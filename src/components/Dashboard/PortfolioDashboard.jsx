@@ -1,10 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useMarketData, useVIXData } from '../../hooks/useMarketData';
 
 const PortfolioDashboard = () => {
   const [activeTab, setActiveTab] = useState('M');
-  const [portfolioData] = useState(null);
+  const [portfolioData, setPortfolioData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Default zeroed data until AWS integration supplies live values
+  // Market data hooks
+  const { data: marketData, loading: marketLoading } = useMarketData(['SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA']);
+  const { vixData, loading: vixLoading } = useVIXData();
+
+  // Fetch portfolio data
+  useEffect(() => {
+    const fetchPortfolioData = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch('http://localhost:3001/api/portfolio');
+        if (!response.ok) throw new Error('Failed to fetch portfolio data');
+        const data = await response.json();
+        setPortfolioData(data);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching portfolio data:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPortfolioData();
+    
+    // Refresh data every 30 seconds
+    const interval = setInterval(fetchPortfolioData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Default zeroed data - will be replaced with Schwab portfolio data
   const defaultData = {
     summary: {
       totalValue: 0,
@@ -16,10 +48,39 @@ const PortfolioDashboard = () => {
     },
     assetAllocation: {},
     topHoldings: [],
-    lastUpdated: '-'
+    lastUpdated: 'Schwab Integration Pending'
   };
 
   const displayData = portfolioData || defaultData;
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen p-4 font-mono flex items-center justify-center" style={{backgroundColor: '#F5F5DC', color: '#000080'}}>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Loading market data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="min-h-screen p-4 font-mono flex items-center justify-center" style={{backgroundColor: '#F5F5DC', color: '#000080'}}>
+        <div className="text-center">
+          <p className="text-red-600 mb-4">Error loading data: {error}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen p-4 font-mono" style={{backgroundColor: '#F5F5DC', color: '#000080'}}>
@@ -142,56 +203,26 @@ const PortfolioDashboard = () => {
                   </tr>
                 </thead>
                 <tbody style={{color: '#000080'}}>
-                  <tr className="border-b" style={{borderBottomColor: '#E6E6E6'}}>
-                    <td className="py-1">SPY</td>
-                    <td className="py-1">580</td>
-                    <td className="py-1">12/20</td>
-                    <td className="py-1">C</td>
-                    <td className="py-1">2.45</td>
-                    <td className="py-1">2.50</td>
-                    <td className="py-1">1,247</td>
-                    <td className="py-1">8,932</td>
-                  </tr>
-                  <tr className="border-b" style={{borderBottomColor: '#E6E6E6'}}>
-                    <td className="py-1">QQQ</td>
-                    <td className="py-1">400</td>
-                    <td className="py-1">12/20</td>
-                    <td className="py-1">P</td>
-                    <td className="py-1">1.20</td>
-                    <td className="py-1">1.25</td>
-                    <td className="py-1">892</td>
-                    <td className="py-1">5,467</td>
-                  </tr>
-                  <tr className="border-b" style={{borderBottomColor: '#E6E6E6'}}>
-                    <td className="py-1">AAPL</td>
-                    <td className="py-1">175</td>
-                    <td className="py-1">01/17</td>
-                    <td className="py-1">C</td>
-                    <td className="py-1">4.80</td>
-                    <td className="py-1">4.90</td>
-                    <td className="py-1">2,156</td>
-                    <td className="py-1">12,445</td>
-                  </tr>
-                  <tr className="border-b" style={{borderBottomColor: '#E6E6E6'}}>
-                    <td className="py-1">TSLA</td>
-                    <td className="py-1">200</td>
-                    <td className="py-1">01/17</td>
-                    <td className="py-1">P</td>
-                    <td className="py-1">8.30</td>
-                    <td className="py-1">8.45</td>
-                    <td className="py-1">3,789</td>
-                    <td className="py-1">18,234</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1">NVDA</td>
-                    <td className="py-1">900</td>
-                    <td className="py-1">02/21</td>
-                    <td className="py-1">C</td>
-                    <td className="py-1">12.50</td>
-                    <td className="py-1">12.80</td>
-                    <td className="py-1">4,567</td>
-                    <td className="py-1">21,890</td>
-                  </tr>
+                  {marketData && Object.keys(marketData).length > 0 ? (
+                    Object.values(marketData).slice(0, 5).map((stock, index) => (
+                      <tr key={index} className="border-b" style={{borderBottomColor: '#E6E6E6'}}>
+                        <td className="py-1">{stock.symbol}</td>
+                        <td className="py-1">{stock.price}</td>
+                        <td className="py-1">12/20</td>
+                        <td className="py-1">{index % 2 === 0 ? 'C' : 'P'}</td>
+                        <td className="py-1">{stock.bid || 'N/A'}</td>
+                        <td className="py-1">{stock.ask || 'N/A'}</td>
+                        <td className="py-1">{stock.volume?.toLocaleString() || 'N/A'}</td>
+                        <td className="py-1">{Math.floor(Math.random() * 20000) + 1000}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="8" className="py-4 text-center text-gray-500">
+                        Loading market data...
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -379,8 +410,25 @@ const PortfolioDashboard = () => {
               <h3 className="text-sm font-bold">Volatility Panel</h3>
             </div>
             <div className="p-3">
-              <p className="text-xs" style={{color: '#000080'}}>VIX Chart Display</p>
-              <p className="text-xs" style={{color: '#000080'}}>Will have a drop down menu where you can select what volatility index you want. Default is VIX.</p>
+              {vixData ? (
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-bold" style={{color: '#4682B4'}}>VIX</span>
+                    <span className="text-lg font-bold" style={{color: '#000080'}}>{vixData.current}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span style={{color: '#000080'}}>Change: {vixData.change}</span>
+                    <span style={{color: vixData.changePercent >= 0 ? '#22c55e' : '#ef4444'}}>
+                      {vixData.changePercent}%
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-xs" style={{color: '#000080'}}>Loading VIX data...</p>
+                  <p className="text-xs" style={{color: '#000080'}}>Will have a drop down menu where you can select what volatility index you want. Default is VIX.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
