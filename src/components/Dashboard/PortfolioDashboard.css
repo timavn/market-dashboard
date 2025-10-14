@@ -1,0 +1,39 @@
+/* Portfolio Dashboard Styles */
+
+/* Fixed bottom panels container */
+.sticky-panels-container {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  background-color: #F5F5DC;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Individual sticky panel */
+.sticky-panel {
+  /* Panel styling handled by individual component CSS */
+}
+
+/* Ensure the main container allows for scrolling */
+.portfolio-dashboard-container {
+  position: relative;
+  min-height: 100vh;
+}
+
+/* Grid content with bottom padding to prevent overlap */
+.portfolio-content {
+  min-height: 100vh;
+  display: grid;
+  padding-bottom: 190px; /* Height of panels + padding + shadow (reduced by 25%) */
+}
+
+/* Bottom row for sticky panels */
+.bottom-panels {
+  display: contents; /* Allow grid items to participate in parent grid */
+}

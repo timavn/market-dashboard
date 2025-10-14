@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { MarketDataService } from '../services/api/marketDataService';
 import { marketWebSocket } from '../services/websocket/marketWebSocket';
 
-export const useMarketData = (symbols = []) => {
+export const useMarketData = (symbols = [], options = {}) => {
+  const { enableRealtime = false } = options;
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -25,27 +26,36 @@ export const useMarketData = (symbols = []) => {
     }
   }, [symbols]);
 
-  // WebSocket real-time updates
+  // WebSocket real-time updates (optional)
   useEffect(() => {
+    if (!enableRealtime) {
+      // Ensure any existing socket is disconnected and no resubscribe occurs
+      marketWebSocket.disconnect();
+      setConnected(false);
+      return;
+    }
+
     if (!connected) {
       marketWebSocket.connect();
       setConnected(true);
     }
 
-    const unsubscribe = marketWebSocket.subscribe('quotes', (update) => {
-      setData(prevData => ({
-        ...prevData,
-        [update.symbol]: {
-          ...prevData[update.symbol],
-          ...update
-        }
-      }));
+    const unsubscribe = marketWebSocket.subscribe('quotes', (payload) => {
+      // Payload can be a single quote or an array of quotes
+      const updates = Array.isArray(payload) ? payload : [payload];
+      setData(prevData => {
+        const next = { ...prevData };
+        updates.forEach(update => {
+          next[update.symbol] = { ...next[update.symbol], ...update };
+        });
+        return next;
+      });
     });
 
     return () => {
       unsubscribe();
     };
-  }, [connected]);
+  }, [connected, enableRealtime]);
 
   // Initial fetch
   useEffect(() => {
@@ -115,11 +125,10 @@ export const useVIXData = () => {
 
   useEffect(() => {
     fetchVIX();
-    
-    // Set up periodic refresh every 30 seconds
-    const interval = setInterval(fetchVIX, 30000);
-    
-    return () => clearInterval(interval);
+
+    // Disabled auto-refresh for now
+    // const interval = setInterval(fetchVIX, 30000);
+    // return () => clearInterval(interval);
   }, [fetchVIX]);
 
   return {

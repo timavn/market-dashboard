@@ -1,0 +1,6 @@
+Symbol,Description,Quantity,Price,Market Value,Cost Basis Total,Gain/Loss $,Gain/Loss %,Type
+AAPL,Apple Inc,100,$175.50,$17550.00,$15000.00,$2550.00,17.00%,Equity
+MSFT,Microsoft Corp,50,$380.25,$19012.50,$17000.00,$2012.50,11.84%,Equity
+SPY,SPDR S&P 500 ETF,75,$454.70,$34102.50,$32000.00,$2102.50,6.57%,ETFs & Closed End Funds
+QQQ,Invesco QQQ Trust,100,$371.50,$37150.00,$35000.00,$2150.00,6.14%,ETFs & Closed End Funds
+TSLA,Tesla Inc,25,$265.80,$6645.00,$7500.00,-$855.00,-11.40%,Equity

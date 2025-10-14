@@ -1,0 +1,36 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3ReadAccess",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject"
+            ],
+            "Resource": "arn:aws:s3:::market-dashboard-csv-data/*"
+        },
+        {
+            "Sid": "DynamoDBWriteAccess",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:BatchWriteItem"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:*:*:table/PortfolioSnapshots",
+                "arn:aws:dynamodb:*:*:table/Holdings",
+                "arn:aws:dynamodb:*:*:table/ProcessingLogs"
+            ]
+        },
+        {
+            "Sid": "CloudWatchLogsAccess",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": "arn:aws:logs:*:*:*"
+        }
+    ]
+}

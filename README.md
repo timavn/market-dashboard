@@ -1,66 +1,110 @@
-# Market Dashboard
+# Market Dashboard - AWS Serverless Portfolio Tracker
 
-Financial market dashboard with portfolio analytics and real-time data.
+A fully automated portfolio tracking system that processes Schwab CSV exports and displays real-time portfolio data using AWS serverless architecture.
 
-## 🚀 **Today's Progress (October 1, 2025)**
+## 🚀 **Current Status: AWS BACKEND WORKING** (October 10, 2025)
 
-### ✅ **Completed:**
-- **Development Environment Setup**: Node.js 18.20.8 installed via nvm
-- **Dependencies Installed**: All React dependencies and dev tools configured
-- **Development Server**: React app running on localhost:3000
-- **Production Build**: Successfully builds optimized production bundle
-- **AWS Integration Planning**: Designed automated CSV processing architecture
-- **Portfolio Data Structure**: Zeroed out portfolio section for Schwab integration
-- **AWS Infrastructure**: DynamoDB tables and S3 bucket created
-- **Lambda Function**: CSVPortfolioProcessor created (needs configuration)
+### ✅ **What's Working:**
+- **AWS Lambda Function**: Processes Schwab CSV files automatically ✅
+- **DynamoDB Storage**: Stores portfolio snapshots and holdings data ✅
+- **S3 Integration**: Automatic file processing on upload ✅
+- **Daily Portfolio Replacement**: Clears old data, stores fresh daily data ✅
+- **React Frontend**: Dashboard interface running locally ✅
+- **Express Backend**: Fetches portfolio data from DynamoDB via API ✅
 
-### 🎯 **Tomorrow's Tasks:**
-- **Lambda Configuration**: Change runtime to Python 3.9, set memory/timeout
-- **IAM Permissions**: Add S3 and DynamoDB access to Lambda role
-- **Python Code**: Write CSV processing logic for Schwab data
-- **S3 Trigger**: Configure automatic processing on CSV upload
-- **Testing**: Test the complete pipeline with sample data
+### 🔧 **Current Task:**
+- **CSV Upload Button**: Implementing browser-based upload with presigned S3 URLs
+- **Fetch Error Debugging**: Troubleshooting presigned URL endpoint communication
+- **Next Step**: Fix fetch error and complete end-to-end CSV upload flow
 
-## 🏗️ **Architecture Overview**
+## 🏗️ **Architecture**
 
 ```
-📧 CSV Upload → 📁 S3 → ⚡ Lambda → 🗄️ DynamoDB → 🌐 API Gateway → 📊 Dashboard
+Schwab CSV → S3 Upload → Lambda Process → DynamoDB → API Gateway → React Dashboard
 ```
 
-## 🛠️ **Tech Stack**
-- **Frontend**: React 18, Tailwind CSS
-- **Backend**: Express.js, AWS Services
-- **Database**: DynamoDB
-- **Storage**: AWS S3
-- **Compute**: AWS Lambda
-- **Deployment**: AWS S3 + CloudFront
+### **AWS Services:**
+- **S3**: CSV file storage and triggers
+- **Lambda**: CSV processing and data transformation  
+- **DynamoDB**: Portfolio data storage (3 tables)
+- **IAM**: Security and permissions
+- **CloudWatch**: Logging and monitoring
 
-## 📊 **AWS Services Used**
-- S3 (Static hosting + CSV storage)
-- DynamoDB (Portfolio data)
-- Lambda (CSV processing)
-- API Gateway (Data API)
-- IAM (Security)
+## 📊 **Data Flow**
 
-## 🚀 **Quick Start**
-```bash
-# Install dependencies
-npm install
+1. **Upload Schwab CSV** to S3 bucket (`market-dashboard-csv-data/uploads/`)
+2. **Lambda triggers automatically** and processes the file
+3. **Data stored in DynamoDB** (PortfolioSnapshots, Holdings, ProcessingLogs)
+4. **Daily replacement logic** clears old holdings, stores new ones
+5. **Frontend displays** real portfolio data (when API Gateway connected)
 
-# Start development server
-npm start
+## 🛠️ **Setup Status**
 
-# Build for production
-npm run build
+### **Completed:**
+- ✅ DynamoDB tables created with correct schemas
+- ✅ Lambda function deployed with CSV processing
+- ✅ S3 trigger configured for automatic processing
+- ✅ IAM permissions configured
+- ✅ Daily portfolio replacement logic implemented
+- ✅ React frontend running locally
+- ✅ Test data processing working (5 test holdings)
 
-# Start backend server
-npm run server
-```
+### **In Progress:**
+- 🔧 CSV parser debugging (Schwab format issues)
+- 🔧 Real Schwab data parsing (32 holdings showing zeros)
+- 🔧 API Gateway setup (for frontend data access)
+
+### **Next Steps:**
+- 🔧 Fix Schwab CSV column name mapping
+- 🔧 Deploy updated parser
+- 🔧 Test with real Schwab data
+- 🔧 Set up API Gateway
+- 🔧 Connect frontend to AWS data
 
 ## 📁 **Project Structure**
-- `src/components/` - React components
-- `src/services/` - API services and WebSocket
-- `src/hooks/` - Custom React hooks
-- `src/constants/` - Configuration files
-- `deploy/` - AWS deployment documentation
-- `aws/` - AWS infrastructure code
+
+```
+├── aws/                    # AWS infrastructure
+│   ├── lambda/             # Lambda function code
+│   ├── dynamodb/           # Table creation scripts
+│   ├── iam/                # IAM policies and guides
+│   └── README.md           # AWS setup documentation
+├── src/                    # React frontend
+│   ├── components/         # Dashboard components
+│   ├── services/           # API services
+│   └── hooks/               # Custom React hooks
+└── README.md              # This file
+```
+
+## 🚀 **Quick Start**
+
+### **For Development:**
+```bash
+npm install
+npm start
+```
+
+### **For AWS Setup:**
+See `aws/README.md` for complete AWS infrastructure setup.
+
+## 📋 **Current Task Details**
+
+**Task**: Implement CSV upload button on website
+**Status**: Lambda/S3/DynamoDB pipeline is WORKING - now connecting frontend
+**Component**: `CSVUpload.jsx` - Drag-and-drop upload with presigned URLs
+**Backend**: Express endpoint `/api/presigned-url` generates secure S3 upload URLs
+**Issue**: Investigating fetch error between frontend and backend
+**Goal**: Enable users to upload CSVs directly from dashboard
+
+## 💰 **Cost Estimate**
+- **Lambda**: ~$0.10/month
+- **DynamoDB**: ~$1.50/month  
+- **S3**: ~$0.50/month
+- **Total**: ~$2/month for automated portfolio tracking
+
+## 🎯 **Next Steps**
+1. ✅ ~~Deploy updated CSV parser~~ (COMPLETED)
+2. ✅ ~~Test with real Schwab data~~ (COMPLETED)
+3. 🔧 Fix fetch error in CSV upload button
+4. 🔧 Test end-to-end CSV upload from dashboard
+5. ⏳ Optional: Set up API Gateway (currently using Express backend)

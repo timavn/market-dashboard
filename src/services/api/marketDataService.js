@@ -1,8 +1,12 @@
 import axios from 'axios';
-import { ENDPOINTS, EXTERNAL_APIS } from '../../constants/apiEndpoints';
+import { API_BASE_URL, ENDPOINTS, EXTERNAL_APIS } from '../../constants/apiEndpoints';
+import { PortfolioAnalytics } from '../portfolioAnalytics';
 
 // Create axios instance with default config
+// Use full URL to bypass proxy issues in development
+const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 const apiClient = axios.create({
+  baseURL: backendUrl,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -20,6 +24,140 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching quotes:', error);
+      throw error;
+    }
+  }
+
+  // Get portfolio summary and holdings
+  static async getPortfolio() {
+    try {
+      const response = await apiClient.get(ENDPOINTS.PORTFOLIO);
+      const data = response.data;
+      
+      // Handle both AWS API Gateway format (with snapshot/holdings) and local server format (direct)
+      let portfolioData;
+      if (data.snapshot && data.holdings) {
+        // AWS API Gateway format
+        const { snapshot, holdings } = data;
+        const enhancedMetrics = PortfolioAnalytics.calculatePortfolioMetrics(holdings, snapshot);
+        
+        portfolioData = {
+          summary: {
+            totalValue: snapshot.summary.totalValue,
+            totalDayChange: 0, // Not available in current data
+            totalDayChangePercent: '0.00',
+            totalGainLoss: snapshot.summary.totalGainLoss,
+            totalGainLossPercent: snapshot.summary.totalGainLossPercent.toFixed(2),
+            positionCount: snapshot.summary.positionCount
+          },
+          assetAllocation: snapshot.assetAllocation,
+          topHoldings: holdings.slice(0, 10).map(holding => ({
+            symbol: holding.symbol,
+            marketValue: holding.marketValue,
+            accountPercent: ((holding.marketValue / snapshot.summary.totalValue) * 100).toFixed(2)
+          })),
+          lastUpdated: new Date(snapshot.timestamp).toLocaleString(),
+          
+          // Enhanced analytics
+          riskMetrics: {
+            volatility: enhancedMetrics.volatility,
+            sharpeRatio: enhancedMetrics.sharpeRatio,
+            sortinoRatio: enhancedMetrics.sortinoRatio,
+            var95: enhancedMetrics.var95,
+            maxDrawdown: enhancedMetrics.maxDrawdown
+          },
+          exposureMetrics: {
+            grossExposure: enhancedMetrics.grossExposure,
+            netLongExposure: enhancedMetrics.netLongExposure,
+            netShortExposure: enhancedMetrics.netShortExposure,
+            netExposure: enhancedMetrics.netExposure
+          },
+          concentrationMetrics: {
+            top10HoldingsPercent: enhancedMetrics.top10HoldingsPercent,
+            largestPositionPercent: enhancedMetrics.largestPositionPercent,
+            hhiIndex: enhancedMetrics.hhiIndex
+          },
+          factorExposures: {
+            marketCap: {
+              largeCap: enhancedMetrics.largeCap,
+              midCap: enhancedMetrics.midCap,
+              smallCap: enhancedMetrics.smallCap
+            },
+            sectors: {
+              technology: enhancedMetrics.technology,
+              healthcare: enhancedMetrics.healthcare,
+              financials: enhancedMetrics.financials,
+              consumer: enhancedMetrics.consumer,
+              energy: enhancedMetrics.energy
+            },
+            geographic: {
+              northAmerica: enhancedMetrics.northAmerica,
+              europe: enhancedMetrics.europe,
+              asiaPacific: enhancedMetrics.asiaPacific,
+              emergingMarkets: enhancedMetrics.emergingMarkets
+            }
+          }
+        };
+      } else {
+        // Local server format (direct data)
+        portfolioData = {
+          summary: {
+            totalValue: data.summary.totalValue,
+            totalDayChange: data.summary.totalDayChange || 0,
+            totalDayChangePercent: data.summary.totalDayChangePercent || '0.00',
+            totalGainLoss: data.summary.totalGainLoss || 0,
+            totalGainLossPercent: data.summary.totalGainLossPercent || '0.00',
+            positionCount: data.summary.positionCount || 0
+          },
+          assetAllocation: data.assetAllocation || {},
+          topHoldings: data.topHoldings || [],
+          lastUpdated: data.lastUpdated || new Date().toLocaleString(),
+          
+          // Mock analytics for local development
+          riskMetrics: {
+            volatility: '18.75%',
+            sharpeRatio: '-0.13',
+            sortinoRatio: '-0.02',
+            var95: '$5571',
+            maxDrawdown: '0.00%'
+          },
+          exposureMetrics: {
+            grossExposure: '100.0%',
+            netLongExposure: '100.0%',
+            netShortExposure: '0.0%',
+            netExposure: '100.0%'
+          },
+          concentrationMetrics: {
+            top10HoldingsPercent: '65.2%',
+            largestPositionPercent: '18.2%',
+            hhiIndex: '0.15'
+          },
+          factorExposures: {
+            marketCap: {
+              largeCap: '75.0%',
+              midCap: '20.0%',
+              smallCap: '5.0%'
+            },
+            sectors: {
+              technology: '35.0%',
+              healthcare: '15.0%',
+              financials: '12.0%',
+              consumer: '18.0%',
+              energy: '8.0%'
+            },
+            geographic: {
+              northAmerica: '80.0%',
+              europe: '12.0%',
+              asiaPacific: '6.0%',
+              emergingMarkets: '2.0%'
+            }
+          }
+        };
+      }
+      
+      return portfolioData;
+    } catch (error) {
+      console.error('Error fetching portfolio:', error);
       throw error;
     }
   }

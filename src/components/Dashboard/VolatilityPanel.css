@@ -1,0 +1,103 @@
+/* Volatility Panel Styles */
+
+.volatility-panel {
+  background: #F5F5DC;
+  border: 1px solid #D3D3D3;
+  border-radius: 4px;
+  color: #000080;
+  font-family: 'Courier New', monospace;
+  height: 150px;
+  display: flex;
+  flex-direction: column;
+}
+
+.volatility-header {
+  display: flex;
+  border-bottom: 1px solid #D3D3D3;
+  background: #E6E6E6;
+  height: 40px;
+}
+
+.header-cell {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-right: 1px solid #D3D3D3;
+  flex: 1;
+}
+
+.header-cell:last-child {
+  border-right: none;
+}
+
+.range-info {
+  flex: 2;
+  font-size: 10px;
+  color: #000080;
+  line-height: 1.2;
+}
+
+.volatility-select,
+.timeframe-select {
+  background: #F5F5DC;
+  color: #000080;
+  border: 1px solid #D3D3D3;
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  cursor: pointer;
+  min-width: 60px;
+}
+
+.volatility-select:focus,
+.timeframe-select:focus {
+  outline: none;
+  border-color: #4682B4;
+  box-shadow: 0 0 0 1px #4682B4;
+}
+
+.volatility-select option,
+.timeframe-select option {
+  background: #F5F5DC;
+  color: #000080;
+}
+
+.volatility-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.graph-placeholder {
+  color: #4682B4;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1280px) {
+  .volatility-panel {
+    height: 135px;
+  }
+  
+  .volatility-header {
+    height: 35px;
+  }
+  
+  .header-cell {
+    padding: 6px 8px;
+  }
+  
+  .range-info {
+    font-size: 9px;
+  }
+  
+  .volatility-select,
+  .timeframe-select {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+}

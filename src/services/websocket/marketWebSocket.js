@@ -7,10 +7,12 @@ export class MarketWebSocketService {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
+    this.shouldReconnect = true;
   }
 
   connect() {
     try {
+      this.shouldReconnect = true;
       const wsUrl = `ws://localhost:3001${ENDPOINTS.WS_MARKET_DATA}`;
       this.ws = new WebSocket(wsUrl);
 
@@ -42,6 +44,9 @@ export class MarketWebSocketService {
   }
 
   handleReconnect() {
+    if (!this.shouldReconnect) {
+      return;
+    }
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
@@ -105,6 +110,7 @@ export class MarketWebSocketService {
       this.ws.close();
       this.ws = null;
     }
+    this.shouldReconnect = false;
     this.subscribers.clear();
   }
 }
