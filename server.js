@@ -110,13 +110,62 @@ const generateOptionsData = () => ([
   { symbol: 'NVDA', strike: '217', expiration: '12/20', type: 'C', bid: '2.80', ask: '2.95', volume: 1081, openInterest: 6327 }
 ]);
 
-// Fixed VIX data
-const generateVIXData = () => ({
-  current: '18.42',
-  change: '0.00',
-  changePercent: '0.00',
-  timestamp: new Date().toISOString()
-});
+// Real VIX data from Yahoo Finance
+const fetchVIXData = async () => {
+  try {
+    // Using Yahoo Finance API (free, no API key required)
+    const response = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d');
+    const data = await response.json();
+    
+    if (data.chart && data.chart.result && data.chart.result[0]) {
+      const result = data.chart.result[0];
+      const meta = result.meta;
+      const quotes = result.indicators.quote[0];
+      
+      // Get the latest price
+      const latestPrice = meta.regularMarketPrice || meta.previousClose || 0;
+      const previousClose = meta.previousClose || 0;
+      const change = latestPrice - previousClose;
+      const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+      
+      return {
+        current: latestPrice.toFixed(2),
+        change: change.toFixed(2),
+        changePercent: changePercent.toFixed(2),
+        timestamp: new Date().toISOString(),
+        high: meta.regularMarketDayHigh || 0,
+        low: meta.regularMarketDayLow || 0,
+        open: meta.regularMarketOpen || 0,
+        volume: meta.regularMarketVolume || 0
+      };
+    }
+    
+    // Fallback to mock data if API fails
+    return {
+      current: '18.42',
+      change: '0.00',
+      changePercent: '0.00',
+      timestamp: new Date().toISOString(),
+      high: 19.50,
+      low: 17.80,
+      open: 18.20,
+      volume: 0
+    };
+  } catch (error) {
+    console.error('Error fetching VIX data:', error);
+    // Fallback to mock data
+    return {
+      current: '18.42',
+      change: '0.00',
+      changePercent: '0.00',
+      timestamp: new Date().toISOString(),
+      high: 19.50,
+      low: 17.80,
+      open: 18.20,
+      volume: 0
+    };
+  }
+};
 
 // API Routes
 app.get('/api/quotes', (req, res) => {
@@ -246,8 +295,14 @@ app.get('/api/options', (req, res) => {
   res.json(generateOptionsData());
 });
 
-app.get('/api/indicators/vix', (req, res) => {
-  res.json(generateVIXData());
+app.get('/api/indicators/vix', async (req, res) => {
+  try {
+    const vixData = await fetchVIXData();
+    res.json(vixData);
+  } catch (error) {
+    console.error('Error in VIX endpoint:', error);
+    res.status(500).json({ error: 'Failed to fetch VIX data' });
+  }
 });
 
 app.get('/api/indicators/volume', (req, res) => {
