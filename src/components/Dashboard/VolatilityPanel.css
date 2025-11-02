@@ -1,29 +1,32 @@
-/* Volatility Panel Styles */
+/* Volatility Panel Styles - Neobrutalism */
 
 .volatility-panel {
-  background: #F5F5DC;
-  border: 1px solid #D3D3D3;
-  border-radius: 4px;
-  color: #000080;
-  font-family: 'Courier New', monospace;
+  background: #FF00FF;
+  border: 6px solid #000000;
+  color: #000000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Arial Black', 'Arial', sans-serif;
+  font-weight: 800;
   height: 150px;
   display: flex;
   flex-direction: column;
+  box-shadow: 8px 8px 0px 0px #000000;
 }
 
 .volatility-header {
   display: flex;
-  border-bottom: 1px solid #D3D3D3;
-  background: #E6E6E6;
-  height: 40px;
+  border-bottom: 6px solid #000000;
+  background: #000000;
+  height: 45px;
 }
 
 .header-cell {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-right: 1px solid #D3D3D3;
+  padding: 10px 14px;
+  border-right: 4px solid #FFFFFF;
   flex: 1;
+  color: #FFFFFF;
+  font-weight: 900;
 }
 
 .header-cell:last-child {
@@ -38,62 +41,70 @@
 }
 
 .level-badge {
-  padding: 6px 12px;
-  border-radius: 4px;
+  padding: 8px 16px;
   font-size: 12px;
-  font-weight: bold;
+  font-weight: 900;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+  border: 4px solid #000000;
 }
 
 .level-badge.green {
-  background: #90EE90;
-  color: #006400;
-  border: 2px solid #32CD32;
+  background: #00FF00;
+  color: #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
 }
 
 .level-badge.yellow {
-  background: #FFD700;
-  color: #B8860B;
-  border: 2px solid #FFA500;
+  background: #FFFF00;
+  color: #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
 }
 
 .level-badge.red {
-  background: #FFB6C1;
-  color: #8B0000;
-  border: 2px solid #DC143C;
+  background: #FF0000;
+  color: #FFFFFF;
+  box-shadow: 4px 4px 0px 0px #000000;
 }
 
 .level-badge.placeholder {
-  background: #E6E6E6;
-  color: #666666;
-  border: 2px solid #CCCCCC;
+  background: #FFF9E6;
+  color: #000000;
+  border: 4px solid #000000;
 }
 
 .volatility-select,
 .timeframe-select {
-  background: #F5F5DC;
-  color: #000080;
-  border: 1px solid #D3D3D3;
-  border-radius: 3px;
-  padding: 4px 8px;
+  background: #FFF9E6;
+  color: #000000;
+  border: 4px solid #000000;
+  padding: 6px 10px;
   font-size: 11px;
-  font-family: 'Courier New', monospace;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Arial Black', 'Arial', sans-serif;
+  font-weight: 800;
   cursor: pointer;
-  min-width: 60px;
+  min-width: 70px;
+  box-shadow: 3px 3px 0px 0px #000000;
 }
 
 .volatility-select:focus,
 .timeframe-select:focus {
   outline: none;
-  border-color: #4682B4;
-  box-shadow: 0 0 0 1px #4682B4;
+  box-shadow: 5px 5px 0px 0px #000000;
+  transform: translate(-1px, -1px);
+}
+
+.volatility-select:hover,
+.timeframe-select:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 5px 5px 0px 0px #000000;
 }
 
 .volatility-select option,
 .timeframe-select option {
-  background: #F5F5DC;
-  color: #000080;
+  background: #FFF9E6;
+  color: #000000;
+  font-weight: 800;
 }
 
 .volatility-content {
@@ -102,12 +113,13 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+  background: #FF00FF;
 }
 
 .graph-placeholder {
-  color: #4682B4;
-  font-size: 14px;
-  font-weight: 500;
+  color: #000000;
+  font-size: 16px;
+  font-weight: 900;
 }
 
 /* VIX Data Display */
@@ -116,13 +128,14 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
+  padding: 8px;
 }
 
 .vix-main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .vix-value {
@@ -132,23 +145,30 @@
 }
 
 .vix-value .value {
-  font-size: 24px;
-  font-weight: bold;
-  color: #000080;
-  margin-bottom: 2px;
+  font-size: 28px;
+  font-weight: 900;
+  color: #000000;
+  margin-bottom: 4px;
+  text-shadow: 2px 2px 0px #FFFFFF;
 }
 
 .vix-value .change {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border: 3px solid #000000;
 }
 
 .vix-value .change.positive {
-  color: #228B22;
+  background-color: #00FF00;
+  color: #000000;
+  box-shadow: 3px 3px 0px 0px #000000;
 }
 
 .vix-value .change.negative {
-  color: #DC143C;
+  background-color: #FF0000;
+  color: #FFFFFF;
+  box-shadow: 3px 3px 0px 0px #000000;
 }
 
 .vix-level {
@@ -157,33 +177,37 @@
 }
 
 .vix-level .level {
-  padding: 4px 8px;
-  border-radius: 3px;
-  font-size: 11px;
-  font-weight: bold;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 900;
   text-transform: uppercase;
+  border: 4px solid #000000;
 }
 
 .vix-level .level.green {
-  background: #90EE90;
-  color: #006400;
+  background: #00FF00;
+  color: #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
 }
 
 .vix-level .level.yellow {
-  background: #FFD700;
-  color: #B8860B;
+  background: #FFFF00;
+  color: #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
 }
 
 .vix-level .level.red {
-  background: #FFB6C1;
-  color: #8B0000;
+  background: #FF0000;
+  color: #FFFFFF;
+  box-shadow: 4px 4px 0px 0px #000000;
 }
 
 .vix-details {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #000080;
+  color: #000000;
+  font-weight: 800;
 }
 
 .detail-item {
@@ -191,21 +215,28 @@
   flex-direction: column;
   align-items: center;
   flex: 1;
+  padding: 4px;
+  border: 2px solid #000000;
+  background: #FFF9E6;
+  margin: 0 2px;
 }
 
 .detail-item .label {
-  font-weight: 500;
-  margin-bottom: 2px;
+  font-weight: 800;
+  margin-bottom: 4px;
+  font-size: 9px;
+  text-transform: uppercase;
 }
 
 .detail-item .value {
-  font-weight: bold;
+  font-weight: 900;
+  font-size: 12px;
 }
 
 .loading {
-  color: #4682B4;
-  font-size: 14px;
-  font-weight: 500;
+  color: #000000;
+  font-size: 16px;
+  font-weight: 900;
 }
 
 /* Responsive adjustments */
@@ -215,20 +246,20 @@
   }
   
   .volatility-header {
-    height: 35px;
+    height: 40px;
   }
   
   .header-cell {
-    padding: 6px 8px;
+    padding: 8px 10px;
   }
   
   .range-info {
-    font-size: 9px;
+    font-size: 10px;
   }
   
   .volatility-select,
   .timeframe-select {
     font-size: 10px;
-    padding: 3px 6px;
+    padding: 4px 8px;
   }
 }

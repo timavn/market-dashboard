@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Card, Metric, Text, Grid, Badge, Flex, Select, SelectItem } from '@tremor/react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { CorrelationHelpers, USDMarketService } from '../../services/api/usdMarketService';
-import './USDProxies.css';
 
 const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
   const [historicalData, setHistoricalData] = useState({});
@@ -12,7 +12,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
     if (currencyPairs) {
       const initialTimeframes = {};
       currencyPairs.forEach(pair => {
-        initialTimeframes[pair.pair] = 30; // Default to 30 days
+        initialTimeframes[pair.pair] = '30'; // Default to 30 days
       });
       setTimeframes(initialTimeframes);
     }
@@ -24,7 +24,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
       if (!currencyPairs) return;
 
       const promises = currencyPairs.map(async (pair) => {
-        const timeframe = timeframes[pair.pair] || 30;
+        const timeframe = parseInt(timeframes[pair.pair] || 30);
         try {
           const data = await USDMarketService.getHistoricalData(pair.pair, timeframe);
           return { pair: pair.pair, data: data.data || [] };
@@ -48,13 +48,17 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
   const handleTimeframeChange = (pair, newTimeframe) => {
     setTimeframes(prev => ({
       ...prev,
-      [pair]: parseInt(newTimeframe)
+      [pair]: newTimeframe
     }));
   };
 
   const MiniSparkline = ({ data, isPositive }) => {
     if (!data || data.length === 0) {
-      return <div className="mini-chart-placeholder">No data</div>;
+      return (
+        <div className="h-20 flex items-center justify-center text-gray-400 text-xs">
+          No data
+        </div>
+      );
     }
 
     const chartData = data.map(item => ({
@@ -68,7 +72,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
             type="monotone"
             dataKey="value"
             stroke={isPositive ? '#10B981' : '#EF4444'}
-            strokeWidth={1.3}
+            strokeWidth={1.5}
             dot={false}
             activeDot={false}
           />
@@ -79,85 +83,90 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
 
   if (loading) {
     return (
-      <div className="usd-proxies-container">
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading USD data...</p>
+      <Card>
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-2"></div>
+          <Text>Loading USD data...</Text>
         </div>
-      </div>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <div className="usd-proxies-container">
-        <div className="error-state">
-          <p>Error loading USD data: {error}</p>
-        </div>
-      </div>
+      <Card className="bg-red-50 border-red-200">
+        <Text className="text-red-600">Error loading USD data: {error}</Text>
+      </Card>
     );
   }
 
   return (
-    <div className="usd-proxies-container">
-      <div className="usd-proxies-content">
-        {/* DXY Highlight - Left Side */}
-        <div className="dxy-section">
-          <div className="dxy-highlight">
-            <div className="dxy-label">DXY</div>
-            <div className="dxy-value">
+    <Card>
+      <Grid numItems={1} numItemsSm={1} numItemsLg={12} className="gap-4">
+        {/* DXY Highlight */}
+        <div className="col-span-12 lg:col-span-4">
+          <Card className="bg-blue-50">
+            <Text className="text-sm font-semibold mb-2">DXY</Text>
+            <Metric>
               {dxy?.value ? dxy.value.toFixed(2) : '--'}
+            </Metric>
+            <div className="mt-2">
+              <Badge 
+                color={CorrelationHelpers.getChangeColor(dxy?.change) === 'positive' ? 'emerald' : 'red'}
+              >
+                {CorrelationHelpers.formatChange(dxy?.change)} ({CorrelationHelpers.formatChangePercent(dxy?.changePercent)})
+              </Badge>
             </div>
-            <div className={`dxy-change ${CorrelationHelpers.getChangeColor(dxy?.change)}`}>
-              {CorrelationHelpers.formatChange(dxy?.change)} ({CorrelationHelpers.formatChangePercent(dxy?.changePercent)})
-            </div>
-          </div>
+          </Card>
         </div>
 
-        {/* Currency Pairs Grid - Right Side */}
-        <div className="currency-section">
-          <div className="currency-grid">
+        {/* Currency Pairs Grid */}
+        <div className="col-span-12 lg:col-span-8">
+          <Grid numItems={2} numItemsSm={3} className="gap-4">
             {currencyPairs?.map((pair) => {
               const isPositive = parseFloat(pair.change) >= 0;
               const pairData = historicalData[pair.pair] || [];
               
               return (
-                <div key={pair.pair} className="currency-pair">
-                  <div className="pair-header">
-                    <div className="pair-name">{pair.name}</div>
-                    <select
-                      className="timeframe-select"
-                      value={timeframes[pair.pair] || 30}
-                      onChange={(e) => handleTimeframeChange(pair.pair, e.target.value)}
+                <Card key={pair.pair}>
+                  <Flex justifyContent="between" alignItems="center" className="mb-2">
+                    <Text className="text-xs font-semibold truncate mr-1">{pair.name}</Text>
+                    <Select
+                      value={timeframes[pair.pair] || '30'}
+                      onValueChange={(value) => handleTimeframeChange(pair.pair, value)}
+                      className="max-w-[60px] min-w-[50px]"
                     >
-                      <option value={7}>1W</option>
-                      <option value={30}>1M</option>
-                      <option value={90}>3M</option>
-                      <option value={180}>6M</option>
-                      <option value={365}>1Y</option>
-                    </select>
-                  </div>
-                  <div className="pair-rate">{pair.rate}</div>
-                  <div className="mini-chart">
+                      <SelectItem value="7">1W</SelectItem>
+                      <SelectItem value="30">1M</SelectItem>
+                      <SelectItem value="90">3M</SelectItem>
+                      <SelectItem value="180">6M</SelectItem>
+                      <SelectItem value="365">1Y</SelectItem>
+                    </Select>
+                  </Flex>
+                  <Text className="text-base font-bold mb-1">{pair.rate}</Text>
+                  <div className="mb-1 h-16">
                     <MiniSparkline data={pairData} isPositive={isPositive} />
                   </div>
-                  <div className={`pair-change ${CorrelationHelpers.getChangeColor(pair.change)}`}>
+                  <Badge 
+                    color={CorrelationHelpers.getChangeColor(pair.change) === 'positive' ? 'emerald' : 'red'}
+                    size="xs"
+                  >
                     {CorrelationHelpers.formatChangePercent(pair.changePercent)}
-                  </div>
-                </div>
+                  </Badge>
+                </Card>
               );
             })}
-          </div>
+          </Grid>
         </div>
-      </div>
+      </Grid>
 
       {/* Last Updated */}
       {(dxy?.timestamp || currencyPairs?.[0]?.timestamp) && (
-        <div className="last-updated">
+        <Text className="text-xs text-gray-500 mt-4">
           Last updated: {new Date(dxy?.timestamp || currencyPairs[0]?.timestamp).toLocaleTimeString()}
-        </div>
+        </Text>
       )}
-    </div>
+    </Card>
   );
 };
 

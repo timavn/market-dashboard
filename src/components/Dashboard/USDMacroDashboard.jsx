@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Card, Title, Text, Button, Flex } from '@tremor/react';
 import USDProxies from './USDProxies';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
 import { USDMarketService } from '../../services/api/usdMarketService';
@@ -57,26 +58,28 @@ const USDMacroDashboard = () => {
   };
 
   return (
-    <div className="usd-macro-dashboard">
-      <div className="dashboard-header">
-        <h2>USD Macro Dashboard</h2>
-        <div className="header-controls">
-          {lastUpdated && (
-            <span className="last-updated">
-              Last updated: {lastUpdated.toLocaleTimeString()}
-            </span>
-          )}
-          <button 
-            className="refresh-button"
-            onClick={handleRefresh}
-            disabled={loading}
-          >
-            {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-      </div>
+    <div className="space-y-4">
+      <Card>
+        <Flex justifyContent="between" alignItems="center">
+          <Title>USD Macro Dashboard</Title>
+          <Flex className="gap-3" alignItems="center">
+            {lastUpdated && (
+              <Text className="text-xs text-gray-500">
+                Last updated: {lastUpdated.toLocaleTimeString()}
+              </Text>
+            )}
+            <Button 
+              onClick={handleRefresh}
+              disabled={loading}
+              size="xs"
+            >
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </Button>
+          </Flex>
+        </Flex>
+      </Card>
 
-      <div className="dashboard-content">
+      <div className="space-y-4">
         {/* USD Proxies Section */}
         <USDProxies
           dxy={data.dxy}
@@ -96,15 +99,13 @@ const USDMacroDashboard = () => {
 
       {/* Error overlay */}
       {error && (
-        <div className="error-overlay">
-          <div className="error-message">
-            <h4>Error Loading USD Data</h4>
-            <p>{error}</p>
-            <button onClick={handleRefresh} className="retry-button">
-              Retry
-            </button>
-          </div>
-        </div>
+        <Card className="bg-red-50 border-red-200">
+          <Title className="text-red-600">Error Loading USD Data</Title>
+          <Text className="mb-4">{error}</Text>
+          <Button onClick={handleRefresh} color="red" size="xs">
+            Retry
+          </Button>
+        </Card>
       )}
     </div>
   );

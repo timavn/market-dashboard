@@ -1,29 +1,28 @@
-/* Securities List Sidebar Styles */
+/* Securities List Sidebar Styles - Neobrutalism */
 
 .securities-list-container {
   height: calc(100vh - 80px);
   overflow-y: auto;
   overflow-x: hidden;
-  background: white;
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  background: #00FFFF;
+  border: 6px solid #000000;
+  box-shadow: 8px 8px 0px 0px #000000;
 }
 
 /* Color Legend */
 .securities-legend {
-  padding: 8px 6px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  border-radius: 4px 4px 0 0;
+  padding: 12px 8px;
+  background: #FFFF00;
+  border-bottom: 6px solid #000000;
 }
 
 .legend-title {
-  font-size: 8px;
-  font-weight: 600;
-  color: #374151;
+  font-size: 10px;
+  font-weight: 900;
+  color: #000000;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
   text-align: center;
 }
 
@@ -41,42 +40,44 @@
 }
 
 .legend-color {
-  width: 8px;
-  height: 8px;
-  border-radius: 1px;
-  border: 1px solid #d1d5db;
+  width: 12px;
+  height: 12px;
+  border: 3px solid #000000;
 }
 
 .legend-label {
-  font-size: 7px;
-  color: #6b7280;
-  font-weight: 500;
+  font-size: 8px;
+  color: #000000;
+  font-weight: 800;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - Neobrutalism */
 .securities-list-container::-webkit-scrollbar {
-  width: 6px;
+  width: 12px;
 }
 
 .securities-list-container::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: #FFF9E6;
+  border-left: 3px solid #000000;
 }
 
 .securities-list-container::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 3px;
+  background: #FF00FF;
+  border: 3px solid #000000;
 }
 
 .securities-list-container::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #00FF00;
 }
 
 /* Table */
 .securities-table {
   width: 100%;
-  border-collapse: collapse;
-  font-family: 'Courier New', monospace;
-  font-size: 9px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Arial Black', 'Arial', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
 }
 
 /* Fixed header */
@@ -84,18 +85,19 @@
   position: sticky;
   top: 0;
   z-index: 10;
-  background: #1f2937;
+  background: #000000;
 }
 
 .securities-table th {
-  padding: 6px 4px;
+  padding: 10px 6px;
   text-align: center;
-  font-weight: bold;
-  font-size: 9px;
+  font-weight: 900;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: white;
-  border: 1px solid #374151;
+  letter-spacing: 1px;
+  color: #FFFFFF;
+  border: 3px solid #000000;
+  background: #000000;
 }
 
 .securities-table th:first-child {
@@ -105,74 +107,81 @@
 
 /* Table body rows */
 .security-row {
-  height: 18px;
+  height: 22px;
   cursor: pointer;
-  transition: all 0.15s ease;
-  border-bottom: 1px solid #e5e7eb;
+  transition: all 0.1s ease;
+  border-bottom: 3px solid #000000;
 }
 
 .security-row:hover {
-  opacity: 0.8;
-  transform: translateX(2px);
+  transform: translateX(4px) translateY(-2px);
+  box-shadow: -4px 4px 0px 0px #000000;
 }
 
-/* Asset class color coding */
+/* Asset class color coding - Bright Neobrutalism Colors */
 .asset-class-fixedIncome {
-  background-color: #E0F2FE;
+  background-color: #00FFFF;
 }
 
 .asset-class-equity {
-  background-color: #D1FAE5;
+  background-color: #00FF00;
 }
 
 .asset-class-currency {
-  background-color: #E9D5FF;
+  background-color: #FF00FF;
 }
 
 .asset-class-commodity {
-  background-color: #FED7AA;
+  background-color: #FFA500;
 }
 
 .asset-class-crypto {
-  background-color: #FDE68A;
+  background-color: #FFFF00;
 }
 
 /* Table cells */
 .securities-table td {
-  padding: 2px 4px;
+  padding: 6px 6px;
   text-align: center;
-  font-size: 9px;
-  color: #1f2937;
+  font-size: 10px;
+  color: #000000;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-right: 2px solid #000000;
+  font-weight: 800;
+}
+
+.securities-table td:last-child {
+  border-right: none;
 }
 
 .ticker-cell {
   text-align: left !important;
-  font-weight: 600;
-  padding-left: 6px !important;
+  font-weight: 900;
+  padding-left: 8px !important;
   max-width: 70px;
 }
 
 .rank-change {
-  font-weight: 500;
-  color: #6b7280;
+  font-weight: 800;
+  color: #000000;
 }
 
 .risk-range {
-  font-size: 8px;
-  color: #9ca3af;
+  font-size: 9px;
+  color: #000000;
+  font-weight: 800;
 }
 
 .trade-cell {
-  font-weight: 500;
-  color: #9ca3af;
+  font-weight: 800;
+  color: #000000;
 }
 
 .trend-cell {
-  font-weight: 500;
-  color: #9ca3af;
+  font-weight: 800;
+  color: #000000;
 }
 
 /* Responsive adjustments */

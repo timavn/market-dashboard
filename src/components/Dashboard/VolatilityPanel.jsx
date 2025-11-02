@@ -1,11 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import './VolatilityPanel.css';
+import { Card, Text, Select, SelectItem, Badge, Flex, Grid } from '@tremor/react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const VolatilityPanel = () => {
   const [selectedVolatility, setSelectedVolatility] = useState('VIX');
-  const [selectedTimeframe, setSelectedTimeframe] = useState('1D');
+  const [selectedTimeframe, setSelectedTimeframe] = useState('1M');
   const [vixData, setVixData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [chartData, setChartData] = useState([]);
+  const [metrics, setMetrics] = useState({
+    closing: 0.00,
+    current: 0.00,
+    lrr: 0.00,
+    trr: 0.00,
+    dayOverDay: { percent: 0.00, bps: 0 },
+    weekOverWeek: { percent: 0.00, bps: 0 },
+    monthOverMonth: { percent: 0.00, bps: 0 },
+    yearOverYear: { percent: 0.00, bps: 0 }
+  });
 
   const volatilityOptions = [
     { value: 'VIX', label: 'VIX' },
@@ -25,120 +37,279 @@ const VolatilityPanel = () => {
     { value: '1Y', label: '1Y' }
   ];
 
-  // Fetch VIX data when component mounts or volatility changes
+  // Fetch VIX data and generate chart data
   useEffect(() => {
-    const fetchVixData = async () => {
+    const fetchData = async () => {
       if (selectedVolatility === 'VIX') {
         setLoading(true);
         try {
           const response = await fetch('http://localhost:3001/api/indicators/vix');
           const data = await response.json();
           setVixData(data);
+
+          // Map timeframe to days
+          const timeframeMap = {
+            '1D': 1,
+            '1W': 7,
+            '1M': 30,
+            '3M': 90,
+            '6M': 180,
+            '1Y': 365
+          };
+          const days = timeframeMap[selectedTimeframe] || 30;
+
+          // Generate mock chart data
+          const mockData = generateMockChartData(days, parseFloat(data.current || 18));
+          setChartData(mockData);
+          calculateMetrics(mockData);
         } catch (error) {
           console.error('Error fetching VIX data:', error);
         } finally {
           setLoading(false);
         }
+      } else {
+        // For non-VIX volatility, generate mock data
+        const timeframeMap = {
+          '1D': 1,
+          '1W': 7,
+          '1M': 30,
+          '3M': 90,
+          '6M': 180,
+          '1Y': 365
+        };
+        const days = timeframeMap[selectedTimeframe] || 30;
+        const mockData = generateMockChartData(days, 18);
+        setChartData(mockData);
+        calculateMetrics(mockData);
       }
     };
 
-    fetchVixData();
-  }, [selectedVolatility]);
+    fetchData();
+  }, [selectedVolatility, selectedTimeframe]);
 
-  const getVolatilityRanges = (volatility) => {
-    switch (volatility) {
-      case 'VIX':
-        return 'Range: 0-19, 20-29, 30+. 0-19 is investable, 20-29 is chop, 30+ is noninvestable';
-      case 'MOVE':
-        return 'Range: 0-50, 50-100, 100+. 0-50 is low vol, 50-100 is normal, 100+ is high vol';
-      case 'GVZ':
-        return 'Range: 0-15, 15-25, 25+. 0-15 is low vol, 15-25 is normal, 25+ is high vol';
-      default:
-        return 'Range: 0-20, 20-40, 40+. 0-20 is low vol, 20-40 is normal, 40+ is high vol';
+  // Generate mock chart data
+  const generateMockChartData = (days, baseValue) => {
+    const data = [];
+    let currentValue = baseValue || 18;
+    
+    for (let i = days; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      
+      // Simulate volatility movement
+      const change = (Math.random() - 0.5) * 2;
+      currentValue += change;
+      currentValue = Math.max(10, Math.min(40, currentValue)); // Keep in reasonable VIX range
+      
+      data.push({
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        value: parseFloat(currentValue.toFixed(2))
+      });
     }
+    
+    return data;
   };
 
-  const getVixLevel = (value) => {
+  // Calculate metrics from chart data
+  const calculateMetrics = (data) => {
+    if (!data || data.length === 0) return;
+
+    const latest = data[data.length - 1];
+    const previous = data.length > 1 ? data[data.length - 2] : latest;
+    const weekAgo = data.length >= 7 ? data[Math.max(0, data.length - 7)] : latest;
+    const monthAgo = data.length >= 30 ? data[Math.max(0, data.length - 30)] : latest;
+    const yearAgo = data.length >= 365 ? data[Math.max(0, data.length - 365)] : latest;
+
+    const current = latest.value;
+    const closing = previous.value;
+
+    // Calculate percentage changes
+    const calculateChange = (current, previous) => {
+      if (!previous || previous === 0) return { percent: 0.00, bps: 0 };
+      const percent = ((current - previous) / previous) * 100;
+      const bps = percent * 100;
+      return { percent: parseFloat(percent.toFixed(2)), bps: Math.round(bps) };
+    };
+
+    const dayOverDay = calculateChange(current, closing);
+    const weekOverWeek = calculateChange(current, weekAgo.value);
+    const monthOverMonth = calculateChange(current, monthAgo.value);
+    const yearOverYear = calculateChange(current, yearAgo.value);
+
+    setMetrics({
+      closing: parseFloat(closing.toFixed(2)),
+      current: parseFloat(current.toFixed(2)),
+      lrr: 0.00, // Placeholder - lower risk range
+      trr: 0.00, // Placeholder - higher risk range
+      dayOverDay,
+      weekOverWeek,
+      monthOverMonth,
+      yearOverYear
+    });
+  };
+
+  const formatMetricValue = (value, percent, bps) => {
+    const sign = percent >= 0 ? '+' : '';
+    return `${sign}${percent}% (${sign}${bps} bps)`;
+  };
+
+  const getChangeColor = (percent) => {
+    return percent >= 0 ? 'emerald' : 'rose';
+  };
+
+  // Determine line color based on volatility level
+  const getVolatilityColor = (value) => {
     const num = parseFloat(value);
-    if (num <= 19) return { level: 'INVESTABLE', color: 'green' };
-    if (num <= 29) return { level: 'CHOP', color: 'yellow' };
-    return { level: 'UNINVESTABLE', color: 'red' };
+    if (num <= 19) return '#10b981'; // Green for low volatility
+    if (num <= 29) return '#f59e0b'; // Amber for medium volatility
+    return '#ef4444'; // Red for high volatility
   };
 
   return (
-    <div className="volatility-panel">
-      <div className="volatility-header">
-        <div className="header-cell">
-          <select 
-            value={selectedVolatility} 
-            onChange={(e) => setSelectedVolatility(e.target.value)}
-            className="volatility-select"
-          >
-            {volatilityOptions.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="header-cell level-indicator">
-          {vixData && selectedVolatility === 'VIX' ? (
-            <span className={`level-badge ${getVixLevel(vixData.current).color}`}>
-              {getVixLevel(vixData.current).level}
-            </span>
-          ) : (
-            <span className="level-badge placeholder">Select VIX</span>
-          )}
-        </div>
-        <div className="header-cell">
-          <select 
-            value={selectedTimeframe} 
-            onChange={(e) => setSelectedTimeframe(e.target.value)}
-            className="timeframe-select"
-          >
-            {timeframeOptions.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+    <Card className="p-2 dark:bg-gray-800">
+      {/* Top Controls Row */}
+      <Flex className="mb-2" justifyContent="between" alignItems="center">
+        <Select
+          value={selectedVolatility}
+          onValueChange={setSelectedVolatility}
+          className="w-32"
+        >
+          {volatilityOptions.map(option => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </Select>
+        
+        <Select
+          value={selectedTimeframe}
+          onValueChange={setSelectedTimeframe}
+          className="w-20"
+        >
+          {timeframeOptions.map(option => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </Select>
+      </Flex>
+
+      {/* Small Legend Above Chart */}
+      <div className="flex items-center gap-3 mb-1 text-xs">
+        <div className="flex items-center gap-1">
+          <div 
+            className="w-4 h-0.5" 
+            style={{ backgroundColor: getVolatilityColor(metrics.current || 18) }}
+          ></div>
+          <Text className="dark:text-gray-300">{selectedVolatility}</Text>
         </div>
       </div>
-      <div className="volatility-content">
+
+      {/* Chart Area */}
+      <div className="h-64 mb-1 dark:text-white">
         {loading ? (
-          <div className="loading">Loading VIX data...</div>
-        ) : vixData && selectedVolatility === 'VIX' ? (
-          <div className="vix-data">
-            <div className="vix-main">
-              <div className="vix-value">
-                <span className="value">{vixData.current}</span>
-                <span className={`change ${parseFloat(vixData.change) >= 0 ? 'positive' : 'negative'}`}>
-                  {vixData.change >= 0 ? '+' : ''}{vixData.change} ({vixData.changePercent}%)
-                </span>
-              </div>
-            </div>
-            <div className="vix-details">
-              <div className="detail-item">
-                <span className="label">High:</span>
-                <span className="value">{vixData.high}</span>
-              </div>
-              <div className="detail-item">
-                <span className="label">Low:</span>
-                <span className="value">{vixData.low}</span>
-              </div>
-              <div className="detail-item">
-                <span className="label">Open:</span>
-                <span className="value">{vixData.open}</span>
-              </div>
-            </div>
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent"></div>
+            <Text className="ml-3 dark:text-gray-300">Loading chart data...</Text>
           </div>
+        ) : chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis 
+                dataKey="date" 
+                tick={{ fontSize: 10 }}
+                angle={-45}
+                textAnchor="end"
+                height={60}
+                padding={{ bottom: 10 }}
+              />
+              <YAxis 
+                tick={{ fontSize: 10 }}
+                label={{ value: selectedVolatility, angle: -90, position: 'insideLeft' }}
+              />
+              <Tooltip 
+                contentStyle={{ 
+                  backgroundColor: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '4px',
+                  fontSize: '12px'
+                }}
+                labelStyle={{ color: '#374151' }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="value" 
+                stroke={getVolatilityColor(metrics.current || 18)}
+                strokeWidth={2}
+                dot={false}
+                name={selectedVolatility}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         ) : (
-          <div className="graph-placeholder">
-            {selectedVolatility === 'VIX' ? 'VIX data will appear here' : `${selectedVolatility} data not available yet`}
+          <div className="flex items-center justify-center h-full">
+            <Text className="text-gray-500 dark:text-gray-400">No chart data available</Text>
           </div>
         )}
       </div>
-    </div>
+
+      {/* Bottom Metrics Bar */}
+      <Flex className="flex-wrap gap-2 text-xs dark:text-white">
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">Closing:</Text>
+          <Text className="dark:text-gray-300">{metrics.closing.toFixed(2)}</Text>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">Current:</Text>
+          <Text className="dark:text-gray-300">{metrics.current.toFixed(2)}</Text>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">LRR:</Text>
+          <Text className="dark:text-gray-300">{metrics.lrr.toFixed(2)}</Text>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">TRR:</Text>
+          <Text className="dark:text-gray-300">{metrics.trr.toFixed(2)}</Text>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">D/D:</Text>
+          <Badge 
+            color={getChangeColor(metrics.dayOverDay.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.dayOverDay.percent, metrics.dayOverDay.bps)}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">W/W:</Text>
+          <Badge 
+            color={getChangeColor(metrics.weekOverWeek.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.weekOverWeek.percent, metrics.weekOverWeek.bps)}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">M/M:</Text>
+          <Badge 
+            color={getChangeColor(metrics.monthOverMonth.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.monthOverMonth.percent, metrics.monthOverMonth.bps)}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">Y/Y:</Text>
+          <Badge 
+            color={getChangeColor(metrics.yearOverYear.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.yearOverYear.percent, metrics.yearOverYear.bps)}
+          </Badge>
+        </div>
+      </Flex>
+    </Card>
   );
 };
 

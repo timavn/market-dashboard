@@ -1,16 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
   margin: 0;
-  font-family: 'Courier New', monospace;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #F5F5DC;
-  color: #000080;
+  overflow: auto !important;
+}
+
+/* Prevent Tremor Select from locking body scroll */
+html {
+  overflow: auto !important;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Dark mode overrides for Tremor components */
+.dark [class*="tremor"] {
+  color: white;
+}
+
+.dark .tremor-Card {
+  background-color: rgb(31 41 55) !important;
+  color: white !important;
+}
+
+.dark .tremor-Text {
+  color: rgb(229 231 235) !important;
+}
+
+.dark .tremor-Metric {
+  color: white !important;
+}
+
+.dark .tremor-Text.text-gray-500 {
+  color: rgb(156 163 175) !important;
+}
+
+.dark .tremor-Text.text-xs {
+  color: rgb(229 231 235) !important;
+}
+
+/* Force dark mode text in bottom panels */
+.dark .tremor-Card.p-2 [class*="tremor-Text"],
+.dark .tremor-Card.p-2 [class*="tremor-Metric"] {
+  color: white !important;
+}
+
+/* Ensure Tremor Select dropdowns render above all fixed elements */
+/* Target various possible portal/overlay containers */
+[data-radix-popper-content-wrapper],
+[data-headlessui-portal],
+[class*="tremor-Select"] [class*="Content"],
+[class*="Select"] [class*="Content"],
+[role="listbox"],
+[id^="headlessui-listbox"],
+[id^="radix-"] {
+  z-index: 9999 !important;
+}
+
+/* Ensure Select trigger doesn't create stacking context issues */
+[class*="tremor-Select"] {
+  position: relative;
+  z-index: auto;
+}
+
+/* Make dropdown menus solid and opaque */
+[role="listbox"],
+[id^="headlessui-listbox"],
+[class*="tremor-Select"] [class*="Content"],
+[class*="Select"] [class*="Content"],
+[data-radix-popper-content-wrapper] > div,
+[data-headlessui-portal] > div {
+  background-color: white !important;
+  opacity: 1 !important;
+  border: 1px solid rgb(229 231 235) !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Dark mode dropdown backgrounds */
+.dark [role="listbox"],
+.dark [id^="headlessui-listbox"],
+.dark [class*="tremor-Select"] [class*="Content"],
+.dark [class*="Select"] [class*="Content"],
+.dark [data-radix-popper-content-wrapper] > div,
+.dark [data-headlessui-portal] > div {
+  background-color: rgb(31 41 55) !important;
+  border-color: rgb(55 65 81) !important;
+  color: rgb(229 231 235) !important;
+}
+
+/* Ensure dropdown items are readable */
+[role="option"],
+[role="listbox"] button,
+[role="listbox"] > * {
+  background-color: transparent !important;
+  color: inherit !important;
+}
+
+.dark [role="option"],
+.dark [role="listbox"] button,
+.dark [role="listbox"] > * {
+  color: rgb(229 231 235) !important;
+}
+
+/* Hover states for dropdown items */
+[role="option"]:hover,
+[role="listbox"] button:hover {
+  background-color: rgb(243 244 246) !important;
+}
+
+.dark [role="option"]:hover,
+.dark [role="listbox"] button:hover {
+  background-color: rgb(55 65 81) !important;
 }

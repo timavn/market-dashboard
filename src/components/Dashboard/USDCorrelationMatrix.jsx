@@ -1,153 +1,124 @@
 import React from 'react';
+import { Card, Title, Text, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Badge } from '@tremor/react';
 import { USD_METRICS, CORRELATION_PERIODS } from '../../constants/usdMarket';
 import { CorrelationHelpers } from '../../services/api/usdMarketService';
-import './USDCorrelationMatrix.css';
 
 const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) => {
   if (loading) {
     return (
-      <div className="correlation-matrix-container">
-        <div className="correlation-matrix-header">
-          <h3>Key $USD Correlations</h3>
-          <p className="subtitle">*Days = Trading Days*</p>
+      <Card>
+        <Title className="mb-2">Key $USD Correlations</Title>
+        <Text className="text-xs text-gray-500 mb-4">*Days = Trading Days*</Text>
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-2"></div>
+          <Text>Loading correlation data...</Text>
         </div>
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading correlation data...</p>
-        </div>
-      </div>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <div className="correlation-matrix-container">
-        <div className="correlation-matrix-header">
-          <h3>Key $USD Correlations</h3>
-          <p className="subtitle">*Days = Trading Days*</p>
-        </div>
-        <div className="error-state">
-          <p>Error loading correlation data: {error}</p>
-        </div>
-      </div>
+      <Card className="bg-red-50 border-red-200">
+        <Title className="mb-2">Key $USD Correlations</Title>
+        <Text className="text-red-600">Error loading correlation data: {error}</Text>
+      </Card>
     );
   }
 
   if (!correlations || !rollingStats) {
     return (
-      <div className="correlation-matrix-container">
-        <div className="correlation-matrix-header">
-          <h3>Key $USD Correlations</h3>
-          <p className="subtitle">*Days = Trading Days*</p>
-        </div>
-        <div className="no-data-state">
-          <p>No correlation data available</p>
-        </div>
-      </div>
+      <Card>
+        <Title className="mb-2">Key $USD Correlations</Title>
+        <Text className="text-center py-8">No correlation data available</Text>
+      </Card>
     );
   }
 
+  const getCorrelationBadgeColor = (correlation) => {
+    if (correlation === null || correlation === undefined) return 'gray';
+    if (correlation >= 0.5) return 'emerald';
+    if (correlation >= 0.2) return 'blue';
+    if (correlation >= -0.2) return 'amber';
+    if (correlation >= -0.5) return 'orange';
+    return 'red';
+  };
+
   return (
-    <div className="correlation-matrix-container">
-      <div className="correlation-matrix-header">
-        <h3>Key $USD Correlations</h3>
-        <p className="subtitle">*Days = Trading Days*</p>
-      </div>
+    <Card>
+      <Title className="mb-2">Key $USD Correlations</Title>
+      <Text className="text-xs text-gray-500 mb-4">*Days = Trading Days*</Text>
       
-      <div className="correlation-matrix">
-        <table className="correlation-table">
-          <thead>
-            <tr className="header-row">
-              <th className="metric-column">METRIC</th>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableHeaderCell>Metric</TableHeaderCell>
               {CORRELATION_PERIODS.map(period => (
-                <th key={period} className="period-column">{period}D</th>
+                <TableHeaderCell key={period}>{period}D</TableHeaderCell>
               ))}
-              <th colSpan="4" className="rolling-header">52-Wk Rolling 30D Correlation</th>
-            </tr>
-            <tr className="subheader-row">
-              <th></th>
+              <TableHeaderCell colSpan={4}>52-Wk Rolling 30D Correlation</TableHeaderCell>
+            </TableRow>
+            <TableRow>
+              <TableHeaderCell></TableHeaderCell>
               {CORRELATION_PERIODS.map(period => (
-                <th key={period}></th>
+                <TableHeaderCell key={period}></TableHeaderCell>
               ))}
-              <th className="rolling-subheader">High</th>
-              <th className="rolling-subheader">Low</th>
-              <th className="rolling-subheader">% Time Pos</th>
-              <th className="rolling-subheader">% Time Neg</th>
-            </tr>
-          </thead>
-          <tbody>
+              <TableHeaderCell>High</TableHeaderCell>
+              <TableHeaderCell>Low</TableHeaderCell>
+              <TableHeaderCell>% Time Pos</TableHeaderCell>
+              <TableHeaderCell>% Time Neg</TableHeaderCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
             {USD_METRICS.map(metric => {
               const metricCorrelations = correlations[metric.symbol] || {};
               const metricRollingStats = rollingStats[metric.symbol] || {};
               
               return (
-                <tr key={metric.symbol} className="data-row">
-                  <td className="metric-name">{metric.name}</td>
+                <TableRow key={metric.symbol}>
+                  <TableCell>
+                    <Text className="font-semibold text-xs">{metric.name}</Text>
+                  </TableCell>
                   
                   {/* Correlation periods */}
                   {CORRELATION_PERIODS.map(period => {
                     const correlation = metricCorrelations[`${period}D`];
-                    const colorClass = CorrelationHelpers.getCorrelationColor(correlation);
                     const displayValue = CorrelationHelpers.formatCorrelation(correlation);
                     
                     return (
-                      <td 
-                        key={period} 
-                        className={`correlation-cell ${colorClass}`}
-                        title={`${metric.name} vs USD (${period}D): ${displayValue}`}
-                      >
-                        {displayValue}
-                      </td>
+                      <TableCell key={period}>
+                        <Badge color={getCorrelationBadgeColor(correlation)} size="xs">
+                          {displayValue}
+                        </Badge>
+                      </TableCell>
                     );
                   })}
                   
                   {/* Rolling statistics */}
-                  <td className="rolling-stat high">
-                    {CorrelationHelpers.formatCorrelation(metricRollingStats.high)}
-                  </td>
-                  <td className="rolling-stat low">
-                    {CorrelationHelpers.formatCorrelation(metricRollingStats.low)}
-                  </td>
-                  <td className="rolling-stat percent-positive">
-                    {CorrelationHelpers.formatPercentage(metricRollingStats.percentTimePositive)}
-                  </td>
-                  <td className="rolling-stat percent-negative">
-                    {CorrelationHelpers.formatPercentage(metricRollingStats.percentTimeNegative)}
-                  </td>
-                </tr>
+                  <TableCell>
+                    <Text className="text-xs">{metricRollingStats.high?.toFixed(3) || '--'}</Text>
+                  </TableCell>
+                  <TableCell>
+                    <Text className="text-xs">{metricRollingStats.low?.toFixed(3) || '--'}</Text>
+                  </TableCell>
+                  <TableCell>
+                    <Badge color="emerald" size="xs">
+                      {metricRollingStats.percentPositive?.toFixed(1) || '--'}%
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge color="red" size="xs">
+                      {metricRollingStats.percentNegative?.toFixed(1) || '--'}%
+                    </Badge>
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
-      
-      <div className="correlation-legend">
-        <div className="legend-item">
-          <span className="legend-color positive-strong"></span>
-          <span>Strong Positive (>0.3)</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-color positive-weak"></span>
-          <span>Weak Positive (0.1-0.3)</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-color neutral"></span>
-          <span>Neutral (-0.1-0.1)</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-color negative-weak"></span>
-          <span>Weak Negative (-0.3 to -0.1)</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-color negative-medium"></span>
-          <span>Medium Negative (-0.6 to -0.3)</span>
-        </div>
-        <div className="legend-item">
-          <span className="legend-color negative-strong"></span>
-          <span>Strong Negative (&lt;-0.6)</span>
-        </div>
-      </div>
-    </div>
+    </Card>
   );
 };
 

@@ -1,4 +1,4 @@
-/* Portfolio Dashboard Styles */
+/* Portfolio Dashboard Styles - Neobrutalism */
 
 /* Fixed bottom panels container */
 .sticky-panels-container {
@@ -9,10 +9,11 @@
   z-index: 100;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  padding: 12px;
-  background-color: #F5F5DC;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+  gap: 16px;
+  padding: 16px;
+  background-color: #FFF9E6;
+  border-top: 8px solid #000000;
+  box-shadow: 0 -8px 0px 0px #000000;
 }
 
 /* Individual sticky panel */
@@ -24,13 +25,14 @@
 .portfolio-dashboard-container {
   position: relative;
   min-height: 100vh;
+  background-color: #FFF9E6;
 }
 
 /* Grid content with bottom padding to prevent overlap */
 .portfolio-content {
   min-height: 100vh;
   display: grid;
-  padding-bottom: 190px; /* Height of panels + padding + shadow (reduced by 25%) */
+  padding-bottom: 200px; /* Height of panels + padding + shadow */
 }
 
 /* Bottom row for sticky panels */
