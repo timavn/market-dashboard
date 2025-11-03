@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Text, Select, SelectItem, Flex, Grid, Badge } from '@tremor/react';
+import { Card, Text, Flex, Grid, Badge } from '@tremor/react';
+import PopoverSelect from '../common/PopoverSelect';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
@@ -191,31 +192,19 @@ const VolumePanel = () => {
     <Card className="p-2 dark:bg-gray-800">
       {/* Top Controls Row */}
       <Grid numItems={4} className="gap-2 mb-4">
-        {/* Asset Class Dropdown */}
-        <Select
+        {/* Asset Class Selector (popover) */}
+        <PopoverSelect
           value={selectedAssetClass}
-          onValueChange={setSelectedAssetClass}
-          className="min-w-0"
-        >
-          {assetClassOptions.map(assetClass => (
-            <SelectItem key={assetClass} value={assetClass}>
-              {ASSET_CLASS_NAMES[assetClass]}
-            </SelectItem>
-          ))}
-        </Select>
+          options={assetClassOptions.map(a => ({ value: a, label: ASSET_CLASS_NAMES[a] }))}
+          onChange={setSelectedAssetClass}
+        />
 
-        {/* Ticker Dropdown */}
-        <Select
+        {/* Ticker Selector (popover) */}
+        <PopoverSelect
           value={selectedTicker}
-          onValueChange={setSelectedTicker}
-          className="min-w-0"
-        >
-          {availableTickers.map(ticker => (
-            <SelectItem key={ticker.ticker} value={ticker.ticker}>
-              {ticker.ticker}
-            </SelectItem>
-          ))}
-        </Select>
+          options={availableTickers.map(t => ({ value: t.ticker, label: t.ticker }))}
+          onChange={setSelectedTicker}
+        />
 
         {/* Product Name Input */}
         <input
@@ -226,18 +215,12 @@ const VolumePanel = () => {
           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-none bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0"
         />
 
-        {/* Date Range Dropdown */}
-        <Select
+        {/* Date Range Selector (popover) */}
+        <PopoverSelect
           value={selectedDateRange}
-          onValueChange={setSelectedDateRange}
-          className="min-w-0"
-        >
-          {dateRangeOptions.map(option => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </Select>
+          options={dateRangeOptions}
+          onChange={setSelectedDateRange}
+        />
       </Grid>
 
       {/* Small Legend Above Chart */}

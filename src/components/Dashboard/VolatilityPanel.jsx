@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Text, Select, SelectItem, Badge, Flex, Grid } from '@tremor/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Card, Text, Badge, Flex } from '@tremor/react';
+import PopoverSelect from '../common/PopoverSelect';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const VolatilityPanel = () => {
@@ -165,33 +166,77 @@ const VolatilityPanel = () => {
     return '#ef4444'; // Red for high volatility
   };
 
+  // Lightweight Popover component (no external deps)
+  const Popover = ({ trigger, children }) => {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+      const handleClickOutside = (e) => {
+        if (ref.current && !ref.current.contains(e.target)) {
+          setOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside, true);
+      return () => document.removeEventListener('mousedown', handleClickOutside, true);
+    }, []);
+
+    return (
+      <div ref={ref} className="relative inline-block">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 dark:text-white border-gray-300 dark:border-gray-600 shadow-sm"
+        >
+          {trigger}
+        </button>
+        {open && (
+          <div
+            className="absolute z-[9999] mt-2 w-36 max-h-64 overflow-auto rounded border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-lg"
+          >
+            {children({ close: () => setOpen(false) })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Card className="p-2 dark:bg-gray-800">
       {/* Top Controls Row */}
-      <Flex className="mb-2" justifyContent="between" alignItems="center">
-        <Select
-          value={selectedVolatility}
-          onValueChange={setSelectedVolatility}
-          className="w-32"
-        >
-          {volatilityOptions.map(option => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </Select>
-        
-        <Select
-          value={selectedTimeframe}
-          onValueChange={setSelectedTimeframe}
-          className="w-20"
-        >
-          {timeframeOptions.map(option => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </Select>
+      <Flex className="mb-2 gap-2" justifyContent="between" alignItems="center">
+        <div className="flex items-center gap-2">
+          {/* Volatility Popover (left) */}
+          <Popover trigger={<span>{selectedVolatility}</span>}>
+          {({ close }) => (
+            <div className="py-1">
+              {volatilityOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                    selectedVolatility === opt.value ? 'font-semibold' : ''
+                  }`}
+                  onClick={() => {
+                    setSelectedVolatility(opt.value);
+                    close();
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </Popover>
+        </div>
+        {/* Timeframe Popover moved to right side (top-right) */}
+        <div>
+          <PopoverSelect
+            value={selectedTimeframe}
+            options={timeframeOptions}
+            onChange={setSelectedTimeframe}
+            buttonClassName="w-20 justify-center"
+          />
+        </div>
       </Flex>
 
       {/* Small Legend Above Chart */}

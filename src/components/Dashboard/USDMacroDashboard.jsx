@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Title, Text, Button, Flex } from '@tremor/react';
+import { Card, Title, Text, Flex } from '@tremor/react';
 import USDProxies from './USDProxies';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
+import TickerTape from './TickerTape';
 import { USDMarketService } from '../../services/api/usdMarketService';
 import { REFRESH_INTERVALS } from '../../constants/usdMarket';
 
@@ -51,32 +52,52 @@ const USDMacroDashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Manual refresh function
-  const handleRefresh = () => {
-    setLoading(true);
-    fetchUSDData();
-  };
-
   return (
     <div className="space-y-4">
-      <Card>
-        <Flex justifyContent="between" alignItems="center">
-          <Title>USD Macro Dashboard</Title>
-          <Flex className="gap-3" alignItems="center">
-            {lastUpdated && (
-              <Text className="text-xs text-gray-500">
-                Last updated: {lastUpdated.toLocaleTimeString()}
-              </Text>
-            )}
-            <Button 
-              onClick={handleRefresh}
-              disabled={loading}
-              size="xs"
-            >
-              {loading ? 'Refreshing...' : 'Refresh'}
-            </Button>
-          </Flex>
+      {/* Banner with Title and Ticker Tape */}
+      <Card className="dark:bg-gray-800">
+        <Flex justifyContent="between" alignItems="center" className="gap-4">
+          <Title className="dark:text-white">USD Macro Dashboard</Title>
+          <div className="flex-1 max-w-2xl">
+            <TickerTape />
+          </div>
+          {lastUpdated && (
+            <Text className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </Text>
+          )}
         </Flex>
+      </Card>
+
+      {/* Events/Signals Placeholder Section */}
+      <Card className="dark:bg-gray-800">
+        <Title className="mb-4 dark:text-white">Events & Signals</Title>
+        <div className="space-y-3">
+          <div>
+            <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Market Events</Text>
+            <ul className="list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
+              <li>Placeholder for significant market events</li>
+              <li>Economic data releases and surprises</li>
+              <li>Central bank announcements</li>
+            </ul>
+          </div>
+          <div>
+            <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Outlier Signals</Text>
+            <ul className="list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
+              <li>Placeholder for outlier price movements</li>
+              <li>Unusual volume spikes</li>
+              <li>Volatility breakouts</li>
+            </ul>
+          </div>
+          <div>
+            <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Important Indicators</Text>
+            <ul className="list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
+              <li>Placeholder for key indicator signals</li>
+              <li>Risk range violations</li>
+              <li>Correlation breakdowns</li>
+            </ul>
+          </div>
+        </div>
       </Card>
 
       <div className="space-y-4">
@@ -99,12 +120,9 @@ const USDMacroDashboard = () => {
 
       {/* Error overlay */}
       {error && (
-        <Card className="bg-red-50 border-red-200">
-          <Title className="text-red-600">Error Loading USD Data</Title>
-          <Text className="mb-4">{error}</Text>
-          <Button onClick={handleRefresh} color="red" size="xs">
-            Retry
-          </Button>
+        <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800">
+          <Title className="text-red-600 dark:text-red-400">Error Loading USD Data</Title>
+          <Text className="mb-4 dark:text-gray-300">{error}</Text>
         </Card>
       )}
     </div>

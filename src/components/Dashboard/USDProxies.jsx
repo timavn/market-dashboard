@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Metric, Text, Grid, Badge, Flex, Select, SelectItem } from '@tremor/react';
+import { Card, Metric, Text, Grid, Badge, Flex } from '@tremor/react';
+import PopoverSelect from '../common/PopoverSelect';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { CorrelationHelpers, USDMarketService } from '../../services/api/usdMarketService';
 
@@ -131,17 +132,18 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
                 <Card key={pair.pair}>
                   <Flex justifyContent="between" alignItems="center" className="mb-2">
                     <Text className="text-xs font-semibold truncate mr-1">{pair.name}</Text>
-                    <Select
+                    <PopoverSelect
                       value={timeframes[pair.pair] || '30'}
-                      onValueChange={(value) => handleTimeframeChange(pair.pair, value)}
-                      className="max-w-[60px] min-w-[50px]"
-                    >
-                      <SelectItem value="7">1W</SelectItem>
-                      <SelectItem value="30">1M</SelectItem>
-                      <SelectItem value="90">3M</SelectItem>
-                      <SelectItem value="180">6M</SelectItem>
-                      <SelectItem value="365">1Y</SelectItem>
-                    </Select>
+                      options={[
+                        { value: '7', label: '1W' },
+                        { value: '30', label: '1M' },
+                        { value: '90', label: '3M' },
+                        { value: '180', label: '6M' },
+                        { value: '365', label: '1Y' },
+                      ]}
+                      onChange={(value) => handleTimeframeChange(pair.pair, value)}
+                      buttonClassName="max-w-[60px] min-w-[50px]"
+                    />
                   </Flex>
                   <Text className="text-base font-bold mb-1">{pair.rate}</Text>
                   <div className="mb-1 h-16">
