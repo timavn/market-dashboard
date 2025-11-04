@@ -1,289 +1,192 @@
 import React from 'react';
-import { Card, Title } from '@tremor/react';
-import { 
-  LineChart, 
-  Line, 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
+import { Card } from '@tremor/react';
+import {
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   ResponsiveContainer,
   ReferenceArea,
-  LabelList,
-  Cell
 } from 'recharts';
 
-// Quad colors matching the image exactly
-const QUAD_COLORS = {
-  1: { bg: '#90EE90', border: '#28a745', text: '#155724' }, // Light green
-  2: { bg: '#ADFF2F', border: '#9ACD32', text: '#556B2F' }, // Light yellow-green
-  3: { bg: '#FFA500', border: '#FF8C00', text: '#8B4513' }, // Light orange
-  4: { bg: '#FF6B6B', border: '#DC3545', text: '#8B0000' }  // Light red
-};
-
-// Generate all months from Jan-24 to Aug-26
-const generateMonths = () => {
-  const months = [];
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  
-  // Jan 2024 to Dec 2024
-  for (let i = 0; i < 12; i++) {
-    months.push(`${monthNames[i]}-24`);
-  }
-  
-  // Jan 2025 to Dec 2025
-  for (let i = 0; i < 12; i++) {
-    months.push(`${monthNames[i]}-25`);
-  }
-  
-  // Jan 2026 to Aug 2026
-  for (let i = 0; i < 8; i++) {
-    months.push(`${monthNames[i]}-26`);
-  }
-  
-  return months;
-};
-
-// Quad timeline data (from image)
-const getQuadTimelineData = () => {
-  const months = generateMonths();
-  const quadData = {
-    'Jan-24': 4,
-    'Feb-24': 2,
-    'Mar-24': null, // Not specified
-    'Apr-24': null,
-    'May-24': 1,
-    'Jun-24': null,
-    'Jul-24': null,
-    'Aug-24': null,
-    'Sep-24': null,
-    'Oct-24': 3,
-    'Nov-24': null,
-    'Dec-24': null,
-    'Jan-25': null,
-    'Feb-25': 4,
-    'Mar-25': 1,
-    'Apr-25': null,
-    'May-25': null,
-    'Jun-25': null,
-    'Jul-25': null,
-    'Aug-25': null,
-    'Sep-25': 2,
-    'Oct-25': null,
-    'Nov-25': null,
-    'Dec-25': 4,
-    'Jan-26': 1,
-    'Feb-26': null,
-    'Mar-26': null,
-    'Apr-26': null,
-    'May-26': 2,
-    'Jun-26': null,
-    'Jul-26': 3,
-    'Aug-26': null
-  };
-  
-  return months.map(month => ({
-    month,
-    quad: quadData[month] || null,
-    quadValue: quadData[month] || null // For Y-axis positioning
-  }));
-};
-
-// Conditional probabilities data (from image - Sep-25 to Aug-26)
-const getProbabilitiesData = () => {
-  return [
-    { month: 'Sep-25', quad1: 6, quad2: 8, quad3: 48, quad4: 39 },
-    { month: 'Oct-25', quad1: 3, quad2: 21, quad3: 60, quad4: 14 },
-    { month: 'Nov-25', quad1: 3, quad2: 27, quad3: 63, quad4: 7 },
-    { month: 'Dec-25', quad1: 8, quad2: 3, quad3: 23, quad4: 68 },
-    { month: 'Jan-26', quad1: 75, quad2: 2, quad3: 15, quad4: 8 },
-    { month: 'Feb-26', quad1: 50, quad2: 19, quad3: 8, quad4: 22 },
-    { month: 'Mar-26', quad1: 7, quad2: 9, quad3: 46, quad4: 38 },
-    { month: 'Apr-26', quad1: 65, quad2: 3, quad3: 7, quad4: 25 },
-    { month: 'May-26', quad1: 34, quad2: 42, quad3: 13, quad4: 11 },
-    { month: 'Jun-26', quad1: 29, quad2: 24, quad3: 21, quad4: 26 },
-    { month: 'Jul-26', quad1: 15, quad2: 18, quad3: 37, quad4: 30 },
-    { month: 'Aug-26', quad1: 25, quad2: 30, quad3: 25, quad4: 20 }
-  ];
-};
-
-// Custom dot component for timeline (colored square with number)
-const CustomDot = ({ cx, cy, payload }) => {
-  if (!payload.quad) return null;
-  
-  const quad = payload.quad;
-  const color = QUAD_COLORS[quad];
-  
-  return (
-    <g>
-      <rect
-        x={cx - 12}
-        y={cy - 12}
-        width={24}
-        height={24}
-        fill={color.bg}
-        stroke={color.border}
-        strokeWidth={2}
-        rx={2}
-      />
-      <text
-        x={cx}
-        y={cy + 5}
-        textAnchor="middle"
-        fill={color.text}
-        fontSize={14}
-        fontWeight="bold"
-      >
-        {quad}
-      </text>
-    </g>
-  );
-};
-
-// Custom label for stacked bars
-const CustomBarLabel = ({ x, y, width, height, value, index }) => {
-  if (value < 5) return null; // Don't show labels for very small segments
-  
-  return (
-    <text
-      x={x + width / 2}
-      y={y + height / 2}
-      fill="white"
-      textAnchor="middle"
-      fontSize={11}
-      fontWeight="bold"
-    >
-      {value}%
-    </text>
-  );
-};
-
+// Quad area with left QU/AD label box (20% width) and ComposedChart on right
 const USQuadChart = () => {
-  const timelineData = getQuadTimelineData();
-  const probabilitiesData = getProbabilitiesData();
+  // Standard colors: Q=green (1), U=dark green (2), A=yellow (3), D=red (4)
+  const QUAD_COLORS = {
+    1: '#008000', // Quad 1
+    2: '#7CB342', // Quad 2 - toned down light green
+    3: '#FFC107', // Quad 3 - toned down yellow
+    4: '#FE0000', // Quad 4
+  };
+
+  // Chart colors match QUAD colors
+  const CHART_COLORS = {
+    1: '#008000', // Quad 1
+    2: '#7CB342', // Quad 2 - toned down light green
+    3: '#FFC107', // Quad 3 - toned down yellow
+    4: '#FE0000', // Quad 4
+  };
+
+  // Data from image: Sep-25 to Aug-26, normalized to sum to 100%
+  // quadY maps quad values (1-4) to center of quad bands (reversed): Quad 1=12.5, Quad 2=37.5, Quad 3=62.5, Quad 4=87.5
+  const data = [
+    { month: 'Sep-25', quad1: 6, quad2: 8, quad3: 48, quad4: 38, quadValue: 3, quadY: 62.5 },
+    { month: 'Oct-25', quad1: 3, quad2: 21, quad3: 61, quad4: 15, quadValue: 2, quadY: 37.5 },
+    { month: 'Nov-25', quad1: 3, quad2: 27, quad3: 63, quad4: 7, quadValue: 3, quadY: 62.5 },
+    { month: 'Dec-25', quad1: 8, quad2: 3, quad3: 23, quad4: 66, quadValue: 4, quadY: 87.5 },
+    { month: 'Jan-26', quad1: 75, quad2: 2, quad3: 15, quad4: 8, quadValue: 1, quadY: 12.5 },
+    { month: 'Feb-26', quad1: 50, quad2: 19, quad3: 8, quad4: 23, quadValue: 1, quadY: 12.5 },
+    { month: 'Mar-26', quad1: 7, quad2: 9, quad3: 46, quad4: 38, quadValue: 3, quadY: 62.5 },
+    { month: 'Apr-26', quad1: 65, quad2: 3, quad3: 7, quad4: 25, quadValue: 1, quadY: 12.5 },
+    { month: 'May-26', quad1: 34, quad2: 42, quad3: 13, quad4: 11, quadValue: 2, quadY: 37.5 },
+    { month: 'Jun-26', quad1: 29, quad2: 24, quad3: 21, quad4: 26, quadValue: 1, quadY: 12.5 },
+    { month: 'Jul-26', quad1: 15, quad2: 18, quad3: 37, quad4: 30, quadValue: 3, quadY: 62.5 },
+    { month: 'Aug-26', quad1: 25, quad2: 30, quad3: 25, quad4: 20, quadValue: 2, quadY: 37.5 },
+  ];
+
+  // Custom dot component for line showing quad numbers (1-4) in colored circles
+  const CustomQuadDot = ({ cx, cy, payload }) => {
+    if (cx == null || cy == null || !payload?.quadValue) return null;
+
+    const quad = payload.quadValue;
+    const fill = CHART_COLORS[quad] || '#9ca3af';
+
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={13} fill={fill} stroke="#1f2937" strokeWidth={2} />
+        <text x={cx} y={cy + 4} textAnchor="middle" fill="#ffffff" fontSize={12} fontWeight={700}>
+          {quad}
+        </text>
+      </g>
+    );
+  };
+
+  // Custom tooltip component showing percentages with % sign
+  const CustomTooltip = ({ active, payload }) => {
+    if (!active || !payload || payload.length === 0) return null;
+
+    const data = payload[0].payload;
+    
+    return (
+      <div style={{
+        backgroundColor: 'white',
+        border: '1px solid #e5e7eb',
+        borderRadius: '4px',
+        padding: '8px',
+      }}>
+        <p style={{ margin: '0 0 4px 0', fontWeight: 'bold' }}>{data.month}</p>
+        <p style={{ margin: '2px 0', color: CHART_COLORS[1] }}>quad1: {data.quad1}%</p>
+        <p style={{ margin: '2px 0', color: CHART_COLORS[2] }}>quad2: {data.quad2}%</p>
+        <p style={{ margin: '2px 0', color: CHART_COLORS[3] }}>quad3: {data.quad3}%</p>
+        <p style={{ margin: '2px 0', color: CHART_COLORS[4] }}>quad4: {data.quad4}%</p>
+      </div>
+    );
+  };
 
   return (
-    <Card className="dark:bg-gray-800">
-      <div className="flex">
-        {/* Vertical QUAD Text */}
-        <div className="flex items-center justify-center w-16 mr-4">
-          <div 
-            className="text-4xl font-bold text-gray-700 dark:text-gray-300"
-            style={{ 
-              writingMode: 'vertical-rl',
-              textOrientation: 'upright'
+    <Card className="bg-white">
+      <div style={{ height: 360, display: 'flex' }}>
+        {/* Left label: QU over AD */}
+        <div
+          style={{
+            flexBasis: '20%',
+            minWidth: 140,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            // Match app card outline (blue divider)
+            borderRight: '2px solid #60A5FA',
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif",
+              lineHeight: 0.95,
             }}
+            className="text-9xl tracking-wide select-none"
           >
-            QUAD
+            <div className="text-center">
+              <span style={{ color: QUAD_COLORS[1] }}>Q</span>
+              <span style={{ color: QUAD_COLORS[2] }}>U</span>
+            </div>
+            <div className="text-center">
+              <span style={{ color: QUAD_COLORS[3] }}>A</span>
+              <span style={{ color: QUAD_COLORS[4] }}>D</span>
+            </div>
           </div>
         </div>
 
-        {/* Charts Container */}
-        <div className="flex-1">
-          {/* Top Chart: Quad Timeline */}
-          <div className="mb-6">
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={timelineData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                
-                {/* Background quad bands */}
-                <ReferenceArea y1={0.5} y2={1.5} fill={QUAD_COLORS[1].bg} fillOpacity={0.3} />
-                <ReferenceArea y1={1.5} y2={2.5} fill={QUAD_COLORS[2].bg} fillOpacity={0.3} />
-                <ReferenceArea y1={2.5} y2={3.5} fill={QUAD_COLORS[3].bg} fillOpacity={0.3} />
-                <ReferenceArea y1={3.5} y2={4.5} fill={QUAD_COLORS[4].bg} fillOpacity={0.3} />
-                
-                <XAxis 
-                  dataKey="month" 
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                  tick={{ fontSize: 10 }}
-                  interval={0}
-                />
-                <YAxis 
-                  domain={[0.5, 4.5]}
-                  ticks={[1, 2, 3, 4]}
-                  tickFormatter={(value) => `QUAD ${value}`}
-                  tick={{ fontSize: 12, fontWeight: 'bold' }}
-                  width={80}
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'white',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '4px'
-                  }}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="quadValue" 
-                  stroke="#888888"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  dot={<CustomDot />}
-                  connectNulls={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Bottom Chart: Conditional Probabilities */}
-          <div>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={probabilitiesData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis 
-                  dataKey="month" 
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                  tick={{ fontSize: 10 }}
-                />
-                <YAxis 
-                  domain={[0, 100]}
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Conditional Probabilities', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'white',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '4px'
-                  }}
-                />
-                <Bar dataKey="quad1" stackId="a" fill={QUAD_COLORS[1].border}>
-                  <LabelList dataKey="quad1" content={<CustomBarLabel />} />
-                </Bar>
-                <Bar dataKey="quad2" stackId="a" fill={QUAD_COLORS[2].border}>
-                  <LabelList dataKey="quad2" content={<CustomBarLabel />} />
-                </Bar>
-                <Bar dataKey="quad3" stackId="a" fill={QUAD_COLORS[3].border}>
-                  <LabelList dataKey="quad3" content={<CustomBarLabel />} />
-                </Bar>
-                <Bar dataKey="quad4" stackId="a" fill={QUAD_COLORS[4].border}>
-                  <LabelList dataKey="quad4" content={<CustomBarLabel />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            
-            {/* Legend */}
-            <div className="flex items-center gap-4 mt-4 ml-20">
-              {[1, 2, 3, 4].map(quad => (
-                <div key={quad} className="flex items-center gap-2">
-                  <div 
-                    className="w-4 h-4 border-2 rounded"
-                    style={{ 
-                      backgroundColor: QUAD_COLORS[quad].bg,
-                      borderColor: QUAD_COLORS[quad].border
-                    }}
-                  />
-                  <span className="text-xs font-semibold dark:text-gray-300">{quad}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* Right canvas area - ComposedChart */}
+        <div style={{ flex: 1, padding: '10px' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart
+              data={data}
+              margin={{ top: 10, right: 10, left: 10, bottom: 40 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              {/* Quad bands background - reversed: QUAD 4 at top, QUAD 1 at bottom */}
+              <ReferenceArea y1={75} y2={100} fill={CHART_COLORS[4]} fillOpacity={0.2} />
+              <ReferenceArea y1={50} y2={75} fill={CHART_COLORS[3]} fillOpacity={0.2} />
+              <ReferenceArea y1={25} y2={50} fill={CHART_COLORS[2]} fillOpacity={0.2} />
+              <ReferenceArea y1={0} y2={25} fill={CHART_COLORS[1]} fillOpacity={0.2} />
+              <XAxis
+                dataKey="month"
+                angle={-45}
+                textAnchor="end"
+                height={80}
+                tick={{ fontSize: 10 }}
+                interval={0}
+              />
+              <YAxis
+                domain={[0, 100]}
+                ticks={[87.5, 62.5, 37.5, 12.5]}
+                tick={(props) => {
+                  const { x, y, payload } = props;
+                  let text = '';
+                  let color = '#000';
+                  if (payload.value === 87.5) {
+                    text = 'QUAD 4';
+                    color = CHART_COLORS[4]; // red - at top
+                  } else if (payload.value === 62.5) {
+                    text = 'QUAD 3';
+                    color = CHART_COLORS[3]; // yellow
+                  } else if (payload.value === 37.5) {
+                    text = 'QUAD 2';
+                    color = CHART_COLORS[2]; // light green
+                  } else if (payload.value === 12.5) {
+                    text = 'QUAD 1';
+                    color = CHART_COLORS[1]; // green - at bottom
+                  }
+                  return (
+                    <text x={x - 15} y={y} fill={color} fontSize={12} fontWeight="bold" textAnchor="end">
+                      {text}
+                    </text>
+                  );
+                }}
+                width={90}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              {/* Stacked bars for conditional probabilities */}
+              <Bar dataKey="quad1" stackId="a" fill={CHART_COLORS[1]} stroke="#000000" strokeWidth={1} barSize={24} />
+              <Bar dataKey="quad2" stackId="a" fill={CHART_COLORS[2]} stroke="#000000" strokeWidth={1} barSize={24} />
+              <Bar dataKey="quad3" stackId="a" fill={CHART_COLORS[3]} stroke="#000000" strokeWidth={1} barSize={24} />
+              <Bar dataKey="quad4" stackId="a" fill={CHART_COLORS[4]} stroke="#000000" strokeWidth={1} barSize={24} />
+              {/* Line overlay showing actual quad value experienced */}
+              <Line
+                type="monotone"
+                dataKey="quadY"
+                stroke="#9CA3AF"
+                strokeWidth={2}
+                strokeDasharray="4 6"
+                dot={<CustomQuadDot />}
+                connectNulls
+                legendType="none"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
       </div>
     </Card>
@@ -291,4 +194,5 @@ const USQuadChart = () => {
 };
 
 export default USQuadChart;
+
 
