@@ -4,18 +4,90 @@ import PopoverSelect from '../common/PopoverSelect';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { CorrelationHelpers, USDMarketService } from '../../services/api/usdMarketService';
 
+// Currency index mapping
+const CURRENCY_INDEXES = {
+  'USDEUR': { ticker: 'FXE', name: 'Euro' },
+  'USDJPY': { ticker: 'FXY', name: 'Japanese Yen' },
+  'USDCHF': { ticker: 'FXF', name: 'Swiss Franc' },
+  'USDGBP': { ticker: 'FXB', name: 'British Pound' },
+  'USDCAD': { ticker: 'FXC', name: 'Canadian Dollar' },
+  'USDCNY': { ticker: 'FXCH', name: 'Chinese Yuan' },
+  'USDAUD': { ticker: 'FXA', name: 'Australian Dollar' },
+  'USD': { ticker: 'UUP', name: 'U.S. Dollar' },
+  'GOLD': { ticker: 'GLD', name: 'Gold' }
+};
+
 const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
   const [historicalData, setHistoricalData] = useState({});
+  const [indexData, setIndexData] = useState({});
   const [timeframes, setTimeframes] = useState({});
 
-  // Initialize timeframes for each currency pair
+  // Initialize timeframes for each currency pair and index
   useEffect(() => {
     if (currencyPairs) {
       const initialTimeframes = {};
       currencyPairs.forEach(pair => {
         initialTimeframes[pair.pair] = '30'; // Default to 30 days
+        // Also initialize timeframe for the corresponding index
+        const index = CURRENCY_INDEXES[pair.pair];
+        if (index) {
+          initialTimeframes[index.ticker] = '30';
+        }
       });
+      // Add UUP and GLD
+      initialTimeframes['UUP'] = '30';
+      initialTimeframes['GLD'] = '30';
       setTimeframes(initialTimeframes);
+    }
+  }, [currencyPairs]);
+
+  // Generate mock index data
+  useEffect(() => {
+    if (currencyPairs) {
+      const mockIndexData = {};
+      
+      // Generate data for UUP (USD index)
+      mockIndexData['UUP'] = {
+        value: 28.21,
+        change: 0.77,
+        changePercent: 2.81,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Generate data for GLD (Gold)
+      mockIndexData['GLD'] = {
+        value: 368.12,
+        change: 2.45,
+        changePercent: 0.67,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Generate data for each currency index
+      currencyPairs.forEach(pair => {
+        const index = CURRENCY_INDEXES[pair.pair];
+        if (index) {
+          // Generate mock index values based on the pair
+          const baseValue = index.ticker === 'FXE' ? 106.37 :
+                           index.ticker === 'FXY' ? 59.66 :
+                           index.ticker === 'FXF' ? 109.96 :
+                           index.ticker === 'FXB' ? 126.44 :
+                           index.ticker === 'FXC' ? 135.50 :
+                           index.ticker === 'FXCH' ? 95.20 :
+                           index.ticker === 'FXA' ? 142.30 : 100;
+          
+          const changePercent = (Math.random() - 0.5) * 2;
+          const change = baseValue * (changePercent / 100);
+          
+          mockIndexData[index.ticker] = {
+            value: baseValue,
+            change: change,
+            changePercent: changePercent,
+            timestamp: new Date().toISOString()
+          };
+        }
+      });
+      
+      setIndexData(mockIndexData);
     }
   }, [currencyPairs]);
 
@@ -35,10 +107,29 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
         }
       });
 
-      const results = await Promise.all(promises);
+      // Also fetch index historical data
+      const indexPromises = Object.keys(CURRENCY_INDEXES).map(async (pairKey) => {
+        const index = CURRENCY_INDEXES[pairKey];
+        if (index) {
+          const timeframe = parseInt(timeframes[index.ticker] || 30);
+          try {
+            const data = await USDMarketService.getHistoricalData(index.ticker, timeframe);
+            return { ticker: index.ticker, data: data.data || [] };
+          } catch (err) {
+            // Return empty data for now (will use mock data)
+            return { ticker: index.ticker, data: [] };
+          }
+        }
+        return null;
+      }).filter(Boolean);
+
+      const allPromises = [...promises, ...indexPromises];
+      const results = await Promise.all(allPromises);
       const dataMap = {};
       results.forEach(result => {
-        dataMap[result.pair] = result.data;
+        if (result) {
+          dataMap[result.pair || result.ticker] = result.data;
+        }
       });
       setHistoricalData(dataMap);
     };
@@ -101,63 +192,138 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
     );
   }
 
-  return (
-    <Card>
-      <Grid numItems={1} numItemsSm={1} numItemsLg={12} className="gap-4">
-        {/* DXY Highlight */}
-        <div className="col-span-12 lg:col-span-4">
-          <Card className="bg-blue-50">
-            <Text className="text-sm font-semibold mb-2">DXY</Text>
-            <Metric>
-              {dxy?.value ? dxy.value.toFixed(2) : '--'}
-            </Metric>
-            <div className="mt-2">
-              <Badge 
-                color={CorrelationHelpers.getChangeColor(dxy?.change) === 'positive' ? 'emerald' : 'red'}
-              >
-                {CorrelationHelpers.formatChange(dxy?.change)} ({CorrelationHelpers.formatChangePercent(dxy?.changePercent)})
-              </Badge>
+  // Render currency pair card with its index
+  const renderCurrencyCard = (pair) => {
+    const isPositive = parseFloat(pair.change) >= 0;
+    const pairData = historicalData[pair.pair] || [];
+    const index = CURRENCY_INDEXES[pair.pair];
+    const indexInfo = index ? indexData[index.ticker] : null;
+    const indexDataHistorical = index ? (historicalData[index.ticker] || []) : [];
+    const indexIsPositive = indexInfo ? parseFloat(indexInfo.changePercent) >= 0 : false;
+    
+    return (
+      <Card key={pair.pair} className="dark:bg-gray-700">
+        <Flex justifyContent="between" alignItems="center" className="mb-2">
+          <Text className="text-xs font-semibold truncate mr-1 dark:text-white">{pair.name}</Text>
+          <PopoverSelect
+            value={timeframes[pair.pair] || '30'}
+            options={[
+              { value: '7', label: '1W' },
+              { value: '30', label: '1M' },
+              { value: '90', label: '3M' },
+              { value: '180', label: '6M' },
+              { value: '365', label: '1Y' },
+            ]}
+            onChange={(value) => handleTimeframeChange(pair.pair, value)}
+            buttonClassName="max-w-[60px] min-w-[50px]"
+          />
+        </Flex>
+        <Text className="text-base font-bold mb-1 dark:text-white">{pair.rate}</Text>
+        <div className="mb-1 h-16">
+          <MiniSparkline data={pairData} isPositive={isPositive} />
+        </div>
+        <Badge 
+          color={CorrelationHelpers.getChangeColor(pair.change) === 'positive' ? 'emerald' : 'red'}
+          size="xs"
+        >
+          {CorrelationHelpers.formatChangePercent(pair.changePercent)}
+        </Badge>
+        
+        {/* Index Display */}
+        {index && indexInfo && (
+          <div className="mt-2 pt-2 border-t dark:border-gray-600">
+            <Flex justifyContent="between" alignItems="center" className="mb-1">
+              <Text className="text-xs font-semibold dark:text-gray-300">{index.ticker}</Text>
+              <PopoverSelect
+                value={timeframes[index.ticker] || '30'}
+                options={[
+                  { value: '7', label: '1W' },
+                  { value: '30', label: '1M' },
+                  { value: '90', label: '3M' },
+                  { value: '180', label: '6M' },
+                  { value: '365', label: '1Y' },
+                ]}
+                onChange={(value) => handleTimeframeChange(index.ticker, value)}
+                buttonClassName="max-w-[60px] min-w-[50px]"
+              />
+            </Flex>
+            <Text className="text-sm font-bold mb-1 dark:text-white">{indexInfo.value.toFixed(2)}</Text>
+            <div className="mb-1 h-12">
+              <MiniSparkline data={indexDataHistorical} isPositive={indexIsPositive} />
             </div>
-          </Card>
+            <Badge 
+              color={indexIsPositive ? 'emerald' : 'red'}
+              size="xs"
+            >
+              {indexInfo.changePercent >= 0 ? '+' : ''}{indexInfo.changePercent.toFixed(2)}%
+            </Badge>
+          </div>
+        )}
+      </Card>
+    );
+  };
+
+  return (
+    <Card className="dark:bg-gray-800">
+      <Grid numItems={1} numItemsSm={1} numItemsLg={12} className="gap-4">
+        {/* DXY and UUP Highlight */}
+        <div className="col-span-12 lg:col-span-4">
+          <Grid numItems={1} className="gap-4">
+            {/* DXY Card */}
+            <Card className="bg-blue-50 dark:bg-blue-900/20">
+              <Text className="text-sm font-semibold mb-2 dark:text-white">DXY</Text>
+              <Metric className="dark:text-white">
+                {dxy?.value ? dxy.value.toFixed(2) : '--'}
+              </Metric>
+              <div className="mt-2">
+                <Badge 
+                  color={CorrelationHelpers.getChangeColor(dxy?.change) === 'positive' ? 'emerald' : 'red'}
+                >
+                  {CorrelationHelpers.formatChange(dxy?.change)} ({CorrelationHelpers.formatChangePercent(dxy?.changePercent)})
+                </Badge>
+              </div>
+            </Card>
+            
+            {/* UUP Card */}
+            {indexData['UUP'] && (
+              <Card className="bg-blue-50 dark:bg-blue-900/20">
+                <Text className="text-sm font-semibold mb-2 dark:text-white">UUP (USD Index)</Text>
+                <Metric className="dark:text-white">
+                  {indexData['UUP'].value.toFixed(2)}
+                </Metric>
+                <div className="mt-2">
+                  <Badge 
+                    color={indexData['UUP'].changePercent >= 0 ? 'emerald' : 'red'}
+                  >
+                    {indexData['UUP'].changePercent >= 0 ? '+' : ''}{indexData['UUP'].change.toFixed(2)} ({indexData['UUP'].changePercent >= 0 ? '+' : ''}{indexData['UUP'].changePercent.toFixed(2)}%)
+                  </Badge>
+                </div>
+              </Card>
+            )}
+            
+            {/* GLD Card */}
+            {indexData['GLD'] && (
+              <Card className="bg-amber-50 dark:bg-amber-900/20">
+                <Text className="text-sm font-semibold mb-2 dark:text-white">GLD (Gold)</Text>
+                <Metric className="dark:text-white">
+                  {indexData['GLD'].value.toFixed(2)}
+                </Metric>
+                <div className="mt-2">
+                  <Badge 
+                    color={indexData['GLD'].changePercent >= 0 ? 'emerald' : 'red'}
+                  >
+                    {indexData['GLD'].changePercent >= 0 ? '+' : ''}{indexData['GLD'].change.toFixed(2)} ({indexData['GLD'].changePercent >= 0 ? '+' : ''}{indexData['GLD'].changePercent.toFixed(2)}%)
+                  </Badge>
+                </div>
+              </Card>
+            )}
+          </Grid>
         </div>
 
-        {/* Currency Pairs Grid */}
+        {/* Currency Pairs Grid with Indexes */}
         <div className="col-span-12 lg:col-span-8">
           <Grid numItems={2} numItemsSm={3} className="gap-4">
-            {currencyPairs?.map((pair) => {
-              const isPositive = parseFloat(pair.change) >= 0;
-              const pairData = historicalData[pair.pair] || [];
-              
-              return (
-                <Card key={pair.pair}>
-                  <Flex justifyContent="between" alignItems="center" className="mb-2">
-                    <Text className="text-xs font-semibold truncate mr-1">{pair.name}</Text>
-                    <PopoverSelect
-                      value={timeframes[pair.pair] || '30'}
-                      options={[
-                        { value: '7', label: '1W' },
-                        { value: '30', label: '1M' },
-                        { value: '90', label: '3M' },
-                        { value: '180', label: '6M' },
-                        { value: '365', label: '1Y' },
-                      ]}
-                      onChange={(value) => handleTimeframeChange(pair.pair, value)}
-                      buttonClassName="max-w-[60px] min-w-[50px]"
-                    />
-                  </Flex>
-                  <Text className="text-base font-bold mb-1">{pair.rate}</Text>
-                  <div className="mb-1 h-16">
-                    <MiniSparkline data={pairData} isPositive={isPositive} />
-                  </div>
-                  <Badge 
-                    color={CorrelationHelpers.getChangeColor(pair.change) === 'positive' ? 'emerald' : 'red'}
-                    size="xs"
-                  >
-                    {CorrelationHelpers.formatChangePercent(pair.changePercent)}
-                  </Badge>
-                </Card>
-              );
-            })}
+            {currencyPairs?.map((pair) => renderCurrencyCard(pair))}
           </Grid>
         </div>
       </Grid>

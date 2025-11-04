@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Title, Text, Flex } from '@tremor/react';
 import USDProxies from './USDProxies';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
+import USQuadChart from './USQuadChart';
 import TickerTape from './TickerTape';
 import { USDMarketService } from '../../services/api/usdMarketService';
 import { REFRESH_INTERVALS } from '../../constants/usdMarket';
@@ -57,15 +58,17 @@ const USDMacroDashboard = () => {
       {/* Banner with Title and Ticker Tape */}
       <Card className="dark:bg-gray-800">
         <Flex justifyContent="between" alignItems="center" className="gap-4">
-          <Title className="dark:text-white">USD Macro Dashboard</Title>
-          <div className="flex-1 max-w-2xl">
+          <div className="flex-shrink-0">
+            <Title className="dark:text-white">Macro Dashboard</Title>
+            {lastUpdated && (
+              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Last updated: {lastUpdated.toLocaleTimeString()}
+              </Text>
+            )}
+          </div>
+          <div className="flex-1 min-w-0 overflow-hidden">
             <TickerTape />
           </div>
-          {lastUpdated && (
-            <Text className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              Last updated: {lastUpdated.toLocaleTimeString()}
-            </Text>
-          )}
         </Flex>
       </Card>
 
@@ -97,6 +100,13 @@ const USDMacroDashboard = () => {
               <li>Correlation breakdowns</li>
             </ul>
           </div>
+          <div className="pt-3 border-t dark:border-gray-700">
+            <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Previous Week Portfolio Summary</Text>
+            <Text className="text-sm text-gray-600 dark:text-gray-400">
+              Placeholder for weekly portfolio summary including currency market review, signals, and positioning updates. 
+              Example: Global currency market analysis, position performance, and trend signals across major pairs.
+            </Text>
+          </div>
         </div>
       </Card>
 
@@ -116,6 +126,9 @@ const USDMacroDashboard = () => {
           loading={loading}
           error={error}
         />
+
+        {/* US Quad Charts Section */}
+        <USQuadChart />
       </div>
 
       {/* Error overlay */}

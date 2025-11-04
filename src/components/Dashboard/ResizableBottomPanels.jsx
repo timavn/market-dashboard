@@ -16,6 +16,7 @@ const ResizableBottomPanels = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [startY, setStartY] = useState(0);
   const [startHeight, setStartHeight] = useState(0);
+  const rafIdRef = useRef(null);
   const containerRef = useRef(null);
 
   // Save height to localStorage when it changes
@@ -35,24 +36,42 @@ const ResizableBottomPanels = () => {
     document.body.style.userSelect = 'none';
   };
 
-  // Handle mouse move during drag
+  // Handle mouse move during drag (rAF throttled, direct style updates)
   useEffect(() => {
     if (!isDragging) return;
 
+    let lastY = startY;
     const handleMouseMove = (e) => {
-      const deltaY = startY - e.clientY; // Negative = moving up (increase height)
-      let newHeight = startHeight + deltaY;
-
-      // Constrain height between MIN_HEIGHT and MAX_HEIGHT
-      newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, newHeight));
-      
-      setPanelHeight(newHeight);
+      lastY = e.clientY;
+      if (rafIdRef.current) return;
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null;
+        const deltaY = startY - lastY;
+        let newHeight = startHeight + deltaY;
+        newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, newHeight));
+        if (containerRef.current) {
+          containerRef.current.style.height = `${newHeight}px`;
+          containerRef.current.style.willChange = 'height';
+        }
+      });
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      if (containerRef.current) {
+        const h = parseInt(containerRef.current.style.height, 10);
+        if (!Number.isNaN(h)) {
+          const clamped = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, h));
+          setPanelHeight(clamped);
+        }
+        containerRef.current.style.willChange = '';
+      }
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -69,7 +88,7 @@ const ResizableBottomPanels = () => {
   return (
     <div 
       ref={containerRef}
-      className="fixed bottom-0 left-0 right-0 z-50 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700 transition-all duration-200"
+      className="fixed bottom-0 left-0 right-0 z-50 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700 transition-[background-color,border-color] duration-200"
       style={{ 
         height: `${panelHeight}px`,
         display: 'flex',

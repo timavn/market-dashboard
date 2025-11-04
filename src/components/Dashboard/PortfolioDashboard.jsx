@@ -144,16 +144,48 @@ const PortfolioDashboard = () => {
                 <Metric className="dark:text-white">
                   ${displayData.summary.totalValue.toLocaleString()}
                 </Metric>
+                
+                {/* Position Sizing Legend */}
+                <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1 pt-2 border-t dark:border-gray-700">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                    <div>
+                      <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Long:</div>
+                      <div>FX : 4-12%</div>
+                      <div>Fixed Income : 4-10%</div>
+                      <div>Equities : 2-6%</div>
+                      <div>Commodities : 2-4%</div>
+                      <div>Crypto : 2-4%</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Short:</div>
+                      <div>FX : 2-6%</div>
+                      <div>Fixed Income : 2-5%</div>
+                      <div>Equities : 1-3%</div>
+                      <div>Commodities : 1-2%</div>
+                      <div>Crypto : 1-2%</div>
+                    </div>
+                  </div>
+                  <div className="pt-1 border-t dark:border-gray-700 mt-1">
+                    <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Basis Points:</div>
+                    <div className="grid grid-cols-4 gap-x-2">
+                      <div>25 bps: ${Math.floor(displayData.summary.totalValue * 0.0025).toLocaleString()}</div>
+                      <div>50 bps: ${Math.floor(displayData.summary.totalValue * 0.005).toLocaleString()}</div>
+                      <div>100 bps: ${Math.floor(displayData.summary.totalValue * 0.01).toLocaleString()}</div>
+                      <div>500 bps: ${Math.floor(displayData.summary.totalValue * 0.05).toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
+                
                 <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
                   <Text className="text-sm dark:text-white">P&L MTD</Text>
-                  <Badge color="emerald">
-                    +${displayData.summary.totalDayChange.toLocaleString()} ({displayData.summary.totalDayChangePercent}%)
+                  <Badge color={parseFloat(displayData.summary.totalDayChange) >= 0 ? 'emerald' : 'rose'}>
+                    {displayData.summary.totalDayChange >= 0 ? '+' : ''}${displayData.summary.totalDayChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalDayChangePercent).toFixed(2)}%)
                   </Badge>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                  <Text className="text-sm dark:text-white">P&L YTD</Text>
-                  <Badge color="emerald">
-                    +${displayData.summary.totalGainLoss.toLocaleString()} ({displayData.summary.totalGainLossPercent}%)
+                  <Text className="text-xs dark:text-white">P&L YTD</Text>
+                  <Badge color={parseFloat(displayData.summary.totalGainLoss) >= 0 ? 'emerald' : 'rose'}>
+                    {displayData.summary.totalGainLoss >= 0 ? '+' : ''}${displayData.summary.totalGainLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalGainLossPercent).toFixed(2)}%)
                   </Badge>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
@@ -170,23 +202,23 @@ const PortfolioDashboard = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
                     <Text className="text-xs dark:text-white">Gross Exposure</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.exposureMetrics.grossExposure || '0'}%</Text>
+                    <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.exposureMetrics.grossExposure || 0).toFixed(2)}%</Text>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
                     <Text className="text-xs dark:text-white">Net Long</Text>
                     <Badge color="emerald" size="xs">
-                      {displayData.exposureMetrics.netLongExposure || '0'}%
+                      {parseFloat(displayData.exposureMetrics.netLongExposure || 0).toFixed(2)}%
                     </Badge>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">
                     <Text className="text-xs dark:text-white">Net Short</Text>
                     <Badge color="red" size="xs">
-                      {displayData.exposureMetrics.netShortExposure || '0'}%
+                      {parseFloat(displayData.exposureMetrics.netShortExposure || 0).toFixed(2)}%
                     </Badge>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
                     <Text className="text-xs dark:text-white">Net Exposure</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.exposureMetrics.netExposure || '0'}%</Text>
+                    <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.exposureMetrics.netExposure || 0).toFixed(2)}%</Text>
                   </div>
                 </div>
               </div>
@@ -226,12 +258,12 @@ const PortfolioDashboard = () => {
               <div className="mb-6 pt-6 border-t dark:border-gray-700">
                 <Title className="text-sm mb-3 dark:text-white">Asset Class Allocation</Title>
                 <div className="space-y-2">
-                  {Object.entries(displayData.assetAllocation).map(([type, percentage]) => (
-                    <div key={type} className="space-y-1">
-                      <div className="flex justify-between items-center">
-                        <Text className="text-xs dark:text-white">{type}</Text>
-                        <Text className="text-xs font-semibold dark:text-white">{percentage}%</Text>
-                      </div>
+                      {Object.entries(displayData.assetAllocation).map(([type, percentage]) => (
+                        <div key={type} className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <Text className="text-xs dark:text-white">{type}</Text>
+                            <Text className="text-xs font-semibold dark:text-white">{parseFloat(percentage || 0).toFixed(2)}%</Text>
+                          </div>
                       <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                         <div 
                           className="bg-blue-600 h-2 rounded-full" 
@@ -266,22 +298,22 @@ const PortfolioDashboard = () => {
               <div className="mb-6 pt-6 border-t dark:border-gray-700">
                 <Title className="text-sm mb-3 dark:text-white">Geographic Exposure</Title>
                 <div className="space-y-2">
-                  <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                    <Text className="text-xs dark:text-white">North America</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.factorExposures.geographic.northAmerica || '0'}%</Text>
-                  </div>
-                  <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                    <Text className="text-xs dark:text-white">Europe</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.factorExposures.geographic.europe || '0'}%</Text>
-                  </div>
-                  <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                    <Text className="text-xs dark:text-white">Asia Pacific</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.factorExposures.geographic.asiaPacific || '0'}%</Text>
-                  </div>
-                  <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                    <Text className="text-xs dark:text-white">Emerging Markets</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.factorExposures.geographic.emergingMarkets || '0'}%</Text>
-                  </div>
+                      <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                        <Text className="text-xs dark:text-white">North America</Text>
+                        <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.northAmerica || 0).toFixed(2)}%</Text>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                        <Text className="text-xs dark:text-white">Europe</Text>
+                        <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.europe || 0).toFixed(2)}%</Text>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                        <Text className="text-xs dark:text-white">Asia Pacific</Text>
+                        <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.asiaPacific || 0).toFixed(2)}%</Text>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                        <Text className="text-xs dark:text-white">Emerging Markets</Text>
+                        <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.emergingMarkets || 0).toFixed(2)}%</Text>
+                      </div>
                 </div>
               </div>
             )}
@@ -291,14 +323,14 @@ const PortfolioDashboard = () => {
               <div className="pt-6 border-t dark:border-gray-700">
                 <Title className="text-sm mb-3 dark:text-white">Concentration Risk</Title>
                 <div className="space-y-2">
-                  <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                    <Text className="text-xs dark:text-white">Top 10 Holdings</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.concentrationMetrics.top10HoldingsPercent || '0'}%</Text>
-                  </div>
-                  <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                    <Text className="text-xs dark:text-white">Largest Position</Text>
-                    <Text className="text-xs font-semibold dark:text-white">{displayData.concentrationMetrics.largestPositionPercent || '0'}%</Text>
-                  </div>
+                      <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                        <Text className="text-xs dark:text-white">Top 10 Holdings</Text>
+                        <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.concentrationMetrics.top10HoldingsPercent || 0).toFixed(2)}%</Text>
+                      </div>
+                      <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                        <Text className="text-xs dark:text-white">Largest Position</Text>
+                        <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.concentrationMetrics.largestPositionPercent || 0).toFixed(2)}%</Text>
+                      </div>
                   <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
                     <Text className="text-xs dark:text-white">HHI Index</Text>
                     <Text className="text-xs font-semibold dark:text-white">{displayData.concentrationMetrics.hhiIndex || '0.000'}</Text>

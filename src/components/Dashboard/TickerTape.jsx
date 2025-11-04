@@ -63,7 +63,8 @@ const TickerTape = () => {
       onMouseLeave={() => setIsPaused(false)}
       style={{ 
         height: '40px',
-        width: '100%'
+        width: '100%',
+        maxWidth: '100%'
       }}
     >
       <div
