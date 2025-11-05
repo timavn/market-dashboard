@@ -7,7 +7,7 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
   if (loading) {
     return (
       <Card>
-        <Title className="mb-2">Key $USD Correlations</Title>
+        <Title className="mb-2">$USD Correlations</Title>
         <Text className="text-xs text-gray-500 mb-4">*Days = Trading Days*</Text>
         <div className="text-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-2"></div>
@@ -20,7 +20,7 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
   if (error) {
     return (
       <Card className="bg-red-50 border-red-200">
-        <Title className="mb-2">Key $USD Correlations</Title>
+        <Title className="mb-2">$USD Correlations</Title>
         <Text className="text-red-600">Error loading correlation data: {error}</Text>
       </Card>
     );
@@ -29,24 +29,28 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
   if (!correlations || !rollingStats) {
     return (
       <Card>
-        <Title className="mb-2">Key $USD Correlations</Title>
+        <Title className="mb-2">$USD Correlations</Title>
         <Text className="text-center py-8">No correlation data available</Text>
       </Card>
     );
   }
 
-  const getCorrelationBadgeColor = (correlation) => {
-    if (correlation === null || correlation === undefined) return 'gray';
-    if (correlation >= 0.5) return 'emerald';
-    if (correlation >= 0.2) return 'blue';
-    if (correlation >= -0.2) return 'amber';
-    if (correlation >= -0.5) return 'orange';
-    return 'red';
+  const getCorrelationStyle = (correlation) => {
+    if (correlation === null || correlation === undefined) {
+      return { text: 'text-black', border: 'border-black' };
+    }
+    if (correlation >= 0.5) {
+      return { text: 'text-green-500', border: 'border-green-500' };
+    }
+    if (correlation <= -0.5) {
+      return { text: 'text-red-500', border: 'border-red-500' };
+    }
+    return { text: 'text-black', border: 'border-black' };
   };
 
   return (
     <Card>
-      <Title className="mb-2">Key $USD Correlations</Title>
+      <Title className="mb-2">$USD Correlations</Title>
       <Text className="text-xs text-gray-500 mb-4">*Days = Trading Days*</Text>
       
       <div className="overflow-x-auto">
@@ -74,6 +78,8 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
             {USD_METRICS.map(metric => {
               const metricCorrelations = correlations[metric.symbol] || {};
               const metricRollingStats = rollingStats[metric.symbol] || {};
+              const highStyle = getCorrelationStyle(metricRollingStats.high);
+              const lowStyle = getCorrelationStyle(metricRollingStats.low);
               
               return (
                 <TableRow key={metric.symbol}>
@@ -85,22 +91,27 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
                   {CORRELATION_PERIODS.map(period => {
                     const correlation = metricCorrelations[`${period}D`];
                     const displayValue = CorrelationHelpers.formatCorrelation(correlation);
+                    const style = getCorrelationStyle(correlation);
                     
                     return (
                       <TableCell key={period}>
-                        <Badge color={getCorrelationBadgeColor(correlation)} size="xs">
+                        <div className={`inline-block px-1 py-0.5 border ${style.border} ${style.text} text-xs`}>
                           {displayValue}
-                        </Badge>
+                        </div>
                       </TableCell>
                     );
                   })}
                   
                   {/* Rolling statistics */}
                   <TableCell>
-                    <Text className="text-xs">{metricRollingStats.high?.toFixed(3) || '--'}</Text>
+                    <div className={`inline-block px-1 py-0.5 border ${highStyle.border} ${highStyle.text} text-xs`}>
+                      {metricRollingStats.high?.toFixed(3) || '--'}
+                    </div>
                   </TableCell>
                   <TableCell>
-                    <Text className="text-xs">{metricRollingStats.low?.toFixed(3) || '--'}</Text>
+                    <div className={`inline-block px-1 py-0.5 border ${lowStyle.border} ${lowStyle.text} text-xs`}>
+                      {metricRollingStats.low?.toFixed(3) || '--'}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge color="emerald" size="xs">

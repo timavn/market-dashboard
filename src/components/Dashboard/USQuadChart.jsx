@@ -86,8 +86,94 @@ const USQuadChart = () => {
     );
   };
 
+  // Heatmap data structure
+  const countries = [
+    'United States',
+    'Argentina',
+    'Australia',
+    'Brazil',
+    'Canada',
+    'China',
+    'Eurozone',
+    'France',
+    'Germany',
+    'India',
+    'Indonesia',
+    'Italy',
+    'Japan',
+    'Mexico',
+    'Russia',
+    'South Africa',
+    'South Korea',
+    'Spain',
+    'Turkey',
+    'United Kingdom',
+    'MODE/MEDIAN'
+  ];
+
+  const quarters = [
+    { period: '2Q23', type: 'actuals' },
+    { period: '3Q23', type: 'actuals' },
+    { period: '4Q23', type: 'actuals' },
+    { period: '1Q24', type: 'actuals' },
+    { period: '2Q24', type: 'actuals' },
+    { period: '3Q24', type: 'actuals' },
+    { period: '4Q24', type: 'actuals' },
+    { period: '1Q25', type: 'actuals' },
+    { period: '2Q25', type: 'actuals' },
+    { period: '3Q25E', type: 'estimates' },
+    { period: '4Q25E', type: 'estimates' },
+    { period: '1Q26E', type: 'estimates' },
+    { period: '2Q26E', type: 'estimates' },
+  ];
+
+  // Generate sample heatmap data (country -> quarter -> quad value)
+  // In a real implementation, this would come from an API or props
+  // Using React.useMemo to ensure stable data across renders
+  const heatmapData = React.useMemo(() => {
+    const data = {};
+    // Use a simple hash-based approach for consistent "random" values
+    const seed = 12345;
+    let currentSeed = seed;
+    const random = () => {
+      currentSeed = (currentSeed * 9301 + 49297) % 233280;
+      return currentSeed / 233280;
+    };
+    
+    countries.forEach((country, countryIndex) => {
+      data[country] = {};
+      quarters.forEach(({ period }, quarterIndex) => {
+        // Generate consistent pseudo-random quad values (1-4) based on country and quarter
+        const value = Math.floor(random() * 4) + 1;
+        data[country][period] = value;
+      });
+    });
+    return data;
+  }, []);
+
+  // Get cell background color based on quad value
+  const getCellColor = (quadValue) => {
+    if (quadValue === 1) return '#008000'; // Green
+    if (quadValue === 2 || quadValue === 3) return '#FFC107'; // Yellow/Amber
+    if (quadValue === 4) return '#FE0000'; // Red
+    return '#f3f4f6'; // Default gray
+  };
+
+  // Get text color for cell
+  const getTextColor = (quadValue) => {
+    if (quadValue === 1) return '#ffffff'; // White text for green
+    if (quadValue === 2 || quadValue === 3) return '#000000'; // Black text for yellow
+    if (quadValue === 4) return '#ffffff'; // White text for red
+    return '#000000'; // Default black
+  };
+
+  // Calculate actuals and estimates column spans
+  const actualsCount = quarters.filter(q => q.type === 'actuals').length;
+  const estimatesCount = quarters.filter(q => q.type === 'estimates').length;
+
   return (
     <Card className="bg-white">
+      {/* Existing Bar Chart */}
       <div style={{ height: 360, display: 'flex' }}>
         {/* Left label: QU over AD */}
         <div
@@ -187,6 +273,133 @@ const USQuadChart = () => {
               />
             </ComposedChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Heatmap Table */}
+      <div style={{ marginTop: '15px', padding: '7.5px' }}>
+        <div style={{ marginBottom: '6px', fontSize: '10.5px', fontWeight: 'bold' }}>
+          Hedgeye Macro GIP Model Signals
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px' }}>
+            <thead>
+              {/* First header row: Date and section headers */}
+              <tr>
+                <th
+                  style={{
+                    padding: '6px',
+                    textAlign: 'left',
+                    backgroundColor: '#3b82f6',
+                    color: '#ffffff',
+                    fontWeight: 'bold',
+                    border: '1px solid #000',
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 10,
+                    minWidth: '90px',
+                  }}
+                >
+                  10/1/2025
+                </th>
+                <th
+                  colSpan={actualsCount}
+                  style={{
+                    padding: '6px',
+                    textAlign: 'center',
+                    backgroundColor: '#f3f4f6',
+                    fontWeight: 'bold',
+                    border: '1px solid #000',
+                  }}
+                >
+                  Actuals
+                </th>
+                <th
+                  colSpan={estimatesCount}
+                  style={{
+                    padding: '6px',
+                    textAlign: 'center',
+                    backgroundColor: '#f3f4f6',
+                    fontWeight: 'bold',
+                    border: '1px solid #000',
+                  }}
+                >
+                  Estimates
+                </th>
+              </tr>
+              {/* Second header row: Quarter periods */}
+              <tr>
+                <th
+                  style={{
+                    padding: '6px',
+                    textAlign: 'left',
+                    backgroundColor: '#f3f4f6',
+                    fontWeight: 'bold',
+                    border: '1px solid #000',
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 10,
+                  }}
+                >
+                  Country
+                </th>
+                {quarters.map(({ period }) => (
+                  <th
+                    key={period}
+                    style={{
+                      padding: '6px',
+                      textAlign: 'center',
+                      backgroundColor: '#f3f4f6',
+                      fontWeight: 'bold',
+                      border: '1px solid #000',
+                      minWidth: '45px',
+                    }}
+                  >
+                    {period}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {countries.map((country) => (
+                <tr key={country}>
+                  <td
+                    style={{
+                      padding: '6px',
+                      textAlign: 'left',
+                      fontWeight: country === 'MODE/MEDIAN' ? 'bold' : 'normal',
+                      border: '1px solid #000',
+                      backgroundColor: '#ffffff',
+                      position: 'sticky',
+                      left: 0,
+                      zIndex: 5,
+                    }}
+                  >
+                    {country}
+                  </td>
+                  {quarters.map(({ period }) => {
+                    const quadValue = heatmapData[country]?.[period] || null;
+                    return (
+                      <td
+                        key={period}
+                        style={{
+                          padding: '6px',
+                          textAlign: 'center',
+                          backgroundColor: quadValue ? getCellColor(quadValue) : '#f3f4f6',
+                          color: quadValue ? getTextColor(quadValue) : '#000000',
+                          fontWeight: 'bold',
+                          border: '1px solid #000',
+                          fontSize: '10.5px',
+                        }}
+                      >
+                        {quadValue || ''}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </Card>
