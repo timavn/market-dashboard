@@ -171,11 +171,94 @@ const USQuadChart = () => {
   const actualsCount = quarters.filter(q => q.type === 'actuals').length;
   const estimatesCount = quarters.filter(q => q.type === 'estimates').length;
 
+  // Sector exposures data - matching image description
+  const sectorExposures = [
+    { sector: 'Consumer Discretionary', ticker: 'XLY', price: 238.16, d1: -1.66, mtd: -0.74, qtd: -0.62, ytd: 6.16 },
+    { sector: 'Financial Select Sector', ticker: 'XLF', price: 52.42, d1: 0.52, mtd: 0.10, qtd: -0.26, ytd: 8.46 },
+    { sector: 'Health Care Select Sector', ticker: 'XLV', price: 293.94, d1: 0.41, mtd: 0.27, qtd: 0.15, ytd: 12.34 },
+    { sector: 'Technology Select Sector', ticker: 'XLK', price: 75.99, d1: -2.64, mtd: -1.50, qtd: 0.85, ytd: 18.92 },
+    { sector: 'Consumer Staples Select Sector', ticker: 'XLP', price: 152.61, d1: 0.45, mtd: 0.32, qtd: 0.18, ytd: 5.67 },
+    { sector: 'Industrial Select Sector', ticker: 'XLI', price: 84.72, d1: -0.88, mtd: -0.42, qtd: 0.25, ytd: 9.81 },
+    { sector: 'Materials Select Sector', ticker: 'XLB', price: 87.19, d1: -1.23, mtd: -0.65, qtd: -0.12, ytd: 7.43 },
+    { sector: 'The Energy Select Sector', ticker: 'XLE', price: 88.83, d1: 0.38, mtd: 0.21, qtd: -0.35, ytd: 4.92 },
+    { sector: 'Utilities Select Sector', ticker: 'XLU', price: 40.94, d1: 0.31, mtd: 0.18, qtd: 0.09, ytd: 3.75 },
+    { sector: 'Real Estate Select Sector', ticker: 'XLRE', price: 112.81, d1: -0.95, mtd: -0.52, qtd: 0.33, ytd: 8.24 },
+    { sector: 'Communications Services Sector', ticker: 'XLC', price: 95.67, d1: -1.42, mtd: -0.78, qtd: 0.47, ytd: 11.56 },
+    { sector: 'S&P 500', ticker: 'SPX', price: 6771.55, d1: -1.17, mtd: -1.00, qtd: 1.24, ytd: 15.13 },
+  ];
+
+  // Table styling objects for factor exposures table
+  const thLeft = {
+    padding: '4px 6px',
+    textAlign: 'left',
+    backgroundColor: '#f3f4f6',
+    fontWeight: 'bold',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    minWidth: '180px',
+  };
+  const th = {
+    padding: '4px 6px',
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6',
+    fontWeight: 'bold',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    minWidth: '60px',
+  };
+  const thRight = {
+    padding: '4px 6px',
+    textAlign: 'right',
+    backgroundColor: '#f3f4f6',
+    fontWeight: 'bold',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    minWidth: '80px',
+  };
+  const thPct = {
+    padding: '4px 6px',
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6',
+    fontWeight: 'bold',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    minWidth: '70px',
+  };
+  const tdLeft = {
+    padding: '3px 6px',
+    textAlign: 'left',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    backgroundColor: '#ffffff',
+  };
+  const tdCenter = {
+    padding: '3px 6px',
+    textAlign: 'center',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    backgroundColor: '#ffffff',
+    fontWeight: '600',
+  };
+  const tdRight = {
+    padding: '3px 6px',
+    textAlign: 'right',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    backgroundColor: '#ffffff',
+  };
+  const tdPct = {
+    padding: '3px 6px',
+    textAlign: 'center',
+    border: '1px solid #d1d5db',
+    fontSize: '10px',
+    backgroundColor: '#ffffff',
+  };
+
   return (
     <Card className="bg-white">
-      {/* Existing Bar Chart */}
-      <div style={{ height: 360, display: 'flex' }}>
-        {/* Left label: QU over AD */}
+      {/* Two-column layout: Left QU/AD label, Right Chart + Exposures Table */}
+      <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        {/* Left label: QU over AD - stretches to cover chart + table */}
         <div
           style={{
             flexBasis: '20%',
@@ -185,6 +268,7 @@ const USQuadChart = () => {
             justifyContent: 'center',
             // Match app card outline (blue divider)
             borderRight: '2px solid #60A5FA',
+            alignSelf: 'stretch',
           }}
         >
           <div
@@ -205,74 +289,140 @@ const USQuadChart = () => {
           </div>
         </div>
 
-        {/* Right canvas area - ComposedChart */}
-        <div style={{ flex: 1, padding: '10px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
-              data={data}
-              margin={{ top: 10, right: 10, left: 10, bottom: 40 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              {/* Quad bands background - reversed: QUAD 4 at top, QUAD 1 at bottom */}
-              <ReferenceArea y1={75} y2={100} fill={CHART_COLORS[4]} fillOpacity={0.2} />
-              <ReferenceArea y1={50} y2={75} fill={CHART_COLORS[3]} fillOpacity={0.2} />
-              <ReferenceArea y1={25} y2={50} fill={CHART_COLORS[2]} fillOpacity={0.2} />
-              <ReferenceArea y1={0} y2={25} fill={CHART_COLORS[1]} fillOpacity={0.2} />
-              <XAxis
-                dataKey="month"
-                angle={-45}
-                textAnchor="end"
-                height={80}
-                tick={{ fontSize: 10 }}
-                interval={0}
-              />
-              <YAxis
-                domain={[0, 100]}
-                ticks={[87.5, 62.5, 37.5, 12.5]}
-                tick={(props) => {
-                  const { x, y, payload } = props;
-                  let text = '';
-                  let color = '#000';
-                  if (payload.value === 87.5) {
-                    text = 'QUAD 4';
-                    color = CHART_COLORS[4]; // red - at top
-                  } else if (payload.value === 62.5) {
-                    text = 'QUAD 3';
-                    color = CHART_COLORS[3]; // yellow
-                  } else if (payload.value === 37.5) {
-                    text = 'QUAD 2';
-                    color = CHART_COLORS[2]; // light green
-                  } else if (payload.value === 12.5) {
-                    text = 'QUAD 1';
-                    color = CHART_COLORS[1]; // green - at bottom
-                  }
-                  return (
-                    <text x={x - 15} y={y} fill={color} fontSize={12} fontWeight="bold" textAnchor="end">
-                      {text}
-                    </text>
-                  );
-                }}
-                width={90}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              {/* Stacked bars for conditional probabilities */}
-              <Bar dataKey="quad1" stackId="a" fill={CHART_COLORS[1]} stroke="#000000" strokeWidth={1} barSize={24} />
-              <Bar dataKey="quad2" stackId="a" fill={CHART_COLORS[2]} stroke="#000000" strokeWidth={1} barSize={24} />
-              <Bar dataKey="quad3" stackId="a" fill={CHART_COLORS[3]} stroke="#000000" strokeWidth={1} barSize={24} />
-              <Bar dataKey="quad4" stackId="a" fill={CHART_COLORS[4]} stroke="#000000" strokeWidth={1} barSize={24} />
-              {/* Line overlay showing actual quad value experienced */}
-              <Line
-                type="monotone"
-                dataKey="quadY"
-                stroke="#9CA3AF"
-                strokeWidth={2}
-                strokeDasharray="4 6"
-                dot={<CustomQuadDot />}
-                connectNulls
-                legendType="none"
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
+        {/* Right column: Chart + Exposures Table stacked vertically */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {/* Bar Chart */}
+          <div style={{ height: 360, padding: '10px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={data}
+                margin={{ top: 10, right: 10, left: 10, bottom: 40 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                {/* Quad bands background - reversed: QUAD 4 at top, QUAD 1 at bottom */}
+                <ReferenceArea y1={75} y2={100} fill={CHART_COLORS[4]} fillOpacity={0.2} />
+                <ReferenceArea y1={50} y2={75} fill={CHART_COLORS[3]} fillOpacity={0.2} />
+                <ReferenceArea y1={25} y2={50} fill={CHART_COLORS[2]} fillOpacity={0.2} />
+                <ReferenceArea y1={0} y2={25} fill={CHART_COLORS[1]} fillOpacity={0.2} />
+                <XAxis
+                  dataKey="month"
+                  angle={-45}
+                  textAnchor="end"
+                  height={80}
+                  tick={{ fontSize: 10 }}
+                  interval={0}
+                />
+                <YAxis
+                  domain={[0, 100]}
+                  ticks={[87.5, 62.5, 37.5, 12.5]}
+                  tick={(props) => {
+                    const { x, y, payload } = props;
+                    let text = '';
+                    let color = '#000';
+                    if (payload.value === 87.5) {
+                      text = 'QUAD 4';
+                      color = CHART_COLORS[4]; // red - at top
+                    } else if (payload.value === 62.5) {
+                      text = 'QUAD 3';
+                      color = CHART_COLORS[3]; // yellow
+                    } else if (payload.value === 37.5) {
+                      text = 'QUAD 2';
+                      color = CHART_COLORS[2]; // light green
+                    } else if (payload.value === 12.5) {
+                      text = 'QUAD 1';
+                      color = CHART_COLORS[1]; // green - at bottom
+                    }
+                    return (
+                      <text x={x - 15} y={y} fill={color} fontSize={12} fontWeight="bold" textAnchor="end">
+                        {text}
+                      </text>
+                    );
+                  }}
+                  width={90}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                {/* Stacked bars for conditional probabilities */}
+                <Bar dataKey="quad1" stackId="a" fill={CHART_COLORS[1]} stroke="#000000" strokeWidth={1} barSize={24} />
+                <Bar dataKey="quad2" stackId="a" fill={CHART_COLORS[2]} stroke="#000000" strokeWidth={1} barSize={24} />
+                <Bar dataKey="quad3" stackId="a" fill={CHART_COLORS[3]} stroke="#000000" strokeWidth={1} barSize={24} />
+                <Bar dataKey="quad4" stackId="a" fill={CHART_COLORS[4]} stroke="#000000" strokeWidth={1} barSize={24} />
+                {/* Line overlay showing actual quad value experienced */}
+                <Line
+                  type="monotone"
+                  dataKey="quadY"
+                  stroke="#9CA3AF"
+                  strokeWidth={2}
+                  strokeDasharray="4 6"
+                  dot={<CustomQuadDot />}
+                  connectNulls
+                  legendType="none"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Factor Exposures Table */}
+          <div style={{ padding: '6px 10px', overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
+              <thead>
+                <tr>
+                  <th style={thLeft}>SECTOR</th>
+                  <th style={th}>Ticker</th>
+                  <th style={thRight}>Price</th>
+                  <th style={thPct}>1-Day % Chg</th>
+                  <th style={thPct}>MTD % Chg</th>
+                  <th style={thPct}>QTD % Chg</th>
+                  <th style={thPct}>YTD % Chg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sectorExposures.map((row) => (
+                  <tr key={row.ticker}>
+                    <td style={tdLeft}>{row.sector}</td>
+                    <td style={tdCenter}>{row.ticker}</td>
+                    <td style={tdRight}>
+                      {row.ticker === 'SPX' 
+                        ? row.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : `$${row.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      }
+                    </td>
+                    <td style={{
+                      ...tdPct,
+                      backgroundColor: row.d1 >= 0 ? '#16a34a22' : '#dc262622',
+                      color: row.d1 >= 0 ? '#15803d' : '#b91c1c',
+                      fontWeight: 700,
+                    }}>
+                      {row.d1 >= 0 ? '+' : ''}{row.d1.toFixed(2)}%
+                    </td>
+                    <td style={{
+                      ...tdPct,
+                      backgroundColor: row.mtd >= 0 ? '#16a34a22' : '#dc262622',
+                      color: row.mtd >= 0 ? '#15803d' : '#b91c1c',
+                      fontWeight: 700,
+                    }}>
+                      {row.mtd >= 0 ? '+' : ''}{row.mtd.toFixed(2)}%
+                    </td>
+                    <td style={{
+                      ...tdPct,
+                      backgroundColor: row.qtd >= 0 ? '#16a34a22' : '#dc262622',
+                      color: row.qtd >= 0 ? '#15803d' : '#b91c1c',
+                      fontWeight: 700,
+                    }}>
+                      {row.qtd >= 0 ? '+' : ''}{row.qtd.toFixed(2)}%
+                    </td>
+                    <td style={{
+                      ...tdPct,
+                      backgroundColor: row.ytd >= 0 ? '#16a34a22' : '#dc262622',
+                      color: row.ytd >= 0 ? '#15803d' : '#b91c1c',
+                      fontWeight: 700,
+                    }}>
+                      {row.ytd >= 0 ? '+' : ''}{row.ytd.toFixed(2)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

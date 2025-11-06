@@ -481,6 +481,210 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Daily Notes API Endpoints
+
+// List all dates that have notes
+app.get('/api/notes', async (req, res) => {
+  try {
+    const params = {
+      TableName: 'DailyNotes',
+      ProjectionExpression: '#dt', // Only retrieve the date attribute (using alias for reserved keyword)
+      ExpressionAttributeNames: {
+        '#dt': 'date'
+      }
+    };
+    
+    const result = await dynamodb.scan(params).promise();
+    
+    // Extract dates and sort descending (newest first)
+    const dates = result.Items
+      .map(item => item.date)
+      .filter(date => date) // Filter out any null/undefined dates
+      .sort()
+      .reverse(); // Sort descending (newest first)
+    
+    res.json({
+      dates: dates,
+      count: dates.length
+    });
+    
+  } catch (error) {
+    console.error('Error listing note dates:', error);
+    res.status(500).json({ 
+      error: 'Failed to list note dates',
+      details: error.message 
+    });
+  }
+});
+
+// Save a note for a specific date
+app.post('/api/notes', async (req, res) => {
+  try {
+    const { date, content } = req.body;
+    
+    if (!date) {
+      return res.status(400).json({ error: 'Date is required' });
+    }
+    
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+    
+    const params = {
+      TableName: 'DailyNotes',
+      Item: {
+        date: date,
+        content: content || '',
+        timestamp: new Date().toISOString(),
+      }
+    };
+    
+    await dynamodb.put(params).promise();
+    
+    res.json({
+      success: true,
+      date: date,
+      timestamp: params.Item.timestamp
+    });
+    
+  } catch (error) {
+    console.error('Error saving note:', error);
+    res.status(500).json({ 
+      error: 'Failed to save note',
+      details: error.message 
+    });
+  }
+});
+
+// Get a note for a specific date
+app.get('/api/notes/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+    
+    const params = {
+      TableName: 'DailyNotes',
+      Key: {
+        date: date
+      }
+    };
+    
+    const result = await dynamodb.get(params).promise();
+    
+    if (!result.Item) {
+      return res.status(404).json({ 
+        error: 'Note not found',
+        date: date 
+      });
+    }
+    
+    res.json({
+      date: result.Item.date,
+      content: result.Item.content,
+      timestamp: result.Item.timestamp
+    });
+    
+  } catch (error) {
+    console.error('Error loading note:', error);
+    res.status(500).json({ 
+      error: 'Failed to load note',
+      details: error.message 
+    });
+  }
+});
+
+// Calendar Notes API Endpoints
+
+// Save a calendar note for a specific date
+app.post('/api/notes/calendar', async (req, res) => {
+  try {
+    const { date, content } = req.body;
+    
+    if (!date) {
+      return res.status(400).json({ error: 'Date is required' });
+    }
+    
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+    
+    const params = {
+      TableName: 'CalendarNotes',
+      Item: {
+        date: date,
+        content: content || '',
+        timestamp: new Date().toISOString(),
+      }
+    };
+    
+    await dynamodb.put(params).promise();
+    
+    res.json({
+      success: true,
+      date: date,
+      timestamp: params.Item.timestamp
+    });
+    
+  } catch (error) {
+    console.error('Error saving calendar note:', error);
+    res.status(500).json({ 
+      error: 'Failed to save calendar note',
+      details: error.message 
+    });
+  }
+});
+
+// Get a calendar note for a specific date
+app.get('/api/notes/calendar/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+    
+    const params = {
+      TableName: 'CalendarNotes',
+      Key: {
+        date: date
+      }
+    };
+    
+    const result = await dynamodb.get(params).promise();
+    
+    if (!result.Item) {
+      return res.status(404).json({ 
+        error: 'Calendar note not found',
+        date: date 
+      });
+    }
+    
+    res.json({
+      date: result.Item.date,
+      content: result.Item.content,
+      timestamp: result.Item.timestamp
+    });
+    
+  } catch (error) {
+    console.error('Error loading calendar note:', error);
+    res.status(500).json({ 
+      error: 'Failed to load calendar note',
+      details: error.message 
+    });
+  }
+});
+
 // AWS Status debugging endpoint (temporary)
 app.get('/api/aws-status', async (req, res) => {
   try {
