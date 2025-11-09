@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const AWS = require('aws-sdk');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -52,19 +53,367 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Fixed mock market data (no randomness)
-const FIXED_QUOTES = {
-  SPY: { symbol: 'SPY', price: '454.70', change: '0.00', changePercent: '0.00', volume: 140591, high: '455.00', low: '452.00', open: '454.00', timestamp: new Date().toISOString() },
-  QQQ: { symbol: 'QQQ', price: '171.41', change: '0.00', changePercent: '0.00', volume: 767854, high: '172.00', low: '170.00', open: '171.00', timestamp: new Date().toISOString() },
-  AAPL: { symbol: 'AAPL', price: '289.18', change: '0.00', changePercent: '0.00', volume: 167018, high: '290.00', low: '288.00', open: '289.00', timestamp: new Date().toISOString() },
-  TSLA: { symbol: 'TSLA', price: '221.36', change: '0.00', changePercent: '0.00', volume: 453877, high: '223.00', low: '220.00', open: '221.00', timestamp: new Date().toISOString() },
-  NVDA: { symbol: 'NVDA', price: '217.03', change: '0.00', changePercent: '0.00', volume: 1081837, high: '218.00', low: '216.00', open: '217.00', timestamp: new Date().toISOString() },
-  MSFT: { symbol: 'MSFT', price: '335.12', change: '0.00', changePercent: '0.00', volume: 512345, high: '336.00', low: '334.00', open: '335.00', timestamp: new Date().toISOString() },
-  GOOGL: { symbol: 'GOOGL', price: '128.45', change: '0.00', changePercent: '0.00', volume: 234567, high: '129.00', low: '128.00', open: '128.00', timestamp: new Date().toISOString() },
-  AMZN: { symbol: 'AMZN', price: '142.90', change: '0.00', changePercent: '0.00', volume: 345678, high: '143.50', low: '142.00', open: '142.50', timestamp: new Date().toISOString() }
+// Ticker mapping: Convert securities list tickers to Yahoo Finance/FRED tickers
+const TICKER_MAPPING = {
+  'AAPL': { source: 'yahoo', ticker: 'AAPL' },
+  'AMZN': { source: 'yahoo', ticker: 'AMZN' },
+  'AVAX': { source: 'yahoo', ticker: 'AVAX-USD' },
+  'BITCOIN': { source: 'yahoo', ticker: 'BTC-USD' },
+  'BKLN': { source: 'yahoo', ticker: 'BKLN' },
+  'BLOK': { source: 'yahoo', ticker: 'BLOK' },
+  'BMNR': { source: 'yahoo', ticker: 'BMNR' },
+  'BNDX': { source: 'yahoo', ticker: 'BNDX' },
+  'BRENT': { source: 'yahoo', ticker: 'BZ=F' },
+  'BTC': { source: 'yahoo', ticker: 'BTC-USD' },
+  'CAD/USD': { source: 'yahoo', ticker: 'CADUSD=X' },
+  'COIN': { source: 'yahoo', ticker: 'COIN' },
+  'COMPQ': { source: 'yahoo', ticker: '^IXIC' },
+  'COPPER': { source: 'yahoo', ticker: 'HG=F' },
+  'CRCL': { source: 'yahoo', ticker: 'CRCL' },
+  'CWB': { source: 'yahoo', ticker: 'CWB' },
+  'DAX': { source: 'yahoo', ticker: '^GDAXI' },
+  'EMB': { source: 'yahoo', ticker: 'EMB' },
+  'EMXC': { source: 'yahoo', ticker: 'EMXC' },
+  'ETH': { source: 'yahoo', ticker: 'ETH-USD' },
+  'ETHA': { source: 'yahoo', ticker: 'ETHA' },
+  'EUR/USD': { source: 'yahoo', ticker: 'EURUSD=X' },
+  'EWA': { source: 'yahoo', ticker: 'EWA' },
+  'EWC': { source: 'yahoo', ticker: 'EWC' },
+  'EWG': { source: 'yahoo', ticker: 'EWG' },
+  'EWH': { source: 'yahoo', ticker: 'EWH' },
+  'EWJ': { source: 'yahoo', ticker: 'EWJ' },
+  'EWQ': { source: 'yahoo', ticker: 'EWQ' },
+  'EWS': { source: 'yahoo', ticker: 'EWS' },
+  'EWU': { source: 'yahoo', ticker: 'EWU' },
+  'EWW': { source: 'yahoo', ticker: 'EWW' },
+  'EWY': { source: 'yahoo', ticker: 'EWY' },
+  'EWZ': { source: 'yahoo', ticker: 'EWZ' },
+  'EZA': { source: 'yahoo', ticker: 'EZA' },
+  'FXB': { source: 'yahoo', ticker: 'FXB' },
+  'FXE': { source: 'yahoo', ticker: 'FXE' },
+  'FXF': { source: 'yahoo', ticker: 'FXF' },
+  'FXI': { source: 'yahoo', ticker: 'FXI' },
+  'FXY': { source: 'yahoo', ticker: 'FXY' },
+  'GBP/USD': { source: 'yahoo', ticker: 'GBPUSD=X' },
+  'GDX': { source: 'yahoo', ticker: 'GDX' },
+  'GLD': { source: 'yahoo', ticker: 'GLD' },
+  'GOLD': { source: 'yahoo', ticker: 'GC=F' },
+  'GOOGL': { source: 'yahoo', ticker: 'GOOGL' },
+  'HEFA': { source: 'yahoo', ticker: 'HEFA' },
+  'HYG': { source: 'yahoo', ticker: 'HYG' },
+  'IBIT': { source: 'yahoo', ticker: 'IBIT' },
+  'IEF': { source: 'yahoo', ticker: 'IEF' },
+  'IGOV': { source: 'yahoo', ticker: 'IGOV' },
+  'ILF': { source: 'yahoo', ticker: 'ILF' },
+  'INDA': { source: 'yahoo', ticker: 'INDA' },
+  'ITA': { source: 'yahoo', ticker: 'ITA' },
+  'ITB': { source: 'yahoo', ticker: 'ITB' },
+  'IWM': { source: 'yahoo', ticker: 'IWM' },
+  'LQD': { source: 'yahoo', ticker: 'LQD' },
+  'MARA': { source: 'yahoo', ticker: 'MARA' },
+  'MBB': { source: 'yahoo', ticker: 'MBB' },
+  'META': { source: 'yahoo', ticker: 'META' },
+  'MLPX': { source: 'yahoo', ticker: 'MLPX' },
+  'MSFT': { source: 'yahoo', ticker: 'MSFT' },
+  'MSTR': { source: 'yahoo', ticker: 'MSTR' },
+  'MTUM': { source: 'yahoo', ticker: 'MTUM' },
+  'NATGAS': { source: 'yahoo', ticker: 'NG=F' },
+  'NFLX': { source: 'yahoo', ticker: 'NFLX' },
+  'NIKK': { source: 'yahoo', ticker: '^N225' },
+  'NVDA': { source: 'yahoo', ticker: 'NVDA' },
+  'ORCL': { source: 'yahoo', ticker: 'ORCL' },
+  'PDBC': { source: 'yahoo', ticker: 'PDBC' },
+  'PFF': { source: 'yahoo', ticker: 'PFF' },
+  'QQQ': { source: 'yahoo', ticker: 'QQQ' },
+  'RIOT': { source: 'yahoo', ticker: 'RIOT' },
+  'RSP': { source: 'yahoo', ticker: 'RSP' },
+  'RUT': { source: 'yahoo', ticker: '^RUT' },
+  'SHY': { source: 'yahoo', ticker: 'SHY' },
+  'SILVER': { source: 'yahoo', ticker: 'SI=F' },
+  'SLV': { source: 'yahoo', ticker: 'SLV' },
+  'SMH': { source: 'yahoo', ticker: 'SMH' },
+  'SOL': { source: 'yahoo', ticker: 'SOL-USD' },
+  'SPX': { source: 'yahoo', ticker: '^GSPC' },
+  'SPY': { source: 'yahoo', ticker: 'SPY' },
+  'SSEC': { source: 'yahoo', ticker: '000001.SS' },
+  'TIP': { source: 'yahoo', ticker: 'TIP' },
+  'TLT': { source: 'yahoo', ticker: 'TLT' },
+  'TSLA': { source: 'yahoo', ticker: 'TSLA' },
+  'URA': { source: 'yahoo', ticker: 'URA' },
+  'USD': { source: 'yahoo', ticker: 'DX-Y.NYB' },
+  'USD/YEN': { source: 'yahoo', ticker: 'JPY=X' },
+  'USMV': { source: 'yahoo', ticker: 'USMV' },
+  'UST10Y': { source: 'fred', ticker: 'DGS10' },
+  'UST2Y': { source: 'fred', ticker: 'DGS2' },
+  'UST30Y': { source: 'fred', ticker: 'DGS30' },
+  'UUP': { source: 'yahoo', ticker: 'UUP' },
+  'VGK': { source: 'yahoo', ticker: 'VGK' },
+  'VIX': { source: 'yahoo', ticker: '^VIX' },
+  'VT': { source: 'yahoo', ticker: 'VT' },
+  'VYMI': { source: 'yahoo', ticker: 'VYMI' },
+  'WTIC': { source: 'yahoo', ticker: 'CL=F' },
+  'XLB': { source: 'yahoo', ticker: 'XLB' },
+  'XLC': { source: 'yahoo', ticker: 'XLC' },
+  'XLE': { source: 'yahoo', ticker: 'XLE' },
+  'XLF': { source: 'yahoo', ticker: 'XLF' },
+  'XLI': { source: 'yahoo', ticker: 'XLI' },
+  'XLK': { source: 'yahoo', ticker: 'XLK' },
+  'XLP': { source: 'yahoo', ticker: 'XLP' },
+  'XLRE': { source: 'yahoo', ticker: 'XLRE' },
+  'XLU': { source: 'yahoo', ticker: 'XLU' },
+  'XLV': { source: 'yahoo', ticker: 'XLV' },
+  'XLY': { source: 'yahoo', ticker: 'XLY' },
+  'XME': { source: 'yahoo', ticker: 'XME' },
+  'XOP': { source: 'yahoo', ticker: 'XOP' },
+  'XRP': { source: 'yahoo', ticker: 'XRP-USD' }
 };
 
-const generateMockData = () => ({ ...FIXED_QUOTES });
+// In-memory cache for quotes (5-10 second TTL)
+const quotesCache = new Map();
+const CACHE_TTL = parseInt(process.env.QUOTES_CACHE_TTL || '8000'); // 8 seconds default
+
+// Helper to get ticker mapping
+function getTickerMapping(symbol) {
+  return TICKER_MAPPING[symbol.toUpperCase()] || { source: 'yahoo', ticker: symbol.toUpperCase() };
+}
+
+// Fetch from Yahoo Finance
+async function fetchYahooQuote(yahooTicker) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}`;
+    const params = {
+      range: '1d',
+      interval: '1d',
+      includePrePost: 'false'
+    };
+    
+    console.log(`[Yahoo Finance] Fetching quote for: ${yahooTicker}`);
+    
+    const response = await axios.get(url, {
+      params,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      timeout: 10000
+    });
+    
+    const data = response.data;
+    
+    // Check for errors in Yahoo Finance response
+    if (data.chart && data.chart.error) {
+      console.warn(`[Yahoo Finance] API error for ${yahooTicker}:`, data.chart.error);
+      return null;
+    }
+    
+    if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
+      console.warn(`[Yahoo Finance] Invalid response structure for ${yahooTicker}`);
+      console.warn(`[Yahoo Finance] Response keys:`, Object.keys(data));
+      if (data.chart) {
+        console.warn(`[Yahoo Finance] Chart keys:`, Object.keys(data.chart));
+      }
+      return null;
+    }
+    
+    const result = data.chart.result[0];
+    
+    // Check if result has errors
+    if (result.error) {
+      console.warn(`[Yahoo Finance] Result error for ${yahooTicker}:`, result.error);
+      return null;
+    }
+    const meta = result.meta || {};
+    
+    // Log available price fields for debugging
+    const availablePriceFields = Object.keys(meta).filter(key => 
+      key.toLowerCase().includes('price') || 
+      key.toLowerCase().includes('close') ||
+      key.toLowerCase().includes('previous')
+    );
+    console.log(`[Yahoo Finance] ${yahooTicker} - Available price fields:`, availablePriceFields);
+    
+    // Try multiple price fields in order of preference
+    let currentPrice = null;
+    let previousClose = null;
+    
+    // Try regularMarketPrice first (most common)
+    if (meta.regularMarketPrice !== undefined && meta.regularMarketPrice !== null) {
+      currentPrice = meta.regularMarketPrice;
+      previousClose = meta.previousClose || meta.chartPreviousClose || meta.previousClose || currentPrice;
+    }
+    // Try chartPreviousClose (for indices and some ETFs)
+    else if (meta.chartPreviousClose !== undefined && meta.chartPreviousClose !== null) {
+      currentPrice = meta.chartPreviousClose;
+      previousClose = meta.previousClose || currentPrice;
+    }
+    // Try previousClose (fallback)
+    else if (meta.previousClose !== undefined && meta.previousClose !== null) {
+      currentPrice = meta.previousClose;
+      previousClose = currentPrice;
+    }
+    // Try regularMarketPreviousClose
+    else if (meta.regularMarketPreviousClose !== undefined && meta.regularMarketPreviousClose !== null) {
+      currentPrice = meta.regularMarketPreviousClose;
+      previousClose = currentPrice;
+    }
+    // Try to get from indicators.quote if available
+    else if (result.indicators && result.indicators.quote && result.indicators.quote[0]) {
+      const quote = result.indicators.quote[0];
+      const closeValues = quote.close || [];
+      if (closeValues.length > 0) {
+        currentPrice = closeValues[closeValues.length - 1];
+        previousClose = closeValues.length > 1 ? closeValues[closeValues.length - 2] : currentPrice;
+      }
+    }
+    
+    if (currentPrice !== null && currentPrice !== undefined) {
+      // Ensure previousClose is set
+      if (!previousClose) {
+        previousClose = currentPrice;
+      }
+      
+      const change = currentPrice - previousClose;
+      const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+      
+      console.log(`[Yahoo Finance] Successfully fetched ${yahooTicker}: price=${currentPrice}, change=${change}, source=${availablePriceFields.join(',')}`);
+      
+      return {
+        price: currentPrice.toFixed(2),
+        change: change.toFixed(2),
+        changePercent: changePercent.toFixed(2),
+        timestamp: new Date().toISOString()
+      };
+    } else {
+      console.warn(`[Yahoo Finance] No price found in response for ${yahooTicker}`);
+      console.warn(`[Yahoo Finance] Meta keys:`, Object.keys(meta));
+      console.warn(`[Yahoo Finance] Sample meta data:`, JSON.stringify({
+        regularMarketPrice: meta.regularMarketPrice,
+        chartPreviousClose: meta.chartPreviousClose,
+        previousClose: meta.previousClose,
+        regularMarketPreviousClose: meta.regularMarketPreviousClose
+      }, null, 2));
+      return null;
+    }
+  } catch (error) {
+    console.error(`[Yahoo Finance] Error fetching quote for ${yahooTicker}:`, error.message);
+    if (error.response) {
+      console.error(`[Yahoo Finance] Response status: ${error.response.status}`);
+      console.error(`[Yahoo Finance] Response data:`, error.response.data);
+    }
+    return null;
+  }
+}
+
+// Fetch from FRED API
+async function fetchFredQuote(seriesId) {
+  try {
+    const url = 'https://api.stlouisfed.org/fred/series/observations';
+    const params = {
+      series_id: seriesId,
+      file_type: 'json',
+      limit: '2', // Get 2 observations to calculate change
+      sort_order: 'desc'
+    };
+    
+    console.log(`[FRED] Fetching quote for: ${seriesId}`);
+    
+    const response = await axios.get(url, {
+      params,
+      timeout: 10000
+    });
+    
+    const data = response.data;
+    
+    if (data.observations && data.observations.length > 0) {
+      const obs = data.observations[0];
+      if (obs.value && obs.value !== '.') {
+        const price = parseFloat(obs.value);
+        // For yields, we need previous value to calculate change
+        const previousObs = data.observations[1];
+        const previousPrice = previousObs && previousObs.value !== '.' ? parseFloat(previousObs.value) : price;
+        const change = price - previousPrice;
+        const changePercent = previousPrice > 0 ? (change / previousPrice) * 100 : 0;
+        
+        console.log(`[FRED] Successfully fetched ${seriesId}: price=${price}, change=${change}`);
+        
+        return {
+          price: price.toFixed(2),
+          change: change.toFixed(2),
+          changePercent: changePercent.toFixed(2),
+          timestamp: new Date().toISOString()
+        };
+      } else {
+        console.warn(`[FRED] Invalid value for ${seriesId}:`, obs.value);
+      }
+    } else {
+      console.warn(`[FRED] No observations returned for ${seriesId}`);
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[FRED] Error fetching quote for ${seriesId}:`, error.message);
+    if (error.response) {
+      console.error(`[FRED] Response status: ${error.response.status}`);
+      console.error(`[FRED] Response data:`, error.response.data);
+    }
+    return null;
+  }
+}
+
+// Fetch quote with caching
+async function getQuote(symbol) {
+  const now = Date.now();
+  const cacheKey = symbol.toUpperCase();
+  
+  // Check cache
+  const cached = quotesCache.get(cacheKey);
+  if (cached && (now - cached.timestamp) < CACHE_TTL) {
+    console.log(`[Cache] Hit for ${cacheKey}`);
+    return cached.data;
+  }
+  
+  console.log(`[Cache] Miss for ${cacheKey}, fetching...`);
+  
+  // Fetch new data
+  const mapping = getTickerMapping(symbol);
+  let quoteData = null;
+  
+  try {
+    if (mapping.source === 'fred') {
+      quoteData = await fetchFredQuote(mapping.ticker);
+    } else {
+      quoteData = await fetchYahooQuote(mapping.ticker);
+    }
+    
+    if (quoteData && quoteData.price) {
+      const quoteResult = { symbol: symbol.toUpperCase(), ...quoteData };
+      // Store in cache
+      quotesCache.set(cacheKey, {
+        data: quoteResult,
+        timestamp: now
+      });
+      console.log(`[Cache] Stored quote for ${cacheKey}: price=${quoteData.price}`);
+      return quoteResult;
+    } else {
+      console.warn(`[Quote] No valid price data returned for ${symbol} (${mapping.ticker})`);
+      if (quoteData) {
+        console.warn(`[Quote] Quote data structure:`, Object.keys(quoteData));
+      }
+    }
+  } catch (error) {
+    console.error(`[Quote] Error fetching quote for ${symbol}:`, error.message);
+    if (error.stack) {
+      console.error(`[Quote] Stack trace:`, error.stack.split('\n').slice(0, 3).join('\n'));
+    }
+  }
+  
+  // Return cached data even if expired, or null
+  if (cached && cached.data && cached.data.price) {
+    console.log(`[Cache] Returning expired cache for ${cacheKey}`);
+    return cached.data;
+  }
+  
+  return null;
+}
 
 // Mock portfolio data
 const generatePortfolioData = () => {
@@ -167,19 +516,200 @@ const fetchVIXData = async () => {
   }
 };
 
-// API Routes
-app.get('/api/quotes', (req, res) => {
-  const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ', 'AAPL'];
-  const data = generateMockData();
-  const filteredData = {};
-  
-  symbols.forEach(symbol => {
-    if (data[symbol]) {
-      filteredData[symbol] = data[symbol];
+// Helper to batch process with delays (rate limiting)
+async function batchProcess(items, batchSize, delayMs, processor) {
+  const results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    console.log(`[API] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(items.length / batchSize)} (${batch.length} symbols)`);
+    
+    // Process batch with small delay between each item to avoid rate limiting
+    const batchResults = [];
+    for (const item of batch) {
+      const result = await processor(item);
+      batchResults.push(result);
+      // Small delay between requests (100ms to avoid rate limiting)
+      if (batch.indexOf(item) < batch.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
-  });
-  
-  res.json(filteredData);
+    results.push(...batchResults);
+    
+    // Add delay between batches to avoid rate limiting (except for last batch)
+    if (i + batchSize < items.length) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  return results;
+}
+
+// API Routes
+app.get('/api/quotes', async (req, res) => {
+  try {
+    const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ', 'AAPL'];
+    console.log(`[API] /api/quotes called with ${symbols.length} symbols:`, symbols.slice(0, 5), '...');
+    
+    const quotes = {};
+    
+    // Process in batches to avoid rate limiting
+    // Yahoo Finance can be sensitive to rate limiting, so we'll do smaller batches with longer delays
+    const BATCH_SIZE = 5; // Reduced from 10 to avoid rate limiting
+    const DELAY_MS = 200; // Increased from 100ms to 200ms between batches
+    
+    const results = await batchProcess(
+      symbols.map(s => s.trim()),
+      BATCH_SIZE,
+      DELAY_MS,
+      async (symbol) => {
+        try {
+          return await getQuote(symbol);
+        } catch (error) {
+          console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
+          return null;
+        }
+      }
+    );
+    
+    // Map results back to symbols
+    let successCount = 0;
+    let failCount = 0;
+    symbols.forEach((symbol, index) => {
+      const quote = results[index];
+      if (quote && quote.price) {
+        quotes[symbol.trim().toUpperCase()] = quote;
+        successCount++;
+      } else {
+        failCount++;
+        if (failCount <= 10) { // Log first 10 failures
+          console.warn(`[API] No quote data for ${symbol}`);
+        }
+      }
+    });
+    
+    console.log(`[API] Returning ${successCount} quotes out of ${symbols.length} requested (${failCount} failed)`);
+    res.json(quotes);
+  } catch (error) {
+    console.error('[API] Error in /api/quotes:', error);
+    console.error('[API] Error stack:', error.stack);
+    res.status(500).json({ error: 'Failed to fetch quotes', details: error.message });
+  }
+});
+
+// Signal Strength Rankings Endpoint
+app.get('/api/securities/signal-strength', async (req, res) => {
+  try {
+    // For now, we'll fetch from DynamoDB MarketPriceHistory table
+    // Get all unique symbols from the table
+    const scanParams = {
+      TableName: 'MarketPriceHistory',
+      ProjectionExpression: 'symbol'
+    };
+    
+    const scanResult = await dynamodb.scan(scanParams).promise();
+    const uniqueSymbols = [...new Set(scanResult.Items.map(item => item.symbol))];
+    
+    // If no data in DynamoDB, return empty array (frontend will use fallback)
+    if (uniqueSymbols.length === 0) {
+      return res.json([]);
+    }
+    
+    // Fetch latest market data from DynamoDB for all securities
+    const today = new Date().toISOString().split('T')[0];
+    const securitiesData = [];
+    
+    // For each symbol, get latest market data
+    for (const symbol of uniqueSymbols) {
+      try {
+        // Get latest price data from DynamoDB
+        const params = {
+          TableName: 'MarketPriceHistory',
+          KeyConditionExpression: 'symbol = :symbol',
+          ExpressionAttributeValues: {
+            ':symbol': symbol
+          },
+          ScanIndexForward: false,
+          Limit: 1
+        };
+        
+        const result = await dynamodb.query(params).promise();
+        
+        let marketData = {
+          ticker: symbol,
+          name: symbol,
+          assetClass: 'equity', // Default, can be enhanced
+          price: null,
+          trendLevel: null,
+          tailLevel: null,
+          trendStatus: null,
+          tailStatus: null,
+          buyTrade: null,
+          sellTrade: null,
+          upside: null,
+          downside: null,
+          trendSignal: 'NEUTRAL'
+        };
+        
+        if (result.Items && result.Items.length > 0) {
+          const latest = result.Items[0];
+          marketData.price = latest.close;
+          marketData.closingPrice = latest.close;
+        }
+        
+        securitiesData.push(marketData);
+      } catch (error) {
+        console.error(`Error fetching data for ${symbol}:`, error);
+      }
+    }
+    
+    // Calculate signal strength for each security
+    // Simple calculation based on bias for now (can be enhanced with real data)
+    const rankedSecurities = securitiesData.map(security => {
+      let score = 0;
+      
+      // Base score from trend signal
+      if (security.trendSignal === 'BULLISH') score += 50;
+      else if (security.trendSignal === 'BEARISH') score -= 50;
+      
+      // If we have price vs trend level data, add momentum
+      if (security.trendStatus === 'Above') score += 20;
+      else if (security.trendStatus === 'Below') score -= 20;
+      
+      // If we have tail level data, add support/resistance
+      if (security.tailStatus === 'Above') score += 10;
+      else if (security.tailStatus === 'Below') score -= 10;
+      
+      // Risk/reward from upside/downside
+      if (security.upside && security.downside) {
+        const riskReward = security.upside - Math.abs(security.downside);
+        score += Math.max(-20, Math.min(20, riskReward * 0.8));
+      }
+      
+      score = Math.max(-100, Math.min(100, Math.round(score)));
+      
+      // Determine level and color
+      let level = 'Neutral';
+      let color = 'gray';
+      if (score >= 70) { level = 'Very Strong'; color = 'emerald'; }
+      else if (score >= 40) { level = 'Strong'; color = 'emerald'; }
+      else if (score >= 10) { level = 'Moderate'; color = 'lime'; }
+      else if (score >= -10) { level = 'Neutral'; color = 'gray'; }
+      else if (score >= -40) { level = 'Weak'; color = 'amber'; }
+      else if (score >= -70) { level = 'Very Weak'; color = 'red'; }
+      else { level = 'Extremely Weak'; color = 'red'; }
+      
+      return {
+        ...security,
+        signalStrength: score,
+        signalLevel: level,
+        signalColor: color
+      };
+    }).sort((a, b) => b.signalStrength - a.signalStrength);
+    
+    res.json(rankedSecurities);
+  } catch (error) {
+    console.error('Error fetching signal strength rankings:', error);
+    res.status(500).json({ error: 'Failed to fetch signal strength rankings' });
+  }
 });
 
 // Get real portfolio data from DynamoDB

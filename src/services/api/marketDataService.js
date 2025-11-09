@@ -7,7 +7,7 @@ import { PortfolioAnalytics } from '../portfolioAnalytics';
 const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 const apiClient = axios.create({
   baseURL: backendUrl,
-  timeout: 10000,
+  timeout: 60000, // 60 seconds - increased for large quote requests (111 symbols)
   headers: {
     'Content-Type': 'application/json',
   },
@@ -229,6 +229,45 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching Finnhub data:', error);
+      throw error;
+    }
+  }
+
+  // Get all securities data (for signal strength calculation)
+  static async getAllSecuritiesData() {
+    try {
+      // Get all tickers from securities list
+      const { getAllTickers } = await import('../../constants/securitiesConfig');
+      const tickers = getAllTickers();
+      
+      // Fetch quotes for all securities in batches
+      const batchSize = 50; // Yahoo Finance can handle multiple symbols
+      const allData = {};
+      
+      for (let i = 0; i < tickers.length; i += batchSize) {
+        const batch = tickers.slice(i, i + batchSize);
+        try {
+          const quotes = await this.getQuotes(batch);
+          Object.assign(allData, quotes);
+        } catch (error) {
+          console.error(`Error fetching batch ${i}-${i + batchSize}:`, error);
+        }
+      }
+      
+      return allData;
+    } catch (error) {
+      console.error('Error fetching all securities data:', error);
+      throw error;
+    }
+  }
+
+  // Get signal strength rankings
+  static async getSignalStrengthRankings() {
+    try {
+      const response = await apiClient.get('/api/securities/signal-strength');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching signal strength rankings:', error);
       throw error;
     }
   }

@@ -1,129 +1,256 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Grid } from '@tremor/react';
+import React from 'react';
+import { Title } from '@tremor/react';
 import VolatilityPanel from './VolatilityPanel';
 import VolumePanel from './VolumePanel';
 
-const MIN_HEIGHT = 60; // Minimum visible height (collapsed state)
-const MAX_HEIGHT = 400; // Maximum panel height
-const DEFAULT_HEIGHT = 200; // Default height when first loaded
+const COLLAPSED_HEIGHT = 40; // Height when collapsed (shows label only) - reduced by 33%
+const EXPANDED_HEIGHT = 500; // Height when expanded (25% taller than 400px)
 
-const ResizableBottomPanels = () => {
-  const [panelHeight, setPanelHeight] = useState(() => {
-    // Load from localStorage if available
-    const saved = localStorage.getItem('bottomPanelHeight');
-    return saved ? parseInt(saved, 10) : DEFAULT_HEIGHT;
-  });
-  const [isDragging, setIsDragging] = useState(false);
-  const [startY, setStartY] = useState(0);
-  const [startHeight, setStartHeight] = useState(0);
-  const rafIdRef = useRef(null);
-  const containerRef = useRef(null);
-
-  // Save height to localStorage when it changes
-  useEffect(() => {
-    localStorage.setItem('bottomPanelHeight', panelHeight.toString());
-  }, [panelHeight]);
-
-  // Handle mouse down on drag handle
-  const handleMouseDown = (e) => {
-    e.preventDefault();
-    setIsDragging(true);
-    setStartY(e.clientY);
-    setStartHeight(panelHeight);
-    
-    // Change cursor
-    document.body.style.cursor = 'ns-resize';
-    document.body.style.userSelect = 'none';
-  };
-
-  // Handle mouse move during drag (rAF throttled, direct style updates)
-  useEffect(() => {
-    if (!isDragging) return;
-
-    let lastY = startY;
-    const handleMouseMove = (e) => {
-      lastY = e.clientY;
-      if (rafIdRef.current) return;
-      rafIdRef.current = requestAnimationFrame(() => {
-        rafIdRef.current = null;
-        const deltaY = startY - lastY;
-        let newHeight = startHeight + deltaY;
-        newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, newHeight));
-        if (containerRef.current) {
-          containerRef.current.style.height = `${newHeight}px`;
-          containerRef.current.style.willChange = 'height';
-        }
-      });
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      if (containerRef.current) {
-        const h = parseInt(containerRef.current.style.height, 10);
-        if (!Number.isNaN(h)) {
-          const clamped = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, h));
-          setPanelHeight(clamped);
-        }
-        containerRef.current.style.willChange = '';
-      }
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, startY, startHeight]);
-
-  const isCollapsed = panelHeight <= MIN_HEIGHT;
+const ResizableBottomPanels = ({ 
+  volatilityExpanded, 
+  securitiesExpanded, 
+  onVolatilityToggle, 
+  onSecuritiesToggle,
+  securitiesFullWidth,
+  onSecuritiesFullWidthToggle
+}) => {
+  const volatilityHeight = volatilityExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
+  const securitiesHeight = securitiesExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
 
   return (
-    <div 
-      ref={containerRef}
-      className="fixed bottom-0 left-0 right-0 z-50 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700 transition-[background-color,border-color] duration-200"
-      style={{ 
-        height: `${panelHeight}px`,
-        display: 'flex',
-        flexDirection: 'column'
-      }}
-    >
-      {/* Drag Handle */}
-      <div
-        className="w-full h-4 cursor-ns-resize flex items-center justify-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors border-b dark:border-gray-600"
-        onMouseDown={handleMouseDown}
-        title="Drag to resize panels"
-      >
-        <div className="w-12 h-1 bg-gray-400 dark:bg-gray-500 rounded-full"></div>
-      </div>
-
-      {/* Panels Container */}
-      <div className="flex-1 p-2" style={{ overflow: 'visible' }}>
-        {!isCollapsed ? (
-          <Grid numItems={2} className="gap-2 h-full">
-            <div style={{ overflow: 'visible', minHeight: 0 }}>
-              <VolatilityPanel />
-            </div>
-            <div style={{ overflow: 'visible', minHeight: 0 }}>
-              <VolumePanel />
-            </div>
-          </Grid>
-        ) : (
-          <div className="h-full flex items-center justify-center text-xs text-gray-500 dark:text-gray-400">
-            Drag up to expand panels
+    <>
+      {/* Volatility Panel - Left Side - Only show when Securities is not in full-width mode */}
+      {!securitiesFullWidth && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            width: '50%',
+            height: `${volatilityHeight}px`,
+            zIndex: 1000,
+            backgroundColor: '#f9fafb', // Solid opaque background
+            borderTop: '1px solid #e5e7eb',
+            borderRight: '1px solid #e5e7eb',
+            boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.1)',
+            transition: 'height 0.3s ease-in-out',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+          className="dark:bg-gray-900 dark:border-gray-700"
+        >
+        {/* Collapsed State - Label Only */}
+        {!volatilityExpanded && (
+          <div
+            style={{
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              padding: '0 16px',
+            }}
+            onClick={() => onVolatilityToggle(true)}
+          >
+            <Title
+              style={{
+                fontSize: '18px',
+                fontWeight: 700,
+                color: '#374151',
+                margin: 0,
+                userSelect: 'none',
+              }}
+              className="dark:text-gray-300"
+            >
+              Volatility
+            </Title>
           </div>
         )}
+
+        {/* Expanded State - Full Content */}
+        {volatilityExpanded && (
+          <>
+            {/* Header with Centered Title (Clickable to Collapse) */}
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => onVolatilityToggle(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Volatility
+              </Title>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '8px',
+              }}
+            >
+              <VolatilityPanel />
+            </div>
+          </>
+        )}
+        </div>
+      )}
+
+      {/* Securities Panel - Right Side */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          right: 0,
+          width: securitiesFullWidth ? '100%' : '50%',
+          left: securitiesFullWidth ? 0 : 'auto',
+          height: `${securitiesHeight}px`,
+          zIndex: 1000,
+          backgroundColor: '#f9fafb', // Solid opaque background
+          borderTop: '1px solid #e5e7eb',
+          borderLeft: securitiesFullWidth ? 'none' : '1px solid #e5e7eb',
+          borderRight: securitiesFullWidth ? '1px solid #e5e7eb' : 'none',
+          boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.1)',
+          transition: 'height 0.3s ease-in-out',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {/* Collapsed State - Label Only */}
+        {!securitiesExpanded && (
+          <div
+            style={{
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 16px',
+              gap: '8px',
+            }}
+          >
+            {/* Securities Text - Clickable for Normal 50% Expansion */}
+            <div
+              style={{
+                cursor: 'pointer',
+              }}
+              onClick={() => onSecuritiesToggle(true)}
+            >
+              <Title
+                style={{
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+                className="dark:text-gray-300"
+              >
+                Securities
+              </Title>
+            </div>
+            {/* Triangle Icon - Clickable for Full-Width Expansion */}
+            <div
+              style={{
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginTop: '-2px', // Slightly elevate relative to text baseline
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSecuritiesFullWidthToggle(true);
+              }}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M6 2L10 10H2L6 2Z"
+                  fill="#6b7280"
+                  className="dark:fill-gray-400"
+                />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        {/* Expanded State - Full Content */}
+        {securitiesExpanded && (
+          <>
+            {/* Header with Centered Title (Clickable to Collapse) */}
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => {
+                if (securitiesFullWidth) {
+                  // When full-width, collapse completely
+                  onSecuritiesFullWidthToggle(false);
+                  onSecuritiesToggle(false);
+                } else {
+                  // Normal collapse
+                  onSecuritiesToggle(false);
+                }
+              }}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Securities
+              </Title>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '8px',
+              }}
+            >
+              <VolumePanel />
+            </div>
+          </>
+        )}
       </div>
-    </div>
+    </>
   );
 };
 
 export default ResizableBottomPanels;
-

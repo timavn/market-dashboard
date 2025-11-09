@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Text, Flex, Grid, Badge } from '@tremor/react';
+import { Card, Text, Flex, Badge } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
@@ -191,37 +191,42 @@ const VolumePanel = () => {
   return (
     <Card className="p-2 dark:bg-gray-800">
       {/* Top Controls Row */}
-      <Grid numItems={4} className="gap-2 mb-4">
-        {/* Asset Class Selector (popover) */}
-        <PopoverSelect
-          value={selectedAssetClass}
-          options={assetClassOptions.map(a => ({ value: a, label: ASSET_CLASS_NAMES[a] }))}
-          onChange={setSelectedAssetClass}
-        />
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center gap-2">
+          {/* Asset Class Selector (popover) */}
+          <PopoverSelect
+            value={selectedAssetClass}
+            options={assetClassOptions.map(a => ({ value: a, label: ASSET_CLASS_NAMES[a] }))}
+            onChange={setSelectedAssetClass}
+          />
 
-        {/* Ticker Selector (popover) */}
-        <PopoverSelect
-          value={selectedTicker}
-          options={availableTickers.map(t => ({ value: t.ticker, label: t.ticker }))}
-          onChange={setSelectedTicker}
-        />
+          {/* Ticker Selector (popover) */}
+          <PopoverSelect
+            value={selectedTicker}
+            options={availableTickers.map(t => ({ value: t.ticker, label: t.name }))}
+            onChange={setSelectedTicker}
+          />
 
-        {/* Product Name Input */}
-        <input
-          type="text"
-          value={productName}
-          placeholder="Product Name"
-          readOnly
-          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-none bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0"
-        />
-
-        {/* Date Range Selector (popover) */}
-        <PopoverSelect
-          value={selectedDateRange}
-          options={dateRangeOptions}
-          onChange={setSelectedDateRange}
-        />
-      </Grid>
+          {/* Product Name Input */}
+          <input
+            type="text"
+            value={productName}
+            placeholder="Product Name"
+            readOnly
+            className="px-3 py-2 text-sm border border-gray-300 rounded-none bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0"
+            style={{ width: '200px' }}
+          />
+        </div>
+        {/* Date Range Selector (popover) moved to right side (top-right) */}
+        <div>
+          <PopoverSelect
+            value={selectedDateRange}
+            options={dateRangeOptions}
+            onChange={setSelectedDateRange}
+            buttonClassName="w-20 justify-center"
+          />
+        </div>
+      </div>
 
       {/* Small Legend Above Chart */}
       <div className="flex items-center gap-3 mb-1 text-xs">

@@ -12,73 +12,119 @@ dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table('MarketPriceHistory')
 
 # Market data symbols and their data sources
+# Expanded to include all 111 securities from securities universe
 MARKET_SYMBOLS = {
-    'DXY': {
-        'source': 'fred',
-        'ticker': 'DTWEXBGS',  # FRED series ID for DXY
-        'name': 'Dollar Index'
-    },
-    'SPX': {
-        'source': 'yahoo',
-        'ticker': '^GSPC',
-        'name': 'S&P 500'
-    },
-    'GOLD': {
-        'source': 'yahoo',
-        'ticker': 'GC=F',
-        'name': 'Gold Futures'
-    },
-    'BRENT': {
-        'source': 'yahoo',
-        'ticker': 'BZ=F',
-        'name': 'Brent Oil Futures'
-    },
-    'CRB': {
-        'source': 'yahoo',
-        'ticker': '^CRB',
-        'name': 'CRB Index'
-    },
-    'BTC': {
-        'source': 'yahoo',
-        'ticker': 'BTC-USD',
-        'name': 'Bitcoin'
-    },
-    # Currency pairs
-    'USDEUR': {
-        'source': 'yahoo',
-        'ticker': 'USDEUR=X',
-        'name': 'USD/EUR'
-    },
-    'USDJPY': {
-        'source': 'yahoo',
-        'ticker': 'USDJPY=X',
-        'name': 'USD/JPY'
-    },
-    'USDGBP': {
-        'source': 'yahoo',
-        'ticker': 'USDGBP=X',
-        'name': 'USD/GBP'
-    },
-    'USDCHF': {
-        'source': 'yahoo',
-        'ticker': 'USDCHF=X',
-        'name': 'USD/CHF'
-    },
-    'USDCAD': {
-        'source': 'yahoo',
-        'ticker': 'USDCAD=X',
-        'name': 'USD/CAD'
-    },
-    'USDAUD': {
-        'source': 'yahoo',
-        'ticker': 'USDAUD=X',
-        'name': 'USD/AUD'
-    },
-    'USDNZD': {
-        'source': 'yahoo',
-        'ticker': 'USDNZD=X',
-        'name': 'USD/NZD'
-    }
+    'AAPL': {'source': 'yahoo', 'ticker': 'AAPL', 'name': 'Apple Inc.'},
+    'AMZN': {'source': 'yahoo', 'ticker': 'AMZN', 'name': 'Amazon Inc.'},
+    'AVAX': {'source': 'yahoo', 'ticker': 'AVAX-USD', 'name': 'Avalanche'},
+    'BITCOIN': {'source': 'yahoo', 'ticker': 'BTC-USD', 'name': 'Bitcoin Spot Price'},
+    'BKLN': {'source': 'yahoo', 'ticker': 'BKLN', 'name': 'Corporate Senior Loans (BKLN)'},
+    'BLOK': {'source': 'yahoo', 'ticker': 'BLOK', 'name': 'Amplify Transformational Data Sharing ETF'},
+    'BMNR': {'source': 'yahoo', 'ticker': 'BMNR', 'name': 'BMNR'},
+    'BNDX': {'source': 'yahoo', 'ticker': 'BNDX', 'name': 'International Bonds ex-U.S. (BNDX)'},
+    'BRENT': {'source': 'yahoo', 'ticker': 'BZ=F', 'name': 'Brent Crude Oil Continuous Contract'},
+    'BTC': {'source': 'yahoo', 'ticker': 'BTC-USD', 'name': 'Bitcoin'},
+    'CAD/USD': {'source': 'yahoo', 'ticker': 'CADUSD=X', 'name': 'Canadian Dollar to U.S. Dollar'},
+    'COIN': {'source': 'yahoo', 'ticker': 'COIN', 'name': 'Coinbase Global Inc.'},
+    'COMPQ': {'source': 'yahoo', 'ticker': '^IXIC', 'name': 'NASDAQ Composite'},
+    'COPPER': {'source': 'yahoo', 'ticker': 'HG=F', 'name': 'Copper Continuous Contract'},
+    'CRCL': {'source': 'yahoo', 'ticker': 'CRCL', 'name': 'Crypto Currency Corp.'},
+    'CWB': {'source': 'yahoo', 'ticker': 'CWB', 'name': 'U.S. Convertible Liquid Bond Securities (CWB)'},
+    'DAX': {'source': 'yahoo', 'ticker': '^GDAXI', 'name': 'German DAX Composite'},
+    'EMB': {'source': 'yahoo', 'ticker': 'EMB', 'name': 'Emerging Markets USD Bonds (EMB)'},
+    'EMXC': {'source': 'yahoo', 'ticker': 'EMXC', 'name': 'Emerging Markets ex-China (EMXC)'},
+    'ETH': {'source': 'yahoo', 'ticker': 'ETH-USD', 'name': 'Ethereum'},
+    'ETHA': {'source': 'yahoo', 'ticker': 'ETHA', 'name': 'Etherea Capital Corp.'},
+    'EUR/USD': {'source': 'yahoo', 'ticker': 'EURUSD=X', 'name': 'Euro to U.S. Dollar'},
+    'EWA': {'source': 'yahoo', 'ticker': 'EWA', 'name': 'Australia (EWA)'},
+    'EWC': {'source': 'yahoo', 'ticker': 'EWC', 'name': 'Canada (EWC)'},
+    'EWG': {'source': 'yahoo', 'ticker': 'EWG', 'name': 'Germany (EWG)'},
+    'EWH': {'source': 'yahoo', 'ticker': 'EWH', 'name': 'Hong Kong (EWH)'},
+    'EWJ': {'source': 'yahoo', 'ticker': 'EWJ', 'name': 'Japan (EWJ)'},
+    'EWQ': {'source': 'yahoo', 'ticker': 'EWQ', 'name': 'France (EWQ)'},
+    'EWS': {'source': 'yahoo', 'ticker': 'EWS', 'name': 'Singapore (EWS)'},
+    'EWU': {'source': 'yahoo', 'ticker': 'EWU', 'name': 'United Kingdom (EWU)'},
+    'EWW': {'source': 'yahoo', 'ticker': 'EWW', 'name': 'Mexico (EWW)'},
+    'EWY': {'source': 'yahoo', 'ticker': 'EWY', 'name': 'South Korea (EWY)'},
+    'EWZ': {'source': 'yahoo', 'ticker': 'EWZ', 'name': 'Brazil (EWZ)'},
+    'EZA': {'source': 'yahoo', 'ticker': 'EZA', 'name': 'South Africa (EZA)'},
+    'FXB': {'source': 'yahoo', 'ticker': 'FXB', 'name': 'British Pound (FXB)'},
+    'FXE': {'source': 'yahoo', 'ticker': 'FXE', 'name': 'Euro (FXE)'},
+    'FXF': {'source': 'yahoo', 'ticker': 'FXF', 'name': 'Swiss Franc (FXF)'},
+    'FXI': {'source': 'yahoo', 'ticker': 'FXI', 'name': 'China (FXI)'},
+    'FXY': {'source': 'yahoo', 'ticker': 'FXY', 'name': 'Japanese Yen (FXY)'},
+    'GBP/USD': {'source': 'yahoo', 'ticker': 'GBPUSD=X', 'name': 'British Pound to U.S. Dollar'},
+    'GDX': {'source': 'yahoo', 'ticker': 'GDX', 'name': 'Gold Miners (GDX)'},
+    'GLD': {'source': 'yahoo', 'ticker': 'GLD', 'name': 'Gold (GLD)'},
+    'GOLD': {'source': 'yahoo', 'ticker': 'GC=F', 'name': 'Gold Spot Price'},
+    'GOOGL': {'source': 'yahoo', 'ticker': 'GOOGL', 'name': 'Alphabet Inc.'},
+    'HEFA': {'source': 'yahoo', 'ticker': 'HEFA', 'name': 'Currency Hedged Equities ex. U.S. & Canada (HEFA)'},
+    'HYG': {'source': 'yahoo', 'ticker': 'HYG', 'name': 'High Yield Corporate Bonds (HYG)'},
+    'IBIT': {'source': 'yahoo', 'ticker': 'IBIT', 'name': 'iShares Bitcoin Trust'},
+    'IEF': {'source': 'yahoo', 'ticker': 'IEF', 'name': '7-10 Year U.S. Treasuries (IEF)'},
+    'IGOV': {'source': 'yahoo', 'ticker': 'IGOV', 'name': 'International Treasury Bonds ex-U.S. (IGOV)'},
+    'ILF': {'source': 'yahoo', 'ticker': 'ILF', 'name': 'Latin America Large-Cap Equities (ILF)'},
+    'INDA': {'source': 'yahoo', 'ticker': 'INDA', 'name': 'India (INDA)'},
+    'ITA': {'source': 'yahoo', 'ticker': 'ITA', 'name': 'U.S. Defense & Aerospace Sector (ITA)'},
+    'ITB': {'source': 'yahoo', 'ticker': 'ITB', 'name': 'U.S. Housing Sector (ITB)'},
+    'IWM': {'source': 'yahoo', 'ticker': 'IWM', 'name': 'Russell 2000 (IWM)'},
+    'LQD': {'source': 'yahoo', 'ticker': 'LQD', 'name': 'Investment Grade Corporate Bonds (LQD)'},
+    'MARA': {'source': 'yahoo', 'ticker': 'MARA', 'name': 'Marathon Digital Holdings'},
+    'MBB': {'source': 'yahoo', 'ticker': 'MBB', 'name': 'U.S. Mortgage-Backed Bonds (MBB)'},
+    'META': {'source': 'yahoo', 'ticker': 'META', 'name': 'Meta Platforms Inc.'},
+    'MLPX': {'source': 'yahoo', 'ticker': 'MLPX', 'name': 'MLPs & Energy Infrastructure (MLPX)'},
+    'MSFT': {'source': 'yahoo', 'ticker': 'MSFT', 'name': 'Microsoft Corp.'},
+    'MSTR': {'source': 'yahoo', 'ticker': 'MSTR', 'name': 'MicroStrategy Inc.'},
+    'MTUM': {'source': 'yahoo', 'ticker': 'MTUM', 'name': 'U.S. Momentum (MTUM)'},
+    'NATGAS': {'source': 'yahoo', 'ticker': 'NG=F', 'name': 'Natural Gas Continuous Contract'},
+    'NFLX': {'source': 'yahoo', 'ticker': 'NFLX', 'name': 'Netflix Inc.'},
+    'NIKK': {'source': 'yahoo', 'ticker': '^N225', 'name': 'Nikkei 225 Index'},
+    'NVDA': {'source': 'yahoo', 'ticker': 'NVDA', 'name': 'NVIDIA Corporation'},
+    'ORCL': {'source': 'yahoo', 'ticker': 'ORCL', 'name': 'Oracle Corporation'},
+    'PDBC': {'source': 'yahoo', 'ticker': 'PDBC', 'name': 'GSCI Commodities Index (PDBC)'},
+    'PFF': {'source': 'yahoo', 'ticker': 'PFF', 'name': 'U.S. Preferred and Income Securities (PFF)'},
+    'QQQ': {'source': 'yahoo', 'ticker': 'QQQ', 'name': 'Nasdaq 100 (QQQ)'},
+    'RIOT': {'source': 'yahoo', 'ticker': 'RIOT', 'name': 'Riot Platforms Inc.'},
+    'RSP': {'source': 'yahoo', 'ticker': 'RSP', 'name': 'Equal Weight S&P 500 (RSP)'},
+    'RUT': {'source': 'yahoo', 'ticker': '^RUT', 'name': 'Russell 2000'},
+    'SHY': {'source': 'yahoo', 'ticker': 'SHY', 'name': '1-3 Year U.S. Treasuries (SHY)'},
+    'SILVER': {'source': 'yahoo', 'ticker': 'SI=F', 'name': 'Silver Spot Price'},
+    'SLV': {'source': 'yahoo', 'ticker': 'SLV', 'name': 'Silver (SLV)'},
+    'SMH': {'source': 'yahoo', 'ticker': 'SMH', 'name': 'Semiconductors (SMH)'},
+    'SOL': {'source': 'yahoo', 'ticker': 'SOL-USD', 'name': 'Solana'},
+    'SPX': {'source': 'yahoo', 'ticker': '^GSPC', 'name': 'S&P 500'},
+    'SPY': {'source': 'yahoo', 'ticker': 'SPY', 'name': 'S&P 500 (SPY)'},
+    'SSEC': {'source': 'yahoo', 'ticker': '000001.SS', 'name': 'Shanghai Composite'},
+    'TIP': {'source': 'yahoo', 'ticker': 'TIP', 'name': 'Inflation-Protected U.S. Treasuries (TIP)'},
+    'TLT': {'source': 'yahoo', 'ticker': 'TLT', 'name': '20+ Year U.S. Treasuries (TLT)'},
+    'TSLA': {'source': 'yahoo', 'ticker': 'TSLA', 'name': 'Tesla Inc.'},
+    'URA': {'source': 'yahoo', 'ticker': 'URA', 'name': 'Uranium Miners (URA)'},
+    'USD': {'source': 'yahoo', 'ticker': 'DX-Y.NYB', 'name': 'U.S. Dollar Index'},
+    'USD/YEN': {'source': 'yahoo', 'ticker': 'JPY=X', 'name': 'U.S. Dollar to Japanese Yen'},
+    'USMV': {'source': 'yahoo', 'ticker': 'USMV', 'name': 'U.S. Lower Volatility (USMV)'},
+    'UST10Y': {'source': 'fred', 'ticker': 'DGS10', 'name': '10-Year U.S. Treasury Yield'},
+    'UST2Y': {'source': 'fred', 'ticker': 'DGS2', 'name': '2-Year U.S. Treasury Yield'},
+    'UST30Y': {'source': 'fred', 'ticker': 'DGS30', 'name': '30-Year U.S. Treasury Yield'},
+    'UUP': {'source': 'yahoo', 'ticker': 'UUP', 'name': 'U.S. Dollar (UUP)'},
+    'VGK': {'source': 'yahoo', 'ticker': 'VGK', 'name': 'Eurozone (VGK)'},
+    'VIX': {'source': 'yahoo', 'ticker': '^VIX', 'name': 'Volatility Index'},
+    'VT': {'source': 'yahoo', 'ticker': 'VT', 'name': 'Global All Cap Equities (VT)'},
+    'VYMI': {'source': 'yahoo', 'ticker': 'VYMI', 'name': 'Global Dividend Yield Equities ex-U.S. (VYMI)'},
+    'WTIC': {'source': 'yahoo', 'ticker': 'CL=F', 'name': 'Light Crude Oil Continuous Contract'},
+    'XLB': {'source': 'yahoo', 'ticker': 'XLB', 'name': 'U.S. Basic Materials Sector (XLB)'},
+    'XLC': {'source': 'yahoo', 'ticker': 'XLC', 'name': 'U.S. Communications Sector (XLC)'},
+    'XLE': {'source': 'yahoo', 'ticker': 'XLE', 'name': 'U.S. Energy Sectory (XLE)'},
+    'XLF': {'source': 'yahoo', 'ticker': 'XLF', 'name': 'U.S. Financials Sector (XLF)'},
+    'XLI': {'source': 'yahoo', 'ticker': 'XLI', 'name': 'U.S. Industrials Sector (XLI)'},
+    'XLK': {'source': 'yahoo', 'ticker': 'XLK', 'name': 'U.S. Technology Sector (XLK)'},
+    'XLP': {'source': 'yahoo', 'ticker': 'XLP', 'name': 'U.S. Consumer Staples Sector (XLP)'},
+    'XLRE': {'source': 'yahoo', 'ticker': 'XLRE', 'name': 'U.S. Real Estate Sector (XLRE)'},
+    'XLU': {'source': 'yahoo', 'ticker': 'XLU', 'name': 'U.S. Utilities Sector (XLU)'},
+    'XLV': {'source': 'yahoo', 'ticker': 'XLV', 'name': 'U.S. Healthcare Sector (XLV)'},
+    'XLY': {'source': 'yahoo', 'ticker': 'XLY', 'name': 'U.S. Consumer Discretionary Sector (XLY)'},
+    'XME': {'source': 'yahoo', 'ticker': 'XME', 'name': 'Metals & Mining (XME)'},
+    'XOP': {'source': 'yahoo', 'ticker': 'XOP', 'name': 'U.S. Oil & Gas Exploration & Production (XOP)'},
+    'XRP': {'source': 'yahoo', 'ticker': 'XRP-USD', 'name': 'Ripple'}
 }
 
 def lambda_handler(event, context):

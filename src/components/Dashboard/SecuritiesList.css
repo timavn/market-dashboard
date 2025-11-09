@@ -220,3 +220,80 @@
   font-size: 12px;
 }
 
+/* Securities card and table wrapper - allow overflow for dots */
+.securities-card {
+  overflow: visible !important;
+}
+
+.securities-card > div {
+  overflow: visible !important;
+}
+
+.securities-table-wrapper {
+  overflow: visible !important;
+}
+
+.securities-table-wrapper table {
+  overflow: visible !important;
+}
+
+.securities-table-wrapper tbody {
+  overflow: visible !important;
+}
+
+.securities-table-wrapper thead {
+  overflow: visible !important;
+}
+
+/* Update dot for each security row */
+.security-row-with-dot {
+  position: relative;
+  overflow: visible !important;
+}
+
+.security-row-with-dot::before {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background-color: #4B5563; /* gray-600 */
+  border-radius: 50%;
+  left: 4px; /* Position in the padding area, to the left of the colored area */
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+}
+
+/* Force left alignment for ticker cells - target Tremor's internal classes */
+.securities-table-wrapper [class*="tremor-TableCell"],
+.securities-table-wrapper [class*="tremor-TableHeaderCell"] {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.securities-table-wrapper [class*="tremor-TableCell"] > div,
+.securities-table-wrapper [class*="tremor-TableCell"] > * {
+  text-align: left !important;
+  width: 100% !important;
+}
+
+.securities-table-wrapper [class*="tremor-Text"] {
+  text-align: left !important;
+  display: block !important;
+  width: 100% !important;
+}
+
+/* Price column styling */
+.securities-table-wrapper [class*="tremor-TableCell"]:nth-child(2) {
+  text-align: right !important;
+  justify-content: flex-end !important;
+}
+
+.securities-table-wrapper [class*="tremor-TableCell"]:nth-child(2) [class*="tremor-Text"] {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+

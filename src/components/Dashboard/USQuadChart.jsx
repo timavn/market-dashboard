@@ -153,16 +153,19 @@ const USQuadChart = () => {
 
   // Get cell background color based on quad value
   const getCellColor = (quadValue) => {
-    if (quadValue === 1) return '#008000'; // Green
-    if (quadValue === 2 || quadValue === 3) return '#FFC107'; // Yellow/Amber
-    if (quadValue === 4) return '#FE0000'; // Red
+    // Use the same palette as charts for consistency across the app
+    if (quadValue === 1) return CHART_COLORS[1]; // Green
+    if (quadValue === 2) return CHART_COLORS[2]; // Light green (Quad 2)
+    if (quadValue === 3) return CHART_COLORS[3]; // Yellow/Amber
+    if (quadValue === 4) return CHART_COLORS[4]; // Red
     return '#f3f4f6'; // Default gray
   };
 
   // Get text color for cell
   const getTextColor = (quadValue) => {
     if (quadValue === 1) return '#ffffff'; // White text for green
-    if (quadValue === 2 || quadValue === 3) return '#000000'; // Black text for yellow
+    if (quadValue === 2) return '#ffffff'; // White text for light green (Quad 2)
+    if (quadValue === 3) return '#000000'; // Black text for yellow
     if (quadValue === 4) return '#ffffff'; // White text for red
     return '#000000'; // Default black
   };

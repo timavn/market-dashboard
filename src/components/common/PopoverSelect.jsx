@@ -21,14 +21,18 @@ const PopoverSelect = ({ value, options, onChange, buttonClassName = '', menuCla
     };
   }, []);
 
+  // Find the label for the current value
+  const displayLabel = options.find(opt => opt.value === value)?.label || value;
+
   return (
     <div ref={ref} className="relative inline-block">
       <button
         type="button"
         className={`px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 dark:text-white border-gray-300 dark:border-gray-600 shadow-sm ${buttonClassName}`}
+        style={{ borderRadius: '0.25rem' }}
         onClick={() => setOpen((v) => !v)}
       >
-        {value}
+        {displayLabel}
       </button>
       {open && (
         <div className={`absolute z-[9999] mt-2 w-36 max-h-64 overflow-auto rounded border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-lg ${menuClassName}`}>

@@ -4,9 +4,10 @@ import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { notesService } from '../../services/api/notesService';
 import MarketCalendar from './MarketCalendar';
+import TwitterFeed from './TwitterFeed';
 
 const DailyNotepad = () => {
-  const [viewMode, setViewMode] = useState('notes'); // 'notes' or 'calendar'
+  const [viewMode, setViewMode] = useState('notes'); // 'notes', 'calendar', or 'twitter'
   // Get today's date in YYYY-MM-DD format for default
   const getTodayDateKey = () => new Date().toISOString().split('T')[0];
   
@@ -211,6 +212,17 @@ const DailyNotepad = () => {
           >
             Market Calendar
           </Button>
+          <Button
+            size="xs"
+            variant={viewMode === 'twitter' ? 'primary' : 'secondary'}
+            onClick={() => setViewMode('twitter')}
+            className={viewMode === 'twitter' 
+              ? 'dark:bg-blue-600 dark:text-white' 
+              : 'dark:bg-gray-700 dark:text-gray-300'
+            }
+          >
+            Twitter Feed
+          </Button>
         </div>
         
         {viewMode === 'notes' && (
@@ -260,6 +272,8 @@ const DailyNotepad = () => {
 
       {viewMode === 'calendar' ? (
         <MarketCalendar />
+      ) : viewMode === 'twitter' ? (
+        <TwitterFeed />
       ) : (
         <>
           {loading ? (

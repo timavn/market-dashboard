@@ -505,8 +505,8 @@ const MarketCalendar = () => {
               display: 'grid', 
               gridTemplateColumns: 'repeat(7, 1fr)', 
               gap: '4px',
-              flex: 1,
-              gridAutoRows: '1fr'
+              // Let rows size to content; keep a sensible minimum height
+              gridAutoRows: 'minmax(40px, auto)'
             }}>
               {calendarDays.map((day, index) => {
                 if (day === null) {

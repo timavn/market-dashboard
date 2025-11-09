@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Title, Text, Flex } from '@tremor/react';
+import { Card, Title, Text } from '@tremor/react';
 import USDProxies from './USDProxies';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
 import USQuadChart from './USQuadChart';
-import TickerTape from './TickerTape';
+import WelcomeToTheMachine from './WelcomeToTheMachine';
+import StaticMetricBar from './StaticMetricBar';
 import DailyNotepad from './DailyNotepad';
 import { USDMarketService } from '../../services/api/usdMarketService';
 import { REFRESH_INTERVALS } from '../../constants/usdMarket';
@@ -56,21 +57,12 @@ const USDMacroDashboard = () => {
 
   return (
     <div className="space-y-4">
-      {/* Banner with Title and Ticker Tape */}
-      <Card className="dark:bg-gray-800">
-        <Flex justifyContent="between" alignItems="center" className="gap-4">
-          <div className="flex-shrink-0">
-            <Title className="dark:text-white">Macro Dashboard</Title>
-            {lastUpdated && (
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Last updated: {lastUpdated.toLocaleTimeString()}
-              </Text>
-            )}
-          </div>
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <TickerTape />
-          </div>
-        </Flex>
+      {/* Banner with Title and Metric Bar */}
+      <Card className="dark:bg-gray-800 relative">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <Title className="dark:text-white">Macro Dashboard</Title>
+          <StaticMetricBar />
+        </div>
       </Card>
 
       {/* Events/Signals and Daily Notepad - Side by Side */}
@@ -140,6 +132,9 @@ const USDMacroDashboard = () => {
 
         {/* US Quad Charts Section */}
         <USQuadChart />
+
+        {/* Welcome to the Machine Section */}
+        <WelcomeToTheMachine />
       </div>
 
       {/* Error overlay */}
