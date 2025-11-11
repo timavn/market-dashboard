@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -306,9 +307,15 @@ async function fetchYahooQuote(yahooTicker) {
 // Fetch from FRED API
 async function fetchFredQuote(seriesId) {
   try {
+    const apiKey = process.env.FRED_API_KEY || '';
+    if (!apiKey) {
+      console.warn(`[FRED] Warning: FRED_API_KEY environment variable is not set. FRED API now requires an API key. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html`);
+    }
+    
     const url = 'https://api.stlouisfed.org/fred/series/observations';
     const params = {
       series_id: seriesId,
+      api_key: apiKey,
       file_type: 'json',
       limit: '2', // Get 2 observations to calculate change
       sort_order: 'desc'
@@ -354,6 +361,14 @@ async function fetchFredQuote(seriesId) {
     if (error.response) {
       console.error(`[FRED] Response status: ${error.response.status}`);
       console.error(`[FRED] Response data:`, error.response.data);
+      
+      // Check if error is related to missing API key
+      if (error.response.data && error.response.data.error_message) {
+        const errorMsg = error.response.data.error_message.toLowerCase();
+        if (errorMsg.includes('api_key') || errorMsg.includes('api key')) {
+          console.error(`[FRED] API key error detected. Please set FRED_API_KEY environment variable. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html`);
+        }
+      }
     }
     return null;
   }

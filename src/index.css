@@ -125,3 +125,29 @@ code {
 .dark [role="listbox"] button:hover {
   background-color: rgb(55 65 81) !important;
 }
+
+/* Macro Dashboard title styling */
+.macro-dashboard-card {
+  padding-top: 0 !important;
+}
+
+.macro-dashboard-card > div {
+  padding-top: 0 !important;
+}
+
+.macro-dashboard-title-container {
+  text-align: center !important;
+  padding-top: 0 !important;
+  padding-bottom: 8px !important;
+  margin-top: 0 !important;
+  margin-bottom: 8px !important;
+  border-bottom: 1px solid #E5E7EB !important;
+}
+
+.dark .macro-dashboard-title-container {
+  border-bottom-color: rgb(55 65 81) !important;
+}
+
+.macro-dashboard-title-container [class*="tremor-Title"] {
+  display: inline-block !important;
+}

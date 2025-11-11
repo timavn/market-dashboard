@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Card, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Text, Title } from '@tremor/react';
+import { Card, Text, Title } from '@tremor/react';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
 import './SecuritiesList.css';
@@ -63,8 +63,8 @@ const SecuritiesList = () => {
       return `${priceNum.toFixed(2)}%`;
     }
     
-    // For other assets, show as currency
-    return `$${priceNum.toFixed(2)}`;
+    // For other assets, show as number without $ symbol
+    return `${priceNum.toFixed(2)}`;
   };
 
   // Poll for prices every 8 seconds
@@ -138,7 +138,7 @@ const SecuritiesList = () => {
   return (
     <Card className="relative securities-card" style={{ overflow: 'visible' }}>
       <div 
-        className="mb-3 relative" 
+        className="relative" 
         ref={legendRef}
         onMouseEnter={() => setShowLegend(true)}
         onMouseLeave={() => setShowLegend(false)}
@@ -147,7 +147,7 @@ const SecuritiesList = () => {
           className="cursor-pointer hover:opacity-70 inline-block"
           onClick={() => setShowLegend(!showLegend)}
         >
-          Securities
+          Signal Strength
         </Title>
         
         {/* Asset Class Legend Popover */}
@@ -180,58 +180,40 @@ const SecuritiesList = () => {
         )}
       </div>
       
-      <div className="securities-table-wrapper" style={{ overflow: 'visible' }}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeaderCell style={{ 
-                padding: '4px 12px', 
-                textAlign: 'left',
-                justifyContent: 'flex-start',
-                display: 'flex',
-                alignItems: 'center'
-              }}>Ticker</TableHeaderCell>
-              <TableHeaderCell style={{ 
-                padding: '4px 12px', 
-                textAlign: 'right',
-                justifyContent: 'flex-end',
-                display: 'flex',
-                alignItems: 'center'
-              }}>Spot Price</TableHeaderCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {securities.map((security) => (
-              <TableRow 
-                key={security.ticker}
-                className={`${getAssetClassBgColor(security.assetClass)} hover:opacity-80 cursor-pointer security-row-with-dot`}
-              >
-                <TableCell style={{ 
-                  padding: '4px 12px', 
-                  textAlign: 'left', 
-                  position: 'relative',
-                  justifyContent: 'flex-start',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}>
-                  <Text className="font-semibold text-sm" style={{ textAlign: 'left', width: '100%' }}>{security.ticker}</Text>
-                </TableCell>
-                <TableCell style={{ 
-                  padding: '4px 12px', 
-                  textAlign: 'right', 
-                  position: 'relative',
-                  justifyContent: 'flex-end',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}>
-                  <Text className="font-semibold text-sm" style={{ textAlign: 'right', width: '100%' }}>
-                    {loading && prices[security.ticker] === undefined ? '...' : formatPrice(security.ticker, prices[security.ticker], security.assetClass)}
-                  </Text>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <div className="securities-table-wrapper">
+        {/* Header Row */}
+        <div className="securities-header-row">
+          <div className="header-ticker">Ticker</div>
+          <div className="header-price">Spot Price</div>
+          <div className="header-lrr">LRR</div>
+          <div className="header-hrr">HRR</div>
+        </div>
+        
+        {/* Data Rows */}
+        <div className="securities-data-container">
+          {securities.map((security, index) => (
+            <div 
+              key={security.ticker}
+              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''}`}
+            >
+              <div className="data-ticker-cell">
+                <span className="ticker-dot"></span>
+                <span className="data-ticker">{security.ticker}</span>
+              </div>
+              <div className="data-price-cell">
+                <span className="data-price">
+                  {loading && prices[security.ticker] === undefined ? '...' : formatPrice(security.ticker, prices[security.ticker], security.assetClass)}
+                </span>
+              </div>
+              <div className="data-lrr-cell">
+                <span className="data-lrr">--</span>
+              </div>
+              <div className="data-hrr-cell">
+                <span className="data-hrr">--</span>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </Card>
   );

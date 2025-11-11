@@ -58,9 +58,11 @@ const USDMacroDashboard = () => {
   return (
     <div className="space-y-4">
       {/* Banner with Title and Metric Bar */}
-      <Card className="dark:bg-gray-800 relative">
+      <Card className="dark:bg-gray-800 relative macro-dashboard-card">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <Title className="dark:text-white">Macro Dashboard</Title>
+          <div className="macro-dashboard-title-container">
+            <Title className="dark:text-white">Macro Dashboard</Title>
+          </div>
           <StaticMetricBar />
         </div>
       </Card>

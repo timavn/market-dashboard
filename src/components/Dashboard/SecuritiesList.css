@@ -220,79 +220,180 @@
   font-size: 12px;
 }
 
-/* Securities card and table wrapper - allow overflow for dots */
+/* Securities card and table wrapper */
 .securities-card {
   overflow: visible !important;
+  padding: 0 !important;
 }
 
 .securities-card > div {
   overflow: visible !important;
+  padding: 0 !important;
+}
+
+/* Title spacing and font size */
+.securities-card > div:first-child {
+  margin-bottom: 8px !important;
+  text-align: center !important;
+  padding-bottom: 8px !important;
+  border-bottom: 1px solid #E5E7EB !important;
+}
+
+.securities-card [class*="tremor-Title"] {
+  font-size: 13px !important;
+  display: inline-block !important;
 }
 
 .securities-table-wrapper {
   overflow: visible !important;
 }
 
-.securities-table-wrapper table {
-  overflow: visible !important;
+/* Header Row */
+.securities-header-row {
+  display: grid;
+  grid-template-columns: 75px auto auto auto;
+  gap: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid #E5E7EB;
 }
 
-.securities-table-wrapper tbody {
-  overflow: visible !important;
+.header-ticker {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #000000;
+  text-align: left;
+  padding-left: 22px; /* Match ticker text position (12px cell padding + 10px margin) */
 }
 
-.securities-table-wrapper thead {
-  overflow: visible !important;
+.header-price {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #000000;
+  text-align: left;
+  padding-left: 0; /* Start immediately after ticker column */
 }
 
-/* Update dot for each security row */
-.security-row-with-dot {
+.header-lrr {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #000000;
+  text-align: left;
+  padding-left: 16px; /* 2 character spaces after 'e' in Spot Price */
+}
+
+.header-hrr {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #000000;
+  text-align: left;
+  padding-left: 0;
+}
+
+/* Data Container */
+.securities-data-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Data Rows */
+.securities-data-row {
+  display: grid;
+  grid-template-columns: 75px auto auto auto;
+  gap: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid #E5E7EB;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.securities-data-row:hover {
+  opacity: 0.8;
+}
+
+.securities-data-row.last-row {
+  border-bottom: none;
+}
+
+/* Ticker Cell */
+.data-ticker-cell {
+  display: flex;
+  align-items: center;
+  text-align: left;
   position: relative;
-  overflow: visible !important;
+  padding-left: 12px; /* This plus margin-left: 10px on .data-ticker = 22px total offset */
 }
 
-.security-row-with-dot::before {
-  content: '';
+.ticker-dot {
   position: absolute;
+  left: 0;
   width: 6px;
   height: 6px;
-  background-color: #4B5563; /* gray-600 */
+  background-color: #4B5563;
   border-radius: 50%;
-  left: 4px; /* Position in the padding area, to the left of the colored area */
   top: 50%;
   transform: translateY(-50%);
-  z-index: 10;
 }
 
-/* Force left alignment for ticker cells - target Tremor's internal classes */
-.securities-table-wrapper [class*="tremor-TableCell"],
-.securities-table-wrapper [class*="tremor-TableHeaderCell"] {
-  text-align: left !important;
-  justify-content: flex-start !important;
-  display: flex !important;
-  align-items: center !important;
+.data-ticker {
+  font-size: 12px;
+  font-weight: 400;
+  color: #000000;
+  margin-left: 10px;
+  white-space: nowrap;
 }
 
-.securities-table-wrapper [class*="tremor-TableCell"] > div,
-.securities-table-wrapper [class*="tremor-TableCell"] > * {
-  text-align: left !important;
-  width: 100% !important;
+/* Price Cell */
+.data-price-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  padding-left: 0; /* Align with Spot Price header */
 }
 
-.securities-table-wrapper [class*="tremor-Text"] {
-  text-align: left !important;
-  display: block !important;
-  width: 100% !important;
+.data-price {
+  font-size: 12px;
+  font-weight: 400;
+  color: #000000;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Price column styling */
-.securities-table-wrapper [class*="tremor-TableCell"]:nth-child(2) {
-  text-align: right !important;
-  justify-content: flex-end !important;
+/* LRR Cell */
+.data-lrr-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  padding-left: 16px; /* 2 character spaces after Spot Price column */
 }
 
-.securities-table-wrapper [class*="tremor-TableCell"]:nth-child(2) [class*="tremor-Text"] {
-  text-align: right !important;
+.data-lrr {
+  font-size: 12px;
+  font-weight: 400;
+  color: #000000;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* HRR Cell */
+.data-hrr-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  padding-left: 0;
+}
+
+.data-hrr {
+  font-size: 12px;
+  font-weight: 400;
+  color: #000000;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
