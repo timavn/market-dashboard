@@ -192,7 +192,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
 
       {/* Status Message */}
       {uploadStatus && (
-        <Card className={`mt-3 ${uploadStatus.type === 'success' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+        <Card className={`mt-3 ${uploadStatus.type === 'success' ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
           <Badge 
             color={uploadStatus.type === 'success' ? 'emerald' : 'red'}
             size="lg"
@@ -205,28 +205,28 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
       {/* Warning Dialog */}
       {showWarning && warningData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <Card className="max-w-md mx-4 bg-amber-50 border-amber-300">
+          <Card className="max-w-md mx-4 bg-amber-50 border-amber-300 dark:bg-amber-900/20 dark:border-amber-800">
             <Flex className="mb-4" alignItems="center">
               <Text className="text-3xl mr-3">⚠️</Text>
-              <Title>Older Statement Detected</Title>
+              <Title className="dark:text-white">Older Statement Detected</Title>
             </Flex>
             
-            <Text className="mb-4">
+            <Text className="mb-4 dark:text-gray-300">
               The CSV file you're trying to upload appears to be from an older date:
             </Text>
             
-            <Card className="mb-4 bg-white">
+            <Card className="mb-4 bg-white dark:bg-gray-800">
               <Flex justifyContent="between" alignItems="center" className="mb-2">
-                <Text className="font-semibold">CSV Statement Date:</Text>
+                <Text className="font-semibold dark:text-white">CSV Statement Date:</Text>
                 <Badge color="red">{warningData.csvDate}</Badge>
               </Flex>
               <Flex justifyContent="between" alignItems="center">
-                <Text className="font-semibold">Current Portfolio Date:</Text>
+                <Text className="font-semibold dark:text-white">Current Portfolio Date:</Text>
                 <Badge color="emerald">{warningData.existingDate}</Badge>
               </Flex>
             </Card>
             
-            <Text className="text-xs text-gray-600 mb-4">
+            <Text className="text-xs text-gray-600 dark:text-gray-400 mb-4">
               Uploading an older statement will overwrite your current portfolio data. 
               Are you sure you want to continue?
             </Text>

@@ -19,9 +19,9 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
 
   if (error) {
     return (
-      <Card className="bg-red-50 border-red-200">
-        <Title className="mb-2">$USD Correlations</Title>
-        <Text className="text-red-600">Error loading correlation data: {error}</Text>
+      <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800">
+        <Title className="mb-2 dark:text-red-400">$USD Correlations</Title>
+        <Text className="text-red-600 dark:text-red-400">Error loading correlation data: {error}</Text>
       </Card>
     );
   }

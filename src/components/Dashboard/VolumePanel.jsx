@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Text, Flex, Badge } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -12,6 +12,11 @@ const VolumePanel = () => {
   const [selectedDateRange, setSelectedDateRange] = useState('1M');
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const searchInputRef = useRef(null);
+  const searchResultsRef = useRef(null);
   const [metrics, setMetrics] = useState({
     closing: 0.00,
     current: 0.00,
@@ -28,13 +33,38 @@ const VolumePanel = () => {
     return SECURITIES_LIST.filter(security => security.assetClass === selectedAssetClass);
   };
 
+  // Filter securities based on search query - searches entire universe regardless of asset class
+  const filteredSecurities = React.useMemo(() => {
+    if (!searchQuery.trim()) {
+      return [];
+    }
+    const query = searchQuery.toLowerCase().trim();
+    // Search across ALL securities in the universe, not filtered by selectedAssetClass
+    return SECURITIES_LIST.filter(security => 
+      security.ticker.toLowerCase().includes(query) ||
+      security.name.toLowerCase().includes(query)
+    ).slice(0, 15); // Increased to 15 results to show more options
+  }, [searchQuery]);
+
   // Update product name when ticker changes
   useEffect(() => {
     const security = SECURITIES_LIST.find(s => s.ticker === selectedTicker);
     if (security) {
       setProductName(security.name);
+      // Update search query to show current selection
+      setSearchQuery(`${security.ticker} - ${security.name}`);
     }
   }, [selectedTicker]);
+
+  // Handle security selection from search
+  const handleSecuritySelect = (security) => {
+    setSelectedTicker(security.ticker);
+    setSelectedAssetClass(security.assetClass);
+    setSearchQuery(`${security.ticker} - ${security.name}`);
+    setShowSearchResults(false);
+    setHighlightedIndex(-1);
+    searchInputRef.current?.blur();
+  };
 
   // Filter tickers when asset class changes
   useEffect(() => {
@@ -207,15 +237,85 @@ const VolumePanel = () => {
             onChange={setSelectedTicker}
           />
 
-          {/* Product Name Input */}
-          <input
-            type="text"
-            value={productName}
-            placeholder="Product Name"
-            readOnly
-            className="px-3 py-2 text-sm border border-gray-300 rounded-none bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0"
-            style={{ width: '200px' }}
-          />
+          {/* Securities Search Box */}
+          <div className="relative" style={{ width: '200px' }}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              placeholder="Search securities..."
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setShowSearchResults(true);
+                setHighlightedIndex(-1);
+              }}
+              onFocus={() => {
+                if (searchQuery.trim()) {
+                  setShowSearchResults(true);
+                }
+              }}
+              onBlur={() => {
+                // Delay hiding to allow click on results
+                setTimeout(() => {
+                  setShowSearchResults(false);
+                  setHighlightedIndex(-1);
+                }, 200);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setHighlightedIndex(prev => 
+                    prev < filteredSecurities.length - 1 ? prev + 1 : prev
+                  );
+                  setShowSearchResults(true);
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setHighlightedIndex(prev => prev > 0 ? prev - 1 : -1);
+                } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+                  e.preventDefault();
+                  const selected = filteredSecurities[highlightedIndex];
+                  if (selected) {
+                    handleSecuritySelect(selected);
+                  }
+                } else if (e.key === 'Escape') {
+                  setShowSearchResults(false);
+                  setSearchQuery('');
+                  searchInputRef.current?.blur();
+                }
+              }}
+              className="px-3 py-2 text-sm border border-gray-300 rounded-none bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 w-full"
+            />
+            {showSearchResults && filteredSecurities.length > 0 && (
+              <div
+                ref={searchResultsRef}
+                className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-lg max-h-60 overflow-y-auto"
+                style={{ top: '100%' }}
+              >
+                {filteredSecurities.map((security, index) => (
+                  <div
+                    key={security.ticker}
+                    onClick={() => handleSecuritySelect(security)}
+                    className={`px-3 py-2 cursor-pointer text-sm ${
+                      index === highlightedIndex
+                        ? 'bg-blue-100 dark:bg-blue-900/30'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold dark:text-white">{security.ticker}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-500 ml-2">
+                        {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                      {security.name}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         {/* Date Range Selector (popover) moved to right side (top-right) */}
         <div>

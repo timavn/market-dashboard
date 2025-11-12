@@ -244,6 +244,10 @@
   display: inline-block !important;
 }
 
+.dark .securities-card > div:first-child {
+  border-bottom-color: rgb(55 65 81) !important;
+}
+
 .securities-table-wrapper {
   overflow: visible !important;
 }
@@ -251,46 +255,35 @@
 /* Header Row */
 .securities-header-row {
   display: grid;
-  grid-template-columns: 75px auto auto auto;
-  gap: 0;
-  padding: 8px 12px;
+  grid-template-columns: 20px 60px 70px 50px 50px 80px;
+  gap: 4px;
+  padding: 8px 4px;
   border-bottom: 1px solid #E5E7EB;
 }
 
-.header-ticker {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: #000000;
-  text-align: left;
-  padding-left: 22px; /* Match ticker text position (12px cell padding + 10px margin) */
+.dark .securities-header-row {
+  border-bottom-color: rgb(55 65 81);
 }
 
-.header-price {
+/* Base styles for all column headers */
+.securities-header-row > div {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   color: #000000;
   text-align: left;
-  padding-left: 0; /* Start immediately after ticker column */
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
 }
 
-.header-lrr {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: #000000;
-  text-align: left;
-  padding-left: 16px; /* 2 character spaces after 'e' in Spot Price */
+.dark .securities-header-row > div {
+  color: rgb(229 231 235);
 }
 
-.header-hrr {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: #000000;
-  text-align: left;
-  padding-left: 0;
+.header-dot {
+  justify-content: center;
 }
 
 /* Data Container */
@@ -302,12 +295,16 @@
 /* Data Rows */
 .securities-data-row {
   display: grid;
-  grid-template-columns: 75px auto auto auto;
-  gap: 0;
-  padding: 6px 12px;
+  grid-template-columns: 20px 60px 70px 50px 50px 80px;
+  gap: 4px;
+  padding: 6px 4px;
   border-bottom: 1px solid #E5E7EB;
   cursor: pointer;
   transition: opacity 0.2s ease;
+}
+
+.dark .securities-data-row {
+  border-bottom-color: rgb(55 65 81);
 }
 
 .securities-data-row:hover {
@@ -318,41 +315,46 @@
   border-bottom: none;
 }
 
-/* Ticker Cell */
-.data-ticker-cell {
+/* Base styles for all data cells */
+.securities-data-row > div {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   text-align: left;
-  position: relative;
-  padding-left: 12px; /* This plus margin-left: 10px on .data-ticker = 22px total offset */
+  padding: 0 4px;
+}
+
+/* Dot Cell */
+.data-dot-cell {
+  justify-content: center;
 }
 
 .ticker-dot {
-  position: absolute;
-  left: 0;
   width: 6px;
   height: 6px;
   background-color: #4B5563;
   border-radius: 50%;
-  top: 50%;
-  transform: translateY(-50%);
+}
+
+/* Ticker Cell */
+.data-ticker-cell {
+  /* Uses base styles */
 }
 
 .data-ticker {
   font-size: 12px;
   font-weight: 400;
   color: #000000;
-  margin-left: 10px;
   white-space: nowrap;
+}
+
+.dark .data-ticker {
+  color: rgb(229 231 235);
 }
 
 /* Price Cell */
 .data-price-cell {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  text-align: left;
-  padding-left: 0; /* Align with Spot Price header */
+  /* Uses base styles */
 }
 
 .data-price {
@@ -363,13 +365,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.dark .data-price {
+  color: rgb(229 231 235);
+}
+
 /* LRR Cell */
 .data-lrr-cell {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  text-align: left;
-  padding-left: 16px; /* 2 character spaces after Spot Price column */
+  /* Uses base styles */
 }
 
 .data-lrr {
@@ -380,13 +382,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.dark .data-lrr {
+  color: rgb(229 231 235);
+}
+
 /* HRR Cell */
 .data-hrr-cell {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  text-align: left;
-  padding-left: 0;
+  /* Uses base styles */
 }
 
 .data-hrr {
@@ -395,6 +397,50 @@
   color: #000000;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.dark .data-hrr {
+  color: rgb(229 231 235);
+}
+
+/* Odds Header */
+.header-odds {
+  /* Uses base header styles from .securities-header-row > div */
+}
+
+/* Odds Cell */
+.data-odds-cell {
+  /* Uses base data cell styles from .securities-data-row > div */
+}
+
+.data-odds {
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.odds-upside {
+  color: #10B981; /* Green */
+}
+
+.dark .odds-upside {
+  color: #34D399; /* Lighter green for dark mode */
+}
+
+.odds-downside {
+  color: #EF4444; /* Red */
+}
+
+.dark .odds-downside {
+  color: #F87171; /* Lighter red for dark mode */
+}
+
+.dark .data-odds {
+  color: rgb(229 231 235);
 }
 
 

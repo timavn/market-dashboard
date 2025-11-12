@@ -258,7 +258,7 @@ const USQuadChart = () => {
   };
 
   return (
-    <Card className="bg-white">
+    <Card className="bg-white dark:bg-gray-800">
       {/* Two-column layout: Left QU/AD label, Right Chart + Exposures Table */}
       <div style={{ display: 'flex', alignItems: 'stretch' }}>
         {/* Left label: QU over AD - stretches to cover chart + table */}
