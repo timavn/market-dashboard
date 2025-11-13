@@ -11,6 +11,7 @@ const SecuritiesList = () => {
   const [prices, setPrices] = useState({}); // { ticker: { price, timestamp } }
   const [loading, setLoading] = useState(true);
   const [updateTrigger, setUpdateTrigger] = useState(0); // Trigger for real-time color updates
+  const [updatedRows, setUpdatedRows] = useState(new Set()); // Track rows that were just updated for blink animation
   const legendRef = useRef(null);
   const dotLegendRef = useRef(null);
   const rowRefs = useRef({});
@@ -252,6 +253,20 @@ const SecuritiesList = () => {
         // Trigger update for dot colors
         setUpdateTrigger(prev => prev + 1);
         
+        // Mark all rows with price data as updated for blink animation
+        const updatedTickers = new Set();
+        Object.keys(priceMap).forEach(ticker => {
+          if (priceMap[ticker] && priceMap[ticker].price && priceMap[ticker].price !== '--') {
+            updatedTickers.add(ticker);
+          }
+        });
+        setUpdatedRows(updatedTickers);
+        
+        // Clear updated rows after animation completes (1.5 seconds)
+        setTimeout(() => {
+          setUpdatedRows(new Set());
+        }, 1500);
+        
         console.log(`[SecuritiesList] [${pollId}] State update complete`);
       } catch (error) {
         console.error(`[SecuritiesList] [${pollId}] Error fetching prices:`, error);
@@ -426,7 +441,7 @@ const SecuritiesList = () => {
           {securities.map((security, index) => (
             <div 
               key={security.ticker}
-              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''}`}
+              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
             >
               <div className="data-dot-cell">
                 {(() => {

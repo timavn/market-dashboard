@@ -443,4 +443,21 @@
   color: rgb(229 231 235);
 }
 
+/* Soft blink animation for price updates */
+@keyframes softBlink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.securities-data-row.row-updated {
+  animation: softBlink 1.5s ease-in-out;
+}
+
 

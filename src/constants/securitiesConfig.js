@@ -151,3 +151,4 @@ export const getApiTicker = (ticker) => {
   return config.apiTicker;
 };
 
+

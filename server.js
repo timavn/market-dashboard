@@ -142,6 +142,7 @@ const TICKER_MAPPING = {
   'TSLA': { source: 'yahoo', ticker: 'TSLA' },
   'URA': { source: 'yahoo', ticker: 'URA' },
   'USD': { source: 'yahoo', ticker: 'DX-Y.NYB' },
+  'DXY': { source: 'yahoo', ticker: 'DX-Y.NYB' }, // Dollar Index
   'USD/YEN': { source: 'yahoo', ticker: 'JPY=X' },
   'USMV': { source: 'yahoo', ticker: 'USMV' },
   'UST10Y': { source: 'fred', ticker: 'DGS10' },
@@ -152,7 +153,9 @@ const TICKER_MAPPING = {
   'VIX': { source: 'yahoo', ticker: '^VIX' },
   'VT': { source: 'yahoo', ticker: 'VT' },
   'VYMI': { source: 'yahoo', ticker: 'VYMI' },
+  'WTI': { source: 'yahoo', ticker: 'CL=F' }, // WTI Crude Oil
   'WTIC': { source: 'yahoo', ticker: 'CL=F' },
+  'CRB': { source: 'yahoo', ticker: '^CRB' }, // CRB Commodity Index
   'XLB': { source: 'yahoo', ticker: 'XLB' },
   'XLC': { source: 'yahoo', ticker: 'XLC' },
   'XLE': { source: 'yahoo', ticker: 'XLE' },
@@ -607,6 +610,62 @@ app.get('/api/quotes', async (req, res) => {
     console.error('[API] Error in /api/quotes:', error);
     console.error('[API] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to fetch quotes', details: error.message });
+  }
+});
+
+// Macro Indicators endpoint - fetches top row indicators
+app.get('/api/macro-indicators', async (req, res) => {
+  try {
+    const macroIndicators = ['DXY', 'GLD', 'UST10Y', 'CRB', 'WTI', 'SPY', 'QQQ', 'IWM'];
+    console.log(`[API] /api/macro-indicators called for ${macroIndicators.length} indicators`);
+    
+    const indicators = {};
+    
+    // Process in batches to avoid rate limiting
+    const BATCH_SIZE = 5;
+    const DELAY_MS = 200;
+    
+    const results = await batchProcess(
+      macroIndicators,
+      BATCH_SIZE,
+      DELAY_MS,
+      async (symbol) => {
+        try {
+          return await getQuote(symbol);
+        } catch (error) {
+          console.error(`[API] Error fetching macro indicator ${symbol}:`, error.message);
+          return null;
+        }
+      }
+    );
+    
+    // Map results back to indicators
+    let successCount = 0;
+    macroIndicators.forEach((symbol, index) => {
+      const quote = results[index];
+      if (quote && quote.price) {
+        indicators[symbol] = {
+          symbol: symbol,
+          price: quote.price,
+          change: quote.change || null,
+          changePercent: quote.changePercent || null,
+          timestamp: quote.timestamp || new Date().toISOString()
+        };
+        successCount++;
+      } else {
+        indicators[symbol] = {
+          symbol: symbol,
+          price: null,
+          error: 'No data available'
+        };
+      }
+    });
+    
+    console.log(`[API] Returning ${successCount} macro indicators out of ${macroIndicators.length} requested`);
+    res.json(indicators);
+  } catch (error) {
+    console.error('[API] Error in /api/macro-indicators:', error);
+    res.status(500).json({ error: 'Failed to fetch macro indicators' });
   }
 });
 

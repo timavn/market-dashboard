@@ -181,3 +181,4 @@ export const getSignalStrengthStats = (securities) => {
   };
 };
 
+

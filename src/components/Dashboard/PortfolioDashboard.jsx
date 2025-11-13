@@ -347,7 +347,12 @@ const PortfolioDashboard = () => {
         </div>
 
         {/* Center Panel - USD Macro Dashboard */}
-        <div className={showPortfolioMetrics ? 'col-span-12 md:col-span-7' : 'col-span-12 md:col-span-9'}>
+        <div 
+          className={showPortfolioMetrics ? 'col-span-12 md:col-span-7' : 'col-span-12 md:col-span-9'}
+          style={{
+            marginRight: showPortfolioMetrics ? '0px' : '16px', // Match left side p-4 spacing (16px) - main container already has paddingRight: 40px for Portfolio tab
+          }}
+        >
           <USDMacroDashboard />
         </div>
 

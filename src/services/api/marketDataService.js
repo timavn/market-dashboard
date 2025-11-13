@@ -187,6 +187,17 @@ export class MarketDataService {
     }
   }
 
+  // Get macro indicators (DXY, GLD, UST10Y, CRB, WTI, SPY, QQQ, IWM)
+  static async getMacroIndicators() {
+    try {
+      const response = await apiClient.get('/api/macro-indicators');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching macro indicators:', error);
+      throw error;
+    }
+  }
+
   // Get volume data
   static async getVolumeData(symbols) {
     try {
