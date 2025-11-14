@@ -152,3 +152,4 @@ export const getApiTicker = (ticker) => {
 };
 
 
+

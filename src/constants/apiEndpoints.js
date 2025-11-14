@@ -18,6 +18,9 @@ export const ENDPOINTS = {
   VOLATILITY: '/api/indicators/volatility',
   VOLUME: '/api/indicators/volume',
   
+  // Risk ranges
+  RISK_RANGES: '/api/risk-ranges',
+  
   // WebSocket endpoints
   WS_MARKET_DATA: '/ws/market',
   WS_OPTIONS: '/ws/options',

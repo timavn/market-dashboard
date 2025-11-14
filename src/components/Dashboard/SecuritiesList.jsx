@@ -9,6 +9,7 @@ const SecuritiesList = () => {
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
   const [prices, setPrices] = useState({}); // { ticker: { price, timestamp } }
+  const [riskRanges, setRiskRanges] = useState({}); // { ticker: { lrr, hrr, timestamp } }
   const [loading, setLoading] = useState(true);
   const [updateTrigger, setUpdateTrigger] = useState(0); // Trigger for real-time color updates
   const [updatedRows, setUpdatedRows] = useState(new Set()); // Track rows that were just updated for blink animation
@@ -16,6 +17,7 @@ const SecuritiesList = () => {
   const dotLegendRef = useRef(null);
   const rowRefs = useRef({});
   const pricesRef = useRef({}); // Ref to track current prices for stale closure prevention
+  const riskRangesRef = useRef({}); // Ref to track current risk ranges for stale closure prevention
 
   // Asset class color mapping - using more vibrant, distinct colors
   const getAssetClassColor = (assetClass) => {
@@ -179,25 +181,40 @@ const SecuritiesList = () => {
 
   // Poll for prices every 8 seconds
   useEffect(() => {
-    console.log('[SecuritiesList] Setting up polling interval');
+    const isDev = process.env.NODE_ENV === 'development';
+    
+    if (isDev) {
+      console.log('[SecuritiesList] Setting up polling interval');
+    }
+    
     let pollCount = 0;
     
     // Fetch prices function
     const fetchPricesData = async () => {
       pollCount++;
       const pollId = `poll-${pollCount}`;
-      console.log(`[SecuritiesList] [${pollId}] Starting fetchPricesData (poll #${pollCount})`);
+      const isFirstPoll = pollCount === 1;
+      
+      // Only log in dev mode or for first poll
+      if (isDev && isFirstPoll) {
+        console.log(`[SecuritiesList] [${pollId}] Starting fetchPricesData (poll #${pollCount})`);
+      }
       
       try {
         const tickers = securities.map(s => s.ticker);
-        console.log(`[SecuritiesList] [${pollId}] Fetching prices for ${tickers.length} securities:`, tickers.slice(0, 5), '...');
+        
+        if (isDev && isFirstPoll) {
+          console.log(`[SecuritiesList] [${pollId}] Fetching prices for ${tickers.length} securities`);
+        }
         
         const quotes = await MarketDataService.getQuotes(tickers);
-        console.log(`[SecuritiesList] [${pollId}] API Response received:`, {
-          quoteCount: Object.keys(quotes).length,
-          sampleQuote: quotes[Object.keys(quotes)[0]],
-          allKeys: Object.keys(quotes).slice(0, 10)
-        });
+        
+        if (isDev && isFirstPoll) {
+          console.log(`[SecuritiesList] [${pollId}] API Response received:`, {
+            quoteCount: Object.keys(quotes).length,
+            sampleQuote: quotes[Object.keys(quotes)[0]]
+          });
+        }
         
         // Handle empty response
         if (!quotes || Object.keys(quotes).length === 0) {
@@ -210,7 +227,6 @@ const SecuritiesList = () => {
         const priceMap = {};
         let successCount = 0;
         let failCount = 0;
-        const currentTime = Date.now();
         
         tickers.forEach(ticker => {
           const quote = quotes[ticker.toUpperCase()];
@@ -222,9 +238,6 @@ const SecuritiesList = () => {
               timestamp: timestamp
             };
             successCount++;
-            if (pollCount === 1 || successCount <= 3) { // Log first poll or first 3 successes
-              console.log(`[SecuritiesList] [${pollId}] Updated ${ticker}: price=${quote.price}, timestamp=${timestamp}`);
-            }
           } else {
             // For failed quotes, keep existing data if available, or set to null
             // Use ref to avoid stale closure issues
@@ -232,20 +245,17 @@ const SecuritiesList = () => {
             if (existingData && existingData.price && existingData.price !== '--') {
               // Keep existing data but mark as potentially stale
               priceMap[ticker] = existingData;
-              console.log(`[SecuritiesList] [${pollId}] Keeping existing data for ${ticker}:`, existingData);
             } else {
               priceMap[ticker] = { price: '--', timestamp: null };
             }
             failCount++;
-            if (failCount <= 5) { // Log first 5 failures
-              console.warn(`[SecuritiesList] [${pollId}] No price for ${ticker}:`, quote);
-            }
           }
         });
         
-        console.log(`[SecuritiesList] [${pollId}] Price fetch complete: ${successCount} success, ${failCount} failed`);
-        console.log(`[SecuritiesList] [${pollId}] Timestamps captured for ${successCount} securities`);
-        console.log(`[SecuritiesList] [${pollId}] Updating state with ${Object.keys(priceMap).length} price entries`);
+        // Only log summary in dev mode or if there are failures
+        if (isDev && (isFirstPoll || failCount > 0)) {
+          console.log(`[SecuritiesList] [${pollId}] Price fetch complete: ${successCount} success, ${failCount} failed`);
+        }
         
         setPrices(priceMap);
         pricesRef.current = priceMap; // Update ref
@@ -266,9 +276,8 @@ const SecuritiesList = () => {
         setTimeout(() => {
           setUpdatedRows(new Set());
         }, 1500);
-        
-        console.log(`[SecuritiesList] [${pollId}] State update complete`);
       } catch (error) {
+        // Always log errors
         console.error(`[SecuritiesList] [${pollId}] Error fetching prices:`, error);
         console.error(`[SecuritiesList] [${pollId}] Error details:`, {
           message: error.message,
@@ -283,7 +292,9 @@ const SecuritiesList = () => {
         
         // On error, keep existing data if available
         if (Object.keys(pricesRef.current).length > 0) {
-          console.log(`[SecuritiesList] [${pollId}] Error occurred, keeping existing ${Object.keys(pricesRef.current).length} price entries`);
+          if (isDev) {
+            console.log(`[SecuritiesList] [${pollId}] Error occurred, keeping existing ${Object.keys(pricesRef.current).length} price entries`);
+          }
         } else {
           console.warn(`[SecuritiesList] [${pollId}] Error occurred and no existing data available`);
         }
@@ -293,20 +304,61 @@ const SecuritiesList = () => {
     };
     
     // Initial fetch
-    console.log('[SecuritiesList] Performing initial fetch');
+    if (isDev) {
+      console.log('[SecuritiesList] Performing initial fetch');
+    }
     fetchPricesData();
     
     // Set up polling interval (8 seconds)
-    console.log('[SecuritiesList] Setting up 8-second polling interval');
     const interval = setInterval(() => {
-      console.log('[SecuritiesList] Polling interval triggered');
       fetchPricesData();
     }, 8000);
     
     return () => {
-      console.log('[SecuritiesList] Cleaning up polling interval');
+      if (isDev) {
+        console.log('[SecuritiesList] Cleaning up polling interval');
+      }
       clearInterval(interval);
     };
+  }, [securities]);
+
+  // Fetch risk ranges (LRR/HRR) on component mount and periodically
+  useEffect(() => {
+    const fetchRiskRanges = async () => {
+      try {
+        const tickers = securities.map(s => s.ticker);
+        const riskRangeData = await MarketDataService.getRiskRanges(tickers);
+        
+        // Transform data to match our format
+        const riskRangeMap = {};
+        Object.keys(riskRangeData).forEach(ticker => {
+          const data = riskRangeData[ticker];
+          if (data) {
+            riskRangeMap[ticker.toUpperCase()] = {
+              lrr: data.lrr,
+              hrr: data.hrr,
+              timestamp: data.timestamp
+            };
+          }
+        });
+        
+        setRiskRanges(riskRangeMap);
+        riskRangesRef.current = riskRangeMap;
+      } catch (error) {
+        console.error('[SecuritiesList] Error fetching risk ranges:', error);
+        // Keep existing data on error
+      }
+    };
+    
+    // Initial fetch
+    fetchRiskRanges();
+    
+    // Refresh risk ranges every 5 minutes (they update daily after market close)
+    const riskRangeInterval = setInterval(() => {
+      fetchRiskRanges();
+    }, 5 * 60 * 1000); // 5 minutes
+    
+    return () => clearInterval(riskRangeInterval);
   }, [securities]);
 
   // Real-time color updates for dots (every 10 seconds to update as data ages)
@@ -433,7 +485,7 @@ const SecuritiesList = () => {
           <div className="header-price">Spot Price</div>
           <div className="header-lrr">LRR</div>
           <div className="header-hrr">HRR</div>
-          <div className="header-odds">Odds</div>
+          <div className="header-odds">+/-</div>
         </div>
         
         {/* Data Rows */}
@@ -447,10 +499,9 @@ const SecuritiesList = () => {
                 {(() => {
                   const priceData = prices[security.ticker];
                   const timestamp = priceData?.timestamp || null;
-                  // TODO: Get actual LRR/HRR timestamps when available
-                  // For now, check if security object has these properties
-                  const lrrTimestamp = security.lrrTimestamp || null;
-                  const hrrTimestamp = security.hrrTimestamp || null;
+                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                  const lrrTimestamp = riskRangeData?.timestamp || null;
+                  const hrrTimestamp = riskRangeData?.timestamp || null;
                   const status = getUpdateStatus(timestamp, lrrTimestamp, hrrTimestamp);
                   // Use updateTrigger to force re-render for real-time updates
                   const _ = updateTrigger;
@@ -498,17 +549,42 @@ const SecuritiesList = () => {
                 </span>
               </div>
               <div className="data-lrr-cell">
-                <span className="data-lrr">--</span>
+                <span className="data-lrr">
+                  {(() => {
+                    const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                    if (riskRangeData && riskRangeData.lrr !== undefined && riskRangeData.lrr !== null) {
+                      // Format based on asset class (treasury yields are percentages)
+                      if (security.ticker.startsWith('UST')) {
+                        return `${parseFloat(riskRangeData.lrr).toFixed(2)}%`;
+                      }
+                      return parseFloat(riskRangeData.lrr).toFixed(2);
+                    }
+                    return '--';
+                  })()}
+                </span>
               </div>
               <div className="data-hrr-cell">
-                <span className="data-hrr">--</span>
+                <span className="data-hrr">
+                  {(() => {
+                    const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                    if (riskRangeData && riskRangeData.hrr !== undefined && riskRangeData.hrr !== null) {
+                      // Format based on asset class (treasury yields are percentages)
+                      if (security.ticker.startsWith('UST')) {
+                        return `${parseFloat(riskRangeData.hrr).toFixed(2)}%`;
+                      }
+                      return parseFloat(riskRangeData.hrr).toFixed(2);
+                    }
+                    return '--';
+                  })()}
+                </span>
               </div>
               <div className="data-odds-cell">
                 {(() => {
                   const priceData = prices[security.ticker];
                   const spotPrice = priceData?.price || priceData;
-                  const lrr = '--'; // TODO: Get actual LRR value when available
-                  const hrr = '--'; // TODO: Get actual HRR value when available
+                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                  const lrr = riskRangeData?.lrr || '--';
+                  const hrr = riskRangeData?.hrr || '--';
                   const odds = calculateOdds(spotPrice, lrr, hrr);
                   
                   if (odds.upside === null && odds.downside === null) {

@@ -282,4 +282,16 @@ export class MarketDataService {
       throw error;
     }
   }
+
+  // Get risk ranges (LRR/HRR) for securities
+  static async getRiskRanges(tickers = null) {
+    try {
+      const params = tickers ? { tickers: tickers.join(',') } : {};
+      const response = await apiClient.get(ENDPOINTS.RISK_RANGES, { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching risk ranges:', error);
+      throw error;
+    }
+  }
 }

@@ -613,6 +613,50 @@ app.get('/api/quotes', async (req, res) => {
   }
 });
 
+// Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
+app.get('/api/risk-ranges', async (req, res) => {
+  try {
+    const { tickers } = req.query;
+    const tickerList = tickers ? tickers.split(',').map(t => t.trim().toUpperCase()) : null;
+    
+    console.log(`[API] /api/risk-ranges called${tickerList ? ` for ${tickerList.length} tickers` : ' for all tickers'}`);
+    
+    // Get latest snapshot from DynamoDB
+    const params = {
+      TableName: 'RiskRangeData',
+      Key: {
+        ticker: 'LATEST',
+        date: 'latest'
+      }
+    };
+    
+    const result = await dynamodb.get(params).promise();
+    
+    if (!result.Item || !result.Item.data) {
+      console.log('[API] No risk range data found in DynamoDB');
+      return res.json({});
+    }
+    
+    const allData = result.Item.data;
+    
+    // Filter by tickers if provided
+    const riskRanges = tickerList 
+      ? Object.fromEntries(
+          tickerList
+            .map(ticker => [ticker, allData[ticker] || null])
+            .filter(([_, data]) => data !== null)
+        )
+      : allData;
+    
+    console.log(`[API] Returning risk ranges for ${Object.keys(riskRanges).length} securities`);
+    res.json(riskRanges);
+    
+  } catch (error) {
+    console.error('[API] Error in /api/risk-ranges:', error);
+    res.status(500).json({ error: 'Failed to fetch risk ranges', details: error.message });
+  }
+});
+
 // Macro Indicators endpoint - fetches top row indicators
 app.get('/api/macro-indicators', async (req, res) => {
   try {

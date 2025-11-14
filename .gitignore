@@ -37,3 +37,7 @@ Thumbs.db
 
 # API keys and secrets
 /config/secrets.js
+
+# Hedgeye credentials
+aws/lambda/hedgeye_config.json
+aws/lambda/test_output/
