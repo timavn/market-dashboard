@@ -44,7 +44,7 @@ const VolatilityPanel = () => {
       if (selectedVolatility === 'VIX') {
         setLoading(true);
         try {
-          const response = await fetch('http://localhost:3001/api/indicators/vix');
+          const response = await fetch('http://localhost:3000/api/indicators/vix');
           const data = await response.json();
           setVixData(data);
 

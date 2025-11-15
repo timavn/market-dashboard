@@ -7,7 +7,7 @@ const AWS = require('aws-sdk');
 const axios = require('axios');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // Configure AWS
 AWS.config.update({
@@ -1433,14 +1433,14 @@ app.post('/api/presigned-url', async (req, res) => {
   }
 });
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'build')));
-  
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'build', 'index.html'));
-  });
-}
+// Serve static files (both production and development)
+app.use(express.static(path.join(__dirname, 'build')));
+
+// Serve React app for all non-API routes (must be last route)
+// Use a function-based route matcher for Express 5 compatibility
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
 
 // Start HTTP server first so we can attach WebSocket server to it
 const server = app.listen(PORT, async () => {

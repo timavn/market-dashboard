@@ -13,7 +13,7 @@ export class MarketWebSocketService {
   connect() {
     try {
       this.shouldReconnect = true;
-      const wsUrl = `ws://localhost:3001${ENDPOINTS.WS_MARKET_DATA}`;
+      const wsUrl = `ws://localhost:3000${ENDPOINTS.WS_MARKET_DATA}`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {

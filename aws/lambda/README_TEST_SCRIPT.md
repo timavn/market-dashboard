@@ -74,3 +74,4 @@ After running the test:
 - **Table not found**: The page structure may have changed - check the saved HTML
 - **Playwright errors**: Make sure Playwright is installed: `playwright install chromium`
 
+

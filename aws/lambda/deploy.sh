@@ -37,16 +37,32 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "   Using environment variables HEDGEYE_EMAIL and HEDGEYE_PASSWORD"
     HEDGEYE_EMAIL="${HEDGEYE_EMAIL:-}"
     HEDGEYE_PASSWORD="${HEDGEYE_PASSWORD:-}"
+    FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
 else
     echo "✓ Found config file: $CONFIG_FILE"
     HEDGEYE_EMAIL=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE'))['email'])")
     HEDGEYE_PASSWORD=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE'))['password'])")
+    # Try to get Firecrawl API key from config file (optional)
+    FIRECRAWL_API_KEY=$(python3 -c "import json; config=json.load(open('$CONFIG_FILE')); print(config.get('firecrawl_api_key', ''))" 2>/dev/null || echo "")
+fi
+
+# If not in config file, try environment variable
+if [ -z "$FIRECRAWL_API_KEY" ]; then
+    FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
 fi
 
 if [ -z "$HEDGEYE_EMAIL" ] || [ -z "$HEDGEYE_PASSWORD" ]; then
     echo "❌ Error: HEDGEYE_EMAIL and HEDGEYE_PASSWORD must be set"
     echo "   Either create $CONFIG_FILE or set environment variables"
     exit 1
+fi
+
+if [ -z "$FIRECRAWL_API_KEY" ]; then
+    echo "⚠️  Warning: FIRECRAWL_API_KEY not set"
+    echo "   Firecrawl scraping will not be available (will fall back to Playwright/requests)"
+    echo "   Set FIRECRAWL_API_KEY environment variable or add to $CONFIG_FILE"
+else
+    echo "✓ Firecrawl API key loaded"
 fi
 
 echo "✓ Credentials loaded"
@@ -90,6 +106,12 @@ if [[ "$FUNCTION_EXISTS" == *"NOT_FOUND"* ]] || [[ "$FUNCTION_EXISTS" == *"Resou
         exit 1
     fi
     
+    # Build environment variables JSON
+    ENV_VARS="HEDGEYE_EMAIL=$HEDGEYE_EMAIL,HEDGEYE_PASSWORD=$HEDGEYE_PASSWORD,RISK_RANGE_TABLE=RiskRangeData"
+    if [ -n "$FIRECRAWL_API_KEY" ]; then
+        ENV_VARS="$ENV_VARS,FIRECRAWL_API_KEY=$FIRECRAWL_API_KEY"
+    fi
+    
     aws lambda create-function \
         --function-name "$FUNCTION_NAME" \
         --runtime "$RUNTIME" \
@@ -98,7 +120,7 @@ if [[ "$FUNCTION_EXISTS" == *"NOT_FOUND"* ]] || [[ "$FUNCTION_EXISTS" == *"Resou
         --zip-file "fileb://$ZIP_FILE" \
         --timeout "$TIMEOUT" \
         --memory-size "$MEMORY" \
-        --environment "Variables={HEDGEYE_EMAIL=$HEDGEYE_EMAIL,HEDGEYE_PASSWORD=$HEDGEYE_PASSWORD,RISK_RANGE_TABLE=RiskRangeData}" \
+        --environment "Variables={$ENV_VARS}" \
         --region "$REGION" \
         --description "Scrapes Hedgeye Risk Range Signals (LRR/HRR) daily after market close"
     
@@ -115,12 +137,18 @@ else
     
     echo "✓ Code updated"
     
+    # Build environment variables JSON
+    ENV_VARS="HEDGEYE_EMAIL=$HEDGEYE_EMAIL,HEDGEYE_PASSWORD=$HEDGEYE_PASSWORD,RISK_RANGE_TABLE=RiskRangeData"
+    if [ -n "$FIRECRAWL_API_KEY" ]; then
+        ENV_VARS="$ENV_VARS,FIRECRAWL_API_KEY=$FIRECRAWL_API_KEY"
+    fi
+    
     # Update function configuration
     aws lambda update-function-configuration \
         --function-name "$FUNCTION_NAME" \
         --timeout "$TIMEOUT" \
         --memory-size "$MEMORY" \
-        --environment "Variables={HEDGEYE_EMAIL=$HEDGEYE_EMAIL,HEDGEYE_PASSWORD=$HEDGEYE_PASSWORD,RISK_RANGE_TABLE=RiskRangeData}" \
+        --environment "Variables={$ENV_VARS}" \
         --region "$REGION" \
         --quiet
     
@@ -141,4 +169,5 @@ echo ""
 echo "3. Verify DynamoDB table exists:"
 echo "   aws dynamodb describe-table --table-name RiskRangeData --region $REGION"
 echo ""
+
 

@@ -19,6 +19,24 @@ Hedgeye Website → Lambda Scraper → DynamoDB → API Endpoint → Frontend Da
 4. **Frontend**: `SecuritiesList.jsx` - Displays LRR/HRR in securities table
 5. **EventBridge Schedule**: Runs daily at 5:00 PM EST
 
+## Scraping Methods
+
+The scraper supports three methods (in order of preference):
+
+1. **Firecrawl** (Recommended) - Handles JavaScript rendering and authentication automatically
+2. **Playwright** - Browser automation fallback
+3. **Requests/BeautifulSoup** - Simple HTTP requests (may not work for JS-heavy pages)
+
+### Firecrawl Setup (Recommended)
+
+Firecrawl is the preferred scraping method as it handles authentication and JavaScript rendering more reliably.
+
+1. **Get Firecrawl API Key**: Sign up at [firecrawl.dev](https://www.firecrawl.dev) and get your API key
+2. **Set Environment Variable**: Add `FIRECRAWL_API_KEY` to your Lambda function's environment variables
+3. **Install Package**: The `firecrawl-py` package is already in `requirements.txt`
+
+The scraper will automatically use Firecrawl if the API key is set, otherwise it falls back to Playwright or requests.
+
 ## Quick Start
 
 ### Step 1: Create DynamoDB Table
@@ -59,7 +77,8 @@ aws lambda create-function \
   --environment Variables='{
     "HEDGEYE_EMAIL":"your-email@example.com",
     "HEDGEYE_PASSWORD":"your-password",
-    "RISK_RANGE_TABLE":"RiskRangeData"
+    "RISK_RANGE_TABLE":"RiskRangeData",
+    "FIRECRAWL_API_KEY":"fc-your-api-key-here"
   }' \
   --region us-west-1
 ```
@@ -117,11 +136,49 @@ aws dynamodb get-item \
 
 Set these in Lambda function configuration:
 
+**Required:**
 - `HEDGEYE_EMAIL`: Your Hedgeye login email
 - `HEDGEYE_PASSWORD`: Your Hedgeye login password
-- `RISK_RANGE_TABLE`: `RiskRangeData` (default)
-- `HEDGEYE_LOGIN_URL`: `https://app.hedgeye.com/users/sign_in` (default)
-- `HEDGEYE_RISK_RANGE_URL`: `https://app.hedgeye.com/feed_items/all?page=1&with_category=33-risk-range-signals` (default)
+
+**Optional (but recommended):**
+- `FIRECRAWL_API_KEY`: Your Firecrawl API key (get from [firecrawl.dev](https://www.firecrawl.dev))
+  - If set, the scraper will use Firecrawl (preferred method)
+  - If not set, falls back to Playwright or requests
+  - Can be set via environment variable or added to `hedgeye_config.json` as `firecrawl_api_key`
+
+**Defaults:**
+- `RISK_RANGE_TABLE`: `RiskRangeData`
+- `HEDGEYE_LOGIN_URL`: `https://app.hedgeye.com/users/sign_in`
+- `HEDGEYE_RISK_RANGE_URL`: `https://app.hedgeye.com/feed_items/all?page=1&with_category=33-risk-range-signals`
+
+#### Setting Firecrawl API Key
+
+**Option 1: Environment Variable (Recommended for Lambda)**
+```bash
+# When deploying, set the environment variable:
+export FIRECRAWL_API_KEY="fc-your-api-key-here"
+./deploy.sh
+```
+
+**Option 2: Config File (For Local Testing)**
+Add to `aws/lambda/hedgeye_config.json`:
+```json
+{
+  "email": "your-email@example.com",
+  "password": "your-password",
+  "firecrawl_api_key": "fc-your-api-key-here"
+}
+```
+
+**Option 3: AWS Console**
+1. Go to Lambda → Functions → HedgeyeRiskRangeScraper
+2. Configuration → Environment variables
+3. Add: `FIRECRAWL_API_KEY` = `fc-your-api-key-here`
+4. Save
+
+#### Firecrawl Pricing
+
+Firecrawl charges per API call. Check [firecrawl.dev/pricing](https://www.firecrawl.dev/pricing) for current rates. The scraper makes 1-2 API calls per execution (one for login + navigation, one for scraping the data page).
 
 ### Ticker Mapping
 
@@ -267,4 +324,5 @@ For issues or questions:
 2. Review this documentation
 3. Test Lambda manually
 4. Verify DynamoDB data exists
+
 

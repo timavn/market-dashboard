@@ -69,7 +69,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
       const csvDate = extractDateFromFilename(file.name);
 
       if (csvDate) {
-        const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+        const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3000';
         const response = await fetch(`${backendUrl}/api/portfolio`);
         const portfolioData = await response.json();
 

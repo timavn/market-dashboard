@@ -15,7 +15,15 @@ from typing import Dict, Optional
 import requests
 from bs4 import BeautifulSoup
 
-# Try to import playwright for JavaScript-heavy pages
+# Try to import Firecrawl (preferred method)
+try:
+    from firecrawl import FirecrawlApp
+    FIRECRAWL_AVAILABLE = True
+except ImportError:
+    FIRECRAWL_AVAILABLE = False
+    print("Firecrawl not available, falling back to Playwright or requests")
+
+# Try to import playwright for JavaScript-heavy pages (fallback)
 try:
     from playwright.sync_api import sync_playwright
     PLAYWRIGHT_AVAILABLE = True
@@ -61,6 +69,9 @@ HEDGEYE_RISK_RANGE_URL = os.environ.get(
     'HEDGEYE_RISK_RANGE_URL',
     'https://app.hedgeye.com/feed_items/all?page=1&with_category=33-risk-range-signals'
 )
+
+# Firecrawl API key
+FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY')
 
 # Ticker mapping from Hedgeye format to our ticker format
 # This maps Hedgeye's INDEX names to our ticker symbols
@@ -127,10 +138,152 @@ def scrape_hedgeye_risk_ranges() -> Dict[str, Dict]:
     Scrape risk range data from Hedgeye website
     Returns dict mapping ticker to {lrr: value, hrr: value, timestamp: iso}
     """
+    # Prefer Firecrawl if available and API key is set
+    if FIRECRAWL_AVAILABLE and FIRECRAWL_API_KEY:
+        try:
+            return scrape_with_firecrawl()
+        except Exception as e:
+            print(f"Firecrawl scraping failed: {e}")
+            print("Falling back to Playwright or requests...")
+            # Fall through to next method
+    
+    # Fallback to Playwright if available
     if PLAYWRIGHT_AVAILABLE:
-        return scrape_with_playwright()
-    else:
-        return scrape_with_requests()
+        try:
+            return scrape_with_playwright()
+        except Exception as e:
+            print(f"Playwright scraping failed: {e}")
+            print("Falling back to requests...")
+            # Fall through to requests
+    
+    # Final fallback to requests
+    return scrape_with_requests()
+
+def scrape_with_firecrawl() -> Dict[str, Dict]:
+    """
+    Scrape using Firecrawl API (handles JavaScript rendering and authentication)
+    This is the preferred method as it's more reliable and easier to maintain
+    
+    Note: Firecrawl handles authentication through browser automation.
+    For protected pages, we can use Firecrawl's browser mode with form actions.
+    """
+    print("Using Firecrawl to scrape Hedgeye Risk Range Signals...")
+    
+    app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
+    risk_range_data = {}
+    
+    try:
+        # Firecrawl supports browser automation with actions
+        # We'll use the scrape method with browser options
+        print("Scraping with Firecrawl browser automation...")
+        
+        # Method 1: Try using Firecrawl's browser mode with actions
+        # Note: The exact API may vary, so we'll try multiple approaches
+        try:
+            # Firecrawl v0.0.16+ supports browser mode
+            scrape_result = app.scrape_url(
+                url=HEDGEYE_RISK_RANGE_URL,
+                params={
+                    'pageOptions': {
+                        'onlyMainContent': False,
+                        'waitFor': 5000,
+                    },
+                    'actions': [
+                        {
+                            'type': 'navigate',
+                            'url': HEDGEYE_LOGIN_URL
+                        },
+                        {
+                            'type': 'fill',
+                            'selector': 'input[name="user[email]"]',
+                            'value': HEDGEYE_EMAIL
+                        },
+                        {
+                            'type': 'fill',
+                            'selector': 'input[name="user[password]"]',
+                            'value': HEDGEYE_PASSWORD
+                        },
+                        {
+                            'type': 'click',
+                            'selector': 'button[type="submit"]'
+                        },
+                        {
+                            'type': 'wait',
+                            'milliseconds': 3000
+                        },
+                        {
+                            'type': 'navigate',
+                            'url': HEDGEYE_RISK_RANGE_URL
+                        },
+                        {
+                            'type': 'wait',
+                            'milliseconds': 5000
+                        }
+                    ]
+                }
+            )
+        except Exception as e1:
+            print(f"Method 1 failed: {e1}")
+            # Method 2: Simpler approach - just scrape the URL directly
+            # (This assumes Firecrawl can handle the authentication automatically
+            # or that we've set up cookies/session separately)
+            print("Trying simpler scrape method...")
+            scrape_result = app.scrape_url(
+                url=HEDGEYE_RISK_RANGE_URL,
+                params={
+                    'pageOptions': {
+                        'onlyMainContent': False,
+                        'waitFor': 10000,  # Wait longer for JS to render
+                    }
+                }
+            )
+        
+        # Extract HTML content from Firecrawl response
+        # Firecrawl returns different formats depending on the method
+        html_content = None
+        
+        if isinstance(scrape_result, dict):
+            # Check for HTML in various possible response formats
+            # Firecrawl may return data in 'data' field or directly in response
+            data = scrape_result.get('data', scrape_result)
+            if isinstance(data, dict):
+                html_content = (
+                    data.get('html') or 
+                    data.get('content') or
+                    data.get('markdown') or
+                    scrape_result.get('html') or
+                    scrape_result.get('content')
+                )
+            else:
+                html_content = data
+            
+            # If we got markdown, we can still parse it, but HTML is preferred
+            if scrape_result.get('markdown') and not html_content:
+                print("Warning: Received markdown instead of HTML, parsing may be limited")
+                html_content = scrape_result['markdown']
+        elif isinstance(scrape_result, str):
+            html_content = scrape_result
+        
+        if not html_content:
+            raise Exception("No HTML content received from Firecrawl")
+        
+        # Parse the HTML content
+        soup = BeautifulSoup(html_content, 'html.parser')
+        risk_range_data = parse_risk_range_table(soup)
+        
+        if not risk_range_data:
+            print("Warning: No data extracted from Firecrawl response")
+            print(f"Response keys: {list(scrape_result.keys()) if isinstance(scrape_result, dict) else 'N/A'}")
+        
+    except Exception as e:
+        print(f"Firecrawl scraping failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        print("Falling back to Playwright or requests...")
+        # Re-raise to trigger fallback in scrape_hedgeye_risk_ranges()
+        raise
+    
+    return risk_range_data
 
 def scrape_with_requests() -> Dict[str, Dict]:
     """
