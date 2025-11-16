@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Financial market dashboard with portfolio analytics and real-time data",
   "private": true,
-  "proxy": "http://localhost:3000",
+  "proxy": "http://localhost:3001",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.908.0",
     "@aws-sdk/s3-request-presigner": "^3.908.0",

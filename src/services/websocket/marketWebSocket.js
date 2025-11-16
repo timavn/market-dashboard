@@ -13,7 +13,9 @@ export class MarketWebSocketService {
   connect() {
     try {
       this.shouldReconnect = true;
-      const wsUrl = `ws://localhost:3000${ENDPOINTS.WS_MARKET_DATA}`;
+      // Use port 3001 in development (Express server on 3001), 3000 in production (Express serves static files)
+      const wsPort = process.env.REACT_APP_WS_PORT || 3001;
+      const wsUrl = `ws://localhost:${wsPort}${ENDPOINTS.WS_MARKET_DATA}`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {

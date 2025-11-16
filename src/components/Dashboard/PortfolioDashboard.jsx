@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, Metric, Text, Grid, Title, Button, Badge } from '@tremor/react';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
@@ -6,6 +6,7 @@ import CSVUpload from '../CSVUpload';
 import USDMacroDashboard from './USDMacroDashboard';
 import SecuritiesList from './SecuritiesList';
 import ResizableBottomPanels from './ResizableBottomPanels';
+import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -13,9 +14,40 @@ const PortfolioDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
+  const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
   const [volatilityExpanded, setVolatilityExpanded] = useState(false);
   const [securitiesExpanded, setSecuritiesExpanded] = useState(false);
   const [securitiesFullWidth, setSecuritiesFullWidth] = useState(false);
+  const [peaPodImageError, setPeaPodImageError] = useState(false);
+  
+  // The Pods search state
+  const [podsSearchQuery, setPodsSearchQuery] = useState('');
+  const [podsShowSearchResults, setPodsShowSearchResults] = useState(false);
+  const [podsHighlightedIndex, setPodsHighlightedIndex] = useState(-1);
+  const [podsSelectedSecurity, setPodsSelectedSecurity] = useState(null);
+  const podsSearchInputRef = useRef(null);
+
+  // Filter securities based on search query - searches entire universe
+  const podsFilteredSecurities = useMemo(() => {
+    if (!podsSearchQuery.trim()) {
+      return [];
+    }
+    const query = podsSearchQuery.toLowerCase().trim();
+    // Search across ALL securities in the universe
+    return SECURITIES_LIST.filter(security => 
+      security.ticker.toLowerCase().includes(query) ||
+      security.name.toLowerCase().includes(query)
+    ).slice(0, 15); // Limit to 15 results
+  }, [podsSearchQuery]);
+
+  // Handle security selection from search
+  const handlePodsSecuritySelect = (security) => {
+    setPodsSelectedSecurity(security);
+    setPodsSearchQuery(`${security.ticker} - ${security.name}`);
+    setPodsShowSearchResults(false);
+    setPodsHighlightedIndex(-1);
+    podsSearchInputRef.current?.blur();
+  };
 
   // Fetch portfolio data
   const fetchPortfolio = async () => {
@@ -390,7 +422,7 @@ const PortfolioDashboard = () => {
             flexDirection: 'column',
             alignItems: 'center',
             borderBottom: '1px solid #e5e7eb',
-            minHeight: '80px',
+            minHeight: '120px',
           }}
           className="dark:border-gray-700"
         >
@@ -417,6 +449,29 @@ const PortfolioDashboard = () => {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
             </svg>
+          </Button>
+          
+          {/* The Pods Button */}
+          <Button
+            onClick={() => setShowPeaPodWindow(!showPeaPodWindow)}
+            variant="secondary"
+            size="sm"
+            className="shadow-sm w-full mt-2"
+            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            title="The Pods"
+          >
+            {peaPodImageError ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M7 4C5.5 4 4 5.5 4 7.5c0 1.5.8 2.5 2 3v8c0 1.1.9 2 2 2s2-.9 2-2v-8c1.2-.5 2-1.5 2-3 0-2-1.5-3.5-3-3.5zm-1 4.5c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S4.5 10.8 4.5 10s.7-1.5 1.5-1.5zm3 0c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S7.5 10.8 7.5 10s.7-1.5 1.5-1.5z"/>
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/pea-pod.png" 
+                alt="The Pods" 
+                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                onError={() => setPeaPodImageError(true)}
+              />
+            )}
           </Button>
         </div>
 
@@ -489,6 +544,173 @@ const PortfolioDashboard = () => {
               }}
             >
               <PortfolioMetricsContent />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* The Pods Window - Separate Pop-out Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: showPortfolioMetrics 
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
+            : '40px', // Position to the left of collapsed portfolio bar
+          width: showPeaPodWindow 
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Same width as portfolio window
+            : '0px',
+          height: '100vh',
+          zIndex: showPeaPodWindow ? 1200 : -1, // Higher z-index than portfolio bar when open, hidden when closed
+          backgroundColor: '#f9fafb',
+          borderLeft: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
+          borderRight: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showPeaPodWindow 
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+            : 'none',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
+          display: showPeaPodWindow ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showPeaPodWindow && (
+          <>
+            {/* Header with Centered Title (Clickable to Close) */}
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => setShowPeaPodWindow(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                The Pods
+              </Title>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px',
+              }}
+            >
+              {/* Securities Search Box */}
+              <div className="relative mb-4" style={{ width: '100%', maxWidth: '400px' }}>
+                <input
+                  ref={podsSearchInputRef}
+                  type="text"
+                  value={podsSearchQuery}
+                  placeholder="Search securities..."
+                  onChange={(e) => {
+                    setPodsSearchQuery(e.target.value);
+                    setPodsShowSearchResults(true);
+                    setPodsHighlightedIndex(-1);
+                  }}
+                  onFocus={() => {
+                    if (podsSearchQuery.trim()) {
+                      setPodsShowSearchResults(true);
+                    }
+                  }}
+                  onBlur={() => {
+                    // Delay hiding to allow click on results
+                    setTimeout(() => {
+                      setPodsShowSearchResults(false);
+                      setPodsHighlightedIndex(-1);
+                    }, 200);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setPodsHighlightedIndex(prev => 
+                        prev < podsFilteredSecurities.length - 1 ? prev + 1 : prev
+                      );
+                      setPodsShowSearchResults(true);
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setPodsHighlightedIndex(prev => prev > 0 ? prev - 1 : -1);
+                    } else if (e.key === 'Enter' && podsHighlightedIndex >= 0) {
+                      e.preventDefault();
+                      const selected = podsFilteredSecurities[podsHighlightedIndex];
+                      if (selected) {
+                        handlePodsSecuritySelect(selected);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setPodsShowSearchResults(false);
+                      setPodsSearchQuery('');
+                      podsSearchInputRef.current?.blur();
+                    }
+                  }}
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-none bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 w-full"
+                />
+                {podsShowSearchResults && podsFilteredSecurities.length > 0 && (
+                  <div
+                    className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-lg max-h-60 overflow-y-auto"
+                    style={{ top: '100%' }}
+                  >
+                    {podsFilteredSecurities.map((security, index) => (
+                      <div
+                        key={security.ticker}
+                        onClick={() => handlePodsSecuritySelect(security)}
+                        className={`px-3 py-2 cursor-pointer text-sm ${
+                          index === podsHighlightedIndex
+                            ? 'bg-blue-100 dark:bg-blue-900/30'
+                            : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                        onMouseEnter={() => setPodsHighlightedIndex(index)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold dark:text-white">{security.ticker}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-500 ml-2">
+                            {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                          {security.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected Security Display (Placeholder for future calculation) */}
+              {podsSelectedSecurity && (
+                <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <Text className="text-sm font-semibold dark:text-white mb-2">
+                    Selected Security
+                  </Text>
+                  <Text className="text-sm dark:text-gray-300">
+                    <strong>Ticker:</strong> {podsSelectedSecurity.ticker}
+                  </Text>
+                  <Text className="text-sm dark:text-gray-300">
+                    <strong>Name:</strong> {podsSelectedSecurity.name}
+                  </Text>
+                  <Text className="text-sm dark:text-gray-300">
+                    <strong>Asset Class:</strong> {ASSET_CLASS_NAMES[podsSelectedSecurity.assetClass] || podsSelectedSecurity.assetClass}
+                  </Text>
+                  <Text className="text-sm dark:text-gray-400 mt-2 italic">
+                    Calculation will appear here based on 3 factors
+                  </Text>
+                </div>
+              )}
             </div>
           </>
         )}

@@ -12,7 +12,7 @@ export class PresignedUploadService {
     try {
       // Step 1: Get presigned URL from backend
       // Use full URL to bypass proxy issues
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3000';
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 
       console.log('🔍 DEBUG: Starting CSV upload');
       console.log('🔍 DEBUG: Backend URL:', backendUrl);

@@ -7,7 +7,9 @@ const AWS = require('aws-sdk');
 const axios = require('axios');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// In development, use port 3001 so React dev server can use 3000
+// In production, use port 3000 (or PORT env var)
+const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 3000 : 3001);
 
 // Configure AWS
 AWS.config.update({
@@ -46,8 +48,11 @@ async function validateAWSCredentials() {
 }
 
 // Middleware
+// CORS: Allow React dev server (port 3000) in development, or same origin in production
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  origin: process.env.NODE_ENV === 'production' 
+    ? false // Same origin in production (Express serves static files)
+    : ['http://localhost:3000', 'http://127.0.0.1:3000'], // React dev server in development
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -1433,14 +1438,21 @@ app.post('/api/presigned-url', async (req, res) => {
   }
 });
 
-// Serve static files (both production and development)
-app.use(express.static(path.join(__dirname, 'build')));
+// Serve static files only in production
+// In development, React dev server handles frontend (run separately on port 3000)
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'build')));
 
-// Serve React app for all non-API routes (must be last route)
-// Use a function-based route matcher for Express 5 compatibility
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, 'build', 'index.html'));
-});
+  // Serve React app for all non-API routes (must be last route)
+  // Use a function-based route matcher for Express 5 compatibility
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(__dirname, 'build', 'index.html'));
+  });
+} else {
+  // In development, log that React dev server should be running separately
+  console.log('📝 Development mode: React dev server should run separately on port 3000');
+  console.log('   Start it with: npm start');
+}
 
 // Start HTTP server first so we can attach WebSocket server to it
 const server = app.listen(PORT, async () => {

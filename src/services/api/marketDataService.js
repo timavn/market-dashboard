@@ -4,7 +4,7 @@ import { PortfolioAnalytics } from '../portfolioAnalytics';
 
 // Create axios instance with default config
 // Use full URL to bypass proxy issues in development
-const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3000';
+const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 const apiClient = axios.create({
   baseURL: backendUrl,
   timeout: 60000, // 60 seconds - increased for large quote requests (111 symbols)
