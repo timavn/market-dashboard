@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, Metric, Text, Grid, Title, Button, Badge } from '@tremor/react';
+import ReactMarkdown from 'react-markdown';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
 import CSVUpload from '../CSVUpload';
@@ -7,6 +8,7 @@ import USDMacroDashboard from './USDMacroDashboard';
 import SecuritiesList from './SecuritiesList';
 import ResizableBottomPanels from './ResizableBottomPanels';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
+import { bookContent } from '../../constants/bookContent';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -19,6 +21,18 @@ const PortfolioDashboard = () => {
   const [securitiesExpanded, setSecuritiesExpanded] = useState(false);
   const [securitiesFullWidth, setSecuritiesFullWidth] = useState(false);
   const [peaPodImageError, setPeaPodImageError] = useState(false);
+  const [bookImageError, setBookImageError] = useState(false);
+  const [showBookMenu, setShowBookMenu] = useState(false);
+  const [showBookModal, setShowBookModal] = useState(false);
+  const [selectedBookContent, setSelectedBookContent] = useState(null);
+  const [selectedBookTitle, setSelectedBookTitle] = useState('');
+  const [bookMenuPosition, setBookMenuPosition] = useState({ top: 0, right: 0 });
+  const bookMenuRef = useRef(null);
+  const bookPopoverRef = useRef(null);
+  
+  // Tag navigation state
+  const [selectedTag, setSelectedTag] = useState(null);
+  const bookContentRef = useRef(null);
   
   // The Pods search state
   const [podsSearchQuery, setPodsSearchQuery] = useState('');
@@ -82,6 +96,177 @@ const PortfolioDashboard = () => {
       window.removeEventListener('portfolioRefresh', handlePortfolioRefresh);
     };
   }, []);
+
+  // Handle clicks outside book menu
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      const clickedButton = bookMenuRef.current && bookMenuRef.current.contains(e.target);
+      const clickedPopover = bookPopoverRef.current && bookPopoverRef.current.contains(e.target);
+      if (!clickedButton && !clickedPopover) {
+        setShowBookMenu(false);
+      }
+    };
+    if (showBookMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showBookMenu]);
+
+  // Calculate popover position when menu opens
+  useEffect(() => {
+    if (showBookMenu && bookMenuRef.current) {
+      const buttonRect = bookMenuRef.current.getBoundingClientRect();
+      setBookMenuPosition({
+        top: buttonRect.top,
+        right: window.innerWidth - buttonRect.left + 8, // Position to the left with 8px margin
+      });
+    }
+  }, [showBookMenu]);
+
+  // Book/Notes file configuration
+  const bookFiles = [
+    { name: 'The Coach', path: 'main/The Coach.md' },
+    { name: 'The Process', path: 'main/The Process.md' }
+  ];
+
+  const openBookFile = (fileName) => {
+    const content = bookContent[fileName];
+    if (content) {
+      setSelectedBookContent(content);
+      setSelectedBookTitle(fileName);
+      setShowBookModal(true);
+      setShowBookMenu(false);
+      setSelectedTag(null); // Reset selected tag when opening new file
+    } else {
+      console.error('Book content not found:', fileName);
+    }
+  };
+
+  // Extract all unique tags from content
+  const extractTags = (content) => {
+    if (!content) return [];
+    const tagRegex = /#(\w+)/g;
+    const matches = content.match(tagRegex);
+    if (!matches) return [];
+    const uniqueTags = [...new Set(matches.map(tag => tag.substring(1)))]; // Remove # prefix
+    return uniqueTags.sort();
+  };
+
+  // Parse content into sections and map tags to sections
+  const parseContentSections = (content) => {
+    if (!content) return { sections: [], tagMap: {} };
+    
+    const lines = content.split('\n');
+    const sections = [];
+    const tagMap = {};
+    let currentSection = null;
+    let currentSectionIndex = 0;
+    
+    lines.forEach((line, index) => {
+      // Check if line is a heading
+      const h2Match = line.match(/^## (.+)$/);
+      const h3Match = line.match(/^### (.+)$/);
+      const h4Match = line.match(/^#### (.+)$/);
+      
+      if (h2Match || h3Match || h4Match) {
+        // Save previous section if exists
+        if (currentSection) {
+          sections.push(currentSection);
+        }
+        
+        // Start new section
+        const title = h2Match ? h2Match[1] : (h3Match ? h3Match[1] : h4Match[1]);
+        const sectionId = `section-${currentSectionIndex}`;
+        currentSection = {
+          id: sectionId,
+          title: title.trim(),
+          level: h2Match ? 2 : (h3Match ? 3 : 4),
+          startLine: index,
+          content: line + '\n',
+          tags: []
+        };
+        currentSectionIndex++;
+      } else if (currentSection) {
+        // Add line to current section
+        currentSection.content += line + '\n';
+        
+        // Extract tags from this line
+        const tagRegex = /#(\w+)/g;
+        const matches = line.match(tagRegex);
+        if (matches) {
+          matches.forEach(tag => {
+            const tagName = tag.substring(1);
+            if (!currentSection.tags.includes(tagName)) {
+              currentSection.tags.push(tagName);
+            }
+            if (!tagMap[tagName]) {
+              tagMap[tagName] = [];
+            }
+            if (!tagMap[tagName].find(s => s.id === currentSection.id)) {
+              tagMap[tagName].push({
+                id: currentSection.id,
+                title: currentSection.title,
+                level: currentSection.level,
+                snippet: line.substring(0, 100).trim() // First 100 chars as snippet
+              });
+            }
+          });
+        }
+      }
+    });
+    
+    // Add last section
+    if (currentSection) {
+      sections.push(currentSection);
+    }
+    
+    return { sections, tagMap };
+  };
+
+  // Count total occurrences of each tag
+  const countTagOccurrences = (content, tagName) => {
+    if (!content) return 0;
+    const tagRegex = new RegExp(`#${tagName}\\b`, 'g');
+    const matches = content.match(tagRegex);
+    return matches ? matches.length : 0;
+  };
+
+  // Memoize tags and sections parsing
+  const { tags, sections, tagSectionsMap, tagCounts } = useMemo(() => {
+    if (!selectedBookContent) {
+      return { tags: [], sections: [], tagSectionsMap: {}, tagCounts: {} };
+    }
+    const extractedTags = extractTags(selectedBookContent);
+    const { sections: parsedSections, tagMap } = parseContentSections(selectedBookContent);
+    
+    // Count total occurrences for each tag
+    const counts = {};
+    extractedTags.forEach(tag => {
+      counts[tag] = countTagOccurrences(selectedBookContent, tag);
+    });
+    
+    return {
+      tags: extractedTags,
+      sections: parsedSections,
+      tagSectionsMap: tagMap,
+      tagCounts: counts
+    };
+  }, [selectedBookContent]);
+
+  // Scroll to section
+  const scrollToSection = (sectionId) => {
+    if (bookContentRef.current) {
+      const element = bookContentRef.current.querySelector(`#${sectionId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Highlight briefly
+        element.style.backgroundColor = theme === 'dark' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)';
+        setTimeout(() => {
+          element.style.backgroundColor = 'transparent';
+        }, 2000);
+      }
+    }
+  };
 
   // Default zeroed data - will be replaced with Schwab portfolio data
   const defaultData = {
@@ -473,6 +658,75 @@ const PortfolioDashboard = () => {
               />
             )}
           </Button>
+
+          {/* Book/Notes Button */}
+          <Button
+            ref={bookMenuRef}
+            onClick={() => setShowBookMenu(!showBookMenu)}
+            variant="secondary"
+            size="sm"
+            className="shadow-sm w-full mt-2"
+            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            title="Open Notes"
+          >
+            {bookImageError ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M4 6 L12 4 L12 20 L4 18 Z M12 4 L20 6 L20 18 L12 20 Z"/>
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/book.png" 
+                alt="Open Notes" 
+                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                onError={() => setBookImageError(true)}
+              />
+            )}
+          </Button>
+          
+          {/* Popover Menu */}
+          {showBookMenu && (
+            <div
+              ref={bookPopoverRef}
+              style={{
+                position: 'fixed',
+                top: `${bookMenuPosition.top}px`,
+                right: `${bookMenuPosition.right}px`,
+                minWidth: '180px',
+                backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
+                border: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                borderRadius: '0.375rem',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                zIndex: 1000,
+                padding: '4px 0',
+              }}
+            >
+              {bookFiles.map((file, index) => (
+                <button
+                  key={index}
+                  onClick={() => openBookFile(file.name)}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                  className="hover:bg-gray-100 dark:hover:bg-gray-700"
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  {file.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Collapsed "Portfolio" Text - Vertical and Centered */}
@@ -715,6 +969,480 @@ const PortfolioDashboard = () => {
           </>
         )}
       </div>
+
+      {/* Book/Notes Modal */}
+      {showBookModal && selectedBookContent && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={() => {
+            setShowBookModal(false);
+            setSelectedTag(null);
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
+              borderRadius: '0.5rem',
+              width: '90%',
+              maxWidth: selectedTag ? '1400px' : '1200px',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'row',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              transition: 'max-width 0.3s ease-in-out',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Left Sidebar - Tag Navigation */}
+            {selectedTag && tagSectionsMap[selectedTag] && (
+              <div
+                style={{
+                  width: '250px',
+                  borderRight: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  backgroundColor: theme === 'dark' ? '#111827' : '#f9fafb',
+                  transition: 'width 0.3s ease-in-out',
+                }}
+              >
+                {/* Sidebar Header */}
+                <div
+                  style={{
+                    padding: '16px',
+                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                      margin: 0,
+                    }}
+                  >
+                    #{selectedTag}
+                  </Text>
+                  <Button
+                    onClick={() => setSelectedTag(null)}
+                    variant="secondary"
+                    size="sm"
+                    style={{ minWidth: '24px', height: '24px', padding: '0', fontSize: '14px' }}
+                  >
+                    ✕
+                  </Button>
+                </div>
+                
+                {/* Sections List */}
+                <div
+                  style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: '8px',
+                  }}
+                >
+                  {tagSectionsMap[selectedTag].map((section, index) => (
+                    <div
+                      key={section.id}
+                      onClick={() => scrollToSection(section.id)}
+                      style={{
+                        padding: '12px',
+                        marginBottom: '8px',
+                        borderRadius: '0.375rem',
+                        cursor: 'pointer',
+                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
+                        border: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                        transition: 'all 0.2s ease-in-out',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
+                        e.currentTarget.style.borderColor = theme === 'dark' ? '#4b5563' : '#d1d5db';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1f2937' : '#ffffff';
+                        e.currentTarget.style.borderColor = theme === 'dark' ? '#374151' : '#e5e7eb';
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: section.level === 2 ? '14px' : '13px',
+                          fontWeight: section.level === 2 ? 600 : 500,
+                          color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                          marginBottom: '4px',
+                        }}
+                      >
+                        {section.title}
+                      </div>
+                      {section.snippet && (
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: theme === 'dark' ? '#9ca3af' : '#6b7280',
+                            lineHeight: '1.4',
+                            marginTop: '4px',
+                          }}
+                        >
+                          {section.snippet}...
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Main Content Area */}
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minWidth: 0, // Allow flexbox to shrink
+              }}
+            >
+              {/* Modal Header */}
+              <div
+                style={{
+                  padding: '20px',
+                  borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Title
+                  style={{
+                    fontSize: '24px',
+                    fontWeight: 700,
+                    margin: 0,
+                    color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                  }}
+                >
+                  {selectedBookTitle}
+                </Title>
+                <Button
+                  onClick={() => {
+                    setShowBookModal(false);
+                    setSelectedTag(null);
+                  }}
+                  variant="secondary"
+                  size="sm"
+                  style={{ minWidth: '32px', height: '32px', padding: '0' }}
+                >
+                  ✕
+                </Button>
+              </div>
+
+              {/* Tag Bar */}
+              {tags.length > 0 && (
+                <div
+                  style={{
+                    padding: '12px 20px',
+                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    backgroundColor: theme === 'dark' ? '#111827' : '#f9fafb',
+                  }}
+                >
+                  {tags.map((tag) => {
+                    const count = tagCounts[tag] || 0;
+                    const isActive = selectedTag === tag;
+                    return (
+                      <button
+                        key={tag}
+                        onClick={() => setSelectedTag(isActive ? null : tag)}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          borderRadius: '0.375rem',
+                          border: `1px solid ${isActive 
+                            ? (theme === 'dark' ? '#3b82f6' : '#2563eb')
+                            : (theme === 'dark' ? '#374151' : '#d1d5db')
+                          }`,
+                          backgroundColor: isActive
+                            ? (theme === 'dark' ? '#1e3a8a' : '#dbeafe')
+                            : (theme === 'dark' ? '#1f2937' : '#ffffff'),
+                          color: isActive
+                            ? (theme === 'dark' ? '#93c5fd' : '#1e40af')
+                            : (theme === 'dark' ? '#f3f4f6' : '#111827'),
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease-in-out',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isActive) {
+                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
+                            e.currentTarget.style.borderColor = theme === 'dark' ? '#4b5563' : '#9ca3af';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isActive) {
+                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1f2937' : '#ffffff';
+                            e.currentTarget.style.borderColor = theme === 'dark' ? '#374151' : '#d1d5db';
+                          }
+                        }}
+                      >
+                        <span>#{tag}</span>
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            opacity: 0.7,
+                            padding: '2px 6px',
+                            borderRadius: '0.25rem',
+                            backgroundColor: isActive
+                              ? (theme === 'dark' ? 'rgba(147, 197, 253, 0.2)' : 'rgba(30, 64, 175, 0.2)')
+                              : (theme === 'dark' ? 'rgba(156, 163, 175, 0.2)' : 'rgba(107, 114, 128, 0.2)'),
+                          }}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Modal Content */}
+              <div
+                ref={bookContentRef}
+                style={{
+                  padding: '24px',
+                  overflowY: 'auto',
+                  flex: 1,
+                  color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                  lineHeight: '1.6',
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                }}
+              >
+                <ReactMarkdown
+                  components={{
+                    h2: ({ node, children, ...props }) => {
+                      const text = String(children);
+                      const section = sections.find(s => s.title === text.trim() && s.level === 2);
+                      return (
+                        <h2
+                          id={section?.id || undefined}
+                          style={{
+                            fontSize: '1.5rem',
+                            fontWeight: 700,
+                            marginTop: '2rem',
+                            marginBottom: '1rem',
+                            borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                            paddingBottom: '0.5rem',
+                            color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                          }}
+                          {...props}
+                        >
+                          {children}
+                        </h2>
+                      );
+                    },
+                    h3: ({ node, children, ...props }) => {
+                      const text = String(children);
+                      const section = sections.find(s => s.title === text.trim() && s.level === 3);
+                      return (
+                        <h3
+                          id={section?.id || undefined}
+                          style={{
+                            fontSize: '1.25rem',
+                            fontWeight: 600,
+                            marginTop: '1.5rem',
+                            marginBottom: '0.75rem',
+                            color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                          }}
+                          {...props}
+                        >
+                          {children}
+                        </h3>
+                      );
+                    },
+                    h4: ({ node, children, ...props }) => {
+                      const text = String(children);
+                      const section = sections.find(s => s.title === text.trim() && s.level === 4);
+                      return (
+                        <h4
+                          id={section?.id || undefined}
+                          style={{
+                            fontSize: '1.1rem',
+                            fontWeight: 600,
+                            marginTop: '1.25rem',
+                            marginBottom: '0.75rem',
+                            color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                          }}
+                          {...props}
+                        >
+                          {children}
+                        </h4>
+                      );
+                    },
+                    p: ({ node, children, ...props }) => (
+                      <p
+                        style={{
+                          marginBottom: '1rem',
+                          color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                        }}
+                        {...props}
+                      >
+                        {children}
+                      </p>
+                    ),
+                    strong: ({ node, children, ...props }) => (
+                      <strong style={{ fontWeight: 700 }} {...props}>
+                        {children}
+                      </strong>
+                    ),
+                    em: ({ node, children, ...props }) => (
+                      <em style={{ fontStyle: 'italic' }} {...props}>
+                        {children}
+                      </em>
+                    ),
+                    hr: ({ node, ...props }) => (
+                      <hr
+                        style={{
+                          margin: '1.5rem 0',
+                          border: 'none',
+                          borderTop: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                        }}
+                        {...props}
+                      />
+                    ),
+                    ul: ({ node, children, ...props }) => (
+                      <ul
+                        style={{
+                          marginBottom: '1rem',
+                          paddingLeft: '1.5rem',
+                          listStyleType: 'disc',
+                        }}
+                        {...props}
+                      >
+                        {children}
+                      </ul>
+                    ),
+                    ol: ({ node, children, ...props }) => (
+                      <ol
+                        style={{
+                          marginBottom: '1rem',
+                          paddingLeft: '1.5rem',
+                          listStyleType: 'decimal',
+                        }}
+                        {...props}
+                      >
+                        {children}
+                      </ol>
+                    ),
+                    li: ({ node, children, ...props }) => (
+                      <li
+                        style={{
+                          marginBottom: '0.5rem',
+                          color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                        }}
+                        {...props}
+                      >
+                        {children}
+                      </li>
+                    ),
+                  }}
+                >
+                  {selectedBookContent}
+                </ReactMarkdown>
+              </div>
+            </div>
+
+            {/* Right Sidebar - Table of Contents */}
+            {sections.length > 0 && (
+              <div
+                style={{
+                  width: '220px',
+                  borderLeft: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  backgroundColor: theme === 'dark' ? '#111827' : '#f9fafb',
+                  transition: 'width 0.3s ease-in-out',
+                }}
+              >
+                {/* TOC Header */}
+                <div
+                  style={{
+                    padding: '16px',
+                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                      margin: 0,
+                    }}
+                  >
+                    Table of Contents
+                  </Text>
+                </div>
+                
+                {/* TOC List */}
+                <div
+                  style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: '12px 8px',
+                  }}
+                >
+                  {sections.map((section, index) => {
+                    const indent = section.level === 2 ? 0 : section.level === 3 ? 16 : 32;
+                    return (
+                      <div
+                        key={section.id}
+                        onClick={() => scrollToSection(section.id)}
+                        style={{
+                          padding: '8px 12px',
+                          paddingLeft: `${12 + indent}px`,
+                          marginBottom: '4px',
+                          borderRadius: '0.375rem',
+                          cursor: 'pointer',
+                          backgroundColor: 'transparent',
+                          transition: 'all 0.2s ease-in-out',
+                          fontSize: section.level === 2 ? '13px' : section.level === 3 ? '12px' : '11px',
+                          fontWeight: section.level === 2 ? 600 : section.level === 3 ? 500 : 400,
+                          color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                          borderLeft: section.level === 2 
+                            ? `2px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`
+                            : 'none',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }}
+                      >
+                        {section.title}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Resizable Bottom Panels */}
       <ResizableBottomPanels 
