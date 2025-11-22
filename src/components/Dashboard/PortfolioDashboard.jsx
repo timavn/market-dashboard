@@ -126,7 +126,8 @@ const PortfolioDashboard = () => {
   // Book/Notes file configuration
   const bookFiles = [
     { name: 'The Coach', path: 'main/The Coach.md' },
-    { name: 'The Process', path: 'main/The Process.md' }
+    { name: 'The Process', path: 'main/The Process.md' },
+    { name: 'The Playbook', path: 'main/The Playbook.md' }
   ];
 
   const openBookFile = (fileName) => {
@@ -943,6 +944,78 @@ const PortfolioDashboard = () => {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* POD Calculations */}
+              <div 
+                className="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                style={{ width: '100%', maxWidth: '400px' }}
+              >
+                <Text className="text-sm font-semibold dark:text-white mb-4">
+                  POD Calculations
+                </Text>
+                
+                <div className="space-y-4">
+                  {/* POD1 */}
+                  <div className="p-3 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <Text className="text-sm font-semibold dark:text-white">
+                        POD1
+                      </Text>
+                      <Badge color="blue" size="sm">
+                        Revenue
+                      </Badge>
+                    </div>
+                    <Text className="text-xs text-gray-600 dark:text-gray-400">
+                      #roc of REVENUE Growth
+                    </Text>
+                    <div className="mt-2">
+                      <Text className="text-lg font-bold dark:text-white">
+                        {podsSelectedSecurity ? '--' : '--'}
+                      </Text>
+                    </div>
+                  </div>
+
+                  {/* POD2 */}
+                  <div className="p-3 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <Text className="text-sm font-semibold dark:text-white">
+                        POD2
+                      </Text>
+                      <Badge color="emerald" size="sm">
+                        EBITDA/EPS
+                      </Badge>
+                    </div>
+                    <Text className="text-xs text-gray-600 dark:text-gray-400">
+                      #roc of EBITDA or EPS Growth
+                    </Text>
+                    <div className="mt-2">
+                      <Text className="text-lg font-bold dark:text-white">
+                        {podsSelectedSecurity ? '--' : '--'}
+                      </Text>
+                    </div>
+                  </div>
+
+                  {/* POD3 */}
+                  <div className="p-3 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <Text className="text-sm font-semibold dark:text-white">
+                        POD3
+                      </Text>
+                      <Badge color="purple" size="sm">
+                        FCF
+                      </Badge>
+                    </div>
+                    <Text className="text-xs text-gray-600 dark:text-gray-400">
+                      #roc of FCF (Free Cash Flow) Growth
+                    </Text>
+                    <div className="mt-2">
+                      <Text className="text-lg font-bold dark:text-white">
+                        {podsSelectedSecurity ? '--' : '--'}
+                      </Text>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Selected Security Display (Placeholder for future calculation) */}
