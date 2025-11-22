@@ -17,7 +17,14 @@ const VolatilityPanel = () => {
     dayOverDay: { percent: 0.00, bps: 0 },
     weekOverWeek: { percent: 0.00, bps: 0 },
     monthOverMonth: { percent: 0.00, bps: 0 },
-    yearOverYear: { percent: 0.00, bps: 0 }
+    threeMonthOverMonth: { percent: 0.00, bps: 0 },
+    sixMonthOverMonth: { percent: 0.00, bps: 0 },
+    yearOverYear: { percent: 0.00, bps: 0 },
+    si: 0.00, // Short Interest
+    hhhl: '--', // Higher High / Higher Low
+    lhll: '--', // Lower High / Lower Low
+    vol: 0.00, // Volatility indicator value
+    volTicker: 'VIX' // Volatility ticker name
   });
 
   const volatilityOptions = [
@@ -37,6 +44,14 @@ const VolatilityPanel = () => {
     { value: '6M', label: '6M' },
     { value: '1Y', label: '1Y' }
   ];
+
+  // Update volTicker when selectedVolatility changes
+  useEffect(() => {
+    setMetrics(prev => ({
+      ...prev,
+      volTicker: selectedVolatility
+    }));
+  }, [selectedVolatility]);
 
   // Fetch VIX data and generate chart data
   useEffect(() => {
@@ -119,6 +134,8 @@ const VolatilityPanel = () => {
     const previous = data.length > 1 ? data[data.length - 2] : latest;
     const weekAgo = data.length >= 7 ? data[Math.max(0, data.length - 7)] : latest;
     const monthAgo = data.length >= 30 ? data[Math.max(0, data.length - 30)] : latest;
+    const threeMonthAgo = data.length >= 90 ? data[Math.max(0, data.length - 90)] : latest;
+    const sixMonthAgo = data.length >= 180 ? data[Math.max(0, data.length - 180)] : latest;
     const yearAgo = data.length >= 365 ? data[Math.max(0, data.length - 365)] : latest;
 
     const current = latest.value;
@@ -135,9 +152,12 @@ const VolatilityPanel = () => {
     const dayOverDay = calculateChange(current, closing);
     const weekOverWeek = calculateChange(current, weekAgo.value);
     const monthOverMonth = calculateChange(current, monthAgo.value);
+    const threeMonthOverMonth = calculateChange(current, threeMonthAgo.value);
+    const sixMonthOverMonth = calculateChange(current, sixMonthAgo.value);
     const yearOverYear = calculateChange(current, yearAgo.value);
 
-    setMetrics({
+    setMetrics(prev => ({
+      ...prev,
       closing: parseFloat(closing.toFixed(2)),
       current: parseFloat(current.toFixed(2)),
       lrr: 0.00, // Placeholder - lower risk range
@@ -145,13 +165,17 @@ const VolatilityPanel = () => {
       dayOverDay,
       weekOverWeek,
       monthOverMonth,
-      yearOverYear
-    });
+      threeMonthOverMonth,
+      sixMonthOverMonth,
+      yearOverYear,
+      vol: parseFloat(current.toFixed(2)), // Current volatility value
+      volTicker: selectedVolatility // Current volatility ticker
+    }));
   };
 
   const formatMetricValue = (value, percent, bps) => {
     const sign = percent >= 0 ? '+' : '';
-    return `${sign}${percent}% (${sign}${bps} bps)`;
+    return `${sign}${percent.toFixed(2)}%`;
   };
 
   const getChangeColor = (percent) => {
@@ -202,7 +226,7 @@ const VolatilityPanel = () => {
   };
 
   return (
-    <Card className="p-2 dark:bg-gray-800">
+    <Card className="p-2 dark:bg-gray-800" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Top Controls Row */}
       <Flex className="mb-2 gap-2" justifyContent="between" alignItems="center">
         <div className="flex items-center gap-2">
@@ -239,19 +263,66 @@ const VolatilityPanel = () => {
         </div>
       </Flex>
 
-      {/* Small Legend Above Chart */}
-      <div className="flex items-center gap-3 mb-1 text-xs">
+      {/* Time Period Metrics Above Chart */}
+      <Flex className="flex-wrap gap-2 mb-1 text-xs dark:text-white">
         <div className="flex items-center gap-1">
-          <div 
-            className="w-4 h-0.5" 
-            style={{ backgroundColor: getVolatilityColor(metrics.current || 18) }}
-          ></div>
-          <Text className="dark:text-gray-300">{selectedVolatility}</Text>
+          <Text className="font-semibold dark:text-white">D/D:</Text>
+          <Badge 
+            color={getChangeColor(metrics.dayOverDay.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.dayOverDay.percent, metrics.dayOverDay.bps)}
+          </Badge>
         </div>
-      </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">W/W:</Text>
+          <Badge 
+            color={getChangeColor(metrics.weekOverWeek.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.weekOverWeek.percent, metrics.weekOverWeek.bps)}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">M/M:</Text>
+          <Badge 
+            color={getChangeColor(metrics.monthOverMonth.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.monthOverMonth.percent, metrics.monthOverMonth.bps)}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">3M:</Text>
+          <Badge 
+            color={getChangeColor(metrics.threeMonthOverMonth.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.threeMonthOverMonth.percent, metrics.threeMonthOverMonth.bps)}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">6M:</Text>
+          <Badge 
+            color={getChangeColor(metrics.sixMonthOverMonth.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.sixMonthOverMonth.percent, metrics.sixMonthOverMonth.bps)}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">Y/Y:</Text>
+          <Badge 
+            color={getChangeColor(metrics.yearOverYear.percent)} 
+            size="xs"
+          >
+            {formatMetricValue(metrics.current, metrics.yearOverYear.percent, metrics.yearOverYear.bps)}
+          </Badge>
+        </div>
+      </Flex>
 
       {/* Chart Area */}
-      <div className="h-64 mb-1 dark:text-white">
+      <div className="flex-1 dark:text-white" style={{ minHeight: 0 }}>
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent"></div>
@@ -318,40 +389,22 @@ const VolatilityPanel = () => {
           <Text className="dark:text-gray-300">{metrics.trr.toFixed(2)}</Text>
         </div>
         <div className="flex items-center gap-1">
-          <Text className="font-semibold dark:text-white">D/D:</Text>
-          <Badge 
-            color={getChangeColor(metrics.dayOverDay.percent)} 
-            size="xs"
-          >
-            {formatMetricValue(metrics.current, metrics.dayOverDay.percent, metrics.dayOverDay.bps)}
-          </Badge>
+          <Text className="font-semibold dark:text-white">SI:</Text>
+          <Text className="dark:text-gray-300">{typeof metrics.si === 'number' ? metrics.si.toFixed(2) : metrics.si}</Text>
         </div>
         <div className="flex items-center gap-1">
-          <Text className="font-semibold dark:text-white">W/W:</Text>
-          <Badge 
-            color={getChangeColor(metrics.weekOverWeek.percent)} 
-            size="xs"
-          >
-            {formatMetricValue(metrics.current, metrics.weekOverWeek.percent, metrics.weekOverWeek.bps)}
-          </Badge>
+          <Text className="font-semibold dark:text-white">HH/HL:</Text>
+          <Text className="dark:text-gray-300">{metrics.hhhl}</Text>
         </div>
         <div className="flex items-center gap-1">
-          <Text className="font-semibold dark:text-white">M/M:</Text>
-          <Badge 
-            color={getChangeColor(metrics.monthOverMonth.percent)} 
-            size="xs"
-          >
-            {formatMetricValue(metrics.current, metrics.monthOverMonth.percent, metrics.monthOverMonth.bps)}
-          </Badge>
+          <Text className="font-semibold dark:text-white">LH/LL:</Text>
+          <Text className="dark:text-gray-300">{metrics.lhll}</Text>
         </div>
         <div className="flex items-center gap-1">
-          <Text className="font-semibold dark:text-white">Y/Y:</Text>
-          <Badge 
-            color={getChangeColor(metrics.yearOverYear.percent)} 
-            size="xs"
-          >
-            {formatMetricValue(metrics.current, metrics.yearOverYear.percent, metrics.yearOverYear.bps)}
-          </Badge>
+          <Text className="font-semibold dark:text-white">Vol={metrics.volTicker}:</Text>
+          <Text className="dark:text-gray-300">
+            {typeof metrics.vol === 'number' ? metrics.vol.toFixed(2) : '--'}
+          </Text>
         </div>
       </Flex>
     </Card>

@@ -3,7 +3,7 @@ import { Title } from '@tremor/react';
 import VolatilityPanel from './VolatilityPanel';
 import VolumePanel from './VolumePanel';
 
-const COLLAPSED_HEIGHT = 40; // Height when collapsed (shows label only) - reduced by 33%
+const COLLAPSED_HEIGHT = 30; // Height when collapsed (shows label only) - 25% thinner than original 40px
 const EXPANDED_HEIGHT = 500; // Height when expanded (25% taller than 400px)
 
 const ResizableBottomPanels = ({ 
@@ -73,7 +73,7 @@ const ResizableBottomPanels = ({
             {/* Header with Centered Title (Clickable to Collapse) */}
             <div
               style={{
-                padding: '12px 16px',
+                padding: '4px 16px',
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
@@ -203,7 +203,7 @@ const ResizableBottomPanels = ({
             {/* Header with Centered Title (Clickable to Collapse) */}
             <div
               style={{
-                padding: '12px 16px',
+                padding: '4px 16px',
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
