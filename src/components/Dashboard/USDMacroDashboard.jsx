@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Title, Text } from '@tremor/react';
+import { Card, Title, Text, Badge } from '@tremor/react';
 import USDProxies from './USDProxies';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
 import USQuadChart from './USQuadChart';
 import WelcomeToTheMachine from './WelcomeToTheMachine';
 import StaticMetricBar from './StaticMetricBar';
 import DailyNotepad from './DailyNotepad';
+import StyleFactorTable from './StyleFactorTable';
 import { USDMarketService } from '../../services/api/usdMarketService';
 import { REFRESH_INTERVALS } from '../../constants/usdMarket';
 
@@ -104,6 +105,11 @@ const USDMacroDashboard = () => {
                   Placeholder for weekly portfolio summary including currency market review, signals, and positioning updates. 
                   Example: Global currency market analysis, position performance, and trend signals across major pairs.
                 </Text>
+              </div>
+              
+              {/* Factor Style Section */}
+              <div className="pt-3 border-t dark:border-gray-700">
+                <StyleFactorTable />
               </div>
             </div>
           </Card>

@@ -6,7 +6,6 @@ Runs daily after market close to update risk ranges
 """
 
 import json
-import boto3
 import os
 import re
 from datetime import datetime, timezone
@@ -15,23 +14,27 @@ from typing import Dict, Optional
 import requests
 from bs4 import BeautifulSoup
 
-# Try to import Firecrawl (preferred method)
-try:
-    from firecrawl import FirecrawlApp
-    FIRECRAWL_AVAILABLE = True
-except ImportError:
-    FIRECRAWL_AVAILABLE = False
-    print("Firecrawl not available, falling back to Playwright or requests")
+# Import boto3 from Lambda runtime, not from package
+# Lambda runtime has boto3 pre-installed, so we don't include it in the package
+# If boto3 is in the package, Python will import it from /var/task first
+# So we need to ensure it's removed from the package during build
+import boto3  # Will use runtime version if package version is removed
 
-# Try to import playwright for JavaScript-heavy pages (fallback)
+# Try to import playwright for JavaScript-heavy pages
 try:
     from playwright.sync_api import sync_playwright
     PLAYWRIGHT_AVAILABLE = True
-except ImportError:
+    print("✓ Playwright package is available")
+except ImportError as e:
     PLAYWRIGHT_AVAILABLE = False
-    print("Playwright not available, using requests only")
+    print(f"✗ Playwright not available: {e}")
+    print(f"  Import error details: {type(e).__name__}")
+    import traceback
+    traceback.print_exc()
+    print("  Falling back to requests only")
 
 # DynamoDB setup
+# boto3 is imported above from Lambda runtime
 dynamodb = boto3.resource('dynamodb')
 RISK_RANGE_TABLE = os.environ.get('RISK_RANGE_TABLE', 'RiskRangeData')
 
@@ -70,23 +73,23 @@ HEDGEYE_RISK_RANGE_URL = os.environ.get(
     'https://app.hedgeye.com/feed_items/all?page=1&with_category=33-risk-range-signals'
 )
 
-# Firecrawl API key
-FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY')
-
 # Ticker mapping from Hedgeye format to our ticker format
 # This maps Hedgeye's INDEX names to our ticker symbols
-# Will be expanded after running test_hedgeye_scraper.py to inspect actual page
+# NOTE: This mapping should be expanded after first successful scrape
+# to include all securities available on Hedgeye that match our SECURITIES_LIST
+# Current mappings verified against src/constants/securitiesList.js
 TICKER_MAPPING = {
-    'UST30Y': 'UST30Y',
-    'UST10Y': 'UST10Y',
-    'UST2Y': 'UST2Y',
-    'HYG': 'HYG',
-    'LQD': 'LQD',
-    'SPX': 'SPX',
-    'COMPQ': 'COMPQ',
-    'RUT': 'RUT',
-    # Add more mappings after inspecting actual page structure
-    # Run test_hedgeye_scraper.py to see all available securities
+    'UST30Y': 'UST30Y',  # 30-Year U.S. Treasury Yield
+    'UST10Y': 'UST10Y',  # 10-Year U.S. Treasury Yield
+    'UST2Y': 'UST2Y',    # 2-Year U.S. Treasury Yield
+    'HYG': 'HYG',        # High Yield Corporate Bonds
+    'LQD': 'LQD',        # Investment Grade Corporate Bonds
+    'SPX': 'SPX',        # S&P 500
+    'COMPQ': 'COMPQ',    # NASDAQ Composite
+    'RUT': 'RUT',        # Russell 2000
+    # TODO: Expand this mapping after first successful scrape
+    # Run the scraper and check CloudWatch logs to see all available Hedgeye INDEX names
+    # Then add mappings for all securities that exist in both Hedgeye and SECURITIES_LIST
 }
 
 def lambda_handler(event, context):
@@ -138,16 +141,7 @@ def scrape_hedgeye_risk_ranges() -> Dict[str, Dict]:
     Scrape risk range data from Hedgeye website
     Returns dict mapping ticker to {lrr: value, hrr: value, timestamp: iso}
     """
-    # Prefer Firecrawl if available and API key is set
-    if FIRECRAWL_AVAILABLE and FIRECRAWL_API_KEY:
-        try:
-            return scrape_with_firecrawl()
-        except Exception as e:
-            print(f"Firecrawl scraping failed: {e}")
-            print("Falling back to Playwright or requests...")
-            # Fall through to next method
-    
-    # Fallback to Playwright if available
+    # Use Playwright if available (handles login forms and JavaScript)
     if PLAYWRIGHT_AVAILABLE:
         try:
             return scrape_with_playwright()
@@ -156,134 +150,8 @@ def scrape_hedgeye_risk_ranges() -> Dict[str, Dict]:
             print("Falling back to requests...")
             # Fall through to requests
     
-    # Final fallback to requests
+    # Final fallback to requests (may fail due to bot protection)
     return scrape_with_requests()
-
-def scrape_with_firecrawl() -> Dict[str, Dict]:
-    """
-    Scrape using Firecrawl API (handles JavaScript rendering and authentication)
-    This is the preferred method as it's more reliable and easier to maintain
-    
-    Note: Firecrawl handles authentication through browser automation.
-    For protected pages, we can use Firecrawl's browser mode with form actions.
-    """
-    print("Using Firecrawl to scrape Hedgeye Risk Range Signals...")
-    
-    app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
-    risk_range_data = {}
-    
-    try:
-        # Firecrawl supports browser automation with actions
-        # We'll use the scrape method with browser options
-        print("Scraping with Firecrawl browser automation...")
-        
-        # Method 1: Try using Firecrawl's browser mode with actions
-        # Note: The exact API may vary, so we'll try multiple approaches
-        try:
-            # Firecrawl v0.0.16+ supports browser mode
-            scrape_result = app.scrape_url(
-                url=HEDGEYE_RISK_RANGE_URL,
-                params={
-                    'pageOptions': {
-                        'onlyMainContent': False,
-                        'waitFor': 5000,
-                    },
-                    'actions': [
-                        {
-                            'type': 'navigate',
-                            'url': HEDGEYE_LOGIN_URL
-                        },
-                        {
-                            'type': 'fill',
-                            'selector': 'input[name="user[email]"]',
-                            'value': HEDGEYE_EMAIL
-                        },
-                        {
-                            'type': 'fill',
-                            'selector': 'input[name="user[password]"]',
-                            'value': HEDGEYE_PASSWORD
-                        },
-                        {
-                            'type': 'click',
-                            'selector': 'button[type="submit"]'
-                        },
-                        {
-                            'type': 'wait',
-                            'milliseconds': 3000
-                        },
-                        {
-                            'type': 'navigate',
-                            'url': HEDGEYE_RISK_RANGE_URL
-                        },
-                        {
-                            'type': 'wait',
-                            'milliseconds': 5000
-                        }
-                    ]
-                }
-            )
-        except Exception as e1:
-            print(f"Method 1 failed: {e1}")
-            # Method 2: Simpler approach - just scrape the URL directly
-            # (This assumes Firecrawl can handle the authentication automatically
-            # or that we've set up cookies/session separately)
-            print("Trying simpler scrape method...")
-            scrape_result = app.scrape_url(
-                url=HEDGEYE_RISK_RANGE_URL,
-                params={
-                    'pageOptions': {
-                        'onlyMainContent': False,
-                        'waitFor': 10000,  # Wait longer for JS to render
-                    }
-                }
-            )
-        
-        # Extract HTML content from Firecrawl response
-        # Firecrawl returns different formats depending on the method
-        html_content = None
-        
-        if isinstance(scrape_result, dict):
-            # Check for HTML in various possible response formats
-            # Firecrawl may return data in 'data' field or directly in response
-            data = scrape_result.get('data', scrape_result)
-            if isinstance(data, dict):
-                html_content = (
-                    data.get('html') or 
-                    data.get('content') or
-                    data.get('markdown') or
-                    scrape_result.get('html') or
-                    scrape_result.get('content')
-                )
-            else:
-                html_content = data
-            
-            # If we got markdown, we can still parse it, but HTML is preferred
-            if scrape_result.get('markdown') and not html_content:
-                print("Warning: Received markdown instead of HTML, parsing may be limited")
-                html_content = scrape_result['markdown']
-        elif isinstance(scrape_result, str):
-            html_content = scrape_result
-        
-        if not html_content:
-            raise Exception("No HTML content received from Firecrawl")
-        
-        # Parse the HTML content
-        soup = BeautifulSoup(html_content, 'html.parser')
-        risk_range_data = parse_risk_range_table(soup)
-        
-        if not risk_range_data:
-            print("Warning: No data extracted from Firecrawl response")
-            print(f"Response keys: {list(scrape_result.keys()) if isinstance(scrape_result, dict) else 'N/A'}")
-        
-    except Exception as e:
-        print(f"Firecrawl scraping failed: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        print("Falling back to Playwright or requests...")
-        # Re-raise to trigger fallback in scrape_hedgeye_risk_ranges()
-        raise
-    
-    return risk_range_data
 
 def scrape_with_requests() -> Dict[str, Dict]:
     """
@@ -304,8 +172,25 @@ def scrape_with_requests() -> Dict[str, Dict]:
     
     # Step 1: Get login page to get CSRF token
     print("Fetching login page...")
-    login_page = session.get(HEDGEYE_LOGIN_URL)
-    login_page.raise_for_status()
+    print(f"Login URL: {HEDGEYE_LOGIN_URL}")
+    try:
+        login_page = session.get(HEDGEYE_LOGIN_URL, timeout=30)
+        login_page.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            error_msg = (
+                f"403 Forbidden when accessing Hedgeye login page. "
+                f"This usually means:\n"
+                f"  1. Hedgeye is blocking requests from AWS Lambda IPs\n"
+                f"  2. Hedgeye requires specific headers or cookies\n"
+                f"  3. Hedgeye has bot protection enabled\n\n"
+                f"Recommendation: Use Playwright instead (handles login forms and bot protection).\n"
+                f"Response headers: {dict(e.response.headers)}"
+            )
+            print(error_msg)
+            raise Exception(error_msg) from e
+        else:
+            raise
     
     soup = BeautifulSoup(login_page.text, 'html.parser')
     
@@ -362,11 +247,33 @@ def scrape_with_playwright() -> Dict[str, Dict]:
     """
     Scrape using Playwright (handles JavaScript-rendered content)
     """
+    # Set Playwright browser path for Lambda
+    # Playwright installs browsers to .local-browsers in a nested path
+    if not os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
+        package_dir = os.path.dirname(os.path.abspath(__file__))
+        # Try multiple possible browser locations
+        possible_paths = [
+            os.path.join(package_dir, 'playwright', 'driver', 'package', '.local-browsers'),
+            os.path.join(package_dir, '.local-browsers'),
+            os.path.join(package_dir, '.playwright'),
+        ]
+        for browsers_path in possible_paths:
+            if os.path.exists(browsers_path):
+                os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browsers_path
+                print(f"Found Playwright browsers at: {browsers_path}")
+                break
+        else:
+            print("Warning: Could not find Playwright browsers, using default path")
+    
     risk_range_data = {}
     
     with sync_playwright() as p:
-        # Launch browser
-        browser = p.chromium.launch(headless=True)
+        # Launch browser (use headless shell if available, otherwise regular headless)
+        try:
+            browser = p.chromium.launch(headless=True, args=['--single-process'])  # Single process saves memory
+        except Exception:
+            # Fallback to regular launch
+            browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'

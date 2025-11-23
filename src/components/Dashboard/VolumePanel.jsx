@@ -82,7 +82,8 @@ const VolumePanel = () => {
     hhhl: '--', // Higher High / Higher Low
     lhll: '--', // Lower High / Lower Low
     vol: 0.00, // Volatility indicator value
-    volTicker: 'VIX' // Volatility ticker name
+    volTicker: 'VIX', // Volatility ticker name
+    zScore: 0.00 // Z-score
   });
 
   // Get available tickers for selected asset class
@@ -575,6 +576,10 @@ const VolumePanel = () => {
           <Text className="dark:text-gray-300">
             {typeof metrics.vol === 'number' ? metrics.vol.toFixed(2) : '--'}
           </Text>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">Z-Score:</Text>
+          <Text className="dark:text-gray-300">{typeof metrics.zScore === 'number' ? metrics.zScore.toFixed(2) : metrics.zScore}</Text>
         </div>
       </Flex>
     </Card>
