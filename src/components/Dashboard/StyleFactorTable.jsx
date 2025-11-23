@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
 
 const data = [
   // --- FUNDAMENTAL FACTORS ---
@@ -9,6 +10,7 @@ const data = [
       { name: "Book-to-Price (Deep Value)", values: [0.8, -1.2, 3.4, 5.1, 6.2, 8.4] },
       { name: "Earnings Yield", values: [0.4, -0.5, 1.2, 2.8, 4.5, 5.9] },
       { name: "Free Cash Flow Yield", values: [0.2, -0.8, 2.1, 3.3, 4.1, 6.2] },
+      { name: "Price-to-Earnings (P/E)", values: [-0.3, 0.9, -1.5, 2.4, 3.8, 5.1] },
     ]
   },
   {
@@ -66,9 +68,46 @@ const data = [
   },
 ];
 
-const timeframes = ['1D', '1W', '1M', '3M', '6M', 'YTD'];
+const timeframes = ['1D', '1W', '1M', '3M', '6M', '1Y'];
 
 const StyleFactorTable = () => {
+  const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', description: '' });
+
+  const handleOpenModal = (type, key, context = {}) => {
+    let title = '';
+    let description = '';
+
+    if (type === 'category') {
+      const def = FACTOR_DEFINITIONS.categories[key];
+      title = def ? def.title : key;
+      description = def ? def.description : 'No description available.';
+    } else if (type === 'factor') {
+      const def = FACTOR_DEFINITIONS.factors[key];
+      title = def ? def.title : key;
+      description = def ? def.description : 'No description available.';
+    } else if (type === 'value') {
+      const def = FACTOR_DEFINITIONS.calculations['return'];
+      title = `${context.factor} (${context.timeframe})` || 'Performance Return';
+      description = (
+        <div>
+          <p className="mb-2">{def ? def.description : 'Return calculation.'}</p>
+          <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Current Value: </span>
+            <span className={`text-sm font-bold ${context.value > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+              {context.value > 0 ? '+' : ''}{context.value.toFixed(1)}%
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    setModalConfig({ isOpen: true, title, description });
+  };
+
+  const handleCloseModal = () => {
+    setModalConfig({ isOpen: false, title: '', description: '' });
+  };
+
   const getValueColor = (val) => {
     if (val > 0) return 'text-emerald-600 font-medium dark:text-emerald-400';
     if (val < 0) return 'text-rose-600 font-medium dark:text-rose-400';
@@ -80,7 +119,7 @@ const StyleFactorTable = () => {
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full relative">
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden dark:bg-gray-800 dark:border-gray-700">
         
         {/* Header */}
@@ -98,29 +137,26 @@ const StyleFactorTable = () => {
         {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left border-collapse">
-            <thead>
-              <tr className="bg-white border-b border-gray-200 text-xs uppercase tracking-wider text-gray-500 font-semibold dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400">
-                <th className="px-6 py-4 w-1/3 bg-gray-50/50 dark:bg-gray-700/50">Factor Exposure</th>
-                {timeframes.map((tf) => (
-                  <th key={tf} className="px-4 py-4 text-right bg-gray-50/50 dark:bg-gray-700/50">{tf}</th>
-                ))}
-              </tr>
-            </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {data.map((group, groupIdx) => (
                 <React.Fragment key={groupIdx}>
-                  {/* Category Header */}
+                  {/* Category Header and Timeframes */}
                   <tr className="bg-slate-50 border-y border-gray-200 dark:bg-gray-700 dark:border-gray-600">
-                    <td colSpan={timeframes.length + 1} className="px-6 py-3">
+                    <td className="px-6 py-3">
                       <div className="flex items-baseline gap-3">
-                        <span className="text-xs font-bold text-slate-700 uppercase tracking-widest dark:text-gray-200">
+                        <button 
+                          onClick={() => handleOpenModal('category', group.category)}
+                          className="text-xs font-bold text-slate-700 uppercase tracking-widest dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors text-left"
+                        >
                           {group.category}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-normal uppercase tracking-wide dark:text-gray-400">
-                           — {group.description}
-                        </span>
+                        </button>
                       </div>
                     </td>
+                    {timeframes.map((tf) => (
+                      <td key={tf} className="px-4 py-3 text-right">
+                        <span className="text-xs font-bold text-slate-700 uppercase tracking-widest dark:text-gray-200">{tf}</span>
+                      </td>
+                    ))}
                   </tr>
 
                   {/* Rows */}
@@ -130,12 +166,18 @@ const StyleFactorTable = () => {
                       className="hover:bg-blue-50/30 transition-colors duration-150 group dark:hover:bg-gray-700/50"
                     >
                       <td className="px-6 py-3 font-medium text-gray-700 border-l-4 border-transparent group-hover:border-blue-500 relative dark:text-gray-300">
-                        {item.name}
+                        <button 
+                          onClick={() => handleOpenModal('factor', item.name)}
+                          className="hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors text-left w-full"
+                        >
+                          {item.name}
+                        </button>
                       </td>
                       {item.values.map((val, idx) => (
                         <td 
                           key={idx} 
-                          className={`px-4 py-3 text-right tabular-nums tracking-tight ${getValueColor(val)}`}
+                          className={`px-4 py-3 text-right tabular-nums tracking-tight cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors ${getValueColor(val)}`}
+                          onClick={() => handleOpenModal('value', null, { value: val, timeframe: timeframes[idx], factor: item.name })}
                         >
                           {formatValue(val)}
                         </td>
@@ -156,6 +198,41 @@ const StyleFactorTable = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal Overlay */}
+      {modalConfig.isOpen && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={handleCloseModal}
+        >
+          <div 
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-700 transform transition-all scale-100 opacity-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                {modalConfig.title}
+              </h3>
+              <button
+                onClick={handleCloseModal}
+                className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors focus:outline-none"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Modal Content */}
+            <div className="p-6">
+              <div className="text-gray-600 dark:text-gray-300 text-sm leading-relaxed">
+                {modalConfig.description}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
