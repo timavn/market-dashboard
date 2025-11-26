@@ -19,6 +19,7 @@ const FRED_SERIES = {
 
 // Yahoo Finance ticker format mappings
 // Special cases for indices, currency pairs, commodities, etc.
+// This is the single source of truth for all ticker mappings
 const YAHOO_TICKER_MAP = {
   // Indices (need ^ prefix)
   'SPX': '^GSPC',
@@ -35,6 +36,7 @@ const YAHOO_TICKER_MAP = {
   'GBP/USD': 'GBPUSD=X',
   'CAD/USD': 'CADUSD=X',
   'USD': 'DX-Y.NYB',  // U.S. Dollar Index (DXY)
+  'DXY': 'DX-Y.NYB',  // Dollar Index (alias)
   
   // Currency ETFs
   'UUP': 'UUP',
@@ -45,6 +47,7 @@ const YAHOO_TICKER_MAP = {
   
   // Commodities
   'WTIC': 'CL=F',      // WTI Crude Oil
+  'WTI': 'CL=F',       // WTI Crude Oil (alias)
   'BRENT': 'BZ=F',     // Brent Crude Oil
   'NATGAS': 'NG=F',    // Natural Gas
   'GOLD': 'GC=F',      // Gold Futures
@@ -58,6 +61,9 @@ const YAHOO_TICKER_MAP = {
   'SOL': 'SOL-USD',
   'AVAX': 'AVAX-USD',
   'XRP': 'XRP-USD',
+  
+  // Additional indices/commodities
+  'CRB': '^CRB',       // CRB Commodity Index
 };
 
 /**

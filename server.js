@@ -59,131 +59,83 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Ticker mapping: Convert securities list tickers to Yahoo Finance/FRED tickers
-const TICKER_MAPPING = {
-  'AAPL': { source: 'yahoo', ticker: 'AAPL' },
-  'AMZN': { source: 'yahoo', ticker: 'AMZN' },
-  'AVAX': { source: 'yahoo', ticker: 'AVAX-USD' },
-  'BITCOIN': { source: 'yahoo', ticker: 'BTC-USD' },
-  'BKLN': { source: 'yahoo', ticker: 'BKLN' },
-  'BLOK': { source: 'yahoo', ticker: 'BLOK' },
-  'BMNR': { source: 'yahoo', ticker: 'BMNR' },
-  'BNDX': { source: 'yahoo', ticker: 'BNDX' },
-  'BRENT': { source: 'yahoo', ticker: 'BZ=F' },
-  'BTC': { source: 'yahoo', ticker: 'BTC-USD' },
-  'CAD/USD': { source: 'yahoo', ticker: 'CADUSD=X' },
-  'COIN': { source: 'yahoo', ticker: 'COIN' },
-  'COMPQ': { source: 'yahoo', ticker: '^IXIC' },
-  'COPPER': { source: 'yahoo', ticker: 'HG=F' },
-  'CRCL': { source: 'yahoo', ticker: 'CRCL' },
-  'CWB': { source: 'yahoo', ticker: 'CWB' },
-  'DAX': { source: 'yahoo', ticker: '^GDAXI' },
-  'EMB': { source: 'yahoo', ticker: 'EMB' },
-  'EMXC': { source: 'yahoo', ticker: 'EMXC' },
-  'ETH': { source: 'yahoo', ticker: 'ETH-USD' },
-  'ETHA': { source: 'yahoo', ticker: 'ETHA' },
-  'EUR/USD': { source: 'yahoo', ticker: 'EURUSD=X' },
-  'EWA': { source: 'yahoo', ticker: 'EWA' },
-  'EWC': { source: 'yahoo', ticker: 'EWC' },
-  'EWG': { source: 'yahoo', ticker: 'EWG' },
-  'EWH': { source: 'yahoo', ticker: 'EWH' },
-  'EWJ': { source: 'yahoo', ticker: 'EWJ' },
-  'EWQ': { source: 'yahoo', ticker: 'EWQ' },
-  'EWS': { source: 'yahoo', ticker: 'EWS' },
-  'EWU': { source: 'yahoo', ticker: 'EWU' },
-  'EWW': { source: 'yahoo', ticker: 'EWW' },
-  'EWY': { source: 'yahoo', ticker: 'EWY' },
-  'EWZ': { source: 'yahoo', ticker: 'EWZ' },
-  'EZA': { source: 'yahoo', ticker: 'EZA' },
-  'FXB': { source: 'yahoo', ticker: 'FXB' },
-  'FXE': { source: 'yahoo', ticker: 'FXE' },
-  'FXF': { source: 'yahoo', ticker: 'FXF' },
-  'FXI': { source: 'yahoo', ticker: 'FXI' },
-  'FXY': { source: 'yahoo', ticker: 'FXY' },
-  'GBP/USD': { source: 'yahoo', ticker: 'GBPUSD=X' },
-  'GDX': { source: 'yahoo', ticker: 'GDX' },
-  'GLD': { source: 'yahoo', ticker: 'GLD' },
-  'GOLD': { source: 'yahoo', ticker: 'GC=F' },
-  'GOOGL': { source: 'yahoo', ticker: 'GOOGL' },
-  'HEFA': { source: 'yahoo', ticker: 'HEFA' },
-  'HYG': { source: 'yahoo', ticker: 'HYG' },
-  'IBIT': { source: 'yahoo', ticker: 'IBIT' },
-  'IEF': { source: 'yahoo', ticker: 'IEF' },
-  'IGOV': { source: 'yahoo', ticker: 'IGOV' },
-  'ILF': { source: 'yahoo', ticker: 'ILF' },
-  'INDA': { source: 'yahoo', ticker: 'INDA' },
-  'ITA': { source: 'yahoo', ticker: 'ITA' },
-  'ITB': { source: 'yahoo', ticker: 'ITB' },
-  'IWM': { source: 'yahoo', ticker: 'IWM' },
-  'LQD': { source: 'yahoo', ticker: 'LQD' },
-  'MARA': { source: 'yahoo', ticker: 'MARA' },
-  'MBB': { source: 'yahoo', ticker: 'MBB' },
-  'META': { source: 'yahoo', ticker: 'META' },
-  'MLPX': { source: 'yahoo', ticker: 'MLPX' },
-  'MSFT': { source: 'yahoo', ticker: 'MSFT' },
-  'MSTR': { source: 'yahoo', ticker: 'MSTR' },
-  'MTUM': { source: 'yahoo', ticker: 'MTUM' },
-  'NATGAS': { source: 'yahoo', ticker: 'NG=F' },
-  'NFLX': { source: 'yahoo', ticker: 'NFLX' },
-  'NIKK': { source: 'yahoo', ticker: '^N225' },
-  'NVDA': { source: 'yahoo', ticker: 'NVDA' },
-  'ORCL': { source: 'yahoo', ticker: 'ORCL' },
-  'PDBC': { source: 'yahoo', ticker: 'PDBC' },
-  'PFF': { source: 'yahoo', ticker: 'PFF' },
-  'QQQ': { source: 'yahoo', ticker: 'QQQ' },
-  'RIOT': { source: 'yahoo', ticker: 'RIOT' },
-  'RSP': { source: 'yahoo', ticker: 'RSP' },
-  'RUT': { source: 'yahoo', ticker: '^RUT' },
-  'SHY': { source: 'yahoo', ticker: 'SHY' },
-  'SILVER': { source: 'yahoo', ticker: 'SI=F' },
-  'SLV': { source: 'yahoo', ticker: 'SLV' },
-  'SMH': { source: 'yahoo', ticker: 'SMH' },
-  'SOL': { source: 'yahoo', ticker: 'SOL-USD' },
-  'SPX': { source: 'yahoo', ticker: '^GSPC' },
-  'SPY': { source: 'yahoo', ticker: 'SPY' },
-  'SSEC': { source: 'yahoo', ticker: '000001.SS' },
-  'TIP': { source: 'yahoo', ticker: 'TIP' },
-  'TLT': { source: 'yahoo', ticker: 'TLT' },
-  'TSLA': { source: 'yahoo', ticker: 'TSLA' },
-  'URA': { source: 'yahoo', ticker: 'URA' },
-  'USD': { source: 'yahoo', ticker: 'DX-Y.NYB' },
-  'DXY': { source: 'yahoo', ticker: 'DX-Y.NYB' }, // Dollar Index
-  'USD/YEN': { source: 'yahoo', ticker: 'JPY=X' },
-  'USMV': { source: 'yahoo', ticker: 'USMV' },
-  'UST10Y': { source: 'fred', ticker: 'DGS10' },
-  'UST2Y': { source: 'fred', ticker: 'DGS2' },
-  'UST30Y': { source: 'fred', ticker: 'DGS30' },
-  'UUP': { source: 'yahoo', ticker: 'UUP' },
-  'VGK': { source: 'yahoo', ticker: 'VGK' },
-  'VIX': { source: 'yahoo', ticker: '^VIX' },
-  'VT': { source: 'yahoo', ticker: 'VT' },
-  'VYMI': { source: 'yahoo', ticker: 'VYMI' },
-  'WTI': { source: 'yahoo', ticker: 'CL=F' }, // WTI Crude Oil
-  'WTIC': { source: 'yahoo', ticker: 'CL=F' },
-  'CRB': { source: 'yahoo', ticker: '^CRB' }, // CRB Commodity Index
-  'XLB': { source: 'yahoo', ticker: 'XLB' },
-  'XLC': { source: 'yahoo', ticker: 'XLC' },
-  'XLE': { source: 'yahoo', ticker: 'XLE' },
-  'XLF': { source: 'yahoo', ticker: 'XLF' },
-  'XLI': { source: 'yahoo', ticker: 'XLI' },
-  'XLK': { source: 'yahoo', ticker: 'XLK' },
-  'XLP': { source: 'yahoo', ticker: 'XLP' },
-  'XLRE': { source: 'yahoo', ticker: 'XLRE' },
-  'XLU': { source: 'yahoo', ticker: 'XLU' },
-  'XLV': { source: 'yahoo', ticker: 'XLV' },
-  'XLY': { source: 'yahoo', ticker: 'XLY' },
-  'XME': { source: 'yahoo', ticker: 'XME' },
-  'XOP': { source: 'yahoo', ticker: 'XOP' },
-  'XRP': { source: 'yahoo', ticker: 'XRP-USD' }
-};
+// Import ticker mapping configuration
+// Note: Since server.js is CommonJS and securitiesConfig.js is ES6, we'll create a helper function
+// that replicates the logic. In the future, consider converting to ES6 modules or creating a shared config.
 
 // In-memory cache for quotes (5-10 second TTL)
 const quotesCache = new Map();
 const CACHE_TTL = parseInt(process.env.QUOTES_CACHE_TTL || '8000'); // 8 seconds default
 
-// Helper to get ticker mapping
+// FRED Series IDs for Treasury Yields
+const FRED_SERIES = {
+  'UST30Y': 'DGS30',
+  'UST10Y': 'DGS10',
+  'UST2Y': 'DGS2',
+};
+
+// Yahoo Finance ticker mappings (consolidated from securitiesConfig.js)
+// This should match src/constants/securitiesConfig.js YAHOO_TICKER_MAP
+const YAHOO_TICKER_MAP = {
+  // Indices
+  'SPX': '^GSPC',
+  'COMPQ': '^IXIC',
+  'RUT': '^RUT',
+  'VIX': '^VIX',
+  'DAX': '^GDAXI',
+  'NIKK': '^N225',
+  'SSEC': '000001.SS',
+  'CRB': '^CRB',
+  
+  // Currency pairs
+  'EUR/USD': 'EURUSD=X',
+  'USD/YEN': 'JPY=X',
+  'GBP/USD': 'GBPUSD=X',
+  'CAD/USD': 'CADUSD=X',
+  'USD': 'DX-Y.NYB',
+  'DXY': 'DX-Y.NYB',
+  
+  // Currency ETFs
+  'UUP': 'UUP',
+  'FXE': 'FXE',
+  'FXY': 'FXY',
+  'FXF': 'FXF',
+  'FXB': 'FXB',
+  
+  // Commodities
+  'WTIC': 'CL=F',
+  'WTI': 'CL=F',
+  'BRENT': 'BZ=F',
+  'NATGAS': 'NG=F',
+  'GOLD': 'GC=F',
+  'SILVER': 'SI=F',
+  'COPPER': 'HG=F',
+  
+  // Crypto
+  'BTC': 'BTC-USD',
+  'BITCOIN': 'BTC-USD',
+  'ETH': 'ETH-USD',
+  'SOL': 'SOL-USD',
+  'AVAX': 'AVAX-USD',
+  'XRP': 'XRP-USD',
+};
+
+// Helper to get ticker mapping (matches securitiesConfig.js logic)
 function getTickerMapping(symbol) {
-  return TICKER_MAPPING[symbol.toUpperCase()] || { source: 'yahoo', ticker: symbol.toUpperCase() };
+  const upperSymbol = symbol.toUpperCase();
+  
+  // Check FRED series first
+  if (FRED_SERIES[upperSymbol]) {
+    return { source: 'fred', ticker: FRED_SERIES[upperSymbol] };
+  }
+  
+  // Check Yahoo Finance special mappings
+  if (YAHOO_TICKER_MAP[upperSymbol]) {
+    return { source: 'yahoo', ticker: YAHOO_TICKER_MAP[upperSymbol] };
+  }
+  
+  // Default: use ticker as-is for Yahoo Finance
+  return { source: 'yahoo', ticker: upperSymbol };
 }
 
 // Fetch from Yahoo Finance
@@ -1087,23 +1039,37 @@ app.get('/api/usd/historical/:symbol', async (req, res) => {
     const { symbol } = req.params;
     const { days = 30 } = req.query; // Default to 30 days
     
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+    
+    // Format dates as YYYY-MM-DD for DynamoDB
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+    
     const params = {
       TableName: 'MarketPriceHistory',
-      KeyConditionExpression: 'symbol = :symbol',
-      ExpressionAttributeValues: {
-        ':symbol': symbol.toUpperCase()
+      KeyConditionExpression: 'symbol = :symbol AND #date BETWEEN :startDate AND :endDate',
+      ExpressionAttributeNames: {
+        '#date': 'date'
       },
-      ScanIndexForward: false, // Sort by date descending
-      Limit: parseInt(days)
+      ExpressionAttributeValues: {
+        ':symbol': symbol.toUpperCase(),
+        ':startDate': startDateStr,
+        ':endDate': endDateStr
+      },
+      ScanIndexForward: true // Sort by date ascending (chronological order)
     };
     
     const result = await dynamodb.query(params).promise();
     
     if (!result.Items || result.Items.length === 0) {
+      console.log(`No historical data found for ${symbol} between ${startDateStr} and ${endDateStr}`);
       return res.json({ 
         symbol: symbol,
         data: [],
-        message: `No historical data available for ${symbol}` 
+        message: `No historical data available for ${symbol} in the requested date range` 
       });
     }
     
@@ -1115,7 +1081,9 @@ app.get('/api/usd/historical/:symbol', async (req, res) => {
       high: item.high ? parseFloat(item.high) : null,
       low: item.low ? parseFloat(item.low) : null,
       volume: item.volume || null
-    })).reverse(); // Reverse to get chronological order
+    })); // Already in chronological order due to ScanIndexForward: true
+    
+    console.log(`Fetched ${historicalData.length} data points for ${symbol} (requested ${days} days)`);
     
     res.json({
       symbol: symbol,
