@@ -4,7 +4,7 @@ import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
 import './SecuritiesList.css';
 
-const SecuritiesList = () => {
+const SecuritiesList = ({ onTickerClick }) => {
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
@@ -13,6 +13,7 @@ const SecuritiesList = () => {
   const [loading, setLoading] = useState(true);
   const [updateTrigger, setUpdateTrigger] = useState(0); // Trigger for real-time color updates
   const [updatedRows, setUpdatedRows] = useState(new Set()); // Track rows that were just updated for blink animation
+  const [allRowsExpanded, setAllRowsExpanded] = useState(false); // Track if all rows are expanded
   const legendRef = useRef(null);
   const dotLegendRef = useRef(null);
   const rowRefs = useRef({});
@@ -135,6 +136,11 @@ const SecuritiesList = () => {
     } else {
       return { status: 'stale', color: '#EF4444' }; // Red
     }
+  };
+
+  // Toggle all rows expansion
+  const toggleAllRows = () => {
+    setAllRowsExpanded(prev => !prev);
   };
 
   // Calculate odds (upside and downside percentages)
@@ -387,7 +393,15 @@ const SecuritiesList = () => {
   }, [showLegend, showDotLegend]);
 
   return (
-    <Card className="relative securities-card dark:bg-gray-800" style={{ overflow: 'visible' }}>
+    <Card 
+      className={`securities-card ${allRowsExpanded ? 'expanded' : ''}`} 
+      style={{ 
+        overflow: 'visible',
+        position: 'relative',
+        zIndex: allRowsExpanded ? 100 : 'auto',
+        boxShadow: allRowsExpanded ? '4px 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
+      }}
+    >
       <div 
         className="relative" 
         ref={legendRef}
@@ -431,7 +445,10 @@ const SecuritiesList = () => {
         )}
       </div>
       
-      <div className="securities-table-wrapper">
+      {/* Main content wrapper - flex container with table and expand bar */}
+      <div className="securities-content-wrapper">
+        {/* Table section */}
+        <div className="securities-table-section">
         {/* Header Row */}
         <div className="securities-header-row">
           <div 
@@ -482,134 +499,184 @@ const SecuritiesList = () => {
             )}
           </div>
           <div className="header-ticker">Ticker</div>
-          <div className="header-price">Spot Price</div>
-          <div className="header-lrr">LRR</div>
-          <div className="header-hrr">HRR</div>
-          <div className="header-odds">+/-</div>
+          <div className="header-signal header-trade">TRADE</div>
+          <div className="header-signal header-trend">TREND</div>
+          <div className="header-signal header-tail">TAIL</div>
+          {allRowsExpanded && (
+            <>
+              <div className="header-price">Spot Price</div>
+              <div className="header-lrr">LRR</div>
+              <div className="header-hrr">HRR</div>
+              <div className="header-odds">+/-</div>
+            </>
+          )}
         </div>
         
         {/* Data Rows */}
         <div className="securities-data-container">
-          {securities.map((security, index) => (
-            <div 
-              key={security.ticker}
-              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
-            >
-              <div className="data-dot-cell">
-                {(() => {
-                  const priceData = prices[security.ticker];
-                  const timestamp = priceData?.timestamp || null;
-                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                  const lrrTimestamp = riskRangeData?.timestamp || null;
-                  const hrrTimestamp = riskRangeData?.timestamp || null;
-                  const status = getUpdateStatus(timestamp, lrrTimestamp, hrrTimestamp);
-                  // Use updateTrigger to force re-render for real-time updates
-                  const _ = updateTrigger;
-                  
-                  let tooltipText = '';
-                  if (status.status === 'lrr-stale' || status.status === 'hrr-stale') {
-                    tooltipText = `LRR/HRR are more than 1 market day old`;
-                    if (lrrTimestamp) {
-                      tooltipText += ` (LRR: ${new Date(lrrTimestamp).toLocaleString()})`;
-                    }
-                    if (hrrTimestamp) {
-                      tooltipText += ` (HRR: ${new Date(hrrTimestamp).toLocaleString()})`;
-                    }
-                  } else {
-                    tooltipText = `Last updated: ${timestamp ? new Date(timestamp).toLocaleTimeString() : 'Never'} (${status.status})`;
-                  }
-                  
-                  return (
-                    <span 
-                      className="ticker-dot" 
-                      style={{ backgroundColor: status.color }}
-                      title={tooltipText}
-                    ></span>
-                  );
-                })()}
-              </div>
-              <div className="data-ticker-cell">
-                <span className="data-ticker">{security.ticker}</span>
-              </div>
-              <div className="data-price-cell">
-                <span className="data-price">
+          {securities.map((security, index) => {
+            return (
+              <div 
+                key={security.ticker}
+                className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
+              >
+                <div className="data-dot-cell">
                   {(() => {
                     const priceData = prices[security.ticker];
-                    // Show '...' only when loading AND no data exists
-                    if (loading && priceData === undefined) {
-                      return '...';
-                    }
-                    // If we have data (even if loading is true), show it
-                    if (priceData !== undefined && priceData !== null) {
-                      return formatPrice(security.ticker, priceData, security.assetClass);
-                    }
-                    // No data and not loading, show '--'
-                    return '--';
-                  })()}
-                </span>
-              </div>
-              <div className="data-lrr-cell">
-                <span className="data-lrr">
-                  {(() => {
+                    const timestamp = priceData?.timestamp || null;
                     const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                    if (riskRangeData && riskRangeData.lrr !== undefined && riskRangeData.lrr !== null) {
-                      // Format based on asset class (treasury yields are percentages)
-                      if (security.ticker.startsWith('UST')) {
-                        return `${parseFloat(riskRangeData.lrr).toFixed(2)}%`;
+                    const lrrTimestamp = riskRangeData?.timestamp || null;
+                    const hrrTimestamp = riskRangeData?.timestamp || null;
+                    const status = getUpdateStatus(timestamp, lrrTimestamp, hrrTimestamp);
+                    // Use updateTrigger to force re-render for real-time updates
+                    const _ = updateTrigger;
+                    
+                    let tooltipText = '';
+                    if (status.status === 'lrr-stale' || status.status === 'hrr-stale') {
+                      tooltipText = `LRR/HRR are more than 1 market day old`;
+                      if (lrrTimestamp) {
+                        tooltipText += ` (LRR: ${new Date(lrrTimestamp).toLocaleString()})`;
                       }
-                      return parseFloat(riskRangeData.lrr).toFixed(2);
-                    }
-                    return '--';
-                  })()}
-                </span>
-              </div>
-              <div className="data-hrr-cell">
-                <span className="data-hrr">
-                  {(() => {
-                    const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                    if (riskRangeData && riskRangeData.hrr !== undefined && riskRangeData.hrr !== null) {
-                      // Format based on asset class (treasury yields are percentages)
-                      if (security.ticker.startsWith('UST')) {
-                        return `${parseFloat(riskRangeData.hrr).toFixed(2)}%`;
+                      if (hrrTimestamp) {
+                        tooltipText += ` (HRR: ${new Date(hrrTimestamp).toLocaleString()})`;
                       }
-                      return parseFloat(riskRangeData.hrr).toFixed(2);
+                    } else {
+                      tooltipText = `Last updated: ${timestamp ? new Date(timestamp).toLocaleTimeString() : 'Never'} (${status.status})`;
                     }
-                    return '--';
+                    
+                    return (
+                      <span 
+                        className="ticker-dot" 
+                        style={{ backgroundColor: status.color }}
+                        title={tooltipText}
+                      ></span>
+                    );
                   })()}
-                </span>
+                </div>
+                <div 
+                  className="data-ticker-cell"
+                  onClick={() => onTickerClick && onTickerClick(security.ticker)}
+                  style={{ cursor: onTickerClick ? 'pointer' : 'default' }}
+                >
+                  <span className="data-ticker">{security.ticker}</span>
+                </div>
+                <div className="data-signal-cell data-trade-cell">
+                  <span 
+                    className="signal-circle signal-trade" 
+                    style={{ backgroundColor: '#10B981' }}
+                    title="TRADE: Bullish"
+                  ></span>
+                </div>
+                <div className="data-signal-cell data-trend-cell">
+                  <span 
+                    className="signal-circle signal-trend" 
+                    style={{ backgroundColor: '#EAB308' }}
+                    title="TREND: Neutral"
+                  ></span>
+                </div>
+                <div className="data-signal-cell data-tail-cell">
+                  <span 
+                    className="signal-circle signal-tail" 
+                    style={{ backgroundColor: '#EF4444' }}
+                    title="TAIL: Bearish"
+                  ></span>
+                </div>
+                {allRowsExpanded && (
+                  <>
+                    <div className="data-price-cell">
+                      <span className="data-price">
+                        {(() => {
+                          const priceData = prices[security.ticker];
+                          // Show '...' only when loading AND no data exists
+                          if (loading && priceData === undefined) {
+                            return '...';
+                          }
+                          // If we have data (even if loading is true), show it
+                          if (priceData !== undefined && priceData !== null) {
+                            return formatPrice(security.ticker, priceData, security.assetClass);
+                          }
+                          // No data and not loading, show '--'
+                          return '--';
+                        })()}
+                      </span>
+                    </div>
+                    <div className="data-lrr-cell">
+                      <span className="data-lrr">
+                        {(() => {
+                          const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                          if (riskRangeData && riskRangeData.lrr !== undefined && riskRangeData.lrr !== null) {
+                            // Format based on asset class (treasury yields are percentages)
+                            if (security.ticker.startsWith('UST')) {
+                              return `${parseFloat(riskRangeData.lrr).toFixed(2)}%`;
+                            }
+                            return parseFloat(riskRangeData.lrr).toFixed(2);
+                          }
+                          return '--';
+                        })()}
+                      </span>
+                    </div>
+                    <div className="data-hrr-cell">
+                      <span className="data-hrr">
+                        {(() => {
+                          const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                          if (riskRangeData && riskRangeData.hrr !== undefined && riskRangeData.hrr !== null) {
+                            // Format based on asset class (treasury yields are percentages)
+                            if (security.ticker.startsWith('UST')) {
+                              return `${parseFloat(riskRangeData.hrr).toFixed(2)}%`;
+                            }
+                            return parseFloat(riskRangeData.hrr).toFixed(2);
+                          }
+                          return '--';
+                        })()}
+                      </span>
+                    </div>
+                    <div className="data-odds-cell">
+                      {(() => {
+                        const priceData = prices[security.ticker];
+                        const spotPrice = priceData?.price || priceData;
+                        const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                        const lrr = riskRangeData?.lrr || '--';
+                        const hrr = riskRangeData?.hrr || '--';
+                        const odds = calculateOdds(spotPrice, lrr, hrr);
+                        
+                        if (odds.upside === null && odds.downside === null) {
+                          return <span className="data-odds">--</span>;
+                        }
+                        
+                        const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
+                        const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
+                        
+                        return (
+                          <span className="data-odds">
+                            {odds.upside !== null && (
+                              <span className="odds-upside">{upsideStr}</span>
+                            )}
+                            {odds.upside !== null && odds.downside !== null && ' / '}
+                            {odds.downside !== null && (
+                              <span className="odds-downside">{downsideStr}</span>
+                            )}
+                            {odds.upside === null && odds.downside === null && '--'}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="data-odds-cell">
-                {(() => {
-                  const priceData = prices[security.ticker];
-                  const spotPrice = priceData?.price || priceData;
-                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                  const lrr = riskRangeData?.lrr || '--';
-                  const hrr = riskRangeData?.hrr || '--';
-                  const odds = calculateOdds(spotPrice, lrr, hrr);
-                  
-                  if (odds.upside === null && odds.downside === null) {
-                    return <span className="data-odds">--</span>;
-                  }
-                  
-                  const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
-                  const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
-                  
-                  return (
-                    <span className="data-odds">
-                      {odds.upside !== null && (
-                        <span className="odds-upside">{upsideStr}</span>
-                      )}
-                      {odds.upside !== null && odds.downside !== null && ' / '}
-                      {odds.downside !== null && (
-                        <span className="odds-downside">{downsideStr}</span>
-                      )}
-                      {odds.upside === null && odds.downside === null && '--'}
-                    </span>
-                  );
-                })()}
-              </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+        </div>
+        
+        {/* Vertical Expand Bar */}
+        <div 
+          className="securities-expand-bar"
+          onClick={toggleAllRows}
+          title={allRowsExpanded ? 'Collapse all rows' : 'Expand all rows'}
+        >
+          <span className="expand-bar-text">
+            {allRowsExpanded ? 'Collapse' : 'Expand'}
+          </span>
         </div>
       </div>
     </Card>

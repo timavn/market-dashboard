@@ -99,7 +99,8 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     lhll: '--', // Lower High / Lower Low
     vol: 0.00, // Volatility indicator value
     volTicker: 'VIX', // Volatility ticker name
-    zScore: 0.00 // Z-score
+    zScore: 0.00, // Z-score
+    beta: '--' // Beta (placeholder)
   });
 
   // Get available tickers for selected asset class
@@ -995,6 +996,10 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">Z-Score:</Text>
           <Text className="dark:text-gray-300">{typeof metrics.zScore === 'number' ? metrics.zScore.toFixed(2) : metrics.zScore}</Text>
+        </div>
+        <div className="flex items-center gap-1">
+          <Text className="font-semibold dark:text-white">Beta:</Text>
+          <Text className="dark:text-gray-300">{typeof metrics.beta === 'number' ? metrics.beta.toFixed(2) : metrics.beta}</Text>
         </div>
       </Flex>
     </Card>

@@ -224,11 +224,58 @@
 .securities-card {
   overflow: visible !important;
   padding: 0 !important;
+  background: white !important;
+  transition: width 0.3s ease;
+}
+
+.dark .securities-card {
+  background: rgb(31 41 55) !important; /* gray-800 */
+}
+
+/* Expanded card state - wider to accommodate additional columns */
+.securities-card.expanded {
+  width: fit-content;
+  min-width: fit-content;
+  z-index: 100;
+  position: relative;
+  box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .securities-card > div {
   overflow: visible !important;
   padding: 0 !important;
+}
+
+/* Flex wrapper for table + expand bar */
+.securities-content-wrapper {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  background: white;
+  border-radius: 0 0 0.5rem 0.5rem;
+  position: relative;
+}
+
+.dark .securities-content-wrapper {
+  background: rgb(31 41 55); /* gray-800 */
+}
+
+/* When expanded, ensure wrapper fits content */
+.securities-card.expanded .securities-content-wrapper {
+  width: fit-content;
+}
+
+/* Table section takes available space */
+.securities-table-section {
+  flex: 1;
+  min-width: 0;
+  overflow: visible;
+}
+
+/* When expanded, table section has auto width */
+.securities-card.expanded .securities-table-section {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 /* Title spacing and font size */
@@ -248,34 +295,49 @@
   border-bottom-color: rgb(55 65 81) !important;
 }
 
-.securities-table-wrapper {
-  overflow: visible !important;
-}
 
 /* Header Row */
 .securities-header-row {
   display: grid;
-  grid-template-columns: 20px 60px 70px 50px 50px 80px;
-  gap: 4px;
-  padding: 8px 4px;
+  grid-template-columns: 24px 70px 45px 45px 45px;
+  gap: 6px 3px;
+  padding: 12px 8px;
   border-bottom: 1px solid #E5E7EB;
+  background: white;
+}
+
+.dark .securities-header-row {
+  background: rgb(31 41 55);
+}
+
+.securities-card.expanded .securities-header-row {
+  grid-template-columns: 24px 70px 45px 45px 45px 70px 50px 50px 80px;
 }
 
 .dark .securities-header-row {
   border-bottom-color: rgb(55 65 81);
+  background: rgb(31 41 55);
 }
 
 /* Base styles for all column headers */
 .securities-header-row > div {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.3;
   color: #000000;
   text-align: left;
-  padding: 0 4px;
+  padding: 0 2px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
+}
+
+/* Override for signal headers to center them */
+.securities-header-row .header-signal {
+  justify-content: center;
+  text-align: center;
+  font-size: 10px;
+  padding: 0;
 }
 
 .dark .securities-header-row > div {
@@ -295,12 +357,27 @@
 /* Data Rows */
 .securities-data-row {
   display: grid;
-  grid-template-columns: 20px 60px 70px 50px 50px 80px;
-  gap: 4px;
-  padding: 6px 4px;
+  grid-template-columns: 24px 70px 45px 45px 45px;
+  gap: 6px 3px;
+  padding: 10px 8px;
   border-bottom: 1px solid #E5E7EB;
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: all 0.3s ease;
+  background: inherit;
+}
+
+/* Expanded row state */
+.securities-card.expanded .securities-data-row {
+  grid-template-columns: 24px 70px 45px 45px 45px 70px 50px 50px 80px;
+}
+
+/* Data container needs background */
+.securities-data-container {
+  background: white;
+}
+
+.dark .securities-data-container {
+  background: rgb(31 41 55);
 }
 
 .dark .securities-data-row {
@@ -321,7 +398,7 @@
   align-items: center;
   justify-content: flex-start;
   text-align: left;
-  padding: 0 4px;
+  padding: 0 2px;
 }
 
 /* Dot Cell */
@@ -339,6 +416,12 @@
 /* Ticker Cell */
 .data-ticker-cell {
   /* Uses base styles */
+  transition: all 0.2s ease;
+}
+
+.data-ticker-cell:hover {
+  opacity: 0.7;
+  transform: translateX(2px);
 }
 
 .data-ticker {
@@ -403,9 +486,28 @@
   color: rgb(229 231 235);
 }
 
+/* Price Header */
+.header-price {
+  /* Uses base header styles from .securities-header-row > div */
+  font-size: 11px;
+}
+
+/* LRR Header */
+.header-lrr {
+  /* Uses base header styles from .securities-header-row > div */
+  font-size: 11px;
+}
+
+/* HRR Header */
+.header-hrr {
+  /* Uses base header styles from .securities-header-row > div */
+  font-size: 11px;
+}
+
 /* Odds Header */
 .header-odds {
   /* Uses base header styles from .securities-header-row > div */
+  font-size: 11px;
 }
 
 /* Odds Cell */
@@ -440,6 +542,87 @@
 }
 
 .dark .data-odds {
+  color: rgb(229 231 235);
+}
+
+/* Signal Headers */
+.header-signal {
+  font-size: 10px;
+  text-align: center;
+  justify-content: center;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: visible;
+  letter-spacing: 0.3px;
+}
+
+
+/* Signal Cells */
+.data-signal-cell {
+  justify-content: center !important;
+  padding: 0;
+  text-align: center;
+}
+
+
+.signal-circle {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Vertical Expand Bar */
+.securities-expand-bar {
+  flex: 0 0 30px;
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  background: #e5e7eb;
+  border-left: 1px solid #d1d5db;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+  border-radius: 0 0 0.5rem 0;
+  z-index: 10;
+}
+
+.securities-expand-bar:hover {
+  background: #e5e7eb;
+}
+
+.dark .securities-expand-bar {
+  background: rgb(55 65 81);
+  border-left-color: rgb(75 85 99);
+}
+
+.dark .securities-expand-bar:hover {
+  background: rgb(75 85 99);
+}
+
+/* Vertical text in bar */
+.expand-bar-text {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  user-select: none;
+  letter-spacing: 1px;
+}
+
+.dark .expand-bar-text {
+  color: rgb(156 163 175);
+}
+
+.securities-expand-bar:hover .expand-bar-text {
+  color: #374151;
+}
+
+.dark .securities-expand-bar:hover .expand-bar-text {
   color: rgb(229 231 235);
 }
 

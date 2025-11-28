@@ -20,6 +20,7 @@ const PortfolioDashboard = () => {
   const [volatilityExpanded, setVolatilityExpanded] = useState(false);
   const [securitiesExpanded, setSecuritiesExpanded] = useState(false);
   const [securitiesFullWidth, setSecuritiesFullWidth] = useState(false);
+  const [selectedSecurityTicker, setSelectedSecurityTicker] = useState(null);
   const [peaPodImageError, setPeaPodImageError] = useState(false);
   const [bookImageError, setBookImageError] = useState(false);
   const [showBookMenu, setShowBookMenu] = useState(false);
@@ -559,9 +560,15 @@ const PortfolioDashboard = () => {
           className={showPortfolioMetrics ? 'col-span-12 md:col-span-2' : 'col-span-12 md:col-span-3'}
           style={{
             zIndex: showPortfolioMetrics ? 100 : 'auto', // Lower z-index when Portfolio Metrics overlays
+            overflow: 'visible', // Allow card to expand beyond container
           }}
         >
-          <SecuritiesList />
+          <SecuritiesList 
+            onTickerClick={(ticker) => {
+              setSelectedSecurityTicker(ticker);
+              setSecuritiesExpanded(true);
+            }}
+          />
         </div>
 
         {/* Center Panel - USD Macro Dashboard */}
@@ -1530,6 +1537,7 @@ const PortfolioDashboard = () => {
             setSecuritiesExpanded(true);
           }
         }}
+        selectedTicker={selectedSecurityTicker}
       />
     </div>
   );
