@@ -1,6 +1,6 @@
 // Securities Universe for Trading Dashboard
 // Complete list of tradeable ETFs and securities
-// Generated from securities universe compilation - 111 securities
+// Generated from securities universe compilation - 118 securities
 
 export const SECURITIES_LIST = [
   // Fixed Income (Treasury + Corporate Bonds)
@@ -98,13 +98,20 @@ export const SECURITIES_LIST = [
 
   // Commodities
   { ticker: 'BRENT', name: 'Brent Crude Oil Continuous Contract', assetClass: 'commodity', bias: 'BEARISH' },
+  { ticker: 'CANE', name: 'Sugar (CANE)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'COPPER', name: 'Copper Continuous Contract', assetClass: 'commodity', bias: 'BULLISH' },
+  { ticker: 'CORN', name: 'Corn (CORN)', assetClass: 'commodity', bias: 'NEUTRAL' },
+  { ticker: 'DBA', name: 'Agriculture (DBA)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'GLD', name: 'Gold (GLD)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'GOLD', name: 'Gold Spot Price', assetClass: 'commodity', bias: 'BULLISH' },
+  { ticker: 'JO', name: 'Coffee (JO)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'NATGAS', name: 'Natural Gas Continuous Contract', assetClass: 'commodity', bias: 'BULLISH' },
+  { ticker: 'NIB', name: 'Cocoa (NIB)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'PDBC', name: 'GSCI Commodities Index (PDBC)', assetClass: 'commodity', bias: 'NEUTRAL' },
+  { ticker: 'PPLT', name: 'Platinum (PPLT)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'SILVER', name: 'Silver Spot Price', assetClass: 'commodity', bias: 'BULLISH' },
   { ticker: 'SLV', name: 'Silver (SLV)', assetClass: 'commodity', bias: 'NEUTRAL' },
+  { ticker: 'WEAT', name: 'Wheat (WEAT)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'WTIC', name: 'Light Crude Oil Continuous Contract', assetClass: 'commodity', bias: 'BEARISH' },
 
   // Crypto

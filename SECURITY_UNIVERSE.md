@@ -2,15 +2,15 @@
 
 ## Overview
 
-The security universe consists of **111 securities** across 5 asset classes, providing comprehensive coverage of global financial markets.
+The security universe consists of **118 securities** across 5 asset classes, providing comprehensive coverage of global financial markets.
 
 ## Asset Class Breakdown
 
-- **Fixed Income**: 17 securities (Treasury yields, corporate bonds, mortgage-backed securities)
-- **Equity**: 58 securities (Indices, sectors, individual stocks, country ETFs)
+- **Fixed Income**: 16 securities (Treasury yields, corporate bonds, mortgage-backed securities)
+- **Equity**: 62 securities (Indices, sectors, individual stocks, country ETFs)
 - **Currency/FX**: 10 securities (Currency pairs, currency ETFs, dollar index)
-- **Commodity**: 9 securities (Precious metals, energy, base metals)
-- **Cryptocurrency**: 14 securities (Bitcoin, Ethereum, altcoins, crypto-related stocks)
+- **Commodity**: 16 securities (Precious metals, energy, base metals, agriculture)
+- **Cryptocurrency**: 15 securities (Bitcoin, Ethereum, altcoins, crypto-related stocks)
 
 ## Security Universe Definition
 
@@ -149,12 +149,12 @@ Ensure the data collection Lambda functions (`market_data_collector.py`, `backfi
 
 | Asset Class | Count | Examples |
 |------------|-------|----------|
-| Fixed Income | 17 | TLT, HYG, UST10Y |
-| Equity | 58 | SPY, AAPL, QQQ, XLE |
+| Fixed Income | 16 | TLT, HYG, UST10Y |
+| Equity | 62 | SPY, AAPL, QQQ, XLE |
 | Currency | 10 | USD, EUR/USD, UUP |
-| Commodity | 9 | GOLD, WTIC, GLD |
-| Crypto | 14 | BTC, ETH, COIN |
-| **Total** | **111** | |
+| Commodity | 16 | GOLD, WTIC, GLD, DBA, CORN, WEAT |
+| Crypto | 15 | BTC, ETH, COIN |
+| **Total** | **118** | |
 
 ## Special Cases
 
@@ -165,6 +165,8 @@ Ensure the data collection Lambda functions (`market_data_collector.py`, `backfi
 
 ### Asset Class Notes
 - `GLD` and `SLV` are ETFs but classified as `commodity` (they track gold/silver prices)
+- `DBA`, `CORN`, `WEAT`, `CANE`, `JO`, `NIB` are agriculture commodity ETFs
+- `PPLT` is a platinum ETF classified as `commodity`
 - `VIX` is an index but classified as `equity` (volatility indicator)
 - Treasury yields (`UST2Y`, `UST10Y`, `UST30Y`) are rates, not securities, but included for completeness
 
@@ -195,4 +197,5 @@ Ensure the data collection Lambda functions (`market_data_collector.py`, `backfi
 - **Server Ticker Logic**: `server.js` (lines 62-220)
 - **Data Collection**: `aws/lambda/market_data_collector.py`
 - **Historical Data Backfill**: `aws/lambda/backfill_market_data.py`
+
 
