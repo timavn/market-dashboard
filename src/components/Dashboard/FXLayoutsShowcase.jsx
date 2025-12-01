@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Text, Badge, Flex } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, ResponsiveContainer, YAxis, XAxis } from 'recharts';
 import { CorrelationHelpers, USDMarketService } from '../../services/api/usdMarketService';
 
 // Currency index mapping (same as USDProxies)
@@ -43,10 +43,10 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
     }
   }, [currencyPairs]);
 
-  // Fetch historical data when timeframes change
+  // Initial fetch of historical data for all symbols (only on mount/currencyPairs change)
   useEffect(() => {
-    const fetchHistoricalData = async () => {
-      if (!currencyPairs) return;
+    const fetchAllHistoricalData = async () => {
+      if (!currencyPairs || Object.keys(timeframes).length === 0) return;
 
       const promises = currencyPairs.map(async (pair) => {
         const timeframe = parseInt(timeframes[pair.pair] || 1);
@@ -91,32 +91,95 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
       setIndexHistoricalData(indexDataMap);
     };
 
-    fetchHistoricalData();
-  }, [currencyPairs, timeframes]);
+    fetchAllHistoricalData();
+    // Only run on initial load when timeframes are first initialized
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currencyPairs, Object.keys(timeframes).length]);
 
-  const handleTimeframeChange = (key, newTimeframe) => {
+  // Fetch data for a single symbol when timeframe changes
+  const handleTimeframeChange = async (key, newTimeframe) => {
+    // Update the timeframe state
     setTimeframes(prev => ({
       ...prev,
       [key]: newTimeframe
     }));
+
+    // Fetch data only for the changed symbol
+    try {
+      const data = await USDMarketService.getHistoricalData(key, parseInt(newTimeframe));
+      
+      // Check if this is a currency pair or an index
+      const isIndex = Object.values(CURRENCY_INDEXES).some(idx => idx.ticker === key);
+      
+      if (isIndex) {
+        setIndexHistoricalData(prev => ({
+          ...prev,
+          [key]: data.data || []
+        }));
+      } else {
+        setHistoricalData(prev => ({
+          ...prev,
+          [key]: data.data || []
+        }));
+      }
+    } catch (err) {
+      console.error(`Error fetching historical data for ${key}:`, err);
+    }
   };
 
   const MiniSparkline = ({ data, isPositive }) => {
     if (!data || data.length === 0) {
       return (
-        <div className="h-16 flex items-center justify-center text-gray-400 text-xs">
+        <div className="h-20 flex items-center justify-center text-gray-400 text-xs">
           No data
         </div>
       );
     }
 
+    // Format date for display (MM/DD)
+    const formatDate = (dateStr) => {
+      const date = new Date(dateStr);
+      return `${date.getMonth() + 1}/${date.getDate()}`;
+    };
+
     const chartData = data.map(item => ({
-      value: parseFloat(item.close)
+      value: parseFloat(item.close),
+      date: item.date
     }));
 
+    // Get min/max values for Y-axis labels
+    const values = chartData.map(d => d.value);
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    
+    // Format price for display (smart precision based on value)
+    const formatPrice = (val) => {
+      if (val >= 100) return val.toFixed(1);
+      if (val >= 1) return val.toFixed(2);
+      return val.toFixed(4);
+    };
+
     return (
-      <ResponsiveContainer width="100%" height={64}>
-        <LineChart data={chartData}>
+      <ResponsiveContainer width="100%" height={80}>
+        <LineChart data={chartData} margin={{ top: 5, right: 35, left: 0, bottom: 5 }}>
+          <XAxis 
+            dataKey="date" 
+            tickFormatter={formatDate}
+            tick={{ fontSize: 9, fill: '#9CA3AF' }}
+            axisLine={false}
+            tickLine={false}
+            ticks={[chartData[0]?.date, chartData[chartData.length - 1]?.date]}
+          />
+          <YAxis 
+            domain={['dataMin', 'dataMax']} 
+            orientation="right"
+            tick={{ fontSize: 9, fill: '#9CA3AF' }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={formatPrice}
+            ticks={[minValue, maxValue]}
+            width={32}
+          />
           <Line
             type="monotone"
             dataKey="value"
@@ -194,7 +257,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                       buttonClassName="max-w-[60px] min-w-[50px]"
                     />
                   </Flex>
-                  <div className="mb-2 h-16">
+                  <div className="mb-2 h-20">
                     <MiniSparkline data={pairData} isPositive={isPositive} />
                   </div>
                   <Badge color={isPositive ? 'emerald' : 'red'} size="xs">
@@ -236,7 +299,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                       buttonClassName="max-w-[60px] min-w-[50px]"
                     />
                   </Flex>
-                  <div className="mb-2 h-16">
+                  <div className="mb-2 h-20">
                     <MiniSparkline data={indexDataHistorical} isPositive={isPositive} />
                   </div>
                   <Badge color={isPositive ? 'emerald' : 'red'} size="xs">

@@ -48,8 +48,9 @@ export class USDMarketService {
   // Get historical price data for a symbol
   static async getHistoricalData(symbol, days = 30) {
     try {
-      const response = await apiClient.get(`/api/usd/historical/${symbol}`, {
-        params: { days }
+      // Use query parameter to handle symbols with slashes (e.g., EUR/USD)
+      const response = await apiClient.get('/api/usd/historical', {
+        params: { symbol: symbol, days }
       });
       return response.data;
     } catch (error) {

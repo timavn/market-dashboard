@@ -294,4 +294,18 @@ export class MarketDataService {
       throw error;
     }
   }
+
+  // Get historical price data for a symbol
+  static async getHistoricalData(symbol, days = 30) {
+    try {
+      // Use query parameter to handle symbols with slashes (e.g., GBP/USD)
+      const response = await apiClient.get('/api/usd/historical', {
+        params: { symbol: symbol, days }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching historical data for ${symbol}:`, error);
+      throw error;
+    }
+  }
 }

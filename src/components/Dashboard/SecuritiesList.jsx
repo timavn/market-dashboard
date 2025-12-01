@@ -4,7 +4,7 @@ import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
 import './SecuritiesList.css';
 
-const SecuritiesList = ({ onTickerClick }) => {
+const SecuritiesList = () => {
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
@@ -13,7 +13,10 @@ const SecuritiesList = ({ onTickerClick }) => {
   const [loading, setLoading] = useState(true);
   const [updateTrigger, setUpdateTrigger] = useState(0); // Trigger for real-time color updates
   const [updatedRows, setUpdatedRows] = useState(new Set()); // Track rows that were just updated for blink animation
-  const [allRowsExpanded, setAllRowsExpanded] = useState(false); // Track if all rows are expanded
+  const [topMovers, setTopMovers] = useState({
+    weekly: { upside: [], downside: [] },
+    monthly: { upside: [], downside: [] }
+  });
   const legendRef = useRef(null);
   const dotLegendRef = useRef(null);
   const rowRefs = useRef({});
@@ -136,11 +139,6 @@ const SecuritiesList = ({ onTickerClick }) => {
     } else {
       return { status: 'stale', color: '#EF4444' }; // Red
     }
-  };
-
-  // Toggle all rows expansion
-  const toggleAllRows = () => {
-    setAllRowsExpanded(prev => !prev);
   };
 
   // Calculate odds (upside and downside percentages)
@@ -376,6 +374,121 @@ const SecuritiesList = ({ onTickerClick }) => {
     return () => clearInterval(colorUpdateInterval);
   }, []);
 
+  // Fetch and calculate top movers (weekly and monthly)
+  useEffect(() => {
+    const calculateTopMovers = async () => {
+      try {
+        const tickers = securities.map(s => s.ticker);
+        const moversData = {
+          weekly: { upside: [], downside: [] },
+          monthly: { upside: [], downside: [] }
+        };
+
+        // Only process tickers that have current price data
+        const tickersWithPrices = tickers.filter(ticker => {
+          const price = prices[ticker]?.price;
+          return price && price !== '--' && !isNaN(parseFloat(price));
+        });
+
+        if (tickersWithPrices.length === 0) return;
+
+        // Fetch historical data for all securities in smaller batches to avoid overwhelming the API
+        const batchSize = 5;
+        for (let i = 0; i < tickersWithPrices.length; i += batchSize) {
+          const batch = tickersWithPrices.slice(i, i + batchSize);
+          await Promise.all(batch.map(async (ticker) => {
+            try {
+              const currentPrice = prices[ticker]?.price;
+              const currentPriceNum = parseFloat(currentPrice);
+              if (isNaN(currentPriceNum) || currentPriceNum <= 0) return;
+
+              // Fetch weekly (7 days) and monthly (30 days) historical data
+              const [weeklyData, monthlyData] = await Promise.all([
+                MarketDataService.getHistoricalData(ticker, 7).catch(() => ({ data: [] })),
+                MarketDataService.getHistoricalData(ticker, 30).catch(() => ({ data: [] }))
+              ]);
+
+              // Calculate weekly change
+              if (weeklyData && weeklyData.data && weeklyData.data.length > 0) {
+                // Get the oldest data point (first in chronological order)
+                const weekAgoPrice = weeklyData.data[0]?.close;
+                if (weekAgoPrice && weekAgoPrice > 0) {
+                  const weeklyChange = ((currentPriceNum - weekAgoPrice) / weekAgoPrice) * 100;
+                  const security = securities.find(s => s.ticker === ticker);
+                  if (security && !isNaN(weeklyChange)) {
+                    moversData.weekly[weeklyChange >= 0 ? 'upside' : 'downside'].push({
+                      ticker,
+                      name: security.name,
+                      change: weeklyChange,
+                      assetClass: security.assetClass
+                    });
+                  }
+                }
+              }
+
+              // Calculate monthly change
+              if (monthlyData && monthlyData.data && monthlyData.data.length > 0) {
+                // Get the oldest data point (first in chronological order)
+                const monthAgoPrice = monthlyData.data[0]?.close;
+                if (monthAgoPrice && monthAgoPrice > 0) {
+                  const monthlyChange = ((currentPriceNum - monthAgoPrice) / monthAgoPrice) * 100;
+                  const security = securities.find(s => s.ticker === ticker);
+                  if (security && !isNaN(monthlyChange)) {
+                    moversData.monthly[monthlyChange >= 0 ? 'upside' : 'downside'].push({
+                      ticker,
+                      name: security.name,
+                      change: monthlyChange,
+                      assetClass: security.assetClass
+                    });
+                  }
+                }
+              }
+            } catch (error) {
+              // Silently skip tickers that fail (no historical data available)
+              // console.error(`Error calculating movers for ${ticker}:`, error);
+            }
+          }));
+          
+          // Small delay between batches to avoid overwhelming the API
+          if (i + batchSize < tickersWithPrices.length) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+
+        // Sort and get top 5 for each category
+        const sortAndLimit = (arr, ascending = false) => {
+          return arr
+            .filter(item => !isNaN(item.change))
+            .sort((a, b) => ascending ? a.change - b.change : b.change - a.change)
+            .slice(0, 5);
+        };
+
+        setTopMovers({
+          weekly: {
+            upside: sortAndLimit(moversData.weekly.upside, false),
+            downside: sortAndLimit(moversData.weekly.downside, true)
+          },
+          monthly: {
+            upside: sortAndLimit(moversData.monthly.upside, false),
+            downside: sortAndLimit(moversData.monthly.downside, true)
+          }
+        });
+      } catch (error) {
+        console.error('Error calculating top movers:', error);
+      }
+    };
+
+    // Only calculate if we have price data and not loading
+    if (Object.keys(prices).length > 0 && !loading) {
+      // Debounce to avoid recalculating too frequently
+      const timeoutId = setTimeout(() => {
+        calculateTopMovers();
+      }, 1000);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [prices, loading, securities]);
+
   // Close popover when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -393,15 +506,7 @@ const SecuritiesList = ({ onTickerClick }) => {
   }, [showLegend, showDotLegend]);
 
   return (
-    <Card 
-      className={`securities-card ${allRowsExpanded ? 'expanded' : ''}`} 
-      style={{ 
-        overflow: 'visible',
-        position: 'relative',
-        zIndex: allRowsExpanded ? 100 : 'auto',
-        boxShadow: allRowsExpanded ? '4px 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
-      }}
-    >
+    <Card className="relative securities-card dark:bg-gray-800" style={{ overflow: 'visible' }}>
       <div 
         className="relative" 
         ref={legendRef}
@@ -445,10 +550,84 @@ const SecuritiesList = ({ onTickerClick }) => {
         )}
       </div>
       
-      {/* Main content wrapper - flex container with table and expand bar */}
-      <div className="securities-content-wrapper">
-        {/* Table section */}
-        <div className="securities-table-section">
+      {/* Top Movers Section */}
+      <div className="top-movers-section">
+        <div className="top-movers-grid">
+          {/* Weekly Upside */}
+          <div className="top-movers-card">
+            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 W/W Upside</Text>
+            <div className="top-movers-list">
+              {topMovers.weekly.upside.length > 0 ? (
+                topMovers.weekly.upside.map((mover, idx) => (
+                  <div key={mover.ticker} className="top-mover-item">
+                    <span className="top-mover-rank">{idx + 1}</span>
+                    <span className="top-mover-ticker">{mover.ticker}</span>
+                    <span className="top-mover-change positive">{mover.change.toFixed(2)}%</span>
+                  </div>
+                ))
+              ) : (
+                <Text className="text-xs text-gray-400">Loading...</Text>
+              )}
+            </div>
+          </div>
+
+          {/* Weekly Downside */}
+          <div className="top-movers-card">
+            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 W/W Downside</Text>
+            <div className="top-movers-list">
+              {topMovers.weekly.downside.length > 0 ? (
+                topMovers.weekly.downside.map((mover, idx) => (
+                  <div key={mover.ticker} className="top-mover-item">
+                    <span className="top-mover-rank">{idx + 1}</span>
+                    <span className="top-mover-ticker">{mover.ticker}</span>
+                    <span className="top-mover-change negative">{mover.change.toFixed(2)}%</span>
+                  </div>
+                ))
+              ) : (
+                <Text className="text-xs text-gray-400">Loading...</Text>
+              )}
+            </div>
+          </div>
+
+          {/* Monthly Upside */}
+          <div className="top-movers-card">
+            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 M/M Upside</Text>
+            <div className="top-movers-list">
+              {topMovers.monthly.upside.length > 0 ? (
+                topMovers.monthly.upside.map((mover, idx) => (
+                  <div key={mover.ticker} className="top-mover-item">
+                    <span className="top-mover-rank">{idx + 1}</span>
+                    <span className="top-mover-ticker">{mover.ticker}</span>
+                    <span className="top-mover-change positive">{mover.change.toFixed(2)}%</span>
+                  </div>
+                ))
+              ) : (
+                <Text className="text-xs text-gray-400">Loading...</Text>
+              )}
+            </div>
+          </div>
+
+          {/* Monthly Downside */}
+          <div className="top-movers-card">
+            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 M/M Downside</Text>
+            <div className="top-movers-list">
+              {topMovers.monthly.downside.length > 0 ? (
+                topMovers.monthly.downside.map((mover, idx) => (
+                  <div key={mover.ticker} className="top-mover-item">
+                    <span className="top-mover-rank">{idx + 1}</span>
+                    <span className="top-mover-ticker">{mover.ticker}</span>
+                    <span className="top-mover-change negative">{mover.change.toFixed(2)}%</span>
+                  </div>
+                ))
+              ) : (
+                <Text className="text-xs text-gray-400">Loading...</Text>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div className="securities-table-wrapper">
         {/* Header Row */}
         <div className="securities-header-row">
           <div 
@@ -498,185 +677,139 @@ const SecuritiesList = ({ onTickerClick }) => {
               </div>
             )}
           </div>
+          <div className="header-number">#</div>
           <div className="header-ticker">Ticker</div>
-          <div className="header-signal header-trade">TRADE</div>
-          <div className="header-signal header-trend">TREND</div>
-          <div className="header-signal header-tail">TAIL</div>
-          {allRowsExpanded && (
-            <>
-              <div className="header-price">Spot Price</div>
-              <div className="header-lrr">LRR</div>
-              <div className="header-hrr">HRR</div>
-              <div className="header-odds">+/-</div>
-            </>
-          )}
+          <div className="header-price">Spot Price</div>
+          <div className="header-lrr">LRR</div>
+          <div className="header-hrr">HRR</div>
+          <div className="header-odds">+/-</div>
         </div>
         
         {/* Data Rows */}
         <div className="securities-data-container">
-          {securities.map((security, index) => {
-            return (
-              <div 
-                key={security.ticker}
-                className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
-              >
-                <div className="data-dot-cell">
+          {securities.map((security, index) => (
+            <div 
+              key={security.ticker}
+              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
+            >
+              <div className="data-dot-cell">
+                {(() => {
+                  const priceData = prices[security.ticker];
+                  const timestamp = priceData?.timestamp || null;
+                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                  const lrrTimestamp = riskRangeData?.timestamp || null;
+                  const hrrTimestamp = riskRangeData?.timestamp || null;
+                  const status = getUpdateStatus(timestamp, lrrTimestamp, hrrTimestamp);
+                  // Use updateTrigger to force re-render for real-time updates
+                  const _ = updateTrigger;
+                  
+                  let tooltipText = '';
+                  if (status.status === 'lrr-stale' || status.status === 'hrr-stale') {
+                    tooltipText = `LRR/HRR are more than 1 market day old`;
+                    if (lrrTimestamp) {
+                      tooltipText += ` (LRR: ${new Date(lrrTimestamp).toLocaleString()})`;
+                    }
+                    if (hrrTimestamp) {
+                      tooltipText += ` (HRR: ${new Date(hrrTimestamp).toLocaleString()})`;
+                    }
+                  } else {
+                    tooltipText = `Last updated: ${timestamp ? new Date(timestamp).toLocaleTimeString() : 'Never'} (${status.status})`;
+                  }
+                  
+                  return (
+                    <span 
+                      className="ticker-dot" 
+                      style={{ backgroundColor: status.color }}
+                      title={tooltipText}
+                    ></span>
+                  );
+                })()}
+              </div>
+              <div className="data-number-cell">
+                <span className="data-number">{index + 1}</span>
+              </div>
+              <div className="data-ticker-cell">
+                <span className="data-ticker">{security.ticker}</span>
+              </div>
+              <div className="data-price-cell">
+                <span className="data-price">
                   {(() => {
                     const priceData = prices[security.ticker];
-                    const timestamp = priceData?.timestamp || null;
-                    const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                    const lrrTimestamp = riskRangeData?.timestamp || null;
-                    const hrrTimestamp = riskRangeData?.timestamp || null;
-                    const status = getUpdateStatus(timestamp, lrrTimestamp, hrrTimestamp);
-                    // Use updateTrigger to force re-render for real-time updates
-                    const _ = updateTrigger;
-                    
-                    let tooltipText = '';
-                    if (status.status === 'lrr-stale' || status.status === 'hrr-stale') {
-                      tooltipText = `LRR/HRR are more than 1 market day old`;
-                      if (lrrTimestamp) {
-                        tooltipText += ` (LRR: ${new Date(lrrTimestamp).toLocaleString()})`;
-                      }
-                      if (hrrTimestamp) {
-                        tooltipText += ` (HRR: ${new Date(hrrTimestamp).toLocaleString()})`;
-                      }
-                    } else {
-                      tooltipText = `Last updated: ${timestamp ? new Date(timestamp).toLocaleTimeString() : 'Never'} (${status.status})`;
+                    // Show '...' only when loading AND no data exists
+                    if (loading && priceData === undefined) {
+                      return '...';
                     }
-                    
-                    return (
-                      <span 
-                        className="ticker-dot" 
-                        style={{ backgroundColor: status.color }}
-                        title={tooltipText}
-                      ></span>
-                    );
+                    // If we have data (even if loading is true), show it
+                    if (priceData !== undefined && priceData !== null) {
+                      return formatPrice(security.ticker, priceData, security.assetClass);
+                    }
+                    // No data and not loading, show '--'
+                    return '--';
                   })()}
-                </div>
-                <div 
-                  className="data-ticker-cell"
-                  onClick={() => onTickerClick && onTickerClick(security.ticker)}
-                  style={{ cursor: onTickerClick ? 'pointer' : 'default' }}
-                >
-                  <span className="data-ticker">{security.ticker}</span>
-                </div>
-                <div className="data-signal-cell data-trade-cell">
-                  <span 
-                    className="signal-circle signal-trade" 
-                    style={{ backgroundColor: '#10B981' }}
-                    title="TRADE: Bullish"
-                  ></span>
-                </div>
-                <div className="data-signal-cell data-trend-cell">
-                  <span 
-                    className="signal-circle signal-trend" 
-                    style={{ backgroundColor: '#EAB308' }}
-                    title="TREND: Neutral"
-                  ></span>
-                </div>
-                <div className="data-signal-cell data-tail-cell">
-                  <span 
-                    className="signal-circle signal-tail" 
-                    style={{ backgroundColor: '#EF4444' }}
-                    title="TAIL: Bearish"
-                  ></span>
-                </div>
-                {allRowsExpanded && (
-                  <>
-                    <div className="data-price-cell">
-                      <span className="data-price">
-                        {(() => {
-                          const priceData = prices[security.ticker];
-                          // Show '...' only when loading AND no data exists
-                          if (loading && priceData === undefined) {
-                            return '...';
-                          }
-                          // If we have data (even if loading is true), show it
-                          if (priceData !== undefined && priceData !== null) {
-                            return formatPrice(security.ticker, priceData, security.assetClass);
-                          }
-                          // No data and not loading, show '--'
-                          return '--';
-                        })()}
-                      </span>
-                    </div>
-                    <div className="data-lrr-cell">
-                      <span className="data-lrr">
-                        {(() => {
-                          const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                          if (riskRangeData && riskRangeData.lrr !== undefined && riskRangeData.lrr !== null) {
-                            // Format based on asset class (treasury yields are percentages)
-                            if (security.ticker.startsWith('UST')) {
-                              return `${parseFloat(riskRangeData.lrr).toFixed(2)}%`;
-                            }
-                            return parseFloat(riskRangeData.lrr).toFixed(2);
-                          }
-                          return '--';
-                        })()}
-                      </span>
-                    </div>
-                    <div className="data-hrr-cell">
-                      <span className="data-hrr">
-                        {(() => {
-                          const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                          if (riskRangeData && riskRangeData.hrr !== undefined && riskRangeData.hrr !== null) {
-                            // Format based on asset class (treasury yields are percentages)
-                            if (security.ticker.startsWith('UST')) {
-                              return `${parseFloat(riskRangeData.hrr).toFixed(2)}%`;
-                            }
-                            return parseFloat(riskRangeData.hrr).toFixed(2);
-                          }
-                          return '--';
-                        })()}
-                      </span>
-                    </div>
-                    <div className="data-odds-cell">
-                      {(() => {
-                        const priceData = prices[security.ticker];
-                        const spotPrice = priceData?.price || priceData;
-                        const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                        const lrr = riskRangeData?.lrr || '--';
-                        const hrr = riskRangeData?.hrr || '--';
-                        const odds = calculateOdds(spotPrice, lrr, hrr);
-                        
-                        if (odds.upside === null && odds.downside === null) {
-                          return <span className="data-odds">--</span>;
-                        }
-                        
-                        const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
-                        const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
-                        
-                        return (
-                          <span className="data-odds">
-                            {odds.upside !== null && (
-                              <span className="odds-upside">{upsideStr}</span>
-                            )}
-                            {odds.upside !== null && odds.downside !== null && ' / '}
-                            {odds.downside !== null && (
-                              <span className="odds-downside">{downsideStr}</span>
-                            )}
-                            {odds.upside === null && odds.downside === null && '--'}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                  </>
-                )}
+                </span>
               </div>
-            );
-          })}
-        </div>
-        </div>
-        
-        {/* Vertical Expand Bar */}
-        <div 
-          className="securities-expand-bar"
-          onClick={toggleAllRows}
-          title={allRowsExpanded ? 'Collapse all rows' : 'Expand all rows'}
-        >
-          <span className="expand-bar-text">
-            {allRowsExpanded ? 'Collapse' : 'Expand'}
-          </span>
+              <div className="data-lrr-cell">
+                <span className="data-lrr">
+                  {(() => {
+                    const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                    if (riskRangeData && riskRangeData.lrr !== undefined && riskRangeData.lrr !== null) {
+                      // Format based on asset class (treasury yields are percentages)
+                      if (security.ticker.startsWith('UST')) {
+                        return `${parseFloat(riskRangeData.lrr).toFixed(2)}%`;
+                      }
+                      return parseFloat(riskRangeData.lrr).toFixed(2);
+                    }
+                    return '--';
+                  })()}
+                </span>
+              </div>
+              <div className="data-hrr-cell">
+                <span className="data-hrr">
+                  {(() => {
+                    const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                    if (riskRangeData && riskRangeData.hrr !== undefined && riskRangeData.hrr !== null) {
+                      // Format based on asset class (treasury yields are percentages)
+                      if (security.ticker.startsWith('UST')) {
+                        return `${parseFloat(riskRangeData.hrr).toFixed(2)}%`;
+                      }
+                      return parseFloat(riskRangeData.hrr).toFixed(2);
+                    }
+                    return '--';
+                  })()}
+                </span>
+              </div>
+              <div className="data-odds-cell">
+                {(() => {
+                  const priceData = prices[security.ticker];
+                  const spotPrice = priceData?.price || priceData;
+                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                  const lrr = riskRangeData?.lrr || '--';
+                  const hrr = riskRangeData?.hrr || '--';
+                  const odds = calculateOdds(spotPrice, lrr, hrr);
+                  
+                  if (odds.upside === null && odds.downside === null) {
+                    return <span className="data-odds">--</span>;
+                  }
+                  
+                  const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
+                  const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
+                  
+                  return (
+                    <span className="data-odds">
+                      {odds.upside !== null && (
+                        <span className="odds-upside">{upsideStr}</span>
+                      )}
+                      {odds.upside !== null && odds.downside !== null && ' / '}
+                      {odds.downside !== null && (
+                        <span className="odds-downside">{downsideStr}</span>
+                      )}
+                      {odds.upside === null && odds.downside === null && '--'}
+                    </span>
+                  );
+                })()}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </Card>

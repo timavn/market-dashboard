@@ -1033,11 +1033,45 @@ app.get('/api/usd/correlations', async (req, res) => {
   }
 });
 
+// Helper function to normalize currency pair symbols
+function normalizeCurrencySymbol(symbol) {
+  const currencyPairMap = {
+    'EUR/USD': 'USDEUR',
+    'USD/EUR': 'USDEUR',
+    'GBP/USD': 'USDGBP',
+    'USD/GBP': 'USDGBP',
+    'CAD/USD': 'USDCAD',
+    'USD/CAD': 'USDCAD',
+    'JPY/USD': 'USDJPY',
+    'USD/JPY': 'USDJPY',
+    'USD/YEN': 'USDJPY',
+    'CHF/USD': 'USDCHF',
+    'USD/CHF': 'USDCHF',
+    'CNY/USD': 'USDCNY',
+    'USD/CNY': 'USDCNY',
+    'AUD/USD': 'USDAUD',
+    'USD/AUD': 'USDAUD',
+    'NZD/USD': 'USDNZD',
+    'USD/NZD': 'USDNZD'
+  };
+  return currencyPairMap[symbol.toUpperCase()] || symbol.toUpperCase();
+}
+
 // Get historical price data for a specific symbol
-app.get('/api/usd/historical/:symbol', async (req, res) => {
+// Uses query parameter to handle symbols with slashes (e.g., GBP/USD, EUR/USD)
+app.get('/api/usd/historical', async (req, res) => {
   try {
-    const { symbol } = req.params;
-    const { days = 30 } = req.query; // Default to 30 days
+    const { symbol, days = 30 } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({ error: 'Symbol query parameter is required' });
+    }
+    
+    // Decode URL-encoded symbols
+    let decodedSymbol = decodeURIComponent(symbol);
+    
+    // Normalize currency pair formats
+    const normalizedSymbol = normalizeCurrencySymbol(decodedSymbol);
     
     // Calculate date range
     const endDate = new Date();
@@ -1055,25 +1089,126 @@ app.get('/api/usd/historical/:symbol', async (req, res) => {
         '#date': 'date'
       },
       ExpressionAttributeValues: {
-        ':symbol': symbol.toUpperCase(),
+        ':symbol': normalizedSymbol,
         ':startDate': startDateStr,
         ':endDate': endDateStr
       },
-      ScanIndexForward: true // Sort by date ascending (chronological order)
+      ScanIndexForward: true
     };
     
     const result = await dynamodb.query(params).promise();
     
+    // If no data in database, try fetching from Yahoo Finance as fallback
     if (!result.Items || result.Items.length === 0) {
-      console.log(`No historical data found for ${symbol} between ${startDateStr} and ${endDateStr}`);
+      console.log(`No historical data found in database for ${normalizedSymbol} (original: ${decodedSymbol}), trying Yahoo Finance fallback...`);
+      
+      const yahooTickerMap = {
+        'USDEUR': 'USDEUR=X',
+        'EURUSD': 'EURUSD=X',
+        'USDJPY': 'USDJPY=X',
+        'JPYUSD': 'JPY=X',
+        'USDGBP': 'USDGBP=X',
+        'GBPUSD': 'GBPUSD=X',
+        'USDCHF': 'USDCHF=X',
+        'CHFUSD': 'USDCHF=X',
+        'USDCAD': 'USDCAD=X',
+        'CADUSD': 'CADUSD=X',
+        'USDCNY': 'USDCNY=X',
+        'CNYUSD': 'USDCNY=X',
+        'USDAUD': 'USDAUD=X',
+        'AUDUSD': 'USDAUD=X',
+        'USDNZD': 'USDNZD=X',
+        'NZDUSD': 'USDNZD=X',
+        'EUR/USD': 'EURUSD=X',
+        'USD/EUR': 'USDEUR=X',
+        'GBP/USD': 'GBPUSD=X',
+        'USD/GBP': 'USDGBP=X',
+        'CAD/USD': 'CADUSD=X',
+        'USD/CAD': 'USDCAD=X',
+        'JPY/USD': 'JPY=X',
+        'USD/JPY': 'USDJPY=X',
+        'USD/YEN': 'JPY=X',
+        'CHF/USD': 'USDCHF=X',
+        'USD/CHF': 'USDCHF=X',
+        'CNY/USD': 'USDCNY=X',
+        'USD/CNY': 'USDCNY=X',
+        'AUD/USD': 'USDAUD=X',
+        'USD/AUD': 'USDAUD=X',
+        'NZD/USD': 'USDNZD=X',
+        'USD/NZD': 'USDNZD=X'
+      };
+      
+      const yahooTicker = yahooTickerMap[normalizedSymbol] || yahooTickerMap[decodedSymbol.toUpperCase()] || decodedSymbol;
+      
+      try {
+        const range = days <= 7 ? '5d' : days <= 30 ? '1mo' : days <= 90 ? '3mo' : days <= 180 ? '6mo' : '1y';
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}`;
+        const response = await axios.get(url, {
+          params: {
+            range: range,
+            interval: '1d',
+            includePrePost: 'false'
+          },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          },
+          timeout: 10000
+        });
+        
+        const data = response.data;
+        if (data.chart && data.chart.result && data.chart.result.length > 0) {
+          const result = data.chart.result[0];
+          const timestamps = result.timestamp || [];
+          const quotes = result.indicators?.quote?.[0];
+          
+          if (quotes && quotes.close && quotes.close.length > 0) {
+            const historicalData = [];
+            for (let i = 0; i < timestamps.length; i++) {
+              const closePrice = quotes.close[i];
+              // Skip null/undefined close prices
+              if (closePrice === null || closePrice === undefined) continue;
+              
+              const date = new Date(timestamps[i] * 1000);
+              const dateStr = date.toISOString().split('T')[0];
+              
+              historicalData.push({
+                date: dateStr,
+                close: closePrice,
+                open: quotes.open?.[i] || null,
+                high: quotes.high?.[i] || null,
+                low: quotes.low?.[i] || null,
+                volume: quotes.volume?.[i] || null
+              });
+            }
+            
+            // For small day ranges, just return the most recent data points
+            // This ensures charts always have enough data to render
+            const requestedDays = parseInt(days);
+            const minDataPoints = Math.max(requestedDays, 5); // At least 5 points for a decent chart
+            const trimmedData = historicalData.slice(-minDataPoints);
+            
+            if (trimmedData.length > 0) {
+              console.log(`Fetched ${trimmedData.length} data points from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol})`);
+              return res.json({
+                symbol: decodedSymbol,
+                data: trimmedData,
+                count: trimmedData.length
+              });
+            }
+          }
+        }
+      } catch (yahooError) {
+        console.error(`Error fetching from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol}):`, yahooError.message);
+      }
+      
+      console.log(`No historical data available for ${normalizedSymbol} (original: ${decodedSymbol}) from any source`);
       return res.json({ 
-        symbol: symbol,
+        symbol: decodedSymbol,
         data: [],
-        message: `No historical data available for ${symbol} in the requested date range` 
+        message: `No historical data available for ${decodedSymbol} in the requested date range` 
       });
     }
     
-    // Convert to array format for charting
     const historicalData = result.Items.map(item => ({
       date: item.date,
       close: parseFloat(item.close),
@@ -1081,19 +1216,20 @@ app.get('/api/usd/historical/:symbol', async (req, res) => {
       high: item.high ? parseFloat(item.high) : null,
       low: item.low ? parseFloat(item.low) : null,
       volume: item.volume || null
-    })); // Already in chronological order due to ScanIndexForward: true
+    }));
     
-    console.log(`Fetched ${historicalData.length} data points for ${symbol} (requested ${days} days)`);
+    console.log(`Fetched ${historicalData.length} data points for ${normalizedSymbol} (original: ${decodedSymbol}, requested ${days} days)`);
     
     res.json({
-      symbol: symbol,
+      symbol: decodedSymbol,
       data: historicalData,
       count: historicalData.length
     });
     
   } catch (error) {
-    console.error(`Error fetching historical data for ${req.params.symbol}:`, error);
-    res.status(500).json({ error: `Failed to fetch historical data for ${req.params.symbol}` });
+    const symbolParam = req.query.symbol || 'unknown';
+    console.error(`Error fetching historical data for ${symbolParam}:`, error);
+    res.status(500).json({ error: `Failed to fetch historical data for ${symbolParam}` });
   }
 });
 
