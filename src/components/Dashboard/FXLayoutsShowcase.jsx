@@ -26,11 +26,74 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
   const [historicalData, setHistoricalData] = useState({});
   const [indexHistoricalData, setIndexHistoricalData] = useState({});
   const [timeframes, setTimeframes] = useState({});
+  const [fullYearData, setFullYearData] = useState({}); // Store 365-day data for period calculations
+
+  // Calculate period changes from historical data
+  const calculatePeriodChanges = (data) => {
+    if (!data || data.length < 2) {
+      return { '1D': null, '5D': null, '1M': null, '3M': null, '6M': null, '1Y': null };
+    }
+
+    const latestClose = parseFloat(data[data.length - 1]?.close);
+    const periods = {
+      '1D': 1,
+      '5D': 5,
+      '1M': 30,
+      '3M': 90,
+      '6M': 180,
+      '1Y': 365
+    };
+
+    const changes = {};
+    Object.entries(periods).forEach(([label, days]) => {
+      const targetIndex = Math.max(0, data.length - days - 1);
+      if (targetIndex >= 0 && data[targetIndex]) {
+        const pastClose = parseFloat(data[targetIndex].close);
+        if (pastClose && latestClose) {
+          changes[label] = ((latestClose - pastClose) / pastClose) * 100;
+        } else {
+          changes[label] = null;
+        }
+      } else {
+        changes[label] = null;
+      }
+    });
+
+    return changes;
+  };
+
+  // Period changes display component
+  const PeriodChangesRow = ({ data }) => {
+    const changes = calculatePeriodChanges(data);
+    const periods = ['1D', '5D', '1M', '3M', '6M', '1Y'];
+
+    return (
+      <div className="flex justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+        {periods.map((period) => {
+          const value = changes[period];
+          const isPositive = value !== null && value >= 0;
+          const displayValue = value !== null ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--';
+          
+          return (
+            <div key={period} className="text-center">
+              <Text className="text-[9px] text-gray-400 dark:text-gray-500">{period}</Text>
+              <Text className={`text-[10px] font-medium ${value === null ? 'text-gray-400' : isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
+                {displayValue}
+              </Text>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   // Initialize timeframes for each currency pair and index
   useEffect(() => {
     if (currencyPairs) {
       const initialTimeframes = {};
+      // Add DXY and UUP
+      initialTimeframes['DXY'] = '1';
+      initialTimeframes['UUP'] = '1';
       currencyPairs.forEach(pair => {
         initialTimeframes[pair.pair] = '1'; // Default to 1 day (1D)
         // Also initialize timeframe for the corresponding index
@@ -43,15 +106,30 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
     }
   }, [currencyPairs]);
 
-  // Initial fetch of historical data for all symbols (only on mount/currencyPairs change)
+  // Initial fetch of historical data - runs ONCE when currencyPairs arrives
+  // Uses default timeframe '1' (1 day) for all symbols
+  // Individual chart updates happen via handleTimeframeChange
   useEffect(() => {
-    const fetchAllHistoricalData = async () => {
-      if (!currencyPairs || Object.keys(timeframes).length === 0) return;
+    const fetchInitialData = async () => {
+      if (!currencyPairs) return;
 
-      const promises = currencyPairs.map(async (pair) => {
-        const timeframe = parseInt(timeframes[pair.pair] || 1);
+      const defaultTimeframe = 1; // 1 day default
+
+      // Fetch DXY data
+      const dxyPromise = (async () => {
         try {
-          const data = await USDMarketService.getHistoricalData(pair.pair, timeframe);
+          const data = await USDMarketService.getHistoricalData('DXY', defaultTimeframe);
+          return { pair: 'DXY', data: data.data || [] };
+        } catch (err) {
+          console.error('Error fetching DXY historical data:', err);
+          return { pair: 'DXY', data: [] };
+        }
+      })();
+
+      // Fetch currency pairs data
+      const pairPromises = currencyPairs.map(async (pair) => {
+        try {
+          const data = await USDMarketService.getHistoricalData(pair.pair, defaultTimeframe);
           return { pair: pair.pair, data: data.data || [] };
         } catch (err) {
           console.error(`Error fetching historical data for ${pair.pair}:`, err);
@@ -59,13 +137,22 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
         }
       });
 
-      // Also fetch index historical data
+      // Fetch UUP data
+      const uupPromise = (async () => {
+        try {
+          const data = await USDMarketService.getHistoricalData('UUP', defaultTimeframe);
+          return { ticker: 'UUP', data: data.data || [] };
+        } catch (err) {
+          return { ticker: 'UUP', data: [] };
+        }
+      })();
+
+      // Fetch index ETF data
       const indexPromises = Object.keys(CURRENCY_INDEXES).map(async (pairKey) => {
         const index = CURRENCY_INDEXES[pairKey];
         if (index) {
-          const timeframe = parseInt(timeframes[index.ticker] || 1);
           try {
-            const data = await USDMarketService.getHistoricalData(index.ticker, timeframe);
+            const data = await USDMarketService.getHistoricalData(index.ticker, defaultTimeframe);
             return { ticker: index.ticker, data: data.data || [] };
           } catch (err) {
             return { ticker: index.ticker, data: [] };
@@ -74,8 +161,9 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
         return null;
       }).filter(Boolean);
 
-      const allPromises = [...promises, ...indexPromises];
+      const allPromises = [dxyPromise, ...pairPromises, uupPromise, ...indexPromises];
       const results = await Promise.all(allPromises);
+      
       const dataMap = {};
       const indexDataMap = {};
       results.forEach(result => {
@@ -87,16 +175,80 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
           }
         }
       });
+      
       setHistoricalData(dataMap);
       setIndexHistoricalData(indexDataMap);
     };
 
-    fetchAllHistoricalData();
-    // Only run on initial load when timeframes are first initialized
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currencyPairs, Object.keys(timeframes).length]);
+    fetchInitialData();
+  }, [currencyPairs]);
+
+  // Fetch full year data for period change calculations (separate from chart data)
+  useEffect(() => {
+    const fetchFullYearData = async () => {
+      if (!currencyPairs) return;
+
+      const fullYearDataMap = {};
+
+      // Fetch 365 days for DXY
+      const dxyPromise = (async () => {
+        try {
+          const data = await USDMarketService.getHistoricalData('DXY', 365);
+          return { key: 'DXY', data: data.data || [] };
+        } catch (err) {
+          return { key: 'DXY', data: [] };
+        }
+      })();
+
+      // Fetch 365 days for each currency pair
+      const pairPromises = currencyPairs.map(async (pair) => {
+        try {
+          const data = await USDMarketService.getHistoricalData(pair.pair, 365);
+          return { key: pair.pair, data: data.data || [] };
+        } catch (err) {
+          return { key: pair.pair, data: [] };
+        }
+      });
+
+      // Fetch 365 days for UUP
+      const uupPromise = (async () => {
+        try {
+          const data = await USDMarketService.getHistoricalData('UUP', 365);
+          return { key: 'UUP', data: data.data || [] };
+        } catch (err) {
+          return { key: 'UUP', data: [] };
+        }
+      })();
+
+      // Fetch 365 days for each index
+      const indexPromises = Object.keys(CURRENCY_INDEXES).map(async (pairKey) => {
+        const index = CURRENCY_INDEXES[pairKey];
+        if (index) {
+          try {
+            const data = await USDMarketService.getHistoricalData(index.ticker, 365);
+            return { key: index.ticker, data: data.data || [] };
+          } catch (err) {
+            return { key: index.ticker, data: [] };
+          }
+        }
+        return null;
+      }).filter(Boolean);
+
+      const results = await Promise.all([dxyPromise, ...pairPromises, uupPromise, ...indexPromises]);
+      results.forEach(result => {
+        if (result) {
+          fullYearDataMap[result.key] = result.data;
+        }
+      });
+      
+      setFullYearData(fullYearDataMap);
+    };
+
+    fetchFullYearData();
+  }, [currencyPairs]);
 
   // Fetch data for a single symbol when timeframe changes
+  // Each chart updates independently - only fetches data for the changed symbol
   const handleTimeframeChange = async (key, newTimeframe) => {
     // Update the timeframe state
     setTimeframes(prev => ({
@@ -108,8 +260,8 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
     try {
       const data = await USDMarketService.getHistoricalData(key, parseInt(newTimeframe));
       
-      // Check if this is a currency pair or an index
-      const isIndex = Object.values(CURRENCY_INDEXES).some(idx => idx.ticker === key);
+      // Check if this is an ETF/index (stored in indexHistoricalData) or a currency pair (stored in historicalData)
+      const isIndex = key === 'UUP' || Object.values(CURRENCY_INDEXES).some(idx => idx.ticker === key);
       
       if (isIndex) {
         setIndexHistoricalData(prev => ({
@@ -117,6 +269,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
           [key]: data.data || []
         }));
       } else {
+        // DXY and currency pairs go here
         setHistoricalData(prev => ({
           ...prev,
           [key]: data.data || []
@@ -130,7 +283,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
   const MiniSparkline = ({ data, isPositive }) => {
     if (!data || data.length === 0) {
       return (
-        <div className="h-20 flex items-center justify-center text-gray-400 text-xs">
+        <div className="h-[120px] flex items-center justify-center text-gray-400 text-xs">
           No data
         </div>
       );
@@ -160,25 +313,25 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
     };
 
     return (
-      <ResponsiveContainer width="100%" height={80}>
-        <LineChart data={chartData} margin={{ top: 5, right: 35, left: 0, bottom: 5 }}>
+      <ResponsiveContainer width="100%" height={120}>
+        <LineChart data={chartData} margin={{ top: 5, right: 5, left: 20, bottom: 5 }}>
           <XAxis 
             dataKey="date" 
             tickFormatter={formatDate}
             tick={{ fontSize: 9, fill: '#9CA3AF' }}
-            axisLine={false}
+            axisLine={{ stroke: '#D1D5DB' }}
             tickLine={false}
             ticks={[chartData[0]?.date, chartData[chartData.length - 1]?.date]}
           />
           <YAxis 
             domain={['dataMin', 'dataMax']} 
-            orientation="right"
+            orientation="left"
             tick={{ fontSize: 9, fill: '#9CA3AF' }}
-            axisLine={false}
+            axisLine={{ stroke: '#D1D5DB' }}
             tickLine={false}
             tickFormatter={formatPrice}
             ticks={[minValue, maxValue]}
-            width={32}
+            width={38}
           />
           <Line
             type="monotone"
@@ -233,9 +386,38 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
         <div>
           <Text className="text-xs font-semibold mb-2 text-gray-600 dark:text-gray-400 uppercase tracking-wider">Spot Rates</Text>
           <div className="space-y-2">
+            {/* DXY Card */}
+            {dxy && (
+              <Card className="p-3 dark:bg-gray-700">
+                <Flex justifyContent="between" alignItems="center" className="mb-2">
+                  <div>
+                    <Text className="text-xs font-semibold dark:text-white">DXY</Text>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">{parseFloat(dxy.value || 0).toFixed(2)}</Text>
+                  </div>
+                  <PopoverSelect
+                    value={timeframes['DXY'] || '1'}
+                    options={[
+                      { value: '1', label: '1D' },
+                      { value: '7', label: '1W' },
+                      { value: '30', label: '1M' },
+                      { value: '90', label: '3M' },
+                      { value: '180', label: '6M' },
+                      { value: '365', label: '1Y' },
+                    ]}
+                    onChange={(value) => handleTimeframeChange('DXY', value)}
+                    buttonClassName="max-w-[60px] min-w-[50px]"
+                  />
+                </Flex>
+                <div className="mb-2 h-[120px]">
+                  <MiniSparkline data={historicalData['DXY'] || []} isPositive={parseFloat(dxy.change || 0) >= 0} />
+                </div>
+                <PeriodChangesRow data={fullYearData['DXY'] || []} />
+              </Card>
+            )}
             {currencyPairs.map((pair) => {
               const isPositive = parseFloat(pair.change) >= 0;
               const pairData = historicalData[pair.pair] || [];
+              const pairFullYearData = fullYearData[pair.pair] || [];
               return (
                 <Card key={pair.pair} className="p-3 dark:bg-gray-700">
                   <Flex justifyContent="between" alignItems="center" className="mb-2">
@@ -257,12 +439,10 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                       buttonClassName="max-w-[60px] min-w-[50px]"
                     />
                   </Flex>
-                  <div className="mb-2 h-20">
+                  <div className="mb-2 h-[120px]">
                     <MiniSparkline data={pairData} isPositive={isPositive} />
                   </div>
-                  <Badge color={isPositive ? 'emerald' : 'red'} size="xs">
-                    {CorrelationHelpers.formatChangePercent(pair.changePercent)}
-                  </Badge>
+                  <PeriodChangesRow data={pairFullYearData} />
                 </Card>
               );
             })}
@@ -272,12 +452,41 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
         <div>
           <Text className="text-xs font-semibold mb-2 text-gray-600 dark:text-gray-400 uppercase tracking-wider">ETFs</Text>
           <div className="space-y-2">
+            {/* UUP Card */}
+            {mockIndexData['UUP'] && (
+              <Card className="p-3 dark:bg-gray-700">
+                <Flex justifyContent="between" alignItems="center" className="mb-2">
+                  <div>
+                    <Text className="text-xs font-semibold dark:text-white">UUP</Text>
+                    <Text className="text-xs text-gray-500 dark:text-gray-400">{mockIndexData['UUP'].value.toFixed(2)}</Text>
+                  </div>
+                  <PopoverSelect
+                    value={timeframes['UUP'] || '1'}
+                    options={[
+                      { value: '1', label: '1D' },
+                      { value: '7', label: '1W' },
+                      { value: '30', label: '1M' },
+                      { value: '90', label: '3M' },
+                      { value: '180', label: '6M' },
+                      { value: '365', label: '1Y' },
+                    ]}
+                    onChange={(value) => handleTimeframeChange('UUP', value)}
+                    buttonClassName="max-w-[60px] min-w-[50px]"
+                  />
+                </Flex>
+                <div className="mb-2 h-[120px]">
+                  <MiniSparkline data={indexHistoricalData['UUP'] || []} isPositive={mockIndexData['UUP'].changePercent >= 0} />
+                </div>
+                <PeriodChangesRow data={fullYearData['UUP'] || []} />
+              </Card>
+            )}
             {currencyPairs.map((pair) => {
               const index = CURRENCY_INDEXES[pair.pair];
               const indexInfo = index ? mockIndexData[index.ticker] : null;
               if (!index || !indexInfo) return null;
               const isPositive = indexInfo.changePercent >= 0;
               const indexDataHistorical = index ? (indexHistoricalData[index.ticker] || []) : [];
+              const indexFullYearData = index ? (fullYearData[index.ticker] || []) : [];
               return (
                 <Card key={index.ticker} className="p-3 dark:bg-gray-700">
                   <Flex justifyContent="between" alignItems="center" className="mb-2">
@@ -299,12 +508,10 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                       buttonClassName="max-w-[60px] min-w-[50px]"
                     />
                   </Flex>
-                  <div className="mb-2 h-20">
+                  <div className="mb-2 h-[120px]">
                     <MiniSparkline data={indexDataHistorical} isPositive={isPositive} />
                   </div>
-                  <Badge color={isPositive ? 'emerald' : 'red'} size="xs">
-                    {indexInfo.changePercent >= 0 ? '+' : ''}{indexInfo.changePercent.toFixed(2)}%
-                  </Badge>
+                  <PeriodChangesRow data={indexFullYearData} />
                 </Card>
               );
             })}

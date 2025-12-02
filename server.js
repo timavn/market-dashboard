@@ -1103,6 +1103,7 @@ app.get('/api/usd/historical', async (req, res) => {
       console.log(`No historical data found in database for ${normalizedSymbol} (original: ${decodedSymbol}), trying Yahoo Finance fallback...`);
       
       const yahooTickerMap = {
+        'DXY': 'DX-Y.NYB',
         'USDEUR': 'USDEUR=X',
         'EURUSD': 'EURUSD=X',
         'USDJPY': 'USDJPY=X',
