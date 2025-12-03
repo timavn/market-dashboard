@@ -15,6 +15,131 @@ const CURRENCY_INDEXES = {
   'USDAUD': { ticker: 'FXA', name: 'Australian Dollar' },
 };
 
+// Calculate period changes from historical data
+const calculatePeriodChanges = (data) => {
+  if (!data || data.length < 2) {
+    return { '1D': null, '5D': null, '1M': null, '3M': null, '6M': null, '1Y': null };
+  }
+
+  const latestClose = parseFloat(data[data.length - 1]?.close);
+  const periods = {
+    '1D': 1,
+    '5D': 5,
+    '1M': 30,
+    '3M': 90,
+    '6M': 180,
+    '1Y': 365
+  };
+
+  const changes = {};
+  Object.entries(periods).forEach(([label, days]) => {
+    const targetIndex = Math.max(0, data.length - days - 1);
+    if (targetIndex >= 0 && data[targetIndex]) {
+      const pastClose = parseFloat(data[targetIndex].close);
+      if (pastClose && latestClose) {
+        changes[label] = ((latestClose - pastClose) / pastClose) * 100;
+      } else {
+        changes[label] = null;
+      }
+    } else {
+      changes[label] = null;
+    }
+  });
+
+  return changes;
+};
+
+// Period changes display component
+const PeriodChangesRow = ({ data }) => {
+  const changes = calculatePeriodChanges(data);
+  const periods = ['1D', '5D', '1M', '3M', '6M', '1Y'];
+
+  return (
+    <div className="flex justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+      {periods.map((period) => {
+        const value = changes[period];
+        const isPositive = value !== null && value >= 0;
+        const displayValue = value !== null ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--';
+        
+        return (
+          <div key={period} className="text-center">
+            <Text className="text-[9px] text-gray-400 dark:text-gray-500">{period}</Text>
+            <Text className={`text-[10px] font-medium ${value === null ? 'text-gray-400' : isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
+              {displayValue}
+            </Text>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const MiniSparkline = ({ data, isPositive }) => {
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-[120px] flex items-center justify-center text-gray-400 text-xs">
+        No data
+      </div>
+    );
+  }
+
+  // Format date for display (MM/DD)
+  const formatDate = (dateStr) => {
+    const date = new Date(dateStr);
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  };
+
+  const chartData = data.map(item => ({
+    value: parseFloat(item.close),
+    date: item.date
+  }));
+
+  // Get min/max values for Y-axis labels
+  const values = chartData.map(d => d.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  
+  // Format price for display (smart precision based on value)
+  const formatPrice = (val) => {
+    if (val >= 100) return val.toFixed(1);
+    if (val >= 1) return val.toFixed(2);
+    return val.toFixed(4);
+  };
+
+  return (
+    <ResponsiveContainer width="100%" height={120}>
+      <LineChart data={chartData} margin={{ top: 5, right: 5, left: 20, bottom: 5 }}>
+        <XAxis 
+          dataKey="date" 
+          tickFormatter={formatDate}
+          tick={{ fontSize: 9, fill: '#9CA3AF' }}
+          axisLine={{ stroke: '#D1D5DB' }}
+          tickLine={false}
+          ticks={[chartData[0]?.date, chartData[chartData.length - 1]?.date]}
+        />
+        <YAxis 
+          domain={['dataMin', 'dataMax']} 
+          orientation="left"
+          tick={{ fontSize: 9, fill: '#9CA3AF' }}
+          axisLine={{ stroke: '#D1D5DB' }}
+          tickLine={false}
+          tickFormatter={formatPrice}
+          ticks={[minValue, maxValue]}
+          width={38}
+        />
+        <Line
+          type="monotone"
+          dataKey="value"
+          stroke={isPositive ? '#10B981' : '#EF4444'}
+          strokeWidth={1.5}
+          dot={false}
+          activeDot={false}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+};
+
 /**
  * FX Two-Column Mixed List Layout
  * 
@@ -28,78 +153,19 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
   const [timeframes, setTimeframes] = useState({});
   const [fullYearData, setFullYearData] = useState({}); // Store 365-day data for period calculations
 
-  // Calculate period changes from historical data
-  const calculatePeriodChanges = (data) => {
-    if (!data || data.length < 2) {
-      return { '1D': null, '5D': null, '1M': null, '3M': null, '6M': null, '1Y': null };
-    }
-
-    const latestClose = parseFloat(data[data.length - 1]?.close);
-    const periods = {
-      '1D': 1,
-      '5D': 5,
-      '1M': 30,
-      '3M': 90,
-      '6M': 180,
-      '1Y': 365
-    };
-
-    const changes = {};
-    Object.entries(periods).forEach(([label, days]) => {
-      const targetIndex = Math.max(0, data.length - days - 1);
-      if (targetIndex >= 0 && data[targetIndex]) {
-        const pastClose = parseFloat(data[targetIndex].close);
-        if (pastClose && latestClose) {
-          changes[label] = ((latestClose - pastClose) / pastClose) * 100;
-        } else {
-          changes[label] = null;
-        }
-      } else {
-        changes[label] = null;
-      }
-    });
-
-    return changes;
-  };
-
-  // Period changes display component
-  const PeriodChangesRow = ({ data }) => {
-    const changes = calculatePeriodChanges(data);
-    const periods = ['1D', '5D', '1M', '3M', '6M', '1Y'];
-
-    return (
-      <div className="flex justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-        {periods.map((period) => {
-          const value = changes[period];
-          const isPositive = value !== null && value >= 0;
-          const displayValue = value !== null ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--';
-          
-          return (
-            <div key={period} className="text-center">
-              <Text className="text-[9px] text-gray-400 dark:text-gray-500">{period}</Text>
-              <Text className={`text-[10px] font-medium ${value === null ? 'text-gray-400' : isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
-                {displayValue}
-              </Text>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
   // Initialize timeframes for each currency pair and index
   useEffect(() => {
-    if (currencyPairs) {
+    if (currencyPairs && Array.isArray(currencyPairs)) {
       const initialTimeframes = {};
       // Add DXY and UUP
-      initialTimeframes['DXY'] = '1';
-      initialTimeframes['UUP'] = '1';
+      initialTimeframes['DXY'] = '30';
+      initialTimeframes['UUP'] = '30';
       currencyPairs.forEach(pair => {
-        initialTimeframes[pair.pair] = '1'; // Default to 1 day (1D)
+        initialTimeframes[pair.pair] = '30'; // Default to 30 days
         // Also initialize timeframe for the corresponding index
         const index = CURRENCY_INDEXES[pair.pair];
         if (index) {
-          initialTimeframes[index.ticker] = '1';
+          initialTimeframes[index.ticker] = '30';
         }
       });
       setTimeframes(initialTimeframes);
@@ -107,21 +173,27 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
   }, [currencyPairs]);
 
   // Initial fetch of historical data - runs ONCE when currencyPairs arrives
-  // Uses default timeframe '1' (1 day) for all symbols
+  // Uses default timeframe '30' (30 days) for all symbols to ensure data availability
   // Individual chart updates happen via handleTimeframeChange
   useEffect(() => {
     const fetchInitialData = async () => {
-      if (!currencyPairs) return;
+      if (!currencyPairs || !Array.isArray(currencyPairs)) {
+        console.log('FXLayoutsShowcase: Waiting for currencyPairs...');
+        return;
+      }
 
-      const defaultTimeframe = 1; // 1 day default
+      console.log('FXLayoutsShowcase: Starting initial fetch for', currencyPairs.length, 'pairs');
+      const defaultTimeframe = 30; // 30 days default to ensure we get data
 
       // Fetch DXY data
       const dxyPromise = (async () => {
         try {
+          console.log('FXLayoutsShowcase: Fetching DXY historical data...');
           const data = await USDMarketService.getHistoricalData('DXY', defaultTimeframe);
+          console.log('FXLayoutsShowcase: DXY data received:', data?.data?.length || 0, 'points');
           return { pair: 'DXY', data: data.data || [] };
         } catch (err) {
-          console.error('Error fetching DXY historical data:', err);
+          console.error('FXLayoutsShowcase: Error fetching DXY historical data:', err);
           return { pair: 'DXY', data: [] };
         }
       })();
@@ -186,7 +258,11 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
   // Fetch full year data for period change calculations (separate from chart data)
   useEffect(() => {
     const fetchFullYearData = async () => {
-      if (!currencyPairs) return;
+      // Ensure currencyPairs is an array before proceeding
+      if (!currencyPairs || !Array.isArray(currencyPairs)) {
+        console.log('FXLayoutsShowcase: Waiting for valid currencyPairs array...');
+        return;
+      }
 
       const fullYearDataMap = {};
 
@@ -280,72 +356,6 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
     }
   };
 
-  const MiniSparkline = ({ data, isPositive }) => {
-    if (!data || data.length === 0) {
-      return (
-        <div className="h-[120px] flex items-center justify-center text-gray-400 text-xs">
-          No data
-        </div>
-      );
-    }
-
-    // Format date for display (MM/DD)
-    const formatDate = (dateStr) => {
-      const date = new Date(dateStr);
-      return `${date.getMonth() + 1}/${date.getDate()}`;
-    };
-
-    const chartData = data.map(item => ({
-      value: parseFloat(item.close),
-      date: item.date
-    }));
-
-    // Get min/max values for Y-axis labels
-    const values = chartData.map(d => d.value);
-    const minValue = Math.min(...values);
-    const maxValue = Math.max(...values);
-    
-    // Format price for display (smart precision based on value)
-    const formatPrice = (val) => {
-      if (val >= 100) return val.toFixed(1);
-      if (val >= 1) return val.toFixed(2);
-      return val.toFixed(4);
-    };
-
-    return (
-      <ResponsiveContainer width="100%" height={120}>
-        <LineChart data={chartData} margin={{ top: 5, right: 5, left: 20, bottom: 5 }}>
-          <XAxis 
-            dataKey="date" 
-            tickFormatter={formatDate}
-            tick={{ fontSize: 9, fill: '#9CA3AF' }}
-            axisLine={{ stroke: '#D1D5DB' }}
-            tickLine={false}
-            ticks={[chartData[0]?.date, chartData[chartData.length - 1]?.date]}
-          />
-          <YAxis 
-            domain={['dataMin', 'dataMax']} 
-            orientation="left"
-            tick={{ fontSize: 9, fill: '#9CA3AF' }}
-            axisLine={{ stroke: '#D1D5DB' }}
-            tickLine={false}
-            tickFormatter={formatPrice}
-            ticks={[minValue, maxValue]}
-            width={38}
-          />
-          <Line
-            type="monotone"
-            dataKey="value"
-            stroke={isPositive ? '#10B981' : '#EF4444'}
-            strokeWidth={1.5}
-            dot={false}
-            activeDot={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    );
-  };
-
   // Handle loading and error states
   if (loading) {
     return (
@@ -355,7 +365,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
     );
   }
 
-  if (error || !currencyPairs || currencyPairs.length === 0) {
+  if (error || !currencyPairs || !Array.isArray(currencyPairs) || currencyPairs.length === 0) {
     return (
       <Card className="dark:bg-gray-800">
         <Text className="text-sm font-bold mb-2 dark:text-white">USD Proxies</Text>
@@ -379,6 +389,14 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
     'FXA': { value: 142.30, change: 0.95, changePercent: 0.67 },
   };
 
+  const timeframeOptions = [
+    { value: '1', label: '1D' },
+    { value: '30', label: '1M' },
+    { value: '90', label: '3M' },
+    { value: '180', label: '6M' },
+    { value: '365', label: '1Y' },
+  ];
+
   return (
     <Card className="dark:bg-gray-800">
       <div className="grid grid-cols-2 gap-6">
@@ -396,14 +414,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                   </div>
                   <PopoverSelect
                     value={timeframes['DXY'] || '1'}
-                    options={[
-                      { value: '1', label: '1D' },
-                      { value: '7', label: '1W' },
-                      { value: '30', label: '1M' },
-                      { value: '90', label: '3M' },
-                      { value: '180', label: '6M' },
-                      { value: '365', label: '1Y' },
-                    ]}
+                    options={timeframeOptions}
                     onChange={(value) => handleTimeframeChange('DXY', value)}
                     buttonClassName="max-w-[60px] min-w-[50px]"
                   />
@@ -427,14 +438,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                     </div>
                     <PopoverSelect
                       value={timeframes[pair.pair] || '1'}
-                      options={[
-                        { value: '1', label: '1D' },
-                        { value: '7', label: '1W' },
-                        { value: '30', label: '1M' },
-                        { value: '90', label: '3M' },
-                        { value: '180', label: '6M' },
-                        { value: '365', label: '1Y' },
-                      ]}
+                      options={timeframeOptions}
                       onChange={(value) => handleTimeframeChange(pair.pair, value)}
                       buttonClassName="max-w-[60px] min-w-[50px]"
                     />
@@ -462,14 +466,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                   </div>
                   <PopoverSelect
                     value={timeframes['UUP'] || '1'}
-                    options={[
-                      { value: '1', label: '1D' },
-                      { value: '7', label: '1W' },
-                      { value: '30', label: '1M' },
-                      { value: '90', label: '3M' },
-                      { value: '180', label: '6M' },
-                      { value: '365', label: '1Y' },
-                    ]}
+                    options={timeframeOptions}
                     onChange={(value) => handleTimeframeChange('UUP', value)}
                     buttonClassName="max-w-[60px] min-w-[50px]"
                   />
@@ -496,14 +493,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
                     </div>
                     <PopoverSelect
                       value={timeframes[index.ticker] || '1'}
-                      options={[
-                        { value: '1', label: '1D' },
-                        { value: '7', label: '1W' },
-                        { value: '30', label: '1M' },
-                        { value: '90', label: '3M' },
-                        { value: '180', label: '6M' },
-                        { value: '365', label: '1Y' },
-                      ]}
+                      options={timeframeOptions}
                       onChange={(value) => handleTimeframeChange(index.ticker, value)}
                       buttonClassName="max-w-[60px] min-w-[50px]"
                     />
