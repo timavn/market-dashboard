@@ -4,7 +4,7 @@ import axios from 'axios';
 const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 const apiClient = axios.create({
   baseURL: backendUrl,
-  timeout: 10000,
+  timeout: 60000, // 60 seconds - increased to handle slow DynamoDB/Yahoo Finance responses
   headers: {
     'Content-Type': 'application/json',
   },

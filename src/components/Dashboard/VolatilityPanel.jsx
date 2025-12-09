@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Text, Badge, Flex } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, Bar, ComposedChart, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { MarketDataService } from '../../services/api/marketDataService';
 
 const VolatilityPanel = () => {
   const [selectedVolatility, setSelectedVolatility] = useState('VIX');
@@ -33,7 +34,8 @@ const VolatilityPanel = () => {
     { value: 'GVZ', label: 'GVZ' },
     { value: 'EVZ', label: 'EVZ' },
     { value: 'RVX', label: 'RVX' },
-    { value: 'TYVIX', label: 'TYVIX' }
+    { value: 'TYVIX', label: 'TYVIX' },
+    { value: 'REALIZED_VOL', label: 'Realized Vol (1M vs 3M)' }
   ];
 
   const timeframeOptions = [
@@ -53,10 +55,144 @@ const VolatilityPanel = () => {
     }));
   }, [selectedVolatility]);
 
+  // Calculate realized volatility
+  const calculateRealizedVolatility = (historicalData) => {
+    if (!historicalData || historicalData.length < 65) return [];
+
+    // Sort by date ascending if needed
+    const sortedData = [...historicalData].sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Calculate daily returns
+    const returns = [];
+    for (let i = 1; i < sortedData.length; i++) {
+      const currentPrice = sortedData[i].close;
+      const prevPrice = sortedData[i - 1].close;
+      const dailyReturn = Math.log(currentPrice / prevPrice);
+      returns.push({
+        date: sortedData[i].date,
+        return: dailyReturn,
+        percentChange: ((currentPrice - prevPrice) / prevPrice) * 100
+      });
+    }
+
+    // Calculate rolling volatility
+    const result = [];
+    const TRADING_DAYS = 252;
+    
+    for (let i = 0; i < returns.length; i++) {
+      const currentReturns = returns.slice(0, i + 1);
+      
+      // Need at least 21 days for 1M vol
+      if (currentReturns.length >= 21) {
+        // 1-Month Volatility (21 trading days)
+        const window1M = currentReturns.slice(-21).map(r => r.return);
+        const mean1M = window1M.reduce((a, b) => a + b, 0) / window1M.length;
+        const variance1M = window1M.reduce((a, b) => a + Math.pow(b - mean1M, 2), 0) / (window1M.length - 1);
+        const vol1M = Math.sqrt(variance1M) * Math.sqrt(TRADING_DAYS) * 100;
+
+        let vol3M = null;
+        if (currentReturns.length >= 63) {
+          // 3-Month Volatility (63 trading days)
+          const window3M = currentReturns.slice(-63).map(r => r.return);
+          const mean3M = window3M.reduce((a, b) => a + b, 0) / window3M.length;
+          const variance3M = window3M.reduce((a, b) => a + Math.pow(b - mean3M, 2), 0) / (window3M.length - 1);
+          vol3M = Math.sqrt(variance3M) * Math.sqrt(TRADING_DAYS) * 100;
+        }
+
+        result.push({
+          date: returns[i].date,
+          value: parseFloat(vol1M.toFixed(2)), // Add value field for compatibility with metrics calculation
+          vol1M: parseFloat(vol1M.toFixed(2)),
+          vol3M: vol3M ? parseFloat(vol3M.toFixed(2)) : null,
+          dailyChange: parseFloat(returns[i].percentChange.toFixed(2))
+        });
+      }
+    }
+
+    return result;
+  };
+
+  // Generate mock realized volatility data for fallback
+  const generateMockRealizedVolData = (days) => {
+    const data = [];
+    let vol1M = 15;
+    let vol3M = 14;
+    
+    for (let i = days; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      
+      vol1M += (Math.random() - 0.5) * 2;
+      vol3M += (Math.random() - 0.5) * 1.5;
+      const dailyChange = (Math.random() - 0.5) * 3;
+      
+      data.push({
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        value: Math.max(5, parseFloat(vol1M.toFixed(2))), // Add value field for compatibility
+        vol1M: Math.max(5, parseFloat(vol1M.toFixed(2))),
+        vol3M: Math.max(5, parseFloat(vol3M.toFixed(2))),
+        dailyChange: parseFloat(dailyChange.toFixed(2))
+      });
+    }
+    return data;
+  };
+
   // Fetch VIX data and generate chart data
   useEffect(() => {
     const fetchData = async () => {
-      if (selectedVolatility === 'VIX') {
+      if (selectedVolatility === 'REALIZED_VOL') {
+        setLoading(true);
+        try {
+          // Fetch 1 year of SPX data to calculate realized vol
+          // We need extra history for the moving windows
+          // Use ^GSPC for Yahoo Finance compatibility
+          const response = await MarketDataService.getHistoricalData('^GSPC', 400);
+          
+          if (response && response.data && response.data.length > 0) {
+            const calculatedData = calculateRealizedVolatility(response.data);
+            
+            // Filter based on selected timeframe
+            const timeframeMap = {
+              '1D': 1,
+              '1W': 7,
+              '1M': 30,
+              '3M': 90,
+              '6M': 180,
+              '1Y': 365
+            };
+            const days = timeframeMap[selectedTimeframe] || 30;
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - days);
+            
+            const filteredData = calculatedData.filter(d => new Date(d.date) >= cutoffDate);
+            
+            setChartData(filteredData);
+            calculateMetrics(filteredData);
+            
+            // Update ticker label specifically for this view
+            setMetrics(prev => ({
+              ...prev,
+              volTicker: '1M Realized'
+            }));
+          } else {
+             // If data is missing or empty, throw error to trigger fallback
+             throw new Error('No data returned from API');
+          }
+        } catch (error) {
+          console.error('Error fetching SPX data for realized volatility:', error);
+          // Fallback to mock data if API fails
+          const mockData = generateMockRealizedVolData(30);
+          setChartData(mockData);
+          // Also update metrics with mock data
+          calculateMetrics(mockData);
+           setMetrics(prev => ({
+              ...prev,
+              volTicker: '1M Realized'
+            }));
+        } finally {
+          setLoading(false);
+        }
+      } else if (selectedVolatility === 'VIX') {
         setLoading(true);
         try {
           const response = await fetch('http://localhost:3000/api/indicators/vix');
@@ -330,38 +466,99 @@ const VolatilityPanel = () => {
           </div>
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis 
-                dataKey="date" 
-                tick={{ fontSize: 10 }}
-                angle={-45}
-                textAnchor="end"
-                height={60}
-                padding={{ bottom: 10 }}
-              />
-              <YAxis 
-                tick={{ fontSize: 10 }}
-                label={{ value: selectedVolatility, angle: -90, position: 'insideLeft' }}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '4px',
-                  fontSize: '12px'
-                }}
-                labelStyle={{ color: '#374151' }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="value" 
-                stroke={getVolatilityColor(metrics.current || 18)}
-                strokeWidth={2}
-                dot={false}
-                name={selectedVolatility}
-              />
-            </LineChart>
+            {selectedVolatility === 'REALIZED_VOL' ? (
+              <ComposedChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                <XAxis 
+                  dataKey="date" 
+                  tick={{ fontSize: 10 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={60}
+                  padding={{ bottom: 10 }}
+                />
+                <YAxis 
+                  yAxisId="left"
+                  tick={{ fontSize: 10 }}
+                  label={{ value: 'Realized Volatility', angle: -90, position: 'insideLeft', fontSize: 10 }}
+                  domain={['auto', 'auto']}
+                />
+                <YAxis 
+                  yAxisId="right"
+                  orientation="right"
+                  tick={{ fontSize: 10 }}
+                  label={{ value: 'Daily % Change', angle: 90, position: 'insideRight', fontSize: 10 }}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '4px',
+                    fontSize: '12px'
+                  }}
+                  labelStyle={{ color: '#374151' }}
+                />
+                <Legend wrapperStyle={{ fontSize: '10px' }} />
+                <Bar 
+                  yAxisId="right"
+                  dataKey="dailyChange" 
+                  name="SPX Daily % Change" 
+                  fill="#d1d5db" 
+                  opacity={0.5}
+                />
+                <Line 
+                  yAxisId="left"
+                  type="monotone" 
+                  dataKey="vol1M" 
+                  stroke="#3b82f6" 
+                  strokeWidth={2}
+                  dot={false}
+                  name="1-Month Realized"
+                />
+                <Line 
+                  yAxisId="left"
+                  type="monotone" 
+                  dataKey="vol3M" 
+                  stroke="#f97316" 
+                  strokeWidth={2}
+                  dot={false}
+                  name="3-Month Realized"
+                />
+              </ComposedChart>
+            ) : (
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis 
+                  dataKey="date" 
+                  tick={{ fontSize: 10 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={60}
+                  padding={{ bottom: 10 }}
+                />
+                <YAxis 
+                  tick={{ fontSize: 10 }}
+                  label={{ value: selectedVolatility, angle: -90, position: 'insideLeft' }}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '4px',
+                    fontSize: '12px'
+                  }}
+                  labelStyle={{ color: '#374151' }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="value" 
+                  stroke={getVolatilityColor(metrics.current || 18)}
+                  strokeWidth={2}
+                  dot={false}
+                  name={selectedVolatility}
+                />
+              </LineChart>
+            )}
           </ResponsiveContainer>
         ) : (
           <div className="flex items-center justify-center h-full">
