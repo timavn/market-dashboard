@@ -9,6 +9,7 @@ import SecuritiesList from './SecuritiesList';
 import ResizableBottomPanels from './ResizableBottomPanels';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { bookContent } from '../../constants/bookContent';
+import PortfolioBreakdown from './PortfolioBreakdown';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -30,6 +31,7 @@ const PortfolioDashboard = () => {
   const [bookMenuPosition, setBookMenuPosition] = useState({ top: 0, right: 0 });
   const bookMenuRef = useRef(null);
   const bookPopoverRef = useRef(null);
+  const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
   
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
@@ -690,6 +692,23 @@ const PortfolioDashboard = () => {
               />
             )}
           </Button>
+
+          {/* Portfolio Breakdown Button */}
+          <Button
+            onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
+            variant="secondary"
+            size="sm"
+            className="shadow-sm w-full mt-2"
+            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            title="Portfolio Breakdown"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8"/>
+              <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4"/>
+              <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2"/>
+            </svg>
+          </Button>
           
           {/* Popover Menu */}
           {showBookMenu && (
@@ -1045,6 +1064,77 @@ const PortfolioDashboard = () => {
                   </Text>
                 </div>
               )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Portfolio Breakdown Window - Slides in from right */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: showPortfolioMetrics 
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
+            : '40px', // Position to the left of collapsed portfolio bar
+          width: showPortfolioBreakdown 
+            ? (showPortfolioMetrics 
+                ? 'calc((100vw - 16px) * (10/12) - 128px)' // Width when portfolio metrics open
+                : 'calc((100vw - 16px) * (9/12) - 40px)') // Width when portfolio metrics closed
+            : '0px',
+          height: '100vh',
+          zIndex: showPortfolioBreakdown ? 1300 : -1, // Higher z-index than The Pods window
+          backgroundColor: '#f9fafb',
+          borderLeft: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
+          borderRight: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showPortfolioBreakdown 
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+            : 'none',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
+          display: showPortfolioBreakdown ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showPortfolioBreakdown && (
+          <>
+            {/* Header with Centered Title (Clickable to Close) */}
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => setShowPortfolioBreakdown(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Portfolio Breakdown
+              </Title>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px',
+              }}
+            >
+              <PortfolioBreakdown portfolioData={portfolioData} />
             </div>
           </>
         )}

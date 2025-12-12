@@ -51,6 +51,7 @@ export class MarketDataService {
             positionCount: snapshot.summary.positionCount
           },
           assetAllocation: snapshot.assetAllocation,
+          holdings: holdings,
           topHoldings: holdings.slice(0, 10).map(holding => ({
             symbol: holding.symbol,
             marketValue: holding.marketValue,
@@ -110,6 +111,7 @@ export class MarketDataService {
             positionCount: data.summary.positionCount || 0
           },
           assetAllocation: data.assetAllocation || {},
+          holdings: data.holdings || [],
           topHoldings: data.topHoldings || [],
           lastUpdated: data.lastUpdated || new Date().toLocaleString(),
           

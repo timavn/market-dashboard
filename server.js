@@ -845,6 +845,18 @@ app.get('/api/portfolio', async (req, res) => {
         positionCount: latestSnapshot.summary?.positionCount || holdings.length
       },
       assetAllocation: latestSnapshot.assetAllocation || {},
+      holdings: holdings.map(holding => ({
+        symbol: holding.symbol,
+        description: holding.description || '',
+        quantity: holding.quantity || 0,
+        price: holding.price || 0,
+        marketValue: holding.marketValue || 0,
+        costBasis: holding.costBasis || 0,
+        gainLoss: holding.gainLoss || 0,
+        gainLossPercent: holding.gainLossPercent || 0,
+        assetType: holding.assetType || 'Unknown',
+        assetClass: holding.assetClass || 'Other'
+      })),
       topHoldings: holdings.slice(0, 10).map(holding => ({
         symbol: holding.symbol,
         marketValue: holding.marketValue,
