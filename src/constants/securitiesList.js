@@ -1,6 +1,6 @@
 // Securities Universe for Trading Dashboard
 // Complete list of tradeable ETFs and securities
-// Generated from securities universe compilation - 118 securities
+// Generated from securities universe compilation - 119 securities
 
 export const SECURITIES_LIST = [
   // Fixed Income (Treasury + Corporate Bonds)
@@ -92,6 +92,9 @@ export const SECURITIES_LIST = [
   { ticker: 'FXF', name: 'Swiss Franc (FXF)', assetClass: 'currency', bias: 'NEUTRAL' },
   { ticker: 'FXY', name: 'Japanese Yen (FXY)', assetClass: 'currency', bias: 'NEUTRAL' },
   { ticker: 'GBP/USD', name: 'British Pound to U.S. Dollar', assetClass: 'currency', bias: 'BEARISH' },
+  { ticker: 'GLD', name: 'Gold (GLD)', assetClass: 'currency', bias: 'NEUTRAL' },
+  { ticker: 'GOLD', name: 'Gold Spot Price', assetClass: 'currency', bias: 'BULLISH' },
+  { ticker: 'AAAU', name: 'Gold Trust (AAAU)', assetClass: 'currency', bias: 'NEUTRAL' },
   { ticker: 'USD', name: 'U.S. Dollar Index', assetClass: 'currency', bias: 'BULLISH' },
   { ticker: 'USD/YEN', name: 'U.S. Dollar to Japanese Yen', assetClass: 'currency', bias: 'BULLISH' },
   { ticker: 'UUP', name: 'U.S. Dollar (UUP)', assetClass: 'currency', bias: 'NEUTRAL' },
@@ -102,8 +105,6 @@ export const SECURITIES_LIST = [
   { ticker: 'COPPER', name: 'Copper Continuous Contract', assetClass: 'commodity', bias: 'BULLISH' },
   { ticker: 'CORN', name: 'Corn (CORN)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'DBA', name: 'Agriculture (DBA)', assetClass: 'commodity', bias: 'NEUTRAL' },
-  { ticker: 'GLD', name: 'Gold (GLD)', assetClass: 'commodity', bias: 'NEUTRAL' },
-  { ticker: 'GOLD', name: 'Gold Spot Price', assetClass: 'commodity', bias: 'BULLISH' },
   { ticker: 'JO', name: 'Coffee (JO)', assetClass: 'commodity', bias: 'NEUTRAL' },
   { ticker: 'NATGAS', name: 'Natural Gas Continuous Contract', assetClass: 'commodity', bias: 'BULLISH' },
   { ticker: 'NIB', name: 'Cocoa (NIB)', assetClass: 'commodity', bias: 'NEUTRAL' },

@@ -10,6 +10,7 @@ import ResizableBottomPanels from './ResizableBottomPanels';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { bookContent } from '../../constants/bookContent';
 import PortfolioBreakdown from './PortfolioBreakdown';
+import SecuritiesUniverse from './SecuritiesUniverse';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -32,6 +33,7 @@ const PortfolioDashboard = () => {
   const bookMenuRef = useRef(null);
   const bookPopoverRef = useRef(null);
   const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
+  const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(false);
   
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
@@ -709,6 +711,44 @@ const PortfolioDashboard = () => {
               <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2"/>
             </svg>
           </Button>
+
+          {/* Securities Universe Button */}
+          <Button
+            onClick={() => setShowSecuritiesUniverse(!showSecuritiesUniverse)}
+            variant="secondary"
+            size="sm"
+            className="shadow-sm w-full mt-2"
+            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            title="Securities Universe"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <defs>
+                {/* Purple planet gradient - lighter lavender on upper-right, darker purple on lower-left */}
+                <radialGradient id="planetGradient" cx="0.4" cy="0.3">
+                  <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9"/>
+                  <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95"/>
+                  <stop offset="100%" stopColor="#663399" stopOpacity="1"/>
+                </radialGradient>
+                {/* Ring gradient with iridescent edges */}
+                <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8"/>
+                  <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9"/>
+                  <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8"/>
+                </linearGradient>
+              </defs>
+              {/* Purple planet with swirling cloud patterns */}
+              <circle cx="12" cy="12" r="7" fill="url(#planetGradient)"/>
+              {/* Swirling cloud pattern - lighter lavender swirls */}
+              <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4"/>
+              <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3"/>
+              {/* Prominent purple rings with multiple concentric bands */}
+              <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9"/>
+              <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7"/>
+              <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8"/>
+              <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6"/>
+              <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7"/>
+            </svg>
+          </Button>
           
           {/* Popover Menu */}
           {showBookMenu && (
@@ -1135,6 +1175,77 @@ const PortfolioDashboard = () => {
               }}
             >
               <PortfolioBreakdown portfolioData={portfolioData} />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Securities Universe Window - Slides in from right */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: showPortfolioMetrics 
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
+            : '40px', // Position to the left of collapsed portfolio bar
+          width: showSecuritiesUniverse 
+            ? (showPortfolioMetrics 
+                ? 'calc((100vw - 16px) * (10/12) - 128px)' // Width when portfolio metrics open
+                : 'calc((100vw - 16px) * (9/12) - 40px)') // Width when portfolio metrics closed
+            : '0px',
+          height: '100vh',
+          zIndex: showSecuritiesUniverse ? 1400 : -1, // Higher z-index than Portfolio Breakdown
+          backgroundColor: '#f9fafb',
+          borderLeft: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
+          borderRight: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showSecuritiesUniverse 
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+            : 'none',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
+          display: showSecuritiesUniverse ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showSecuritiesUniverse && (
+          <>
+            {/* Header with Centered Title (Clickable to Close) */}
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => setShowSecuritiesUniverse(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Securities Universe
+              </Title>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px',
+              }}
+            >
+              <SecuritiesUniverse />
             </div>
           </>
         )}

@@ -1,0 +1,155 @@
+// Security Category Mapping for Quad Rankings
+// Maps each security ticker to its specific category for Quad regime ranking
+// Priority: Most specific category (Sector/Factor) > Asset Class
+
+export const SECURITY_CATEGORY_MAPPING = {
+  // Fixed Income Sectors
+  'BKLN': { type: 'fixedIncomeSectors', category: 'Leveraged Loans' },
+  'CWB': { type: 'fixedIncomeSectors', category: 'Convertibles' },
+  'EMB': { type: 'fixedIncomeSectors', category: 'EM $ Debt' },
+  'HYG': { type: 'fixedIncomeSectors', category: 'HY Credit' },
+  'IEF': { type: 'fixedIncomeSectors', category: 'Treasury Belly' },
+  'LQD': { type: 'fixedIncomeSectors', category: 'IG Credit' },
+  'MBB': { type: 'fixedIncomeSectors', category: 'MBS' },
+  'PFF': { type: 'fixedIncomeSectors', category: 'Preferreds' },
+  'SHY': { type: 'fixedIncomeSectors', category: 'Short Duration Treasurys' },
+  'TIP': { type: 'fixedIncomeSectors', category: 'TIPS' },
+  'TLT': { type: 'fixedIncomeSectors', category: 'Long Bond' },
+  'UST10Y': { type: 'fixedIncomeSectors', category: 'Treasury Belly' },
+  'UST2Y': { type: 'fixedIncomeSectors', category: 'Short Duration Treasurys' },
+  'UST30Y': { type: 'fixedIncomeSectors', category: 'Long Bond' },
+  'BNDX': { type: 'assetClasses', category: 'Fixed Income' },
+  'IGOV': { type: 'assetClasses', category: 'Fixed Income' },
+
+  // Equity Sectors
+  'XLK': { type: 'equitySectors', category: 'Tech' },
+  'XLY': { type: 'equitySectors', category: 'Consumer Discretionary' },
+  'XLC': { type: 'equitySectors', category: 'Communication Services' },
+  'XLI': { type: 'equitySectors', category: 'Industrials' },
+  'XLB': { type: 'equitySectors', category: 'Materials' },
+  'XLRE': { type: 'equitySectors', category: 'REITs' },
+  'XLU': { type: 'equitySectors', category: 'Utilities' },
+  'XLP': { type: 'equitySectors', category: 'Consumer Staples' },
+  'XLV': { type: 'equitySectors', category: 'Health Care' },
+  'XLE': { type: 'equitySectors', category: 'Energy' },
+  'XLF': { type: 'equitySectors', category: 'Financials' },
+  'XOP': { type: 'equitySectors', category: 'Energy' },
+  'XME': { type: 'equitySectors', category: 'Materials' },
+  'MLPX': { type: 'equitySectors', category: 'Energy' },
+  'GDX': { type: 'equitySectors', category: 'Materials' },
+  'URA': { type: 'equitySectors', category: 'Energy' },
+  'ITA': { type: 'equitySectors', category: 'Industrials' },
+  'ITB': { type: 'equitySectors', category: 'Industrials' },
+  'SMH': { type: 'equitySectors', category: 'Tech' },
+
+  // Tech Sector Individual Stocks
+  'AAPL': { type: 'equitySectors', category: 'Tech' },
+  'AMZN': { type: 'equitySectors', category: 'Tech' },
+  'GOOGL': { type: 'equitySectors', category: 'Tech' },
+  'META': { type: 'equitySectors', category: 'Tech' },
+  'MSFT': { type: 'equitySectors', category: 'Tech' },
+  'NFLX': { type: 'equitySectors', category: 'Tech' },
+  'NVDA': { type: 'equitySectors', category: 'Tech' },
+  'ORCL': { type: 'equitySectors', category: 'Tech' },
+  'TSLA': { type: 'equitySectors', category: 'Tech' },
+  'COIN': { type: 'equitySectors', category: 'Tech' },
+  'MARA': { type: 'equitySectors', category: 'Tech' },
+  'MSTR': { type: 'equitySectors', category: 'Tech' },
+  'RIOT': { type: 'equitySectors', category: 'Tech' },
+
+  // Tech Sector Indices
+  'QQQ': { type: 'equitySectors', category: 'Tech' },
+  'COMPQ': { type: 'equitySectors', category: 'Tech' },
+  'SPY': { type: 'assetClasses', category: 'Equities' },
+  'SPX': { type: 'assetClasses', category: 'Equities' },
+  'RSP': { type: 'assetClasses', category: 'Equities' },
+  'IWM': { type: 'assetClasses', category: 'Equities' },
+  'RUT': { type: 'assetClasses', category: 'Equities' },
+  'VT': { type: 'assetClasses', category: 'Equities' },
+  'VYMI': { type: 'equityStyleFactors', category: 'Dividend Yield' },
+  'HEFA': { type: 'assetClasses', category: 'Equities' },
+
+  // Equity Style Factors
+  'MTUM': { type: 'equityStyleFactors', category: 'Momentum' },
+  'USMV': { type: 'equityStyleFactors', category: 'Low Beta' },
+
+  // International Equities (map to Equities asset class)
+  'DAX': { type: 'assetClasses', category: 'Equities' },
+  'EMXC': { type: 'assetClasses', category: 'Equities' },
+  'EWA': { type: 'assetClasses', category: 'Equities' },
+  'EWC': { type: 'assetClasses', category: 'Equities' },
+  'EWG': { type: 'assetClasses', category: 'Equities' },
+  'EWH': { type: 'assetClasses', category: 'Equities' },
+  'EWJ': { type: 'assetClasses', category: 'Equities' },
+  'EWQ': { type: 'assetClasses', category: 'Equities' },
+  'EWS': { type: 'assetClasses', category: 'Equities' },
+  'EWU': { type: 'assetClasses', category: 'Equities' },
+  'EWW': { type: 'assetClasses', category: 'Equities' },
+  'EWY': { type: 'assetClasses', category: 'Equities' },
+  'EWZ': { type: 'assetClasses', category: 'Equities' },
+  'EZA': { type: 'assetClasses', category: 'Equities' },
+  'FXI': { type: 'assetClasses', category: 'Equities' },
+  'ILF': { type: 'assetClasses', category: 'Equities' },
+  'INDA': { type: 'assetClasses', category: 'Equities' },
+  'NIKK': { type: 'assetClasses', category: 'Equities' },
+  'SSEC': { type: 'assetClasses', category: 'Equities' },
+  'VGK': { type: 'assetClasses', category: 'Equities' },
+  'VIX': { type: 'assetClasses', category: 'Equities' },
+
+  // Gold (Asset Class)
+  'GLD': { type: 'assetClasses', category: 'Gold' },
+  'GOLD': { type: 'assetClasses', category: 'Gold' },
+  'AAAU': { type: 'assetClasses', category: 'Gold' },
+
+  // USD (Asset Class)
+  'USD': { type: 'assetClasses', category: 'USD' },
+  'UUP': { type: 'assetClasses', category: 'USD' },
+  'USD/YEN': { type: 'assetClasses', category: 'USD' },
+
+  // FX/Currency (Asset Class)
+  'CAD/USD': { type: 'assetClasses', category: 'FX' },
+  'EUR/USD': { type: 'assetClasses', category: 'FX' },
+  'GBP/USD': { type: 'assetClasses', category: 'FX' },
+  'FXB': { type: 'assetClasses', category: 'FX' },
+  'FXE': { type: 'assetClasses', category: 'FX' },
+  'FXF': { type: 'assetClasses', category: 'FX' },
+  'FXY': { type: 'assetClasses', category: 'FX' },
+
+  // Commodities (Asset Class)
+  'BRENT': { type: 'assetClasses', category: 'Commodities' },
+  'CANE': { type: 'assetClasses', category: 'Commodities' },
+  'COPPER': { type: 'assetClasses', category: 'Commodities' },
+  'CORN': { type: 'assetClasses', category: 'Commodities' },
+  'DBA': { type: 'assetClasses', category: 'Commodities' },
+  'JO': { type: 'assetClasses', category: 'Commodities' },
+  'NATGAS': { type: 'assetClasses', category: 'Commodities' },
+  'NIB': { type: 'assetClasses', category: 'Commodities' },
+  'PDBC': { type: 'assetClasses', category: 'Commodities' },
+  'PPLT': { type: 'assetClasses', category: 'Commodities' },
+  'SILVER': { type: 'assetClasses', category: 'Commodities' },
+  'SLV': { type: 'assetClasses', category: 'Commodities' },
+  'WEAT': { type: 'assetClasses', category: 'Commodities' },
+  'WTIC': { type: 'assetClasses', category: 'Commodities' },
+
+  // Crypto (map to Equities asset class for now, or could be separate)
+  'AVAX': { type: 'assetClasses', category: 'Equities' },
+  'BITCOIN': { type: 'assetClasses', category: 'Equities' },
+  'BLOK': { type: 'assetClasses', category: 'Equities' },
+  'BMNR': { type: 'assetClasses', category: 'Equities' },
+  'BTC': { type: 'assetClasses', category: 'Equities' },
+  'CRCL': { type: 'assetClasses', category: 'Equities' },
+  'ETH': { type: 'assetClasses', category: 'Equities' },
+  'ETHA': { type: 'assetClasses', category: 'Equities' },
+  'IBIT': { type: 'assetClasses', category: 'Equities' },
+  'SOL': { type: 'assetClasses', category: 'Equities' },
+  'XRP': { type: 'assetClasses', category: 'Equities' }
+};
+
+/**
+ * Get category mapping for a security ticker
+ * @param {string} ticker - Security ticker symbol
+ * @returns {Object|null} Category mapping object with type and category, or null if not found
+ */
+export const getSecurityCategory = (ticker) => {
+  return SECURITY_CATEGORY_MAPPING[ticker] || null;
+};
