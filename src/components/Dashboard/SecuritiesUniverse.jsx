@@ -20,12 +20,13 @@ const SecuritiesUniverse = () => {
   const [prices, setPrices] = useState({});
   const [priceHistory, setPriceHistory] = useState({});
   const [loading, setLoading] = useState(true);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState([]); // Array of { key, direction } objects
   const [activeFilters, setActiveFilters] = useState({
     assetClasses: [],
     factorExposures: [],
     biases: []
   });
+  const [selectedQuad, setSelectedQuad] = useState(null);
 
   // Fetch prices for all securities (non-blocking - show table even if prices fail)
   useEffect(() => {
@@ -185,48 +186,71 @@ const SecuritiesUniverse = () => {
       );
     }
 
-    return filtered;
-  }, [enrichedSecurities, searchQuery, activeFilters]);
+    // Apply Quad filter
+    if (selectedQuad !== null) {
+      filtered = filtered.filter(security => {
+        if (!security.quadRanking || security.quadRanking === '--') return false;
+        const quads = security.quadRanking.split('/').map(q => parseInt(q));
+        // Check if selected Quad is in first or second position
+        return quads[0] === selectedQuad || quads[1] === selectedQuad;
+      });
+    }
 
-  // Sort securities
+    return filtered;
+  }, [enrichedSecurities, searchQuery, activeFilters, selectedQuad]);
+
+  // Sort securities (supports multiple column sorting)
   const sortedSecurities = useMemo(() => {
-    if (!sortConfig.key) {
+    if (sortConfig.length === 0) {
       return filteredSecurities;
     }
 
     const sorted = [...filteredSecurities].sort((a, b) => {
-      let aValue = a[sortConfig.key];
-      let bValue = b[sortConfig.key];
+      // Apply each sort in order
+      for (const sort of sortConfig) {
+        let aValue = a[sort.key];
+        let bValue = b[sort.key];
 
-      // Handle nested values
-      if (sortConfig.key === 'priceChanges') {
-        aValue = a.priceChanges?.['1D'] || 0;
-        bValue = b.priceChanges?.['1D'] || 0;
-      }
+        // Handle nested values
+        if (sort.key === 'priceChanges') {
+          aValue = a.priceChanges?.['1D'] || 0;
+          bValue = b.priceChanges?.['1D'] || 0;
+        }
 
-      // Handle Quad ranking sorting (sort by first number in format "3/4/2/1")
-      if (sortConfig.key === 'quadRanking') {
-        const aFirst = a.quadRanking && a.quadRanking !== '--' ? parseInt(a.quadRanking.split('/')[0]) : 999;
-        const bFirst = b.quadRanking && b.quadRanking !== '--' ? parseInt(b.quadRanking.split('/')[0]) : 999;
-        aValue = aFirst;
-        bValue = bFirst;
-      }
+        // Handle Quad ranking sorting (sort by first number in format "3/4/2/1")
+        if (sort.key === 'quadRanking') {
+          const aFirst = a.quadRanking && a.quadRanking !== '--' ? parseInt(a.quadRanking.split('/')[0]) : 999;
+          const bFirst = b.quadRanking && b.quadRanking !== '--' ? parseInt(b.quadRanking.split('/')[0]) : 999;
+          aValue = aFirst;
+          bValue = bFirst;
+        }
 
-      // Handle null/undefined
-      if (aValue === null || aValue === undefined) aValue = '';
-      if (bValue === null || bValue === undefined) bValue = '';
+        // Handle T/T/T sorting (sort by bias: BULLISH > NEUTRAL > BEARISH)
+        if (sort.key === 'bias') {
+          const biasOrder = { 'BULLISH': 3, 'NEUTRAL': 2, 'BEARISH': 1 };
+          aValue = biasOrder[a.bias] || 0;
+          bValue = biasOrder[b.bias] || 0;
+        }
 
-      // Convert to comparable types
-      if (typeof aValue === 'string') {
-        aValue = aValue.toLowerCase();
-        bValue = bValue.toLowerCase();
-      }
+        // Handle null/undefined
+        if (aValue === null || aValue === undefined) aValue = '';
+        if (bValue === null || bValue === undefined) bValue = '';
 
-      if (aValue < bValue) {
-        return sortConfig.direction === 'asc' ? -1 : 1;
-      }
-      if (aValue > bValue) {
-        return sortConfig.direction === 'asc' ? 1 : -1;
+        // Convert to comparable types
+        if (typeof aValue === 'string') {
+          aValue = aValue.toLowerCase();
+          bValue = bValue.toLowerCase();
+        }
+
+        // Compare values
+        if (aValue < bValue) {
+          const result = sort.direction === 'asc' ? -1 : 1;
+          if (result !== 0) return result;
+        } else if (aValue > bValue) {
+          const result = sort.direction === 'asc' ? 1 : -1;
+          if (result !== 0) return result;
+        }
+        // If equal, continue to next sort criteria
       }
       return 0;
     });
@@ -234,12 +258,38 @@ const SecuritiesUniverse = () => {
     return sorted;
   }, [filteredSecurities, sortConfig]);
 
-  // Handle column sort
+  // Handle column sort (toggle on/off, supports multiple columns)
   const handleSort = (key) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
-    }));
+    setSortConfig(prev => {
+      const existingIndex = prev.findIndex(s => s.key === key);
+      
+      if (existingIndex >= 0) {
+        // Column is already sorted - toggle direction or remove
+        const existing = prev[existingIndex];
+        if (existing.direction === 'asc') {
+          // Change to desc
+          const updated = [...prev];
+          updated[existingIndex] = { ...existing, direction: 'desc' };
+          return updated;
+        } else {
+          // Remove from sort
+          return prev.filter((_, index) => index !== existingIndex);
+        }
+      } else {
+        // Add new sort (ascending by default)
+        return [...prev, { key, direction: 'asc' }];
+      }
+    });
+  };
+
+  // Get sort info for a column
+  const getSortInfo = (key) => {
+    const sortIndex = sortConfig.findIndex(s => s.key === key);
+    if (sortIndex < 0) return null;
+    return {
+      direction: sortConfig[sortIndex].direction,
+      order: sortIndex + 1 // 1-based order
+    };
   };
 
   // Handle filter tag clicks
@@ -257,6 +307,7 @@ const SecuritiesUniverse = () => {
     });
   };
 
+
   // Clear all filters
   const clearAllFilters = () => {
     setActiveFilters({
@@ -264,6 +315,7 @@ const SecuritiesUniverse = () => {
       factorExposures: [],
       biases: []
     });
+    setSelectedQuad(null);
     setSearchQuery('');
   };
 
@@ -330,7 +382,7 @@ const SecuritiesUniverse = () => {
           style={{ fontSize: '14px' }}
         />
         <Text className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-          {searchQuery || Object.values(activeFilters).some(arr => arr.length > 0)
+          {searchQuery || Object.values(activeFilters).some(arr => arr.length > 0) || selectedQuad !== null
             ? `Showing ${filteredSecurities.length} of ${SECURITIES_LIST.length} securities`
             : `${SECURITIES_LIST.length} securities total`}
         </Text>
@@ -345,17 +397,39 @@ const SecuritiesUniverse = () => {
               Asset Class
             </Text>
             <div className="flex flex-wrap gap-2">
-              {Object.values(ASSET_CLASS_NAMES).map(assetClass => {
+              {['Currency/FX', 'Fixed Income', 'Equity', 'Commodity', 'Cryptocurrency'].map(assetClass => {
                 const isActive = activeFilters.assetClasses.includes(assetClass);
+                // Map display names to asset class keys for color lookup
+                const assetClassKey = Object.keys(ASSET_CLASS_NAMES).find(
+                  key => ASSET_CLASS_NAMES[key] === assetClass
+                );
+                // Color mapping matching signal strength card
+                const colorMap = {
+                  fixedIncome: { active: '#3B82F6', inactive: '#DBEAFE', text: '#1E40AF' },  // Blue
+                  equity: { active: '#10B981', inactive: '#D1FAE5', text: '#065F46' },        // Green
+                  currency: { active: '#8B5CF6', inactive: '#E9D5FF', text: '#6B21A8' },     // Violet
+                  commodity: { active: '#F97316', inactive: '#FED7AA', text: '#9A3412' },    // Orange
+                  crypto: { active: '#EAB308', inactive: '#FDE68A', text: '#854D0E' }         // Yellow
+                };
+                const colors = colorMap[assetClassKey] || { active: '#6B7280', inactive: '#F3F4F6', text: '#374151' };
+                const backgroundColor = isActive ? colors.active : colors.inactive;
+                const textColor = isActive ? '#ffffff' : colors.text;
                 return (
                   <button
                     key={assetClass}
                     onClick={() => toggleFilter('assetClasses', assetClass)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                      isActive
-                        ? 'bg-blue-500 text-white dark:bg-blue-600'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-                    }`}
+                    style={{
+                      backgroundColor,
+                      color: textColor,
+                      padding: '4px 12px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      borderRadius: '9999px',
+                      transition: 'all 0.2s',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                    className={!isActive ? 'hover:opacity-80 dark:hover:opacity-70' : ''}
                   >
                     {assetClass}
                   </button>
@@ -432,8 +506,64 @@ const SecuritiesUniverse = () => {
             </div>
           </div>
 
+          {/* Quad Filter */}
+          <div>
+            <Text className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 block">
+              Quad Filter
+            </Text>
+            <div className="flex flex-wrap gap-2">
+              {[1, 2, 3, 4].map(quadNum => {
+                const isActive = selectedQuad === quadNum;
+                const getQuadButtonColor = (quadNum, isActive) => {
+                  const colors = {
+                    1: isActive ? '#10b981' : '#d1fae5', // Darker green
+                    2: isActive ? '#34d399' : '#a7f3d0', // Lighter green
+                    3: isActive ? '#f59e0b' : '#fde68a', // Orange/Gold
+                    4: isActive ? '#ef4444' : '#fee2e2'  // Red
+                  };
+                  return colors[quadNum] || '#f3f4f6';
+                };
+                const getQuadTextColor = (quadNum, isActive) => {
+                  if (isActive) return '#ffffff';
+                  const textColors = {
+                    1: '#065f46', // Dark green
+                    2: '#047857', // Medium green
+                    3: '#92400e', // Dark orange
+                    4: '#991b1b'  // Dark red
+                  };
+                  return textColors[quadNum] || '#374151';
+                };
+                return (
+                  <button
+                    key={quadNum}
+                    onClick={() => setSelectedQuad(isActive ? null : quadNum)}
+                    style={{
+                      backgroundColor: getQuadButtonColor(quadNum, isActive),
+                      color: getQuadTextColor(quadNum, isActive),
+                      padding: '4px 12px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      borderRadius: '9999px',
+                      transition: 'all 0.2s',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                    className={!isActive ? 'hover:opacity-80 dark:hover:opacity-70' : ''}
+                  >
+                    Quad {quadNum}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedQuad !== null && (
+              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Showing securities where Quad {selectedQuad} is strongest or 2nd strongest
+              </Text>
+            )}
+          </div>
+
           {/* Clear Filters Button */}
-          {(searchQuery || Object.values(activeFilters).some(arr => arr.length > 0)) && (
+          {(searchQuery || Object.values(activeFilters).some(arr => arr.length > 0) || selectedQuad !== null) && (
             <div className="pt-2 border-t dark:border-gray-700">
               <button
                 onClick={clearAllFilters}
@@ -457,70 +587,100 @@ const SecuritiesUniverse = () => {
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('ticker')}
                   >
-                    Ticker {sortConfig.key === 'ticker' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Ticker {(() => {
+                      const sortInfo = getSortInfo('ticker');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('name')}
                   >
-                    Name {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Name {(() => {
+                      const sortInfo = getSortInfo('name');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('price')}
                   >
-                    Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Price {(() => {
+                      const sortInfo = getSortInfo('price');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('assetClass')}
                   >
-                    Asset Class {sortConfig.key === 'assetClass' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Asset Class {(() => {
+                      const sortInfo = getSortInfo('assetClass');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('factorExposure')}
                   >
-                    Factor Exposure {sortConfig.key === 'factorExposure' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Factor Exposure {(() => {
+                      const sortInfo = getSortInfo('factorExposure');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('zScore')}
                   >
-                    Z-Score {sortConfig.key === 'zScore' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Z-Score {(() => {
+                      const sortInfo = getSortInfo('zScore');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('beta')}
                   >
-                    Beta {sortConfig.key === 'beta' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Beta {(() => {
+                      const sortInfo = getSortInfo('beta');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('benchmark')}
                   >
-                    Benchmark {sortConfig.key === 'benchmark' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Benchmark {(() => {
+                      const sortInfo = getSortInfo('benchmark');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('bias')}
                   >
-                    T/T/T {sortConfig.key === 'bias' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    T/T/T {(() => {
+                      const sortInfo = getSortInfo('bias');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('quadRanking')}
                   >
-                    Quad {sortConfig.key === 'quadRanking' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Quad {(() => {
+                      const sortInfo = getSortInfo('quadRanking');
+                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                    })()}
                   </th>
                   <th
                     style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600 }}
