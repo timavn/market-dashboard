@@ -15,10 +15,16 @@ import requests
 from bs4 import BeautifulSoup
 
 # Import boto3 from Lambda runtime, not from package
-# Lambda runtime has boto3 pre-installed, so we don't include it in the package
-# If boto3 is in the package, Python will import it from /var/task first
-# So we need to ensure it's removed from the package during build
-import boto3  # Will use runtime version if package version is removed
+import boto3
+
+# Firecrawl support
+try:
+    from firecrawl import FirecrawlApp
+    FIRECRAWL_AVAILABLE = True
+    print("✓ Firecrawl package is available")
+except ImportError:
+    FIRECRAWL_AVAILABLE = False
+    print("Warning: Firecrawl package not available")
 
 # Try to import playwright for JavaScript-heavy pages
 try:
@@ -28,13 +34,8 @@ try:
 except ImportError as e:
     PLAYWRIGHT_AVAILABLE = False
     print(f"✗ Playwright not available: {e}")
-    print(f"  Import error details: {type(e).__name__}")
-    import traceback
-    traceback.print_exc()
-    print("  Falling back to requests only")
 
 # DynamoDB setup
-# boto3 is imported above from Lambda runtime
 dynamodb = boto3.resource('dynamodb')
 RISK_RANGE_TABLE = os.environ.get('RISK_RANGE_TABLE', 'RiskRangeData')
 
@@ -49,24 +50,26 @@ def load_credentials():
                 config = json.load(f)
                 email = config.get('email')
                 password = config.get('password')
+                fc_key = config.get('firecrawl_api_key')
                 if email and password:
                     print("Loaded credentials from config file")
-                    return email, password
+                    return email, password, fc_key
         except Exception as e:
             print(f"Warning: Could not load config file: {e}")
     
     # Fall back to environment variables (for Lambda)
     email = os.environ.get('HEDGEYE_EMAIL')
     password = os.environ.get('HEDGEYE_PASSWORD')
+    fc_key = os.environ.get('FIRECRAWL_API_KEY')
     
     if email and password:
         print("Loaded credentials from environment variables")
-        return email, password
+        return email, password, fc_key
     
-    return None, None
+    return None, None, None
 
 # Initialize credentials
-HEDGEYE_EMAIL, HEDGEYE_PASSWORD = load_credentials()
+HEDGEYE_EMAIL, HEDGEYE_PASSWORD, FIRECRAWL_API_KEY = load_credentials()
 HEDGEYE_LOGIN_URL = os.environ.get('HEDGEYE_LOGIN_URL', 'https://app.hedgeye.com/users/sign_in')
 HEDGEYE_RISK_RANGE_URL = os.environ.get(
     'HEDGEYE_RISK_RANGE_URL',
@@ -74,10 +77,6 @@ HEDGEYE_RISK_RANGE_URL = os.environ.get(
 )
 
 # Ticker mapping from Hedgeye format to our ticker format
-# This maps Hedgeye's INDEX names to our ticker symbols
-# NOTE: This mapping should be expanded after first successful scrape
-# to include all securities available on Hedgeye that match our SECURITIES_LIST
-# Current mappings verified against src/constants/securitiesList.js
 TICKER_MAPPING = {
     'UST30Y': 'UST30Y',  # 30-Year U.S. Treasury Yield
     'UST10Y': 'UST10Y',  # 10-Year U.S. Treasury Yield
@@ -88,8 +87,6 @@ TICKER_MAPPING = {
     'COMPQ': 'COMPQ',    # NASDAQ Composite
     'RUT': 'RUT',        # Russell 2000
     # TODO: Expand this mapping after first successful scrape
-    # Run the scraper and check CloudWatch logs to see all available Hedgeye INDEX names
-    # Then add mappings for all securities that exist in both Hedgeye and SECURITIES_LIST
 }
 
 def lambda_handler(event, context):
@@ -141,6 +138,15 @@ def scrape_hedgeye_risk_ranges() -> Dict[str, Dict]:
     Scrape risk range data from Hedgeye website
     Returns dict mapping ticker to {lrr: value, hrr: value, timestamp: iso}
     """
+    # Try Firecrawl first if available
+    if FIRECRAWL_AVAILABLE and FIRECRAWL_API_KEY:
+        try:
+            print("Attempting scrape with Firecrawl...")
+            return scrape_with_firecrawl()
+        except Exception as e:
+            print(f"Firecrawl scraping failed: {e}")
+            print("Falling back to Playwright/Requests...")
+
     # Use Playwright if available (handles login forms and JavaScript)
     if PLAYWRIGHT_AVAILABLE:
         try:
@@ -152,6 +158,56 @@ def scrape_hedgeye_risk_ranges() -> Dict[str, Dict]:
     
     # Final fallback to requests (may fail due to bot protection)
     return scrape_with_requests()
+
+def scrape_with_firecrawl() -> Dict[str, Dict]:
+    """
+    Scrape using Firecrawl
+    """
+    app = FirecrawlApp(api_key=FIRECRAWL_API_KEY)
+    
+    # Actions to perform login
+    # We assume visiting the Risk Range URL redirects to Login
+    actions = [
+        {"type": "wait", "milliseconds": 5000},
+        {"type": "write", "selector": "input[name='user[email]']", "text": HEDGEYE_EMAIL},
+        {"type": "write", "selector": "input[name='user[password]']", "text": HEDGEYE_PASSWORD},
+        # Try multiple possible submit selectors
+        {"type": "click", "selector": "#se-be-login-submit"},
+        {"type": "wait", "milliseconds": 15000}
+    ]
+    
+    print(f"Scraping {HEDGEYE_RISK_RANGE_URL} with Firecrawl...")
+    try:
+        # Attempt to scrape with actions
+        # Note: scrape parameters might vary by library version, using keyword args based on recent checks
+        result = app.scrape(
+            HEDGEYE_RISK_RANGE_URL,
+            formats=['html'],
+            actions=actions
+        )
+    except TypeError as e:
+        if "unexpected keyword argument 'params'" in str(e):
+             # Fallback for older library versions if they exist
+             result = app.scrape_url(
+                HEDGEYE_RISK_RANGE_URL,
+                params={'formats': ['html'], 'actions': actions}
+             )
+        else:
+            raise e
+            
+    html = ""
+    if hasattr(result, 'html'):
+        html = result.html
+    elif isinstance(result, dict):
+        html = result.get('html', '')
+    elif hasattr(result, 'data') and isinstance(result.data, dict):
+        html = result.data.get('html', '')
+        
+    if not html:
+        raise Exception("No HTML returned from Firecrawl")
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    return parse_risk_range_table(soup)
 
 def scrape_with_requests() -> Dict[str, Dict]:
     """
@@ -283,24 +339,30 @@ def scrape_with_playwright() -> Dict[str, Dict]:
         try:
             # Step 1: Navigate to login page
             print("Navigating to login page...")
-            page.goto(HEDGEYE_LOGIN_URL, wait_until='networkidle')
+            page.goto(HEDGEYE_LOGIN_URL, wait_until='networkidle', timeout=60000)
             
             # Step 2: Fill in login form
             print("Filling login form...")
+            page.wait_for_selector('input[name="user[email]"]', timeout=30000)
             page.fill('input[name="user[email]"]', HEDGEYE_EMAIL)
             page.fill('input[name="user[password]"]', HEDGEYE_PASSWORD)
             
             # Step 3: Submit login
             print("Submitting login...")
-            page.click('button[type="submit"]', timeout=10000)
+            # Try specific submit button first, then generic
+            try:
+                page.click('#se-be-login-submit', timeout=5000)
+            except:
+                page.click('button[type="submit"]', timeout=5000)
+            
             page.wait_for_load_state('networkidle')
             
             # Wait a bit for redirect
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(5000)
             
             # Step 4: Navigate to Risk Range Signals page
             print("Navigating to Risk Range Signals page...")
-            page.goto(HEDGEYE_RISK_RANGE_URL, wait_until='networkidle')
+            page.goto(HEDGEYE_RISK_RANGE_URL, wait_until='networkidle', timeout=60000)
             
             # Wait for table to load
             page.wait_for_selector('table', timeout=30000)
@@ -495,4 +557,3 @@ def store_risk_range_data(risk_range_data: Dict[str, Dict]):
         print("Stored latest snapshot")
     except Exception as e:
         print(f"Error storing latest snapshot: {str(e)}")
-

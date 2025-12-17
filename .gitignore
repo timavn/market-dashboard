@@ -41,3 +41,7 @@ Thumbs.db
 # Hedgeye credentials
 aws/lambda/hedgeye_config.json
 aws/lambda/test_output/
+
+# Large Lambda deployment packages
+aws/lambda/*.zip
+aws/lambda/package/

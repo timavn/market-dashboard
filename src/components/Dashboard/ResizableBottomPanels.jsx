@@ -1,7 +1,7 @@
 import React from 'react';
 import { Title } from '@tremor/react';
 import VolatilityPanel from './VolatilityPanel';
-import VolumePanel from './VolumePanel';
+import SecuritiesPanel from './VolumePanel';
 
 const COLLAPSED_HEIGHT = 30; // Height when collapsed (shows label only) - 25% thinner than original 40px
 const EXPANDED_HEIGHT = 500; // Height when expanded (25% taller than 400px)
@@ -12,7 +12,8 @@ const ResizableBottomPanels = ({
   onVolatilityToggle, 
   onSecuritiesToggle,
   securitiesFullWidth,
-  onSecuritiesFullWidthToggle
+  onSecuritiesFullWidthToggle,
+  selectedTicker
 }) => {
   const volatilityHeight = volatilityExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
   const securitiesHeight = securitiesExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
@@ -244,7 +245,7 @@ const ResizableBottomPanels = ({
                 padding: '8px',
               }}
             >
-              <VolumePanel />
+              <SecuritiesPanel selectedTicker={selectedTicker} />
             </div>
           </>
         )}

@@ -37,6 +37,14 @@ except ImportError:
     print("Error: Playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)
 
+# Stealth mode to avoid bot detection
+try:
+    from playwright_stealth import stealth_sync
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+    print("Warning: playwright-stealth not installed. Run: pip install playwright-stealth")
+
 # boto3 for DynamoDB (optional - won't fail if not configured)
 try:
     import boto3
@@ -49,6 +57,7 @@ except ImportError:
 # Configuration
 SCRIPT_DIR = Path(__file__).parent
 SESSION_FILE = SCRIPT_DIR / "hedgeye_session.json"
+COOKIE_FILE = SCRIPT_DIR / "hedgeye_cookies.json"
 CONFIG_FILE = SCRIPT_DIR / "hedgeye_config.json"
 OUTPUT_FILE = SCRIPT_DIR / "hedgeye_risk_ranges.json"
 
@@ -88,7 +97,20 @@ def load_config() -> Dict:
     return {}
 
 
-def run_login_mode(wait_seconds: int = 120):
+def load_cookies() -> Optional[list]:
+    """Load cookies from extracted cookie file"""
+    if COOKIE_FILE.exists():
+        try:
+            with open(COOKIE_FILE, 'r') as f:
+                cookies = json.load(f)
+                print(f"✓ Loaded {len(cookies)} cookies from {COOKIE_FILE}")
+                return cookies
+        except Exception as e:
+            print(f"Warning: Could not load cookies: {e}")
+    return None
+
+
+def run_login_mode(wait_seconds: int = 120, use_chrome_profile: bool = False):
     """
     Open browser for manual login, then save session state.
     User must solve CAPTCHA manually.
@@ -104,18 +126,44 @@ def run_login_mode(wait_seconds: int = 120):
     print("="*60 + "\n")
     
     with sync_playwright() as p:
-        # Launch visible browser
-        browser = p.chromium.launch(
-            headless=False,
-            args=['--start-maximized']
-        )
-        
-        context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        )
-        
-        page = context.new_page()
+        # Use real Chrome profile if requested (best for avoiding detection)
+        if use_chrome_profile:
+            chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            user_data_dir = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+            print(f"Using real Chrome profile from: {user_data_dir}")
+            
+            browser = p.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                executable_path=chrome_path,
+                headless=False,
+                args=['--start-maximized'],
+                channel='chrome'
+            )
+            # For persistent context, we use it directly (no separate context)
+            context = browser
+            page = context.pages[0] if context.pages else context.new_page()
+            # Apply stealth
+            if STEALTH_AVAILABLE:
+                stealth_sync(page)
+                print("✓ Stealth mode enabled (Chrome profile)")
+        else:
+            # Launch standalone Chromium
+            browser = p.chromium.launch(
+                headless=False,
+                args=['--start-maximized']
+            )
+            
+            context = browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            
+            page = context.new_page()
+            
+            # Apply stealth to avoid bot detection
+            if STEALTH_AVAILABLE:
+                stealth_sync(page)
+                print("✓ Stealth mode enabled")
         
         try:
             # Navigate to login page
@@ -212,6 +260,10 @@ def check_session() -> bool:
             )
             page = context.new_page()
             
+            # Apply stealth to avoid bot detection
+            if STEALTH_AVAILABLE:
+                stealth_sync(page)
+            
             # Try to access the risk range page
             page.goto(HEDGEYE_RISK_RANGE_URL, wait_until='domcontentloaded', timeout=30000)
             page.wait_for_timeout(3000)
@@ -239,44 +291,130 @@ def check_session() -> bool:
             browser.close()
 
 
-def run_scrape_mode(store_to_dynamodb: bool = True) -> Optional[Dict]:
+def run_scrape_mode(store_to_dynamodb: bool = True, use_chrome_profile: bool = False, headless: bool = True) -> Optional[Dict]:
     """
-    Scrape risk range data using saved session.
+    Scrape risk range data using saved session or cookies.
     Runs headless for automation.
     """
-    if not SESSION_FILE.exists():
-        print("✗ No session file found. Run with --login first.")
+    # Check for cookies first (preferred - from manual login)
+    cookies = load_cookies()
+    has_session = SESSION_FILE.exists()
+    
+    if not cookies and not has_session:
+        print("✗ No cookies or session file found.")
+        print("  Option 1: Log in manually in Chrome, then run:")
+        print("    python3 extract_hedgeye_cookies.py")
+        print("  Option 2: Run with --login to create session")
         return None
     
     print("\n" + "="*60)
     print("AUTOMATED SCRAPE MODE")
     print("="*60)
-    print(f"Using session: {SESSION_FILE}")
+    if cookies:
+        print(f"Using cookies: {COOKIE_FILE}")
+    if has_session:
+        print(f"Using session: {SESSION_FILE}")
     print(f"Target URL: {HEDGEYE_RISK_RANGE_URL}")
     print("="*60 + "\n")
     
     risk_range_data = {}
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # Use real Chrome profile if requested (bypasses Cloudflare)
+        if use_chrome_profile:
+            chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            user_data_dir = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+            
+            if not os.path.exists(chrome_path):
+                print("✗ Chrome not found at expected path")
+                return None
+            
+            print(f"Using Chrome profile from: {user_data_dir}")
+            browser = p.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                executable_path=chrome_path,
+                headless=headless,
+                channel='chrome',
+                viewport={'width': 1920, 'height': 1080}
+            )
+            context = browser
+            page = context.pages[0] if context.pages else context.new_page()
+            print("✓ Using real Chrome profile (logged in state)")
+        else:
+            # Use regular Chromium
+            browser = p.chromium.launch(headless=headless)
+            
+            # Create context with session or cookies
+            context_options = {
+                'viewport': {'width': 1920, 'height': 1080},
+                'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            }
+            
+            if has_session:
+                # Use saved Playwright session
+                context_options['storage_state'] = str(SESSION_FILE)
+            elif cookies:
+                # Add cookies manually
+                context_options['extra_http_headers'] = {}
+            
+            context = browser.new_context(**context_options)
+            page = context.new_page()
         
         try:
-            # Load saved session
-            context = browser.new_context(
-                storage_state=str(SESSION_FILE),
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-            )
-            page = context.new_page()
+            # Apply stealth to avoid bot detection (not needed for Chrome profile)
+            if STEALTH_AVAILABLE and not use_chrome_profile:
+                stealth_sync(page)
+            
+            # Add cookies if using cookie file (must navigate to domain first)
+            # Skip if using Chrome profile (already has cookies)
+            if cookies and not use_chrome_profile:
+                print("Navigating to Hedgeye domain to set cookies...")
+                page.goto("https://app.hedgeye.com", wait_until='domcontentloaded', timeout=30000)
+                page.wait_for_timeout(2000)
+                
+                # Add cookies to the context
+                try:
+                    context.add_cookies(cookies)
+                    print(f"✓ Added {len(cookies)} cookies")
+                    # Reload to apply cookies
+                    page.reload(wait_until='domcontentloaded', timeout=30000)
+                    page.wait_for_timeout(2000)
+                except Exception as e:
+                    print(f"⚠ Warning: Could not add all cookies: {e}")
             
             # Navigate to risk range page
             print("Navigating to Risk Range Signals page...")
-            page.goto(HEDGEYE_RISK_RANGE_URL, wait_until='networkidle', timeout=60000)
+            page.goto(HEDGEYE_RISK_RANGE_URL, wait_until='domcontentloaded', timeout=60000)
+            
+            # Check for Cloudflare challenge
+            page.wait_for_timeout(3000)
+            page_content = page.content()
+            
+            if "Just a moment" in page_content or "challenge-platform" in page_content:
+                print("⚠ Cloudflare challenge detected - waiting for it to complete...")
+                print("  This may take 10-30 seconds...")
+                
+                # Wait for challenge to complete (look for content to change)
+                for i in range(20):  # Wait up to 60 seconds
+                    page.wait_for_timeout(3000)
+                    new_content = page.content()
+                    if "Just a moment" not in new_content and "challenge-platform" not in new_content:
+                        print("✓ Cloudflare challenge passed!")
+                        break
+                    if i % 3 == 0:
+                        print(f"  Still waiting... ({i*3}s)")
+                else:
+                    print("⚠ Cloudflare challenge may still be active")
+            
+            page.wait_for_timeout(2000)  # Give page time to fully load
             
             # Check if we got redirected to login
             current_url = page.url
+            print(f"Current URL after navigation: {current_url[:80]}...")
+            
             if "sign_in" in current_url.lower():
-                print("✗ Session expired! Please run with --login to re-authenticate.")
+                print("✗ Redirected to login page - cookies may have expired")
+                print("  Try logging in again in Chrome and re-extracting cookies")
                 return None
             
             # Wait for content to load
@@ -531,6 +669,10 @@ Examples:
                         help='Skip storing to DynamoDB (local JSON only)')
     parser.add_argument('--wait', type=int, default=120,
                         help='Max seconds to wait for login (default: 120)')
+    parser.add_argument('--chrome', action='store_true',
+                        help='Use real Chrome profile (best for avoiding Cloudflare)')
+    parser.add_argument('--headless', action='store_true',
+                        help='Run Chrome in headless mode (only works with --chrome)')
     
     args = parser.parse_args()
     
@@ -555,13 +697,14 @@ Examples:
         check_session()
     
     if args.login:
-        success = run_login_mode(wait_seconds=args.wait)
+        success = run_login_mode(wait_seconds=args.wait, use_chrome_profile=args.chrome)
         if not success and not args.scrape:
             return
     
     if args.scrape:
         store_to_db = not args.no_dynamodb
-        data = run_scrape_mode(store_to_dynamodb=store_to_db)
+        headless_mode = args.headless if args.chrome else True  # Only allow headless with Chrome
+        data = run_scrape_mode(store_to_dynamodb=store_to_db, use_chrome_profile=args.chrome, headless=headless_mode)
         
         if data:
             print("\n" + "="*60)

@@ -68,7 +68,8 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
   const [selectedTicker, setSelectedTicker] = useState('SPY');
   const [productName, setProductName] = useState('');
   const [selectedDateRange, setSelectedDateRange] = useState('1M');
-  const [chartData, setChartData] = useState([]);
+  const [fullHistory, setFullHistory] = useState([]); // Store complete history
+  const [chartData, setChartData] = useState([]); // Data currently displayed in chart
   const [loading, setLoading] = useState(false);
   const [riskRanges, setRiskRanges] = useState({ lrr: null, hrr: null });
   const [searchQuery, setSearchQuery] = useState('');
@@ -232,7 +233,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     fetchRiskRanges();
   }, [selectedTicker]);
 
-  // Fetch data when ticker or date range changes
+  // Fetch data when ticker changes (ONLY when ticker changes)
   useEffect(() => {
     const fetchData = async () => {
       if (!selectedTicker) return;
@@ -260,10 +261,6 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
             last: historicalData[historicalData.length - 1]?.close || historicalData[historicalData.length - 1]?.price
           });
           
-          // Handle 1D view specially - for now, show today's data with time labels
-          // TODO: In future, fetch intraday data for 1D view
-          const isIntradayView = selectedDateRange === '1D';
-          
           // Transform API response to chart data format
           const transformedData = historicalData.map((item, index) => {
             // Handle date format - DynamoDB returns YYYY-MM-DD format
@@ -280,14 +277,8 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
                 dateObj = new Date(dateStr);
               }
               
-              // For 1D view, show time format; for others, show date
-              if (isIntradayView) {
-                // For 1D, show time (will need intraday data in future)
-                // For now, just show the date since we only have daily data
-                dateStr = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-              } else {
-                dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-              }
+              // Base date string for logic, formatted display will depend on dateRange
+              dateStr = dateObj.toISOString();
             } else {
               dateStr = 'Unknown';
             }
@@ -298,94 +289,107 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
             }
             
             return {
-              date: dateStr,
-              dateValue: dateObj || new Date(item.date), // Keep original date for filtering
+              date: dateStr, // Use standard format for now
+              dateObj: dateObj || new Date(item.date),
               price: parseFloat(price),
               volume: item.volume || 0,
-              lrr: riskRanges.lrr, // Add risk ranges to each data point for extensibility
-              hrr: riskRanges.hrr,
-              // Future: Add more indicators here (sma, ema, support, resistance, etc.)
             };
           });
           
-          // Filter data based on selected timeframe for chart display
-          const dateRangeMap = {
-            '1D': 1,
-            '5D': 5,
-            '1W': 7,
-            '1M': 30,
-            '3M': 90,
-            '6M': 180,
-            '1Y': 365
-          };
-          const displayDays = dateRangeMap[selectedDateRange] || 30;
-          
-          let filteredData;
-          if (isIntradayView) {
-            // For 1D, show only the most recent day's data
-            // Since we only have daily data, show the last 1-2 days
-            filteredData = transformedData.slice(-2); // Show last 2 days for 1D (will be improved with intraday data)
-            console.log(`[SecuritiesPanel] 1D view: showing last ${filteredData.length} data points`);
-          } else {
-            const cutoffDate = new Date();
-            cutoffDate.setDate(cutoffDate.getDate() - displayDays);
-            
-            filteredData = transformedData.filter(item => {
-              const itemDate = item.dateValue || new Date(item.date);
-              return itemDate >= cutoffDate;
-            });
-          }
-          
-          console.log(`[SecuritiesPanel] Filtered to ${filteredData.length} data points for ${selectedDateRange} display`);
-          console.log(`[SecuritiesPanel] Filtered data price range:`, {
-            min: Math.min(...filteredData.map(d => d.price)),
-            max: Math.max(...filteredData.map(d => d.price)),
-            prices: filteredData.map(d => d.price)
-          });
-          
-          setChartData(filteredData);
-          // Calculate metrics from full dataset (not filtered)
-          calculateMetrics(transformedData, riskRanges);
+          setFullHistory(transformedData);
+          calculateMetrics(transformedData, riskRanges); // Calculate metrics on full history
         } else {
           console.warn(`[SecuritiesPanel] No historical data available for ${selectedTicker}, using mock data`);
           // Fallback to mock data if no historical data available
-          const dateRangeMap = {
-            '1D': 1,
-            '5D': 5,
-            '1W': 7,
-            '1M': 30,
-            '3M': 90,
-            '6M': 180,
-            '1Y': 365
-          };
-          const days = dateRangeMap[selectedDateRange] || 30;
-          const mockData = generateMockChartData(days);
-          setChartData(mockData);
-          calculateMetrics(mockData, riskRanges);
+          const mockData = generateMockChartData(365);
+          // Add dateObj for compatibility
+          const processedMockData = mockData.map(d => ({
+            ...d,
+            dateObj: d.dateValue || new Date(d.date)
+          }));
+          setFullHistory(processedMockData);
+          calculateMetrics(processedMockData, riskRanges);
         }
       } catch (error) {
         console.error(`[SecuritiesPanel] Error fetching historical data for ${selectedTicker}:`, error);
         // Fallback to mock data on error
-        const dateRangeMap = {
-          '1D': 1,
-          '5D': 5,
-          '1W': 7,
-          '1M': 30,
-          '3M': 90,
-          '6M': 180,
-          '1Y': 365
-        };
-        const days = dateRangeMap[selectedDateRange] || 30;
-        const mockData = generateMockChartData(days);
-        setChartData(mockData);
-        calculateMetrics(mockData, riskRanges);
+        const mockData = generateMockChartData(365);
+        const processedMockData = mockData.map(d => ({
+            ...d,
+            dateObj: d.dateValue || new Date(d.date)
+        }));
+        setFullHistory(processedMockData);
+        calculateMetrics(processedMockData, riskRanges);
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, [selectedTicker, selectedDateRange, riskRanges]);
+  }, [selectedTicker]); // Only run when ticker changes, not date range
+
+  // Filter chart data when date range or full history changes (local filtering)
+  useEffect(() => {
+    if (!fullHistory || fullHistory.length === 0) return;
+
+    // Add risk ranges to data points for chart display
+    const dataWithRiskRanges = fullHistory.map(item => {
+        // Format date based on selected range
+        const isIntradayView = selectedDateRange === '1D';
+        let displayDate;
+        
+        if (isIntradayView) {
+             // For 1D, show time (will need intraday data in future)
+             // For now, just show the date since we only have daily data
+             displayDate = item.dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        } else {
+             displayDate = item.dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        return {
+            ...item,
+            date: displayDate, // Update display date
+            dateValue: item.dateObj,
+            lrr: riskRanges.lrr,
+            hrr: riskRanges.hrr
+        };
+    });
+
+    const dateRangeMap = {
+        '1D': 1,
+        '5D': 5,
+        '1W': 7,
+        '1M': 30,
+        '3M': 90,
+        '6M': 180,
+        '1Y': 365
+    };
+    const displayDays = dateRangeMap[selectedDateRange] || 30;
+    const isIntradayView = selectedDateRange === '1D';
+    
+    let filteredData;
+    if (isIntradayView) {
+        // For 1D, show only the most recent day's data
+        // Since we only have daily data, show the last 1-2 days
+        filteredData = dataWithRiskRanges.slice(-2); // Show last 2 days for 1D (will be improved with intraday data)
+        console.log(`[SecuritiesPanel] 1D view: showing last ${filteredData.length} data points`);
+    } else {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - displayDays);
+        
+        filteredData = dataWithRiskRanges.filter(item => {
+            return item.dateObj >= cutoffDate;
+        });
+    }
+    
+    console.log(`[SecuritiesPanel] Filtered to ${filteredData.length} data points for ${selectedDateRange} display`);
+    setChartData(filteredData);
+    
+    // Re-calculate metrics if risk ranges changed (since metrics depends on risk ranges)
+    // Note: Usually metrics calculated on full history, but risk ranges are part of state
+    calculateMetrics(fullHistory.map(item => ({...item, dateValue: item.dateObj})), riskRanges);
+
+  }, [selectedDateRange, fullHistory, riskRanges]);
 
   // Generate mock chart data
   const generateMockChartData = (days) => {
@@ -441,8 +445,8 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
 
     // Ensure data is sorted by date (most recent last)
     const sortedData = [...data].sort((a, b) => {
-      const dateA = a.dateValue || new Date(a.date);
-      const dateB = b.dateValue || new Date(b.date);
+      const dateA = a.dateValue || a.dateObj || new Date(a.date);
+      const dateB = b.dateValue || b.dateObj || new Date(b.date);
       return dateA - dateB;
     });
 
@@ -488,7 +492,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     
     // Find data point closest to quarter start
     const qtdDataPoint = sortedData.find(item => {
-      const itemDate = item.dateValue || new Date(item.date);
+      const itemDate = item.dateValue || item.dateObj || new Date(item.date);
       return itemDate >= quarterStart;
     }) || sortedData[0]; // Fallback to first available data point
 
@@ -498,7 +502,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     
     // Find data point closest to year start
     const ytdDataPoint = sortedData.find(item => {
-      const itemDate = item.dateValue || new Date(item.date);
+      const itemDate = item.dateValue || item.dateObj || new Date(item.date);
       return itemDate >= yearStart;
     }) || sortedData[0]; // Fallback to first available data point
 
@@ -545,8 +549,8 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     const zScore = zScore20 !== null ? zScore20 : (zScore60 !== null ? zScore60 : zScore252);
 
     // Enhanced diagnostic logging
-    const firstDate = sortedData[0]?.dateValue || sortedData[0]?.date;
-    const lastDate = sortedData[sortedData.length - 1]?.dateValue || sortedData[sortedData.length - 1]?.date;
+    const firstDate = sortedData[0]?.dateValue || sortedData[0]?.dateObj || sortedData[0]?.date;
+    const lastDate = sortedData[sortedData.length - 1]?.dateValue || sortedData[sortedData.length - 1]?.dateObj || sortedData[sortedData.length - 1]?.date;
     const daysBetween = firstDate && lastDate ? Math.floor((new Date(lastDate) - new Date(firstDate)) / (1000 * 60 * 60 * 24)) : 0;
     
     console.log(`[SecuritiesPanel] Metrics calculated:`, {
@@ -598,6 +602,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       fiftyTwoWeekHigh,
       fiftyTwoWeekLow,
       vsFiftyTwoWeekHigh,
+      vsFiftyTwoWeekLow,
       vsFiftyTwoWeekLow,
       zScore: zScore !== null ? parseFloat(zScore.toFixed(2)) : 0.00
     }));

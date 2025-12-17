@@ -550,79 +550,85 @@ const SecuritiesList = () => {
         )}
       </div>
       
-      {/* Top Movers Section */}
+      {/* Top Movers Section - Compact Table Format */}
       <div className="top-movers-section">
-        <div className="top-movers-grid">
-          {/* Weekly Upside */}
-          <div className="top-movers-card">
-            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 W/W Upside</Text>
-            <div className="top-movers-list">
-              {topMovers.weekly.upside.length > 0 ? (
-                topMovers.weekly.upside.map((mover, idx) => (
-                  <div key={mover.ticker} className="top-mover-item">
-                    <span className="top-mover-rank">{idx + 1}</span>
-                    <span className="top-mover-ticker">{mover.ticker}</span>
-                    <span className="top-mover-change positive">{mover.change.toFixed(2)}%</span>
-                  </div>
-                ))
-              ) : (
-                <Text className="text-xs text-gray-400">Loading...</Text>
-              )}
-            </div>
+        <div className="top-movers-compact">
+          {/* Top Gainers Table */}
+          <div className="top-movers-table-container">
+            <div className="top-movers-header gainers">Gainers</div>
+            <table className="top-movers-table">
+              <thead>
+                <tr>
+                  <th className="col-rank">#</th>
+                  <th className="col-ticker">Ticker</th>
+                  <th className="col-change">W/W</th>
+                  <th className="col-change">M/M</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topMovers.weekly.upside.length > 0 ? (
+                  topMovers.weekly.upside.map((mover, idx) => {
+                    // Find matching monthly data for this ticker
+                    const monthlyData = topMovers.monthly.upside.find(m => m.ticker === mover.ticker) ||
+                                       topMovers.monthly.downside.find(m => m.ticker === mover.ticker);
+                    const monthlyChange = monthlyData?.change;
+                    return (
+                      <tr key={mover.ticker}>
+                        <td className="col-rank">{idx + 1}</td>
+                        <td className="col-ticker">{mover.ticker}</td>
+                        <td className={`col-change ${mover.change >= 0 ? 'positive' : 'negative'}`}>
+                          {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(1)}%
+                        </td>
+                        <td className={`col-change ${monthlyChange !== undefined ? (monthlyChange >= 0 ? 'positive' : 'negative') : ''}`}>
+                          {monthlyChange !== undefined ? `${monthlyChange >= 0 ? '+' : ''}${monthlyChange.toFixed(1)}%` : '--'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr><td colSpan="4" className="loading-cell">Loading...</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
 
-          {/* Weekly Downside */}
-          <div className="top-movers-card">
-            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 W/W Downside</Text>
-            <div className="top-movers-list">
-              {topMovers.weekly.downside.length > 0 ? (
-                topMovers.weekly.downside.map((mover, idx) => (
-                  <div key={mover.ticker} className="top-mover-item">
-                    <span className="top-mover-rank">{idx + 1}</span>
-                    <span className="top-mover-ticker">{mover.ticker}</span>
-                    <span className="top-mover-change negative">{mover.change.toFixed(2)}%</span>
-                  </div>
-                ))
-              ) : (
-                <Text className="text-xs text-gray-400">Loading...</Text>
-              )}
-            </div>
-          </div>
-
-          {/* Monthly Upside */}
-          <div className="top-movers-card">
-            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 M/M Upside</Text>
-            <div className="top-movers-list">
-              {topMovers.monthly.upside.length > 0 ? (
-                topMovers.monthly.upside.map((mover, idx) => (
-                  <div key={mover.ticker} className="top-mover-item">
-                    <span className="top-mover-rank">{idx + 1}</span>
-                    <span className="top-mover-ticker">{mover.ticker}</span>
-                    <span className="top-mover-change positive">{mover.change.toFixed(2)}%</span>
-                  </div>
-                ))
-              ) : (
-                <Text className="text-xs text-gray-400">Loading...</Text>
-              )}
-            </div>
-          </div>
-
-          {/* Monthly Downside */}
-          <div className="top-movers-card">
-            <Text className="text-xs font-semibold mb-2 dark:text-white">Top 5 M/M Downside</Text>
-            <div className="top-movers-list">
-              {topMovers.monthly.downside.length > 0 ? (
-                topMovers.monthly.downside.map((mover, idx) => (
-                  <div key={mover.ticker} className="top-mover-item">
-                    <span className="top-mover-rank">{idx + 1}</span>
-                    <span className="top-mover-ticker">{mover.ticker}</span>
-                    <span className="top-mover-change negative">{mover.change.toFixed(2)}%</span>
-                  </div>
-                ))
-              ) : (
-                <Text className="text-xs text-gray-400">Loading...</Text>
-              )}
-            </div>
+          {/* Top Losers Table */}
+          <div className="top-movers-table-container">
+            <div className="top-movers-header losers">Losers</div>
+            <table className="top-movers-table">
+              <thead>
+                <tr>
+                  <th className="col-rank">#</th>
+                  <th className="col-ticker">Ticker</th>
+                  <th className="col-change">W/W</th>
+                  <th className="col-change">M/M</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topMovers.weekly.downside.length > 0 ? (
+                  topMovers.weekly.downside.map((mover, idx) => {
+                    // Find matching monthly data for this ticker
+                    const monthlyData = topMovers.monthly.downside.find(m => m.ticker === mover.ticker) ||
+                                       topMovers.monthly.upside.find(m => m.ticker === mover.ticker);
+                    const monthlyChange = monthlyData?.change;
+                    return (
+                      <tr key={mover.ticker}>
+                        <td className="col-rank">{idx + 1}</td>
+                        <td className="col-ticker">{mover.ticker}</td>
+                        <td className={`col-change ${mover.change >= 0 ? 'positive' : 'negative'}`}>
+                          {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(1)}%
+                        </td>
+                        <td className={`col-change ${monthlyChange !== undefined ? (monthlyChange >= 0 ? 'positive' : 'negative') : ''}`}>
+                          {monthlyChange !== undefined ? `${monthlyChange >= 0 ? '+' : ''}${monthlyChange.toFixed(1)}%` : '--'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr><td colSpan="4" className="loading-cell">Loading...</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -683,6 +689,7 @@ const SecuritiesList = () => {
           <div className="header-lrr">LRR</div>
           <div className="header-hrr">HRR</div>
           <div className="header-odds">+/-</div>
+          <div className="header-signal">Signal</div>
         </div>
         
         {/* Data Rows */}
@@ -807,6 +814,9 @@ const SecuritiesList = () => {
                     </span>
                   );
                 })()}
+              </div>
+              <div className="data-signal-cell">
+                <span className="data-signal">0</span>
               </div>
             </div>
           ))}

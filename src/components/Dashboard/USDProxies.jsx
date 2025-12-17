@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Metric, Text, Grid, Badge, Flex } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { CorrelationHelpers, USDMarketService } from '../../services/api/usdMarketService';
 
 // Currency index mapping
@@ -19,9 +19,10 @@ const CURRENCY_INDEXES = {
 
 const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
   const [historicalData, setHistoricalData] = useState({});
+  const [fullHistoryData, setFullHistoryData] = useState({}); // Store all history
   const [indexData, setIndexData] = useState({});
   const [timeframes, setTimeframes] = useState({});
-
+  
   // Initialize timeframes for each currency pair and index
   useEffect(() => {
     if (currencyPairs) {
@@ -91,16 +92,23 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
     }
   }, [currencyPairs]);
 
-  // Fetch historical data when timeframes change
+  // Fetch historical data only once (on load)
   useEffect(() => {
     const fetchHistoricalData = async () => {
       if (!currencyPairs) return;
 
+      // Always fetch max required history (365 days)
+      const maxTimeframe = 365;
+
       const promises = currencyPairs.map(async (pair) => {
-        const timeframe = parseInt(timeframes[pair.pair] || 30);
         try {
-          const data = await USDMarketService.getHistoricalData(pair.pair, timeframe);
-          return { pair: pair.pair, data: data.data || [] };
+          const data = await USDMarketService.getHistoricalData(pair.pair, maxTimeframe);
+          // Ensure date parsing for consistent filtering
+          const processedData = (data.data || []).map(d => ({
+            ...d,
+            dateObj: new Date(d.date)
+          }));
+          return { pair: pair.pair, data: processedData };
         } catch (err) {
           console.error(`Error fetching historical data for ${pair.pair}:`, err);
           return { pair: pair.pair, data: [] };
@@ -111,10 +119,13 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
       const indexPromises = Object.keys(CURRENCY_INDEXES).map(async (pairKey) => {
         const index = CURRENCY_INDEXES[pairKey];
         if (index) {
-          const timeframe = parseInt(timeframes[index.ticker] || 30);
           try {
-            const data = await USDMarketService.getHistoricalData(index.ticker, timeframe);
-            return { ticker: index.ticker, data: data.data || [] };
+            const data = await USDMarketService.getHistoricalData(index.ticker, maxTimeframe);
+            const processedData = (data.data || []).map(d => ({
+                ...d,
+                dateObj: new Date(d.date)
+            }));
+            return { ticker: index.ticker, data: processedData };
           } catch (err) {
             // Return empty data for now (will use mock data)
             return { ticker: index.ticker, data: [] };
@@ -131,11 +142,28 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
           dataMap[result.pair || result.ticker] = result.data;
         }
       });
-      setHistoricalData(dataMap);
+      setFullHistoryData(dataMap);
     };
 
     fetchHistoricalData();
-  }, [currencyPairs, timeframes]);
+  }, [currencyPairs]);
+
+  // Filter historical data when timeframes change (local filtering)
+  useEffect(() => {
+    const filteredDataMap = {};
+    
+    Object.keys(fullHistoryData).forEach(key => {
+        const timeframeDays = parseInt(timeframes[key] || '30');
+        const fullData = fullHistoryData[key] || [];
+        
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - timeframeDays);
+        
+        filteredDataMap[key] = fullData.filter(item => item.dateObj >= cutoffDate);
+    });
+    
+    setHistoricalData(filteredDataMap);
+  }, [fullHistoryData, timeframes]);
 
   const handleTimeframeChange = (pair, newTimeframe) => {
     setTimeframes(prev => ({
@@ -147,7 +175,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
   const MiniSparkline = ({ data, isPositive }) => {
     if (!data || data.length === 0) {
       return (
-        <div className="h-20 flex items-center justify-center text-gray-400 text-xs">
+        <div className="h-[88px] flex items-center justify-center text-gray-400 text-xs">
           No data
         </div>
       );
@@ -158,8 +186,21 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
     }));
 
     return (
-      <ResponsiveContainer width="100%" height={80}>
-        <LineChart data={chartData}>
+      <ResponsiveContainer width="100%" height={88}>
+        <LineChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+          <XAxis 
+            dataKey="date"
+            axisLine={{ stroke: '#D1D5DB' }}
+            tick={false}
+            tickLine={false}
+          />
+          <YAxis 
+            domain={['dataMin', 'dataMax']}
+            axisLine={{ stroke: '#D1D5DB' }}
+            tick={false}
+            tickLine={false}
+            width={1}
+          />
           <Line
             type="monotone"
             dataKey="value"
@@ -219,7 +260,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
           />
         </Flex>
         <Text className="text-base font-bold mb-1 dark:text-white">{pair.rate}</Text>
-        <div className="mb-1 h-16">
+        <div className="mb-1 h-[70px]">
           <MiniSparkline data={pairData} isPositive={isPositive} />
         </div>
         <Badge 

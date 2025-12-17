@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, Title, Text, Badge } from '@tremor/react';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
@@ -15,6 +15,94 @@ import {
 } from '../../utils/securitiesUniverseUtils';
 import { getFormattedQuadRanking } from '../../utils/quadRankingUtils';
 
+// Day label component with hover tooltip
+const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+  
+  return (
+    <div
+      style={{
+        width: isLast ? '24px' : '18px',
+        textAlign: 'center',
+        fontSize: '7px',
+        color: '#6b7280',
+        backgroundColor: '#f3f4f6',
+        borderRadius: '2px',
+        padding: '1px 1px',
+        position: 'relative'
+      }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      {label}
+      {showTooltip && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: '#1f2937',
+            color: '#fff',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '10px',
+            whiteSpace: 'nowrap',
+            zIndex: 1000,
+            marginBottom: '4px',
+            pointerEvents: 'none'
+          }}
+        >
+          {date}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Security name component with truncation and hover tooltip
+const TruncatedSecurityName = ({ name, maxLength = 20 }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const isTruncated = name && name.length > maxLength;
+  const displayName = isTruncated ? `${name.substring(0, maxLength)}...` : name;
+  
+  return (
+    <div
+      style={{
+        position: 'relative',
+        maxWidth: '160px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap'
+      }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      {displayName}
+      {showTooltip && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '0',
+            backgroundColor: '#1f2937',
+            color: '#fff',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '10px',
+            whiteSpace: 'nowrap',
+            zIndex: 1000,
+            marginBottom: '4px',
+            pointerEvents: 'none'
+          }}
+        >
+          {name}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SecuritiesUniverse = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [prices, setPrices] = useState({});
@@ -27,6 +115,30 @@ const SecuritiesUniverse = () => {
     biases: []
   });
   const [selectedQuad, setSelectedQuad] = useState(null);
+
+  // Risk Range History - 10 day history for each security
+  // Format: { ticker: { hrr: [t-9, t-8, t-7, t-6, t-5, t-4, t-3, t-2, t-1, today], lrr: [...], ath: number } }
+  const riskRangeHistory = useMemo(() => {
+    const defaultHistory = { hrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], lrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ath: 0 };
+    const history = {};
+    
+    // Initialize all securities with default 0 values
+    SECURITIES_LIST.forEach(security => {
+      history[security.ticker] = { ...defaultHistory };
+    });
+    
+    // Test data for BKLN to verify color coding
+    // HRR: varied pattern to show green (up), red (down), blue (new ATH)
+    // LRR: varied pattern to show higher low (green) and lower low (red)
+    // ATH: 6.5 (so HRR value of 7 should be blue)
+    history['BKLN'] = {
+      hrr: [4, 5, 4, 5, 6, 7, 6, 5, 6, 5],
+      lrr: [1, 2, 1, 2, 3, 2, 3, 2, 3, 2],
+      ath: 6.5
+    };
+    
+    return history;
+  }, []);
 
   // Fetch prices for all securities (non-blocking - show table even if prices fail)
   useEffect(() => {
@@ -115,6 +227,7 @@ const SecuritiesUniverse = () => {
       const tickerUpper = security.ticker.toUpperCase();
       const quote = prices[tickerUpper] || prices[security.ticker] || prices[security.ticker.toUpperCase()];
       const currentPrice = quote?.price || quote?.close || null;
+      const priceTimestamp = quote?.timestamp || null;
       const history = priceHistory[security.ticker] || [];
       
       // Calculate Z-score from price history
@@ -142,18 +255,24 @@ const SecuritiesUniverse = () => {
       // Get Quad ranking
       const quadRanking = getFormattedQuadRanking(security.ticker);
 
+      // Get risk range history for this security
+      const securityRiskRangeHistory = riskRangeHistory[security.ticker] || { hrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], lrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
+
       return {
         ...security,
         price: currentPrice,
+        priceTimestamp,
         factorExposure,
         benchmark,
         zScore,
         priceChanges,
         beta: '--', // Placeholder
-        quadRanking
+        quadRanking,
+        signal: 0,
+        riskRangeHistory: securityRiskRangeHistory
       };
     });
-  }, [prices, priceHistory]);
+  }, [prices, priceHistory, riskRangeHistory]);
 
   // Filter securities based on search query and active filters
   const filteredSecurities = useMemo(() => {
@@ -333,6 +452,23 @@ const SecuritiesUniverse = () => {
     return num.toFixed(2);
   };
 
+  // Format date for tooltip
+  const formatPriceDate = (timestamp) => {
+    if (!timestamp) return null;
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) return null;
+      return date.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch {
+      return null;
+    }
+  };
+
   // Get signal color for T/T/T dots
   const getSignalColor = (signal) => {
     if (signal === 'BULLISH') return '#10b981'; // Green
@@ -365,6 +501,132 @@ const SecuritiesUniverse = () => {
       trend: security.bias || 'NEUTRAL',
       tail: security.bias || 'NEUTRAL'
     };
+  };
+
+  // Get color for risk range value based on comparison with previous day
+  // For HRR: higher than previous = green (higher high), lower = red (lower high)
+  //          if higher high exceeds ATH = blue (new all-time high)
+  // For LRR: higher than previous = green (higher low), lower = red (lower low)
+  const getRiskRangeColor = (currentValue, previousValue, isFirstDay, ath = null, isHRR = false) => {
+    if (isFirstDay || previousValue === null || previousValue === undefined) {
+      return '#6b7280'; // Gray for first day (no comparison)
+    }
+    if (currentValue === 0 && previousValue === 0) {
+      return '#6b7280'; // Gray for placeholder zeros
+    }
+    if (currentValue > previousValue) {
+      // Check if this is an HRR that exceeds ATH (new all-time high)
+      if (isHRR && ath && ath > 0 && currentValue > ath) {
+        return '#3b82f6'; // Blue - new all-time high
+      }
+      return '#10b981'; // Green - higher high or higher low
+    } else if (currentValue < previousValue) {
+      return '#ef4444'; // Red - lower high or lower low
+    }
+    return '#6b7280'; // Gray for equal values
+  };
+
+  // Calculate trading days (skip weekends) going back from today
+  const getTradingDays = () => {
+    const tradingDays = [];
+    const today = new Date();
+    let currentDate = new Date(today);
+    
+    // We need 10 trading days (t-9, t-8, t-7, t-6, t-5, t-4, t-3, t-2, t-1, t)
+    while (tradingDays.length < 10) {
+      const dayOfWeek = currentDate.getDay();
+      // Skip Saturday (6) and Sunday (0)
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        tradingDays.unshift(new Date(currentDate)); // Add to beginning
+      }
+      currentDate.setDate(currentDate.getDate() - 1);
+    }
+    
+    return tradingDays;
+  };
+
+  const tradingDays = getTradingDays();
+  const dayLabels = ['t-9', 't-8', 't-7', 't-6', 't-5', 't-4', 't-3', 't-2', 't-1', 't'];
+
+  // Format date for tooltip
+  const formatTradingDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  // Render the Risk Range mini-table for a security
+  const renderRiskRangeCell = (riskRangeHistory) => {
+    const { hrr, lrr, ath } = riskRangeHistory;
+    const lastIndex = dayLabels.length - 1;
+    
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px' }}>
+        {/* ATH Row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '24px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>ATH</span>
+          <span style={{ fontWeight: 600, color: '#3b82f6' }}>
+            {ath > 0 ? ath.toFixed(2) : '--'}
+          </span>
+        </div>
+        {/* Day Labels Row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '24px' }}></span>
+          <div style={{ display: 'flex', gap: '2px' }}>
+            {dayLabels.map((label, index) => (
+              <DayLabelWithTooltip
+                key={`label-${index}`}
+                label={label}
+                date={formatTradingDate(tradingDays[index])}
+                isLast={index === lastIndex}
+              />
+            ))}
+          </div>
+        </div>
+        {/* HRR Row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '24px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>HRR</span>
+          <div style={{ display: 'flex', gap: '2px' }}>
+            {hrr.map((value, index) => (
+              <span
+                key={`hrr-${index}`}
+                style={{
+                  width: index === lastIndex ? '24px' : '18px',
+                  textAlign: 'center',
+                  fontWeight: 600,
+                  color: getRiskRangeColor(value, index > 0 ? hrr[index - 1] : null, index === 0, ath, true)
+                }}
+                title={`${value}${ath && value > ath ? ' (New ATH!)' : ''}`}
+              >
+                {value}
+              </span>
+            ))}
+          </div>
+        </div>
+        {/* LRR Row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '24px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>LRR</span>
+          <div style={{ display: 'flex', gap: '2px' }}>
+            {lrr.map((value, index) => (
+              <span
+                key={`lrr-${index}`}
+                style={{
+                  width: index === lastIndex ? '24px' : '18px',
+                  textAlign: 'center',
+                  fontWeight: 600,
+                  color: getRiskRangeColor(value, index > 0 ? lrr[index - 1] : null, index === 0)
+                }}
+              >
+                {value}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -603,11 +865,17 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600 }}
+                    className="dark:text-white"
+                  >
+                    Risk Range
+                  </th>
+                  <th
+                    style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('price')}
                   >
-                    Price {(() => {
+                    Closing Price {(() => {
                       const sortInfo = getSortInfo('price');
                       return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
                     })()}
@@ -688,12 +956,18 @@ const SecuritiesUniverse = () => {
                   >
                     Price Change
                   </th>
+                  <th
+                    style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600 }}
+                    className="dark:text-white"
+                  >
+                    Signal
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {sortedSecurities.length === 0 ? (
                   <tr>
-                    <td colSpan="11" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
+                    <td colSpan="13" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
                       {searchQuery 
                         ? `No securities found matching "${searchQuery}"`
                         : 'No securities available'}
@@ -718,9 +992,16 @@ const SecuritiesUniverse = () => {
                         {security.ticker}
                       </td>
                       <td style={{ padding: '10px 8px' }} className="dark:text-gray-300">
-                        {security.name}
+                        <TruncatedSecurityName name={security.name} maxLength={18} />
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'right' }} className="dark:text-white">
+                      <td style={{ padding: '10px 8px', textAlign: 'center' }} className="dark:text-gray-300">
+                        {renderRiskRangeCell(security.riskRangeHistory)}
+                      </td>
+                      <td 
+                        style={{ padding: '10px 8px', textAlign: 'left', cursor: security.priceTimestamp ? 'help' : 'default' }} 
+                        className="dark:text-white"
+                        title={formatPriceDate(security.priceTimestamp) ? `Last updated: ${formatPriceDate(security.priceTimestamp)}` : undefined}
+                      >
                         {formatPrice(security.price, security.ticker)}
                       </td>
                       <td style={{ padding: '10px 8px' }} className="dark:text-gray-300">
@@ -745,9 +1026,6 @@ const SecuritiesUniverse = () => {
                           const signals = getTTTSignals(security);
                           return (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                              <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '1px' }} className="dark:text-white">
-                                T/T/T
-                              </div>
                               <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
                                 <div
                                   style={{
@@ -839,6 +1117,9 @@ const SecuritiesUniverse = () => {
                           </span>
                         </div>
                       </td>
+                      <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
+                        {security.signal}
+                      </td>
                     </tr>
                   );
                 })
@@ -852,3 +1133,4 @@ const SecuritiesUniverse = () => {
 };
 
 export default SecuritiesUniverse;
+

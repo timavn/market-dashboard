@@ -21,30 +21,18 @@ This scraper uses Playwright with persistent browser sessions to pull Risk Range
 
 ## Usage
 
-### Step 1: Login (One-Time Setup)
+### Step 1: Login Manually (Easiest Method)
 
-Run this in your terminal (not an IDE - needs GUI):
+**Just log into Hedgeye in your regular Chrome browser** (solve CAPTCHA manually), then:
 
 ```bash
 cd /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda
-python3 hedgeye_local_scraper.py --login
+python3 extract_hedgeye_cookies.py
 ```
 
-A browser window will open with credentials pre-filled:
-1. Click "Log In"
-2. Solve CAPTCHA if prompted
-3. Wait for redirect to dashboard
-4. Session auto-saves when login detected
+This extracts cookies from Chrome and saves them. Much simpler than automated login!
 
-### Step 2: Verify Session
-
-```bash
-python3 hedgeye_local_scraper.py --check
-```
-
-Should show "✓ Session is valid!"
-
-### Step 3: Run Scrape
+### Step 2: Run Scrape
 
 ```bash
 # Scrape and store to DynamoDB
