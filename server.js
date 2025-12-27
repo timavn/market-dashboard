@@ -570,44 +570,89 @@ app.get('/api/quotes', async (req, res) => {
   }
 });
 
-// Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
+// Risk Range Data endpoint - fetches LRR/HRR from Hedgeye (NEW SCHEMA)
 app.get('/api/risk-ranges', async (req, res) => {
   try {
-    const { tickers } = req.query;
+    const { tickers, date } = req.query;
     const tickerList = tickers ? tickers.split(',').map(t => t.trim().toUpperCase()) : null;
-    
-    console.log(`[API] /api/risk-ranges called${tickerList ? ` for ${tickerList.length} tickers` : ' for all tickers'}`);
-    
-    // Get latest snapshot from DynamoDB
+    const queryDate = date || new Date().toISOString().split('T')[0]; // Default to today
+
+    console.log(`[API] /api/risk-ranges called for date: ${queryDate}${tickerList ? ` (${tickerList.length} tickers)` : ' (all tickers)'}`);
+
+    // Try to get from DailySnapshot first (fastest)
+    try {
+      const snapshotParams = {
+        TableName: 'HedgeyeDailySnapshot',
+        Key: {
+          date: queryDate,
+          snapshotType: 'risk-ranges'
+        }
+      };
+
+      const snapshotResult = await dynamodb.get(snapshotParams).promise();
+
+      if (snapshotResult.Item && snapshotResult.Item.data) {
+        console.log(`[API] Found snapshot with ${snapshotResult.Item.riskRangeCount} securities`);
+
+        const allData = snapshotResult.Item.data;
+
+        // Filter by tickers if provided
+        const riskRanges = tickerList
+          ? Object.fromEntries(
+              tickerList
+                .map(ticker => [ticker, allData[ticker] || null])
+                .filter(([_, data]) => data !== null)
+            )
+          : allData;
+
+        console.log(`[API] Returning ${Object.keys(riskRanges).length} risk ranges from snapshot`);
+        return res.json(riskRanges);
+      }
+    } catch (snapshotError) {
+      console.log('[API] Snapshot not found, querying individual records...');
+    }
+
+    // Fallback: Query HedgeyeRiskRanges table directly
     const params = {
-      TableName: 'RiskRangeData',
-      Key: {
-        ticker: 'LATEST',
-        date: 'latest'
+      TableName: 'HedgeyeRiskRanges',
+      KeyConditionExpression: '#date = :date',
+      ExpressionAttributeNames: {
+        '#date': 'date'
+      },
+      ExpressionAttributeValues: {
+        ':date': queryDate
       }
     };
-    
-    const result = await dynamodb.get(params).promise();
-    
-    if (!result.Item || !result.Item.data) {
-      console.log('[API] No risk range data found in DynamoDB');
+
+    const result = await dynamodb.query(params).promise();
+
+    if (!result.Items || result.Items.length === 0) {
+      console.log(`[API] No risk range data found for ${queryDate}`);
       return res.json({});
     }
-    
-    const allData = result.Item.data;
-    
+
+    // Convert array to object keyed by ticker
+    const allData = result.Items.reduce((acc, item) => {
+      acc[item.ticker] = {
+        lrr: parseFloat(item.lrr),
+        hrr: parseFloat(item.hrr),
+        timestamp: item.updatedAt
+      };
+      return acc;
+    }, {});
+
     // Filter by tickers if provided
-    const riskRanges = tickerList 
+    const riskRanges = tickerList
       ? Object.fromEntries(
           tickerList
             .map(ticker => [ticker, allData[ticker] || null])
             .filter(([_, data]) => data !== null)
         )
       : allData;
-    
-    console.log(`[API] Returning risk ranges for ${Object.keys(riskRanges).length} securities`);
+
+    console.log(`[API] Returning ${Object.keys(riskRanges).length} risk ranges for ${queryDate}`);
     res.json(riskRanges);
-    
+
   } catch (error) {
     console.error('[API] Error in /api/risk-ranges:', error);
     res.status(500).json({ error: 'Failed to fetch risk ranges', details: error.message });

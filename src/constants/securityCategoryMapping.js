@@ -153,3 +153,4 @@ export const SECURITY_CATEGORY_MAPPING = {
 export const getSecurityCategory = (ticker) => {
   return SECURITY_CATEGORY_MAPPING[ticker] || null;
 };
+

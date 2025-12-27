@@ -65,8 +65,8 @@ OUTPUT_FILE = SCRIPT_DIR / "hedgeye_risk_ranges.json"
 HEDGEYE_LOGIN_URL = "https://accounts.hedgeye.com/users/sign_in"
 HEDGEYE_RISK_RANGE_URL = "https://app.hedgeye.com/feed_items/all?page=1&with_category=33-risk-range-signals"
 
-# DynamoDB table
-RISK_RANGE_TABLE = os.environ.get('RISK_RANGE_TABLE', 'RiskRangeData')
+# DynamoDB table (new date-first schema)
+RISK_RANGE_TABLE = os.environ.get('RISK_RANGE_TABLE', 'HedgeyeRiskRanges')
 
 # Ticker mapping (expand as needed after seeing actual data)
 TICKER_MAPPING = {
@@ -592,37 +592,42 @@ def store_to_dynamodb_table(risk_range_data: Dict[str, Dict]):
         
         print(f"\nStoring to DynamoDB table: {RISK_RANGE_TABLE}")
         
-        # Store individual records
+        # Store individual records (date-first schema for new table)
         for ticker, data in risk_range_data.items():
             try:
                 item = {
-                    'ticker': ticker,
-                    'date': date_str,
+                    'date': date_str,       # Partition key (FIRST)
+                    'ticker': ticker,       # Sort key (SECOND)
                     'lrr': Decimal(str(data['lrr'])),
                     'hrr': Decimal(str(data['hrr'])),
-                    'timestamp': data['timestamp'],
+                    'updatedAt': data['timestamp'],
                     'source': data.get('source', 'hedgeye'),
-                    'ttl': int(datetime.now(timezone.utc).timestamp() + (365 * 24 * 60 * 60))
+                    'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))  # 2 year retention
                 }
                 table.put_item(Item=item)
                 print(f"  ✓ Stored {ticker}")
             except Exception as e:
                 print(f"  ✗ Error storing {ticker}: {e}")
         
-        # Store latest snapshot
-        latest_item = {
-            'ticker': 'LATEST',
-            'date': 'latest',
-            'data': {ticker: {
-                'lrr': data['lrr'],
-                'hrr': data['hrr'],
-                'timestamp': data['timestamp']
-            } for ticker, data in risk_range_data.items()},
-            'timestamp': timestamp,
-            'ttl': int(datetime.now(timezone.utc).timestamp() + (30 * 24 * 60 * 60))
-        }
-        table.put_item(Item=latest_item)
-        print("✓ Stored LATEST snapshot")
+        # Store latest snapshot in DailySnapshot table for quick queries
+        try:
+            snapshot_table = dynamodb.Table('HedgeyeDailySnapshot')
+            snapshot_item = {
+                'date': date_str,
+                'snapshotType': 'risk-ranges',
+                'riskRangeCount': len(risk_range_data),
+                'data': {ticker: {
+                    'lrr': float(data['lrr']),
+                    'hrr': float(data['hrr']),
+                    'timestamp': data['timestamp']
+                } for ticker, data in risk_range_data.items()},
+                'scrapedAt': timestamp,
+                'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
+            }
+            snapshot_table.put_item(Item=snapshot_item)
+            print(f"✓ Stored snapshot for {date_str} with {len(risk_range_data)} securities")
+        except Exception as e:
+            print(f"⚠ Could not store snapshot: {e}")
         
     except NoCredentialsError:
         print("⚠ AWS credentials not configured. Run 'aws configure' to set up.")

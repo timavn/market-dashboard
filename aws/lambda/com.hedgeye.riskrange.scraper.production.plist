@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Service identifier -->
+    <key>Label</key>
+    <string>com.hedgeye.riskrange.scraper</string>
+
+    <!-- What to run: wrapper script with error handling -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/run_hedgeye_scraper.sh</string>
+    </array>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda</string>
+
+    <!-- Schedule: 5:15 PM ET every weekday (after market close) -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <!-- Monday -->
+        <dict>
+            <key>Weekday</key>
+            <integer>1</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>15</integer>
+        </dict>
+        <!-- Tuesday -->
+        <dict>
+            <key>Weekday</key>
+            <integer>2</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>15</integer>
+        </dict>
+        <!-- Wednesday -->
+        <dict>
+            <key>Weekday</key>
+            <integer>3</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>15</integer>
+        </dict>
+        <!-- Thursday -->
+        <dict>
+            <key>Weekday</key>
+            <integer>4</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>15</integer>
+        </dict>
+        <!-- Friday -->
+        <dict>
+            <key>Weekday</key>
+            <integer>5</integer>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>15</integer>
+        </dict>
+    </array>
+
+    <!-- Logging: Wrapper script handles detailed logs -->
+    <!-- These are for LaunchAgent system logs only -->
+    <key>StandardOutPath</key>
+    <string>/Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/logs/launchd_stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/logs/launchd_stderr.log</string>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/timsmith</string>
+        <!-- AWS region for DynamoDB -->
+        <key>AWS_REGION</key>
+        <string>us-west-1</string>
+        <key>AWS_DEFAULT_REGION</key>
+        <string>us-west-1</string>
+    </dict>
+
+    <!-- Run only when user is logged in (needed for Chrome) -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Don't run if computer is on battery (optional - saves power) -->
+    <key>StartOnMount</key>
+    <false/>
+
+    <!-- Restart if crashes (max 3 times in 10 minutes) -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Process priority (nice) -->
+    <key>Nice</key>
+    <integer>1</integer>
+
+    <!-- Timeout: kill if runs longer than 30 minutes -->
+    <key>ExitTimeOut</key>
+    <integer>1800</integer>
+
+    <!-- User to run as -->
+    <key>UserName</key>
+    <string>timsmith</string>
+
+    <!-- Run only when user is active -->
+    <key>LimitLoadToSessionType</key>
+    <array>
+        <string>Aqua</string>
+    </array>
+</dict>
+</plist>

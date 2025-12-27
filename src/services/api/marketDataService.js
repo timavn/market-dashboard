@@ -310,4 +310,15 @@ export class MarketDataService {
       throw error;
     }
   }
+
+  // Get USD correlations for all securities
+  static async getUsdCorrelations() {
+    try {
+      const response = await apiClient.get('/api/usd/correlations');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching USD correlations:', error);
+      throw error;
+    }
+  }
 }

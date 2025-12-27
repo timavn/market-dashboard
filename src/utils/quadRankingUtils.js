@@ -82,3 +82,4 @@ export const getFormattedQuadRanking = (ticker) => {
   const ranking = getSecurityQuadRanking(ticker);
   return formatQuadRanking(ranking);
 };
+

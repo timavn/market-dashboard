@@ -138,3 +138,4 @@ export const getRankingsForCategory = (categoryType, categoryName) => {
     quad4: rankings.quad4[categoryName] || null
   };
 };
+

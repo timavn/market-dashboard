@@ -37,7 +37,13 @@
       "Bash(aws logs tail:*)",
       "Bash(aws logs:*)",
       "Bash(aws dynamodb scan:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(chmod:*)",
+      "Bash(aws dynamodb describe-table:*)",
+      "Bash(./create_hedgeye_tables.sh:*)",
+      "Bash(launchctl list:*)",
+      "Bash(./manage_scraper.sh:*)",
+      "Bash(aws dynamodb list-tables:*)"
     ],
     "deny": []
   }
