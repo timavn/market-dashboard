@@ -20,6 +20,9 @@ export const SECURITY_CATEGORY_MAPPING = {
   'UST30Y': { type: 'fixedIncomeSectors', category: 'Long Bond' },
   'BNDX': { type: 'assetClasses', category: 'Fixed Income' },
   'IGOV': { type: 'assetClasses', category: 'Fixed Income' },
+  'CLOZ': { type: 'fixedIncomeSectors', category: 'HY Credit' },
+  'CLOX': { type: 'fixedIncomeSectors', category: 'IG Credit' },
+  'HBDC': { type: 'fixedIncomeSectors', category: 'HY Credit' },
 
   // Equity Sectors
   'XLK': { type: 'equitySectors', category: 'Tech' },
@@ -41,6 +44,14 @@ export const SECURITY_CATEGORY_MAPPING = {
   'ITA': { type: 'equitySectors', category: 'Industrials' },
   'ITB': { type: 'equitySectors', category: 'Industrials' },
   'SMH': { type: 'equitySectors', category: 'Tech' },
+  'ROK': { type: 'equitySectors', category: 'Industrials' },
+  'EMR': { type: 'equitySectors', category: 'Industrials' },
+  'ULS': { type: 'equitySectors', category: 'Industrials' },
+  'SHOO': { type: 'equitySectors', category: 'Consumer Discretionary' },
+  'WRBY': { type: 'equitySectors', category: 'Consumer Discretionary' },
+  'AXP': { type: 'equitySectors', category: 'Financials' },
+  'GOOGL': { type: 'equitySectors', category: 'Tech' },
+  'EFIR': { type: 'equitySectors', category: 'Tech' },
 
   // Tech Sector Individual Stocks
   'AAPL': { type: 'equitySectors', category: 'Tech' },
@@ -59,6 +70,7 @@ export const SECURITY_CATEGORY_MAPPING = {
 
   // Tech Sector Indices
   'QQQ': { type: 'equitySectors', category: 'Tech' },
+  'TQQQ': { type: 'equitySectors', category: 'Tech' },
   'COMPQ': { type: 'equitySectors', category: 'Tech' },
   'SPY': { type: 'assetClasses', category: 'Equities' },
   'SPX': { type: 'assetClasses', category: 'Equities' },
@@ -68,6 +80,17 @@ export const SECURITY_CATEGORY_MAPPING = {
   'VT': { type: 'assetClasses', category: 'Equities' },
   'VYMI': { type: 'equityStyleFactors', category: 'Dividend Yield' },
   'HEFA': { type: 'assetClasses', category: 'Equities' },
+  
+  // Additional ETFs from portfolio
+  'JETS': { type: 'equitySectors', category: 'Industrials' },
+  'UFO': { type: 'equitySectors', category: 'Industrials' },
+  'LIT': { type: 'equitySectors', category: 'Materials' },
+  'SLX': { type: 'equitySectors', category: 'Materials' },
+  'BTAL': { type: 'assetClasses', category: 'Equities' },
+  'DWSH': { type: 'assetClasses', category: 'Equities' },
+  'PINK': { type: 'equitySectors', category: 'Health Care' },
+  'TUR': { type: 'assetClasses', category: 'Equities' },
+  'EIS': { type: 'assetClasses', category: 'Equities' },
 
   // Equity Style Factors
   'MTUM': { type: 'equityStyleFactors', category: 'Momentum' },
@@ -96,15 +119,15 @@ export const SECURITY_CATEGORY_MAPPING = {
   'VGK': { type: 'assetClasses', category: 'Equities' },
   'VIX': { type: 'assetClasses', category: 'Equities' },
 
-  // Gold (Asset Class)
-  'GLD': { type: 'assetClasses', category: 'Gold' },
-  'GOLD': { type: 'assetClasses', category: 'Gold' },
-  'AAAU': { type: 'assetClasses', category: 'Gold' },
+  // Gold (classified under FX due to volatility characteristics)
+  'GLD': { type: 'assetClasses', category: 'FX' },
+  'GOLD': { type: 'assetClasses', category: 'FX' },
+  'AAAU': { type: 'assetClasses', category: 'FX' },
 
-  // USD (Asset Class)
-  'USD': { type: 'assetClasses', category: 'USD' },
-  'UUP': { type: 'assetClasses', category: 'USD' },
-  'USD/YEN': { type: 'assetClasses', category: 'USD' },
+  // USD (part of FX asset class)
+  'USD': { type: 'assetClasses', category: 'FX' },
+  'UUP': { type: 'assetClasses', category: 'FX' },
+  'USD/YEN': { type: 'assetClasses', category: 'FX' },
 
   // FX/Currency (Asset Class)
   'CAD/USD': { type: 'assetClasses', category: 'FX' },
@@ -128,8 +151,11 @@ export const SECURITY_CATEGORY_MAPPING = {
   'PPLT': { type: 'assetClasses', category: 'Commodities' },
   'SILVER': { type: 'assetClasses', category: 'Commodities' },
   'SLV': { type: 'assetClasses', category: 'Commodities' },
+  'PALL': { type: 'assetClasses', category: 'Commodities' },
+  'CPER': { type: 'assetClasses', category: 'Commodities' },
   'WEAT': { type: 'assetClasses', category: 'Commodities' },
   'WTIC': { type: 'assetClasses', category: 'Commodities' },
+  'TOKE': { type: 'assetClasses', category: 'Equities' },
 
   // Crypto (map to Equities asset class for now, or could be separate)
   'AVAX': { type: 'assetClasses', category: 'Equities' },
@@ -153,4 +179,7 @@ export const SECURITY_CATEGORY_MAPPING = {
 export const getSecurityCategory = (ticker) => {
   return SECURITY_CATEGORY_MAPPING[ticker] || null;
 };
+
+
+
 
