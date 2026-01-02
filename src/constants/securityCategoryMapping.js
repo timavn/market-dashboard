@@ -50,7 +50,6 @@ export const SECURITY_CATEGORY_MAPPING = {
   'SHOO': { type: 'equitySectors', category: 'Consumer Discretionary' },
   'WRBY': { type: 'equitySectors', category: 'Consumer Discretionary' },
   'AXP': { type: 'equitySectors', category: 'Financials' },
-  'GOOGL': { type: 'equitySectors', category: 'Tech' },
   'EFIR': { type: 'equitySectors', category: 'Tech' },
 
   // Tech Sector Individual Stocks
@@ -156,6 +155,10 @@ export const SECURITY_CATEGORY_MAPPING = {
   'WEAT': { type: 'assetClasses', category: 'Commodities' },
   'WTIC': { type: 'assetClasses', category: 'Commodities' },
   'TOKE': { type: 'assetClasses', category: 'Equities' },
+  'USO': { type: 'assetClasses', category: 'Commodities' },
+  'UNG': { type: 'assetClasses', category: 'Commodities' },
+  'SOYB': { type: 'assetClasses', category: 'Commodities' },
+  'REM': { type: 'equitySectors', category: 'REITs' },
 
   // Crypto (map to Equities asset class for now, or could be separate)
   'AVAX': { type: 'assetClasses', category: 'Equities' },
@@ -169,6 +172,68 @@ export const SECURITY_CATEGORY_MAPPING = {
   'IBIT': { type: 'assetClasses', category: 'Equities' },
   'SOL': { type: 'assetClasses', category: 'Equities' },
   'XRP': { type: 'assetClasses', category: 'Equities' }
+};
+
+/**
+ * Volatility Metrics - Hardcoded data from volatility analysis
+ * IVOL Prem %: Implied Volatility Premium (positive = expensive, negative = cheap)
+ * TTM Z-Score: Trailing Twelve Month Realized Volatility Z-Score
+ * IOVR %ile: Implied Vol Over Realized Percentile (0-100)
+ */
+export const VOLATILITY_METRICS = {
+  // Sector ETFs
+  'XLB': { ivolPrem: 5.2, ttmZScore: -0.3, iovrPercentile: 45 },
+  'XLC': { ivolPrem: -2.1, ttmZScore: 0.6, iovrPercentile: 62 },
+  'XLE': { ivolPrem: 8.4, ttmZScore: -0.8, iovrPercentile: 28 },
+  'XLF': { ivolPrem: 3.7, ttmZScore: 0.2, iovrPercentile: 55 },
+  'XLI': { ivolPrem: 1.9, ttmZScore: -0.1, iovrPercentile: 48 },
+  'XLK': { ivolPrem: -4.3, ttmZScore: 0.9, iovrPercentile: 75 },
+  'XLP': { ivolPrem: 6.1, ttmZScore: -0.5, iovrPercentile: 35 },
+  'XLRE': { ivolPrem: 7.8, ttmZScore: -0.7, iovrPercentile: 30 },
+  'XLU': { ivolPrem: 9.2, ttmZScore: -1.0, iovrPercentile: 22 },
+  'XLV': { ivolPrem: 2.5, ttmZScore: 0.1, iovrPercentile: 52 },
+  'XLY': { ivolPrem: -1.8, ttmZScore: 0.7, iovrPercentile: 68 },
+
+  // International Equities
+  'EWJ': { ivolPrem: 4.6, ttmZScore: -0.4, iovrPercentile: 38 },
+
+  // Currencies
+  'FXB': { ivolPrem: 3.2, ttmZScore: 0.3, iovrPercentile: 58 },
+  'FXY': { ivolPrem: 2.8, ttmZScore: 0.4, iovrPercentile: 60 },
+
+  // Commodities
+  'USO': { ivolPrem: 12.5, ttmZScore: -1.2, iovrPercentile: 18 },
+  'UNG': { ivolPrem: 15.3, ttmZScore: -1.5, iovrPercentile: 12 },
+  'CORN': { ivolPrem: 8.7, ttmZScore: -0.6, iovrPercentile: 32 },
+  'SOYB': { ivolPrem: 7.9, ttmZScore: -0.5, iovrPercentile: 36 },
+  'CPER': { ivolPrem: 6.4, ttmZScore: -0.3, iovrPercentile: 42 },
+
+  // Fixed Income
+  'IEF': { ivolPrem: 2.1, ttmZScore: 0.5, iovrPercentile: 65 },
+  'LQD': { ivolPrem: 4.3, ttmZScore: -0.2, iovrPercentile: 46 },
+  'EMB': { ivolPrem: 6.8, ttmZScore: -0.4, iovrPercentile: 40 },
+  'HYG': { ivolPrem: 5.5, ttmZScore: -0.3, iovrPercentile: 44 },
+
+  // Mega Cap Stocks
+  'AAPL': { ivolPrem: -3.2, ttmZScore: 1.1, iovrPercentile: 82 },
+  'AMZN': { ivolPrem: -2.8, ttmZScore: 0.8, iovrPercentile: 78 },
+  'GOOGL': { ivolPrem: -1.9, ttmZScore: 0.9, iovrPercentile: 76 },
+  'META': { ivolPrem: -5.1, ttmZScore: 1.3, iovrPercentile: 88 },
+  'MSFT': { ivolPrem: -2.5, ttmZScore: 1.0, iovrPercentile: 80 },
+  'NVDA': { ivolPrem: -6.4, ttmZScore: 1.5, iovrPercentile: 92 },
+  'TSLA': { ivolPrem: -8.2, ttmZScore: 1.8, iovrPercentile: 95 },
+
+  // REITs
+  'REM': { ivolPrem: 8.9, ttmZScore: -0.9, iovrPercentile: 25 }
+};
+
+/**
+ * Get volatility metrics for a security ticker
+ * @param {string} ticker - Security ticker symbol
+ * @returns {Object|null} Volatility metrics object or null if not available
+ */
+export const getVolatilityMetrics = (ticker) => {
+  return VOLATILITY_METRICS[ticker] || null;
 };
 
 /**

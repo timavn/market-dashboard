@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Title, Text, Badge } from '@tremor/react';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
@@ -14,6 +14,7 @@ import {
   getZScoreColor
 } from '../../utils/securitiesUniverseUtils';
 import { getFormattedQuadRanking } from '../../utils/quadRankingUtils';
+import { getVolatilityMetrics } from '../../constants/securityCategoryMapping';
 
 // Day label component with hover tooltip
 const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
@@ -258,6 +259,9 @@ const SecuritiesUniverse = () => {
       // Get risk range history for this security
       const securityRiskRangeHistory = riskRangeHistory[security.ticker] || { hrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], lrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
 
+      // Get volatility metrics for this security
+      const volMetrics = getVolatilityMetrics(security.ticker);
+
       return {
         ...security,
         price: currentPrice,
@@ -269,7 +273,8 @@ const SecuritiesUniverse = () => {
         beta: '--', // Placeholder
         quadRanking,
         signal: 0,
-        riskRangeHistory: securityRiskRangeHistory
+        riskRangeHistory: securityRiskRangeHistory,
+        volatilityMetrics: volMetrics
       };
     });
   }, [prices, priceHistory, riskRangeHistory]);
@@ -474,6 +479,37 @@ const SecuritiesUniverse = () => {
     if (signal === 'BULLISH') return '#10b981'; // Green
     if (signal === 'BEARISH') return '#ef4444'; // Red
     return '#000000'; // Black for neutral
+  };
+
+  // Get color for IVOL Prem % (Red = expensive/high, Green = cheap/discount)
+  const getIvolPremColor = (value) => {
+    if (value === null || value === undefined) return '#6b7280'; // Gray
+    if (value > 5) return '#ef4444'; // Red - expensive
+    if (value < -2) return '#10b981'; // Green - cheap
+    return '#f59e0b'; // Yellow - neutral
+  };
+
+  // Get color for TTM Z-Score (Green < -0.5, Yellow -0.5 to 0.5, Red > 0.5)
+  const getTTMZScoreColor = (value) => {
+    if (value === null || value === undefined) return '#6b7280'; // Gray
+    if (value < -0.5) return '#10b981'; // Green - low volatility
+    if (value > 0.5) return '#ef4444'; // Red - high volatility
+    return '#f59e0b'; // Yellow - neutral
+  };
+
+  // Get color for IOVR Percentile (Green < 30, Yellow 30-70, Red > 70)
+  const getIOVRPercentileColor = (value) => {
+    if (value === null || value === undefined) return '#6b7280'; // Gray
+    if (value < 30) return '#10b981'; // Green - low
+    if (value > 70) return '#ef4444'; // Red - high
+    return '#f59e0b'; // Yellow - neutral
+  };
+
+  // Format volatility metric for display
+  const formatVolatilityMetric = (value, isPercentage = false) => {
+    if (value === null || value === undefined) return '--';
+    if (isPercentage) return `${value}`;
+    return value >= 0 ? `+${value.toFixed(1)}` : value.toFixed(1);
   };
 
   // Get Quad color based on Quad number
@@ -841,11 +877,11 @@ const SecuritiesUniverse = () => {
       {/* Data Table */}
       <Card className="dark:bg-gray-800">
         <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('ticker')}
                   >
@@ -855,7 +891,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('name')}
                   >
@@ -865,13 +901,13 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600 }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
                     className="dark:text-white"
                   >
                     Risk Range
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('price')}
                   >
@@ -881,7 +917,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('assetClass')}
                   >
@@ -891,7 +927,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('factorExposure')}
                   >
@@ -901,7 +937,28 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    className="dark:text-white"
+                    title="Implied Volatility Premium %"
+                  >
+                    IVOL Prem %
+                  </th>
+                  <th
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    className="dark:text-white"
+                    title="Trailing Twelve Month Realized Volatility Z-Score"
+                  >
+                    TTM Z-Score
+                  </th>
+                  <th
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    className="dark:text-white"
+                    title="Implied Vol Over Realized Percentile"
+                  >
+                    IOVR %ile
+                  </th>
+                  <th
+                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('zScore')}
                   >
@@ -911,7 +968,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('beta')}
                   >
@@ -921,7 +978,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('benchmark')}
                   >
@@ -931,7 +988,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('bias')}
                   >
@@ -941,7 +998,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('quadRanking')}
                   >
@@ -951,13 +1008,13 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600 }}
+                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, fontSize: '10px' }}
                     className="dark:text-white"
                   >
                     Price Change
                   </th>
                   <th
-                    style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600 }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
                     className="dark:text-white"
                   >
                     Signal
@@ -967,8 +1024,8 @@ const SecuritiesUniverse = () => {
               <tbody>
                 {sortedSecurities.length === 0 ? (
                   <tr>
-                    <td colSpan="13" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
-                      {searchQuery 
+                    <td colSpan="16" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
+                      {searchQuery
                         ? `No securities found matching "${searchQuery}"`
                         : 'No securities available'}
                     </td>
@@ -978,6 +1035,7 @@ const SecuritiesUniverse = () => {
                   const priceChange1D = security.priceChanges?.['1D'];
                   const priceChange1W = security.priceChanges?.['1W'];
                   const priceChange1M = security.priceChanges?.['1M'];
+                  const volMetrics = security.volatilityMetrics;
 
                   return (
                     <tr
@@ -988,40 +1046,73 @@ const SecuritiesUniverse = () => {
                       }}
                       className="dark:border-gray-700 dark:bg-gray-800"
                     >
-                      <td style={{ padding: '10px 8px', fontWeight: '600' }} className="dark:text-white">
+                      <td style={{ padding: '5px 4px', fontWeight: '600' }} className="dark:text-white">
                         {security.ticker}
                       </td>
-                      <td style={{ padding: '10px 8px' }} className="dark:text-gray-300">
+                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
                         <TruncatedSecurityName name={security.name} maxLength={18} />
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'center' }} className="dark:text-gray-300">
+                      <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
                         {renderRiskRangeCell(security.riskRangeHistory)}
                       </td>
-                      <td 
-                        style={{ padding: '10px 8px', textAlign: 'left', cursor: security.priceTimestamp ? 'help' : 'default' }} 
+                      <td
+                        style={{ padding: '5px 4px', textAlign: 'left', cursor: security.priceTimestamp ? 'help' : 'default' }}
                         className="dark:text-white"
                         title={formatPriceDate(security.priceTimestamp) ? `Last updated: ${formatPriceDate(security.priceTimestamp)}` : undefined}
                       >
                         {formatPrice(security.price, security.ticker)}
                       </td>
-                      <td style={{ padding: '10px 8px' }} className="dark:text-gray-300">
+                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
                         {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
                       </td>
-                      <td style={{ padding: '10px 8px' }} className="dark:text-gray-300">
+                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
                         {security.factorExposure}
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'right' }} className="dark:text-white">
+                      <td
+                        style={{
+                          padding: '5px 4px',
+                          textAlign: 'center',
+                          color: volMetrics ? getIvolPremColor(volMetrics.ivolPrem) : '#6b7280',
+                          fontWeight: 600
+                        }}
+                        className="dark:text-white"
+                      >
+                        {volMetrics ? formatVolatilityMetric(volMetrics.ivolPrem) : '--'}
+                      </td>
+                      <td
+                        style={{
+                          padding: '5px 4px',
+                          textAlign: 'center',
+                          color: volMetrics ? getTTMZScoreColor(volMetrics.ttmZScore) : '#6b7280',
+                          fontWeight: 600
+                        }}
+                        className="dark:text-white"
+                      >
+                        {volMetrics ? formatVolatilityMetric(volMetrics.ttmZScore) : '--'}
+                      </td>
+                      <td
+                        style={{
+                          padding: '5px 4px',
+                          textAlign: 'center',
+                          color: volMetrics ? getIOVRPercentileColor(volMetrics.iovrPercentile) : '#6b7280',
+                          fontWeight: 600
+                        }}
+                        className="dark:text-white"
+                      >
+                        {volMetrics ? formatVolatilityMetric(volMetrics.iovrPercentile, true) : '--'}
+                      </td>
+                      <td style={{ padding: '5px 4px', textAlign: 'right' }} className="dark:text-white">
                         <Badge color={getZScoreColor(security.zScore)} size="sm">
                           {formatZScore(security.zScore)}
                         </Badge>
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'center' }} className="dark:text-gray-300">
+                      <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
                         {security.beta}
                       </td>
-                      <td style={{ padding: '10px 8px' }} className="dark:text-gray-300">
+                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
                         {security.benchmark}
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                      <td style={{ padding: '5px 4px', textAlign: 'center' }}>
                         {(() => {
                           const signals = getTTTSignals(security);
                           return (
@@ -1059,7 +1150,7 @@ const SecuritiesUniverse = () => {
                           );
                         })()}
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                      <td style={{ padding: '5px 4px', textAlign: 'center' }}>
                         {security.quadRanking && security.quadRanking !== '--' ? (
                           <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'center' }}>
                             {security.quadRanking.split('/').map((quadNum, index, array) => {
@@ -1070,13 +1161,13 @@ const SecuritiesUniverse = () => {
                                     style={{
                                       color: getQuadColor(num),
                                       fontWeight: 600,
-                                      fontSize: '13px'
+                                      fontSize: '10px'
                                     }}
                                   >
                                     {quadNum}
                                   </span>
                                   {index < array.length - 1 && (
-                                    <span style={{ color: '#6b7280', fontSize: '13px' }}>/</span>
+                                    <span style={{ color: '#6b7280', fontSize: '10px' }}>/</span>
                                   )}
                                 </React.Fragment>
                               );
@@ -1086,29 +1177,29 @@ const SecuritiesUniverse = () => {
                           <span className="dark:text-gray-400">--</span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px' }}>
-                          <span 
-                            style={{ 
-                              color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#10b981' : 
+                      <td style={{ padding: '5px 4px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px' }}>
+                          <span
+                            style={{
+                              color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#10b981' :
                                      getPriceChangeColor(priceChange1D) === 'red' ? '#ef4444' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
                             1D: {formatPriceChange(priceChange1D)}
                           </span>
-                          <span 
-                            style={{ 
-                              color: getPriceChangeColor(priceChange1W) === 'emerald' ? '#10b981' : 
+                          <span
+                            style={{
+                              color: getPriceChangeColor(priceChange1W) === 'emerald' ? '#10b981' :
                                      getPriceChangeColor(priceChange1W) === 'red' ? '#ef4444' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
                             1W: {formatPriceChange(priceChange1W)}
                           </span>
-                          <span 
-                            style={{ 
-                              color: getPriceChangeColor(priceChange1M) === 'emerald' ? '#10b981' : 
+                          <span
+                            style={{
+                              color: getPriceChangeColor(priceChange1M) === 'emerald' ? '#10b981' :
                                      getPriceChangeColor(priceChange1M) === 'red' ? '#ef4444' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
@@ -1117,7 +1208,7 @@ const SecuritiesUniverse = () => {
                           </span>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
+                      <td style={{ padding: '5px 4px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
                         {security.signal}
                       </td>
                     </tr>
