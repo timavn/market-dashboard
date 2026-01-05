@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, Title, Text, Badge } from '@tremor/react';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
@@ -15,6 +15,8 @@ import {
 } from '../../utils/securitiesUniverseUtils';
 import { getFormattedQuadRanking } from '../../utils/quadRankingUtils';
 import { getVolatilityMetrics } from '../../constants/securityCategoryMapping';
+import { METRIC_DEFINITIONS } from '../../constants/metricDefinitions';
+import MetricDefinitionPopover from '../common/MetricDefinitionPopover';
 
 // Day label component with hover tooltip
 const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
@@ -23,13 +25,13 @@ const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
   return (
     <div
       style={{
-        width: isLast ? '24px' : '18px',
+        width: isLast ? '32px' : '28px',
         textAlign: 'center',
-        fontSize: '7px',
+        fontSize: '8px',
         color: '#6b7280',
         backgroundColor: '#f3f4f6',
         borderRadius: '2px',
-        padding: '1px 1px',
+        padding: '2px 2px',
         position: 'relative'
       }}
       onMouseEnter={() => setShowTooltip(true)}
@@ -116,6 +118,18 @@ const SecuritiesUniverse = () => {
     biases: []
   });
   const [selectedQuad, setSelectedQuad] = useState(null);
+  const [shortsMode, setShortsMode] = useState(false); // false = longs (best quads), true = shorts (worst quads)
+  const [openPopover, setOpenPopover] = useState(null); // { metricKey, position: { top, left } }
+  const hoverTimeoutRef = useRef(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Risk Range History - 10 day history for each security
   // Format: { ticker: { hrr: [t-9, t-8, t-7, t-6, t-5, t-4, t-3, t-2, t-1, today], lrr: [...], ath: number } }
@@ -270,6 +284,7 @@ const SecuritiesUniverse = () => {
         benchmark,
         zScore,
         priceChanges,
+        priceHistory: history, // Store price history for Risk Range display
         beta: '--', // Placeholder
         quadRanking,
         signal: 0,
@@ -315,13 +330,18 @@ const SecuritiesUniverse = () => {
       filtered = filtered.filter(security => {
         if (!security.quadRanking || security.quadRanking === '--') return false;
         const quads = security.quadRanking.split('/').map(q => parseInt(q));
-        // Check if selected Quad is in first or second position
-        return quads[0] === selectedQuad || quads[1] === selectedQuad;
+        if (shortsMode) {
+          // Shorts mode: Check if selected Quad is in worst positions (3rd or 4th)
+          return quads[2] === selectedQuad || quads[3] === selectedQuad;
+        } else {
+          // Longs mode: Check if selected Quad is in best positions (1st or 2nd)
+          return quads[0] === selectedQuad || quads[1] === selectedQuad;
+        }
       });
     }
 
     return filtered;
-  }, [enrichedSecurities, searchQuery, activeFilters, selectedQuad]);
+  }, [enrichedSecurities, searchQuery, activeFilters, selectedQuad, shortsMode]);
 
   // Sort securities (supports multiple column sorting)
   const sortedSecurities = useMemo(() => {
@@ -440,7 +460,45 @@ const SecuritiesUniverse = () => {
       biases: []
     });
     setSelectedQuad(null);
+    setShortsMode(false);
     setSearchQuery('');
+  };
+
+  // Handle metric definition popover on hover
+  const handleMetricHover = (e, metricKey) => {
+    // Clear any pending close timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+
+    const definition = METRIC_DEFINITIONS[metricKey];
+    if (!definition) return;
+
+    // Get the th element for positioning
+    const thElement = e.currentTarget.closest('th') || e.currentTarget;
+    const rect = thElement.getBoundingClientRect();
+    const position = {
+      top: rect.bottom + 8,
+      left: rect.left
+    };
+
+    setOpenPopover({ metricKey, position, definition });
+  };
+
+  const handleMetricHoverEnd = () => {
+    // Add small delay to allow moving to popover
+    hoverTimeoutRef.current = setTimeout(() => {
+      setOpenPopover(null);
+    }, 100);
+  };
+
+  const closePopover = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setOpenPopover(null);
   };
 
   // Format price
@@ -595,23 +653,49 @@ const SecuritiesUniverse = () => {
   };
 
   // Render the Risk Range mini-table for a security
-  const renderRiskRangeCell = (riskRangeHistory) => {
+  const renderRiskRangeCell = (riskRangeHistory, priceHistory = []) => {
     const { hrr, lrr, ath } = riskRangeHistory;
     const lastIndex = dayLabels.length - 1;
     
+    // Extract last 10 trading days of closing prices
+    // Price history is sorted by date (oldest first), so we need the last 10 items
+    const closingPrices = [];
+    if (Array.isArray(priceHistory) && priceHistory.length > 0) {
+      // Get last 10 items from price history
+      const last10 = priceHistory.slice(-10);
+      // Pad to 10 items if we have fewer than 10
+      for (let i = 0; i < 10; i++) {
+        if (i < last10.length) {
+          const price = parseFloat(last10[i]?.close || last10[i]?.price || 0);
+          closingPrices.push(price > 0 ? price : null);
+        } else {
+          closingPrices.push(null);
+        }
+      }
+    } else {
+      // No price history, fill with nulls
+      closingPrices.push(...Array(10).fill(null));
+    }
+    
+    // Helper to format price
+    const formatClosingPrice = (price) => {
+      if (price === null || price === undefined || price === 0) return '--';
+      return price.toFixed(2);
+    };
+    
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '9px' }}>
         {/* ATH Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-          <span style={{ width: '24px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>ATH</span>
-          <span style={{ fontWeight: 600, color: '#3b82f6' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>ATH</span>
+          <span style={{ fontWeight: 600, color: '#3b82f6', fontSize: '9px' }}>
             {ath > 0 ? ath.toFixed(2) : '--'}
           </span>
         </div>
         {/* Day Labels Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-          <span style={{ width: '24px' }}></span>
-          <div style={{ display: 'flex', gap: '2px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ width: '36px' }}></span>
+          <div style={{ display: 'flex', gap: '4px' }}>
             {dayLabels.map((label, index) => (
               <DayLabelWithTooltip
                 key={`label-${index}`}
@@ -623,16 +707,17 @@ const SecuritiesUniverse = () => {
           </div>
         </div>
         {/* HRR Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-          <span style={{ width: '24px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>HRR</span>
-          <div style={{ display: 'flex', gap: '2px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>HRR</span>
+          <div style={{ display: 'flex', gap: '4px' }}>
             {hrr.map((value, index) => (
               <span
                 key={`hrr-${index}`}
                 style={{
-                  width: index === lastIndex ? '24px' : '18px',
+                  width: index === lastIndex ? '32px' : '28px',
                   textAlign: 'center',
                   fontWeight: 600,
+                  fontSize: '9px',
                   color: getRiskRangeColor(value, index > 0 ? hrr[index - 1] : null, index === 0, ath, true)
                 }}
                 title={`${value}${ath && value > ath ? ' (New ATH!)' : ''}`}
@@ -642,17 +727,38 @@ const SecuritiesUniverse = () => {
             ))}
           </div>
         </div>
+        {/* Closing Prices Row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>Price</span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {closingPrices.map((price, index) => (
+              <span
+                key={`price-${index}`}
+                style={{
+                  width: index === lastIndex ? '32px' : '28px',
+                  textAlign: 'center',
+                  fontWeight: 600,
+                  color: price !== null ? '#374151' : '#9ca3af',
+                  fontSize: '9px'
+                }}
+              >
+                {formatClosingPrice(price)}
+              </span>
+            ))}
+          </div>
+        </div>
         {/* LRR Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-          <span style={{ width: '24px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>LRR</span>
-          <div style={{ display: 'flex', gap: '2px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>LRR</span>
+          <div style={{ display: 'flex', gap: '4px' }}>
             {lrr.map((value, index) => (
               <span
                 key={`lrr-${index}`}
                 style={{
-                  width: index === lastIndex ? '24px' : '18px',
+                  width: index === lastIndex ? '32px' : '28px',
                   textAlign: 'center',
                   fontWeight: 600,
+                  fontSize: '9px',
                   color: getRiskRangeColor(value, index > 0 ? lrr[index - 1] : null, index === 0)
                 }}
               >
@@ -806,9 +912,31 @@ const SecuritiesUniverse = () => {
 
           {/* Quad Filter */}
           <div>
-            <Text className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 block">
-              Quad Filter
-            </Text>
+            <div className="flex items-center gap-2 mb-2">
+              <Text className="text-xs font-semibold text-gray-600 dark:text-gray-400">
+                Quad Filter
+              </Text>
+              {selectedQuad !== null && (
+                <button
+                  onClick={() => setShortsMode(!shortsMode)}
+                  style={{
+                    backgroundColor: shortsMode ? '#ef4444' : '#10b981',
+                    color: '#ffffff',
+                    padding: '4px 12px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    borderRadius: '9999px',
+                    transition: 'all 0.2s',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                  className="hover:opacity-80"
+                  title={shortsMode ? 'Switch to longs mode (best quads)' : 'Switch to shorts mode (worst quads)'}
+                >
+                  {shortsMode ? 'Shorts' : 'Longs'}
+                </button>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2">
               {[1, 2, 3, 4].map(quadNum => {
                 const isActive = selectedQuad === quadNum;
@@ -853,11 +981,6 @@ const SecuritiesUniverse = () => {
                 );
               })}
             </div>
-            {selectedQuad !== null && (
-              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Showing securities where Quad {selectedQuad} is strongest or 2nd strongest
-              </Text>
-            )}
           </div>
 
           {/* Clear Filters Button */}
@@ -877,11 +1000,11 @@ const SecuritiesUniverse = () => {
       {/* Data Table */}
       <Card className="dark:bg-gray-800">
         <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('ticker')}
                   >
@@ -891,7 +1014,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('name')}
                   >
@@ -901,23 +1024,26 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    data-metric-key="riskRange"
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
                     className="dark:text-white"
+                    onMouseEnter={(e) => handleMetricHover(e, 'riskRange')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     Risk Range
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('price')}
                   >
-                    Closing Price {(() => {
+                    Spot price {(() => {
                       const sortInfo = getSortInfo('price');
                       return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('assetClass')}
                   >
@@ -927,7 +1053,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('factorExposure')}
                   >
@@ -937,30 +1063,39 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    data-metric-key="ivolPrem"
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
                     className="dark:text-white"
-                    title="Implied Volatility Premium %"
+                    onMouseEnter={(e) => handleMetricHover(e, 'ivolPrem')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     IVOL Prem %
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    data-metric-key="ttmZScore"
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
                     className="dark:text-white"
-                    title="Trailing Twelve Month Realized Volatility Z-Score"
+                    onMouseEnter={(e) => handleMetricHover(e, 'ttmZScore')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     TTM Z-Score
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    data-metric-key="iovrPercentile"
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
                     className="dark:text-white"
-                    title="Implied Vol Over Realized Percentile"
+                    onMouseEnter={(e) => handleMetricHover(e, 'iovrPercentile')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     IOVR %ile
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    data-metric-key="zScore"
+                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('zScore')}
+                    onMouseEnter={(e) => handleMetricHover(e, 'zScore')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     Z-Score {(() => {
                       const sortInfo = getSortInfo('zScore');
@@ -968,9 +1103,12 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    data-metric-key="beta"
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('beta')}
+                    onMouseEnter={(e) => handleMetricHover(e, 'beta')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     Beta {(() => {
                       const sortInfo = getSortInfo('beta');
@@ -978,7 +1116,7 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('benchmark')}
                   >
@@ -988,9 +1126,12 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    data-metric-key="ttt"
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('bias')}
+                    onMouseEnter={(e) => handleMetricHover(e, 'ttt')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     T/T/T {(() => {
                       const sortInfo = getSortInfo('bias');
@@ -998,9 +1139,12 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '10px' }}
+                    data-metric-key="quadRanking"
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('quadRanking')}
+                    onMouseEnter={(e) => handleMetricHover(e, 'quadRanking')}
+                    onMouseLeave={handleMetricHoverEnd}
                   >
                     Quad {(() => {
                       const sortInfo = getSortInfo('quadRanking');
@@ -1008,13 +1152,13 @@ const SecuritiesUniverse = () => {
                     })()}
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, fontSize: '9px' }}
                     className="dark:text-white"
                   >
                     Price Change
                   </th>
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '10px' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px' }}
                     className="dark:text-white"
                   >
                     Signal
@@ -1053,7 +1197,7 @@ const SecuritiesUniverse = () => {
                         <TruncatedSecurityName name={security.name} maxLength={18} />
                       </td>
                       <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
-                        {renderRiskRangeCell(security.riskRangeHistory)}
+                        {renderRiskRangeCell(security.riskRangeHistory, security.priceHistory)}
                       </td>
                       <td
                         style={{ padding: '5px 4px', textAlign: 'left', cursor: security.priceTimestamp ? 'help' : 'default' }}
@@ -1102,7 +1246,7 @@ const SecuritiesUniverse = () => {
                         {volMetrics ? formatVolatilityMetric(volMetrics.iovrPercentile, true) : '--'}
                       </td>
                       <td style={{ padding: '5px 4px', textAlign: 'right' }} className="dark:text-white">
-                        <Badge color={getZScoreColor(security.zScore)} size="sm">
+                        <Badge color={getZScoreColor(security.zScore)} size="xs" style={{ fontSize: '7px', padding: '1px 5px', lineHeight: '1.2' }}>
                           {formatZScore(security.zScore)}
                         </Badge>
                       </td>
@@ -1161,13 +1305,13 @@ const SecuritiesUniverse = () => {
                                     style={{
                                       color: getQuadColor(num),
                                       fontWeight: 600,
-                                      fontSize: '10px'
+                                      fontSize: '8px'
                                     }}
                                   >
                                     {quadNum}
                                   </span>
                                   {index < array.length - 1 && (
-                                    <span style={{ color: '#6b7280', fontSize: '10px' }}>/</span>
+                                    <span style={{ color: '#6b7280', fontSize: '8px' }}>/</span>
                                   )}
                                 </React.Fragment>
                               );
@@ -1178,7 +1322,7 @@ const SecuritiesUniverse = () => {
                         )}
                       </td>
                       <td style={{ padding: '5px 4px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '7px' }}>
                           <span
                             style={{
                               color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#10b981' :
@@ -1219,6 +1363,22 @@ const SecuritiesUniverse = () => {
             </table>
           </div>
       </Card>
+
+      {/* Metric Definition Popover */}
+      {openPopover && (
+        <MetricDefinitionPopover
+          metricKey={openPopover.metricKey}
+          definition={openPopover.definition}
+          position={openPopover.position}
+          onClose={closePopover}
+          onMouseEnter={() => {
+            if (hoverTimeoutRef.current) {
+              clearTimeout(hoverTimeoutRef.current);
+              hoverTimeoutRef.current = null;
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
