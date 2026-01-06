@@ -43,7 +43,9 @@
       "Bash(./create_hedgeye_tables.sh:*)",
       "Bash(launchctl list:*)",
       "Bash(./manage_scraper.sh:*)",
-      "Bash(aws dynamodb list-tables:*)"
+      "Bash(aws dynamodb list-tables:*)",
+      "Bash(npm run lint:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   }

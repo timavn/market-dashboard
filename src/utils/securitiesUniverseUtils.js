@@ -298,22 +298,27 @@ export const formatZScore = (zScore) => {
 /**
  * Get color for Z-score
  * @param {number|null} zScore - Z-score value
- * @returns {string} Color class
+ * @returns {Object} { color: hex color, bgColor: background color }
  */
 export const getZScoreColor = (zScore) => {
   if (zScore === null || zScore === undefined || isNaN(zScore)) {
-    return 'gray';
+    return { color: '#6b7280', bgColor: '#f3f4f6', borderColor: '#d1d5db' }; // Gray
   }
   const num = parseFloat(zScore);
-  if (num > 2) {
-    return 'red'; // Extremely overbought
-  } else if (num > 1) {
-    return 'orange'; // Overbought
-  } else if (num < -2) {
-    return 'emerald'; // Extremely oversold
-  } else if (num < -1) {
-    return 'lime'; // Oversold
+  const threshold = 2; // Based on definition: ±2 = consensus "fade" level
+  
+  if (num > threshold) {
+    return { color: '#065f46', bgColor: '#d1fae5', borderColor: '#10b981' }; // Dark green - strong positive (> 2)
+  } else if (num > 0) {
+    return { color: '#047857', bgColor: '#a7f3d0', borderColor: '#34d399' }; // Light green - moderate positive (0 to 2)
+  } else if (num < -threshold) {
+    return { color: '#991b1b', bgColor: '#fee2e2', borderColor: '#ef4444' }; // Dark red - strong negative (< -2)
+  } else if (num < 0) {
+    return { color: '#b91c1c', bgColor: '#fecaca', borderColor: '#f87171' }; // Light red - moderate negative (-2 to 0)
   }
-  return 'gray'; // Neutral
+  return { color: '#6b7280', bgColor: '#f3f4f6', borderColor: '#d1d5db' }; // Gray - exactly zero
 };
+
+
+
 

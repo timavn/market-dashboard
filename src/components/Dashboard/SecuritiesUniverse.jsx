@@ -120,16 +120,6 @@ const SecuritiesUniverse = () => {
   const [selectedQuad, setSelectedQuad] = useState(null);
   const [shortsMode, setShortsMode] = useState(false); // false = longs (best quads), true = shorts (worst quads)
   const [openPopover, setOpenPopover] = useState(null); // { metricKey, position: { top, left } }
-  const hoverTimeoutRef = useRef(null);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Risk Range History - 10 day history for each security
   // Format: { ticker: { hrr: [t-9, t-8, t-7, t-6, t-5, t-4, t-3, t-2, t-1, today], lrr: [...], ath: number } }
@@ -464,40 +454,22 @@ const SecuritiesUniverse = () => {
     setSearchQuery('');
   };
 
-  // Handle metric definition popover on hover
-  const handleMetricHover = (e, metricKey) => {
-    // Clear any pending close timeout
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-
+  // Handle metric definition popover on button click
+  const handleMetricDefinitionClick = (e, metricKey) => {
+    e.stopPropagation(); // Prevent sorting when clicking definition button
+    
     const definition = METRIC_DEFINITIONS[metricKey];
     if (!definition) return;
 
-    // Get the th element for positioning
-    const thElement = e.currentTarget.closest('th') || e.currentTarget;
-    const rect = thElement.getBoundingClientRect();
-    const position = {
-      top: rect.bottom + 8,
-      left: rect.left
-    };
-
-    setOpenPopover({ metricKey, position, definition });
-  };
-
-  const handleMetricHoverEnd = () => {
-    // Add small delay to allow moving to popover
-    hoverTimeoutRef.current = setTimeout(() => {
+    // If popover is already open for this metric, close it
+    if (openPopover?.metricKey === metricKey) {
       setOpenPopover(null);
-    }, 100);
+    } else {
+      setOpenPopover({ metricKey, definition });
+    }
   };
 
   const closePopover = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
     setOpenPopover(null);
   };
 
@@ -1025,12 +997,32 @@ const SecuritiesUniverse = () => {
                   </th>
                   <th
                     data-metric-key="riskRange"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
                     className="dark:text-white"
-                    onMouseEnter={(e) => handleMetricHover(e, 'riskRange')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    Risk Range
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
+                      Risk Range
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'riskRange')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                    </span>
                   </th>
                   <th
                     style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
@@ -1064,56 +1056,158 @@ const SecuritiesUniverse = () => {
                   </th>
                   <th
                     data-metric-key="ivolPrem"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
                     className="dark:text-white"
-                    onMouseEnter={(e) => handleMetricHover(e, 'ivolPrem')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    IVOL Prem %
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
+                      IVOL Prem %
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'ivolPrem')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                    </span>
                   </th>
                   <th
                     data-metric-key="ttmZScore"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
                     className="dark:text-white"
-                    onMouseEnter={(e) => handleMetricHover(e, 'ttmZScore')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    TTM Z-Score
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
+                      TTM Z-Score
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'ttmZScore')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                    </span>
                   </th>
                   <th
                     data-metric-key="iovrPercentile"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', cursor: 'default', position: 'relative' }}
+                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
                     className="dark:text-white"
-                    onMouseEnter={(e) => handleMetricHover(e, 'iovrPercentile')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    IOVR %ile
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
+                      IOVR %ile
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'iovrPercentile')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                    </span>
                   </th>
                   <th
                     data-metric-key="zScore"
                     style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('zScore')}
-                    onMouseEnter={(e) => handleMetricHover(e, 'zScore')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    Z-Score {(() => {
-                      const sortInfo = getSortInfo('zScore');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', width: '100%', justifyContent: 'flex-end' }}>
+                      Z-Score
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'zScore')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                      {(() => {
+                        const sortInfo = getSortInfo('zScore');
+                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                      })()}
+                    </span>
                   </th>
                   <th
                     data-metric-key="beta"
                     style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('beta')}
-                    onMouseEnter={(e) => handleMetricHover(e, 'beta')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    Beta {(() => {
-                      const sortInfo = getSortInfo('beta');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
+                      Beta
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'beta')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                      {(() => {
+                        const sortInfo = getSortInfo('beta');
+                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                      })()}
+                    </span>
                   </th>
                   <th
                     style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
@@ -1130,26 +1224,68 @@ const SecuritiesUniverse = () => {
                     style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('bias')}
-                    onMouseEnter={(e) => handleMetricHover(e, 'ttt')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    T/T/T {(() => {
-                      const sortInfo = getSortInfo('bias');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
+                      T/T/T
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'ttt')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                      {(() => {
+                        const sortInfo = getSortInfo('bias');
+                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                      })()}
+                    </span>
                   </th>
                   <th
                     data-metric-key="quadRanking"
                     style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
                     className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
                     onClick={() => handleSort('quadRanking')}
-                    onMouseEnter={(e) => handleMetricHover(e, 'quadRanking')}
-                    onMouseLeave={handleMetricHoverEnd}
                   >
-                    Quad {(() => {
-                      const sortInfo = getSortInfo('quadRanking');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
+                      Quad
+                      <button
+                        onClick={(e) => handleMetricDefinitionClick(e, 'quadRanking')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0',
+                          marginLeft: '4px',
+                          fontSize: '10px',
+                          color: '#6b7280',
+                          lineHeight: '1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        className="dark:text-gray-400 hover:dark:text-gray-200"
+                        title="Click for definition"
+                      >
+                        ℹ️
+                      </button>
+                      {(() => {
+                        const sortInfo = getSortInfo('quadRanking');
+                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
+                      })()}
+                    </span>
                   </th>
                   <th
                     style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, fontSize: '9px' }}
@@ -1246,9 +1382,26 @@ const SecuritiesUniverse = () => {
                         {volMetrics ? formatVolatilityMetric(volMetrics.iovrPercentile, true) : '--'}
                       </td>
                       <td style={{ padding: '5px 4px', textAlign: 'right' }} className="dark:text-white">
-                        <Badge color={getZScoreColor(security.zScore)} size="xs" style={{ fontSize: '7px', padding: '1px 5px', lineHeight: '1.2' }}>
-                          {formatZScore(security.zScore)}
-                        </Badge>
+                        {(() => {
+                          const zScoreColors = getZScoreColor(security.zScore);
+                          return (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                fontSize: '7px',
+                                padding: '2px 6px',
+                                lineHeight: '1.2',
+                                borderRadius: '4px',
+                                backgroundColor: zScoreColors.bgColor,
+                                color: zScoreColors.color,
+                                border: `1px solid ${zScoreColors.borderColor}`,
+                                fontWeight: 600
+                              }}
+                            >
+                              {formatZScore(security.zScore)}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
                         {security.beta}
@@ -1369,14 +1522,7 @@ const SecuritiesUniverse = () => {
         <MetricDefinitionPopover
           metricKey={openPopover.metricKey}
           definition={openPopover.definition}
-          position={openPopover.position}
           onClose={closePopover}
-          onMouseEnter={() => {
-            if (hoverTimeoutRef.current) {
-              clearTimeout(hoverTimeoutRef.current);
-              hoverTimeoutRef.current = null;
-            }
-          }}
         />
       )}
     </div>

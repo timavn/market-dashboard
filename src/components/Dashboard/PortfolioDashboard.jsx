@@ -8,9 +8,11 @@ import USDMacroDashboard from './USDMacroDashboard';
 import SecuritiesList from './SecuritiesList';
 import ResizableBottomPanels from './ResizableBottomPanels';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
+import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
 import { bookContent } from '../../constants/bookContent';
 import PortfolioBreakdown from './PortfolioBreakdown';
 import SecuritiesUniverse from './SecuritiesUniverse';
+import PerformanceTracking from './PerformanceTracking';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -34,6 +36,12 @@ const PortfolioDashboard = () => {
   const bookPopoverRef = useRef(null);
   const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
   const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(false);
+  const [showPerformanceTracking, setShowPerformanceTracking] = useState(false);
+  const [showAssetClassInfo, setShowAssetClassInfo] = useState(false);
+  const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
+  const [portfolioConstructionImageError, setPortfolioConstructionImageError] = useState(false);
+  const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
+  const [performanceImageError, setPerformanceImageError] = useState(false);
   
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
@@ -325,36 +333,6 @@ const PortfolioDashboard = () => {
             ${displayData.summary.totalValue.toLocaleString()}
           </Metric>
           
-          {/* Position Sizing Legend */}
-          <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1 pt-2 border-t dark:border-gray-700">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-              <div>
-                <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Long:</div>
-                <div>FX : 4-12%</div>
-                <div>Fixed Income : 4-10%</div>
-                <div>Equities : 2-6%</div>
-                <div>Commodities : 2-4%</div>
-                <div>Crypto : 2-4%</div>
-              </div>
-              <div>
-                <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Short:</div>
-                <div>FX : 2-6%</div>
-                <div>Fixed Income : 2-5%</div>
-                <div>Equities : 1-3%</div>
-                <div>Commodities : 1-2%</div>
-                <div>Crypto : 1-2%</div>
-              </div>
-            </div>
-            <div className="pt-1 border-t dark:border-gray-700 mt-1">
-              <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Basis Points:</div>
-              <div className="grid grid-cols-4 gap-x-2">
-                <div>25 bps: ${Math.floor(displayData.summary.totalValue * 0.0025).toLocaleString()}</div>
-                <div>50 bps: ${Math.floor(displayData.summary.totalValue * 0.005).toLocaleString()}</div>
-                <div>100 bps: ${Math.floor(displayData.summary.totalValue * 0.01).toLocaleString()}</div>
-                <div>500 bps: ${Math.floor(displayData.summary.totalValue * 0.05).toLocaleString()}</div>
-              </div>
-            </div>
-          </div>
           
           <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
             <Text className="text-sm dark:text-white">P&L MTD</Text>
@@ -435,8 +413,51 @@ const PortfolioDashboard = () => {
 
       {/* Asset Class Allocation */}
       {Object.keys(displayData.assetAllocation).length > 0 && (
-        <div className="mb-6 pt-6 border-t dark:border-gray-700">
-          <Title className="text-sm mb-3 dark:text-white">Asset Class Allocation</Title>
+        <div className="mb-6 pt-6 border-t dark:border-gray-700 relative">
+          <div className="flex items-center gap-2 mb-3">
+            <Title className="text-sm dark:text-white">Asset Class Allocation</Title>
+            <button
+              onClick={() => setShowAssetClassInfo(!showAssetClassInfo)}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              title="Asset Class Information"
+              style={{ 
+                width: '16px', 
+                height: '16px', 
+                borderRadius: '50%', 
+                border: '1px solid currentColor',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '10px',
+                cursor: 'pointer'
+              }}
+            >
+              i
+            </button>
+            {showAssetClassInfo && (
+              <div 
+                className="absolute z-50 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg"
+                style={{ 
+                  maxWidth: '300px', 
+                  top: '32px',
+                  left: '0'
+                }}
+              >
+                <Text className="text-xs font-semibold mb-2 block dark:text-white">Asset Classes</Text>
+                <div className="space-y-1">
+                  {Object.values(ASSET_CLASS_NAMES).map((assetClass) => (
+                    <Text key={assetClass} className="text-xs dark:text-gray-300">• {assetClass}</Text>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setShowAssetClassInfo(false)}
+                  className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
           <div className="space-y-2">
             {Object.entries(displayData.assetAllocation).map(([type, percentage]) => (
               <div key={type} className="space-y-1">
@@ -695,21 +716,54 @@ const PortfolioDashboard = () => {
             )}
           </Button>
 
-          {/* Portfolio Breakdown Button */}
+          {/* Portfolio Construction Button */}
           <Button
             onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
             variant="secondary"
             size="sm"
             className="shadow-sm w-full mt-2"
             style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-            title="Portfolio Breakdown"
+            title="Portfolio Construction"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8"/>
-              <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4"/>
-              <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2"/>
-            </svg>
+            {portfolioConstructionImageError ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8"/>
+                <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4"/>
+                <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2"/>
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/portfolio-construction.png" 
+                alt="Portfolio Construction" 
+                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                onError={() => setPortfolioConstructionImageError(true)}
+              />
+            )}
+          </Button>
+
+          {/* Performance Tracking Button */}
+          <Button
+            onClick={() => setShowPerformanceTracking(!showPerformanceTracking)}
+            variant="secondary"
+            size="sm"
+            className="shadow-sm w-full mt-2"
+            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            title="Performance Tracking"
+          >
+            {performanceImageError ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="22 6 13.5 15.5 8.5 10.5 2 17" />
+                <polyline points="16 6 22 6 22 12" />
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/performance.png" 
+                alt="Performance Tracking" 
+                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                onError={() => setPerformanceImageError(true)}
+              />
+            )}
           </Button>
 
           {/* Securities Universe Button */}
@@ -721,33 +775,37 @@ const PortfolioDashboard = () => {
             style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
             title="Securities Universe"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <defs>
-                {/* Purple planet gradient - lighter lavender on upper-right, darker purple on lower-left */}
-                <radialGradient id="planetGradient" cx="0.4" cy="0.3">
-                  <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9"/>
-                  <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95"/>
-                  <stop offset="100%" stopColor="#663399" stopOpacity="1"/>
-                </radialGradient>
-                {/* Ring gradient with iridescent edges */}
-                <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8"/>
-                  <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9"/>
-                  <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8"/>
-                </linearGradient>
-              </defs>
-              {/* Purple planet with swirling cloud patterns */}
-              <circle cx="12" cy="12" r="7" fill="url(#planetGradient)"/>
-              {/* Swirling cloud pattern - lighter lavender swirls */}
-              <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4"/>
-              <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3"/>
-              {/* Prominent purple rings with multiple concentric bands */}
-              <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9"/>
-              <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7"/>
-              <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8"/>
-              <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6"/>
-              <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7"/>
-            </svg>
+            {securitiesUniverseImageError ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <defs>
+                  <radialGradient id="planetGradient" cx="0.4" cy="0.3">
+                    <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9"/>
+                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95"/>
+                    <stop offset="100%" stopColor="#663399" stopOpacity="1"/>
+                  </radialGradient>
+                  <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8"/>
+                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9"/>
+                    <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8"/>
+                  </linearGradient>
+                </defs>
+                <circle cx="12" cy="12" r="7" fill="url(#planetGradient)"/>
+                <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4"/>
+                <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3"/>
+                <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9"/>
+                <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7"/>
+                <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8"/>
+                <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6"/>
+                <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7"/>
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/securities-universe.png" 
+                alt="Securities Universe" 
+                style={{ width: '24px', height: '24px', objectFit: 'contain' }}
+                onError={() => setSecuritiesUniverseImageError(true)}
+              />
+            )}
           </Button>
           
           {/* Popover Menu */}
@@ -1162,7 +1220,7 @@ const PortfolioDashboard = () => {
                   userSelect: 'none',
                 }}
               >
-                Portfolio Breakdown
+                Portfolio Construction
               </Title>
             </div>
 
@@ -1740,6 +1798,77 @@ const PortfolioDashboard = () => {
         }}
         selectedTicker={selectedSecurityTicker}
       />
+
+      {/* Performance Tracking Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: showPortfolioMetrics 
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
+            : '40px', // Position to the left of collapsed portfolio bar
+          width: showPerformanceTracking 
+            ? (showPortfolioMetrics 
+                ? 'calc((100vw - 16px) * (10/12) - 128px)' // Width when portfolio metrics open
+                : 'calc((100vw - 16px) * (9/12) - 40px)') // Width when portfolio metrics closed
+            : '0px',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: showPerformanceTracking ? 1500 : -1,
+          borderLeft: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
+          borderRight: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showPerformanceTracking 
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+            : 'none',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
+          display: showPerformanceTracking ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showPerformanceTracking && (
+          <>
+            {/* Header with Centered Title (Clickable to Close) */}
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => setShowPerformanceTracking(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Performance Tracking
+              </Title>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: 0,
+              }}
+            >
+              <PerformanceTracking />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };

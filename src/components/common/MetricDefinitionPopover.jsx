@@ -3,51 +3,86 @@ import React, { useEffect, useRef } from 'react';
 const MetricDefinitionPopover = ({ 
   metricKey, 
   definition, 
-  position, 
-  onClose,
-  onMouseEnter
+  onClose
 }) => {
   const popoverRef = useRef(null);
 
-  // Keep popover open when hovering over it
-  const handlePopoverMouseEnter = () => {
-    if (onMouseEnter) {
-      onMouseEnter(); // Cancel any pending close
-    }
-  };
+  // Close on escape key
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
 
-  const handlePopoverMouseLeave = () => {
-    onClose();
-  };
+  // Close on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        // Check if click is on the button that opened this popover
+        const clickedElement = e.target.closest('button');
+        if (clickedElement && clickedElement.title === 'Click for definition') {
+          return; // Don't close if clicking the same button
+        }
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [onClose]);
 
-  if (!definition || !position) return null;
+  if (!definition) return null;
 
   const { name, definition: def, range, interpretation, components, format, calculation, source } = definition;
 
+  // Calculate max height with 1 inch (96px) margins top and bottom
+  const maxHeight = `calc(100vh - 192px)`; // 96px top + 96px bottom = 192px total
+
   return (
     <div
-      ref={popoverRef}
-      onMouseEnter={handlePopoverMouseEnter}
-      onMouseLeave={handlePopoverMouseLeave}
       style={{
         position: 'fixed',
-        top: `${position.top}px`,
-        left: `${position.left}px`,
+        top: '0',
+        left: '0',
+        right: '0',
+        bottom: '0',
         zIndex: 1000,
-        backgroundColor: '#ffffff',
-        border: '1px solid #e5e7eb',
-        borderRadius: '8px',
-        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-        padding: '16px',
-        maxWidth: '400px',
-        maxHeight: '80vh',
-        overflowY: 'auto',
-        fontSize: '13px',
-        lineHeight: '1.5',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
         pointerEvents: 'auto'
       }}
-      className="dark:bg-gray-800 dark:border-gray-700"
+      onClick={(e) => {
+        // Close on background click
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
     >
+      <div
+        ref={popoverRef}
+        style={{
+          position: 'relative',
+          backgroundColor: '#ffffff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '8px',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+          padding: '16px',
+          maxWidth: '500px',
+          width: '90%',
+          maxHeight: maxHeight,
+          overflowY: 'auto',
+          fontSize: '13px',
+          lineHeight: '1.5',
+          margin: '96px auto'
+        }}
+        className="dark:bg-gray-800 dark:border-gray-700"
+        onClick={(e) => e.stopPropagation()}
+      >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
         <h3 style={{ 
@@ -58,6 +93,22 @@ const MetricDefinitionPopover = ({
         }} className="dark:text-white">
           {name}
         </h3>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'none',
+            border: 'none',
+            fontSize: '20px',
+            cursor: 'pointer',
+            color: '#6b7280',
+            padding: '0',
+            lineHeight: '1',
+            marginLeft: '12px'
+          }}
+          className="dark:text-gray-400 hover:dark:text-gray-200"
+        >
+          ×
+        </button>
       </div>
 
       {/* Definition */}
@@ -217,6 +268,7 @@ const MetricDefinitionPopover = ({
           Source: {source}
         </div>
       )}
+      </div>
     </div>
   );
 };

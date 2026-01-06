@@ -15,10 +15,24 @@ const TOP_ROW_METRICS = [
   'IWM',
 ];
 
-// Bottom row: Volume metrics
-const VOLUME_METRICS = [
-  { label: 'Total Market Volume', subLabel: '12/30 vs.', metrics: ['Prior Day', '1M Ave', '3M ave', '1Y Ave'] },
-  { label: 'Total Exchange Volume', subLabel: '12/30 vs.', metrics: ['Prior Day', '1M Ave', '3M ave', '1Y Ave'] },
+// Volume metrics data - hardcoded for now
+const VOLUME_DATA = [
+  {
+    series: 'Total Market Volume',
+    priorDay: '-6%',
+    '1m': '-17%',
+    '3m': '-28%',
+    '1y': '-22%',
+    isPositive: false
+  },
+  {
+    series: 'Total Exchange Volume',
+    priorDay: '-3%',
+    '1m': '-19%',
+    '3m': '-31%',
+    '1y': '-26%',
+    isPositive: false
+  }
 ];
 
 // Yield curve data - hardcoded for now
@@ -106,6 +120,26 @@ const VOLATILITY_DATA = [
     dod: { value: '-140 bps', percent: '-4.4%', isPositive: false },
     yoy: { value: '-227 bps', percent: '-6.9%', isPositive: false },
     mom: { value: '-681 bps', percent: '-18.1%', isPositive: false }
+  },
+  {
+    series: 'MOVE',
+    last: '85.42',
+    '1w': '84.15',
+    '1m': '82.30',
+    '4m': '91.57',
+    dod: { value: '127 bps', percent: '1.5%', isPositive: true },
+    yoy: { value: '-312 bps', percent: '-3.5%', isPositive: false },
+    mom: { value: '312 bps', percent: '3.8%', isPositive: true }
+  },
+  {
+    series: 'FX Volatility',
+    last: '6.33',
+    '1w': '6.35',
+    '1m': '6.35',
+    '4m': '6.33',
+    dod: { value: '-2 bps', percent: '-0.3%', isPositive: false },
+    yoy: { value: '8 bps', percent: '1.2%', isPositive: true },
+    mom: { value: '-6 bps', percent: '-0.3%', isPositive: false }
   }
 ];
 
@@ -195,86 +229,50 @@ const MetricBox = ({ label, value, loading }) => {
   );
 };
 
-// Volume metric row component showing label and percentage changes (compact version)
-const VolumeMetricRow = ({ label, subLabel, values = [] }) => {
-  // Hardcoded data - can be replaced with API data later
-  const mockData = label === 'Total Market Volume'
-    ? ['-6%', '-17%', '-28%', '-22%']
-    : ['-3%', '-19%', '-31%', '-26%'];
-
-  const headers = ['Prior Day', '1M Ave', '3M ave', '1Y Ave'];
-
+// Volume Table Component
+const VolumeTable = () => {
   return (
     <div style={{
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: '6px',
-      fontSize: '10px',
-    }}>
-      {/* Label */}
+      fontSize: '9px',
+      border: '1px solid #E5E7EB',
+      borderRadius: '4px',
+      overflow: 'hidden',
+    }}
+    className="dark:border-gray-600">
+      {/* Title Ribbon */}
       <div style={{
+        backgroundColor: '#059669',
+        color: '#FFFFFF',
+        padding: '4px 8px',
+        fontSize: '10px',
         fontWeight: 600,
-        color: '#000000',
-        minWidth: '110px',
-        paddingTop: '12px', // Align with values row
-      }}
-      className="dark:text-gray-200">
-        {label}
-      </div>
-
-      {/* Metric values with headers - compact vertical layout */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2px',
+        textAlign: 'center',
+        letterSpacing: '0.5px',
       }}>
-        {/* Date header (12/30 vs.) */}
-        <div style={{
-          fontSize: '9px',
-          fontWeight: 500,
-          color: '#6B7280',
-          marginBottom: '1px',
-        }}
-        className="dark:text-gray-400">
-          {subLabel}
-        </div>
-
-        {/* Column headers row */}
-        <div style={{
-          display: 'flex',
-          gap: '8px',
-        }}>
-          {headers.map((header, index) => (
-            <div key={index} style={{
-              fontSize: '8px',
-              fontWeight: 500,
-              color: '#6B7280',
-              minWidth: '45px',
-              textAlign: 'center',
-            }}
-            className="dark:text-gray-400">
-              {header}
-            </div>
-          ))}
-        </div>
-
-        {/* Values row */}
-        <div style={{
-          display: 'flex',
-          gap: '8px',
-        }}>
-          {mockData.map((value, index) => (
-            <div key={index} style={{
-              fontWeight: 600,
-              color: value.startsWith('-') ? '#ef4444' : '#22c55e',
-              minWidth: '45px',
-              textAlign: 'center',
-            }}>
-              {value}
-            </div>
-          ))}
-        </div>
+        VOLUME
       </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <thead>
+          <tr style={{ backgroundColor: '#F9FAFB' }} className="dark:bg-gray-800">
+            <th style={{ padding: '4px 6px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '35%' }} className="dark:text-gray-200 dark:border-gray-600">Series</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '16%' }} className="dark:text-gray-200 dark:border-gray-600">Prior Day</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '16%' }} className="dark:text-gray-200 dark:border-gray-600">1M Ave</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '16%' }} className="dark:text-gray-200 dark:border-gray-600">3M ave</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '16%' }} className="dark:text-gray-200 dark:border-gray-600">1Y Ave</th>
+          </tr>
+        </thead>
+        <tbody>
+          {VOLUME_DATA.map((row, index) => (
+            <tr key={index} style={{ borderBottom: index < VOLUME_DATA.length - 1 ? '1px solid #E5E7EB' : 'none' }} className="dark:border-gray-700">
+              <td style={{ padding: '4px 6px', fontWeight: 600 }} className="dark:text-gray-200">{row.series}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, color: row.isPositive ? '#059669' : '#DC2626' }} className={row.isPositive ? 'dark:text-green-400' : 'dark:text-red-400'}>{row.priorDay}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, color: row.isPositive ? '#059669' : '#DC2626' }} className={row.isPositive ? 'dark:text-green-400' : 'dark:text-red-400'}>{row['1m']}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, color: row.isPositive ? '#059669' : '#DC2626' }} className={row.isPositive ? 'dark:text-green-400' : 'dark:text-red-400'}>{row['3m']}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, color: row.isPositive ? '#059669' : '#DC2626' }} className={row.isPositive ? 'dark:text-green-400' : 'dark:text-red-400'}>{row['1y']}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 };
@@ -301,29 +299,29 @@ const YieldCurveTable = () => {
       }}>
         YIELDS
       </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <thead>
           <tr style={{ backgroundColor: '#F9FAFB' }} className="dark:bg-gray-800">
-            <th style={{ padding: '4px 6px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">Series</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">Last Px</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">1w Ago</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">1M Ago</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">4M Ago</th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB' }} className="dark:bg-green-900/20 dark:border-gray-600">
+            <th style={{ padding: '4px 6px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '15%' }} className="dark:text-gray-200 dark:border-gray-600">Series</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">Last Px</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1w Ago</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1M Ago</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">4M Ago</th>
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
               <div>DoD</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
                 <span>%Δ</span>
               </div>
             </th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#DBEAFE', borderBottom: '1px solid #E5E7EB' }} className="dark:bg-blue-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#DBEAFE', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-blue-900/20 dark:border-gray-600">
               <div>YoY</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
                 <span>%Δ</span>
               </div>
             </th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#FEF3C7', borderBottom: '1px solid #E5E7EB' }} className="dark:bg-yellow-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#FED7AA', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-orange-900/20 dark:border-gray-600">
               <div>MoM</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
@@ -340,12 +338,12 @@ const YieldCurveTable = () => {
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1w']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1m']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['4m']}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-green-900/20">{row.dod.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-blue-900/20">{row.yoy.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-blue-900/20">{row.yoy.percent}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FEF3C7', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-yellow-900/20">{row.mom.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FEF3C7', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-yellow-900/20">{row.mom.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FED7AA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-orange-900/20">{row.mom.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FED7AA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-orange-900/20">{row.mom.percent}</td>
             </tr>
           ))}
         </tbody>
@@ -377,29 +375,29 @@ const VolatilityTable = () => {
       }}>
         VOLATILITY
       </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <thead>
           <tr style={{ backgroundColor: '#F9FAFB' }} className="dark:bg-gray-800">
-            <th style={{ padding: '4px 6px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">Series</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">Last Px</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">1w Ago</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">1M Ago</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB' }} className="dark:text-gray-200 dark:border-gray-600">4M Ago</th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#FEE2E2', borderBottom: '1px solid #E5E7EB' }} className="dark:bg-red-900/20 dark:border-gray-600">
+            <th style={{ padding: '4px 6px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '15%' }} className="dark:text-gray-200 dark:border-gray-600">Series</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">Last Px</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1w Ago</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1M Ago</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">4M Ago</th>
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
               <div>DoD</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
                 <span>%Δ</span>
               </div>
             </th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#E0E7FF', borderBottom: '1px solid #E5E7EB' }} className="dark:bg-indigo-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#DBEAFE', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-blue-900/20 dark:border-gray-600">
               <div>YoY</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
                 <span>%Δ</span>
               </div>
             </th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB' }} className="dark:bg-green-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#FED7AA', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-orange-900/20 dark:border-gray-600">
               <div>MoM</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
@@ -416,12 +414,12 @@ const VolatilityTable = () => {
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1w']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1m']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['4m']}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FEE2E2', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-red-900/20">{row.dod.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FEE2E2', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-red-900/20">{row.dod.percent}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#E0E7FF', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-indigo-900/20">{row.yoy.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#E0E7FF', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-indigo-900/20">{row.yoy.percent}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-green-900/20">{row.mom.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626' }} className="dark:bg-green-900/20">{row.mom.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FED7AA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-orange-900/20">{row.mom.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FED7AA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-orange-900/20">{row.mom.percent}</td>
             </tr>
           ))}
         </tbody>
@@ -508,33 +506,8 @@ const StaticMetricBar = () => {
         width: '100%',
       }}>
         {/* Left: Volume Metrics */}
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-        }}>
-          {/* Volume Title Ribbon */}
-          <div style={{
-            backgroundColor: '#059669',
-            color: '#FFFFFF',
-            padding: '4px 8px',
-            fontSize: '10px',
-            fontWeight: 600,
-            textAlign: 'center',
-            letterSpacing: '0.5px',
-            borderRadius: '4px 4px 0 0',
-            marginBottom: '4px',
-          }}>
-            VOLUME
-          </div>
-          {VOLUME_METRICS.map((metric, index) => (
-            <VolumeMetricRow
-              key={`volume-${index}`}
-              label={metric.label}
-              subLabel={metric.subLabel}
-              values={metric.metrics}
-            />
-          ))}
+        <div>
+          <VolumeTable />
         </div>
 
         {/* Right: Yield Curve and Volatility Tables */}

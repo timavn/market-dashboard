@@ -953,6 +953,297 @@ app.get('/api/portfolio', async (req, res) => {
   }
 });
 
+// Performance Tracking API Endpoints
+
+// Get performance history
+app.get('/api/performance/history', async (req, res) => {
+  try {
+    const { startDate, endDate, limit } = req.query;
+    const table = 'PerformanceHistory';
+    
+    const params = {
+      TableName: table
+    };
+    
+    const result = await dynamodb.scan(params).promise();
+    let items = result.Items || [];
+    
+    // Sort by date ascending
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    
+    // Filter by date range if provided
+    if (startDate) {
+      items = items.filter(item => item.date >= startDate);
+    }
+    if (endDate) {
+      items = items.filter(item => item.date <= endDate);
+    }
+    
+    // Apply limit if provided
+    if (limit) {
+      items = items.slice(-parseInt(limit));
+    }
+    
+    // Transform to response format
+    const response = {
+      dates: items.map(item => item.date),
+      values: items.map(item => parseFloat(item.totalValue) || 0),
+      returns: items.map(item => parseFloat(item.dailyReturn) || 0),
+      cumulativeReturns: items.map(item => parseFloat(item.cumulativeReturn) || 0),
+      data: items.map(item => ({
+        date: item.date,
+        totalValue: parseFloat(item.totalValue) || 0,
+        dailyReturn: parseFloat(item.dailyReturn) || 0,
+        cumulativeReturn: parseFloat(item.cumulativeReturn) || 0,
+        positionCount: item.positionCount || 0,
+        snapshotId: item.snapshotId
+      }))
+    };
+    
+    res.json(response);
+  } catch (error) {
+    console.error('Error fetching performance history:', error);
+    res.status(500).json({ error: 'Failed to fetch performance history' });
+  }
+});
+
+// Get performance metrics
+app.get('/api/performance/metrics', async (req, res) => {
+  try {
+    const { period = 'all' } = req.query;
+    const table = 'PerformanceMetrics';
+    
+    // Get latest metrics for the specified period
+    const params = {
+      TableName: table,
+      KeyConditionExpression: 'metricType = :metricType',
+      ExpressionAttributeValues: {
+        ':metricType': period
+      },
+      ScanIndexForward: false, // Descending order
+      Limit: 1
+    };
+    
+    const result = await dynamodb.query(params).promise();
+    
+    if (result.Items && result.Items.length > 0) {
+      const metrics = result.Items[0];
+      res.json({
+        sharpeRatio: parseFloat(metrics.sharpeRatio) || 0,
+        maxDrawdown: parseFloat(metrics.maxDrawdown) || 0,
+        volatility: parseFloat(metrics.volatility) || 0,
+        winRate: parseFloat(metrics.winRate) || 0,
+        avgDailyReturn: parseFloat(metrics.avgDailyReturn) || 0,
+        bestDay: parseFloat(metrics.bestDay) || 0,
+        worstDay: parseFloat(metrics.worstDay) || 0,
+        rollingReturns: metrics.rollingReturns || {},
+        vsBenchmark: metrics.vsBenchmark || {},
+        calculationDate: metrics.calculationDate
+      });
+    } else {
+      // Return empty metrics if not calculated yet
+      res.json({
+        sharpeRatio: 0,
+        maxDrawdown: 0,
+        volatility: 0,
+        winRate: 0,
+        avgDailyReturn: 0,
+        bestDay: 0,
+        worstDay: 0,
+        rollingReturns: {},
+        vsBenchmark: {},
+        calculationDate: null
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching performance metrics:', error);
+    res.status(500).json({ error: 'Failed to fetch performance metrics' });
+  }
+});
+
+// Get position performance
+app.get('/api/performance/positions', async (req, res) => {
+  try {
+    const { symbol, startDate, endDate } = req.query;
+    const table = 'PositionPerformance';
+    
+    if (!symbol) {
+      return res.status(400).json({ error: 'Symbol parameter is required' });
+    }
+    
+    const params = {
+      TableName: table,
+      KeyConditionExpression: 'symbol = :symbol',
+      ExpressionAttributeValues: {
+        ':symbol': symbol
+      }
+    };
+    
+    const result = await dynamodb.query(params).promise();
+    let items = result.Items || [];
+    
+    // Sort by date ascending
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    
+    // Filter by date range if provided
+    if (startDate) {
+      items = items.filter(item => item.date >= startDate);
+    }
+    if (endDate) {
+      items = items.filter(item => item.date <= endDate);
+    }
+    
+    res.json({
+      symbol: symbol,
+      history: items.map(item => ({
+        date: item.date,
+        quantity: parseFloat(item.quantity) || 0,
+        price: parseFloat(item.price) || 0,
+        marketValue: parseFloat(item.marketValue) || 0,
+        costBasis: parseFloat(item.costBasis) || 0,
+        gainLoss: parseFloat(item.gainLoss) || 0,
+        gainLossPercent: parseFloat(item.gainLossPercent) || 0,
+        dailyReturn: parseFloat(item.dailyReturn) || 0,
+        cumulativeReturn: parseFloat(item.cumulativeReturn) || 0
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching position performance:', error);
+    res.status(500).json({ error: 'Failed to fetch position performance' });
+  }
+});
+
+// Get benchmark comparison
+app.get('/api/performance/benchmark-comparison', async (req, res) => {
+  try {
+    const { startDate, endDate, benchmarks = 'SPY,QQQ' } = req.query;
+    const benchmarkList = benchmarks.split(',').map(b => b.trim());
+    
+    // Get portfolio performance history
+    const perfParams = {
+      TableName: 'PerformanceHistory'
+    };
+    const perfResult = await dynamodb.scan(perfParams).promise();
+    let perfItems = (perfResult.Items || []).sort((a, b) => a.date.localeCompare(b.date));
+    
+    // Filter by date range
+    if (startDate) {
+      perfItems = perfItems.filter(item => item.date >= startDate);
+    }
+    if (endDate) {
+      perfItems = perfItems.filter(item => item.date <= endDate);
+    }
+    
+    // Get benchmark data from MarketData table
+    const benchmarkData = {};
+    for (const benchmark of benchmarkList) {
+      benchmarkData[benchmark] = [];
+      
+      // Get market data for each date
+      for (const perfItem of perfItems) {
+        try {
+          const marketParams = {
+            TableName: 'MarketData',
+            Key: { date: perfItem.date }
+          };
+          const marketResult = await dynamodb.get(marketParams).promise();
+          
+          if (marketResult.Item && marketResult.Item.marketData && marketResult.Item.marketData[benchmark]) {
+            const price = marketResult.Item.marketData[benchmark].price || 0;
+            benchmarkData[benchmark].push({
+              date: perfItem.date,
+              price: price,
+              changePercent: marketResult.Item.marketData[benchmark].changePercent || 0
+            });
+          }
+        } catch (err) {
+          // Skip if data not available
+        }
+      }
+    }
+    
+    // Calculate cumulative returns for benchmarks
+    const benchmarkReturns = {};
+    for (const benchmark of benchmarkList) {
+      if (benchmarkData[benchmark].length > 0) {
+        const firstPrice = benchmarkData[benchmark][0].price;
+        benchmarkReturns[benchmark] = benchmarkData[benchmark].map(item => {
+          if (firstPrice > 0) {
+            return ((item.price - firstPrice) / firstPrice) * 100;
+          }
+          return 0;
+        });
+      } else {
+        benchmarkReturns[benchmark] = [];
+      }
+    }
+    
+    res.json({
+      portfolio: perfItems.map(item => ({
+        date: item.date,
+        value: parseFloat(item.totalValue) || 0,
+        return: parseFloat(item.cumulativeReturn) || 0
+      })),
+      benchmarks: Object.keys(benchmarkReturns).reduce((acc, key) => {
+        acc[key] = benchmarkData[key].map((item, idx) => ({
+          date: item.date,
+          price: item.price,
+          return: benchmarkReturns[key][idx] || 0
+        }));
+        return acc;
+      }, {})
+    });
+  } catch (error) {
+    console.error('Error fetching benchmark comparison:', error);
+    res.status(500).json({ error: 'Failed to fetch benchmark comparison' });
+  }
+});
+
+// Get equity curve with drawdowns
+app.get('/api/performance/equity-curve', async (req, res) => {
+  try {
+    const params = {
+      TableName: 'PerformanceHistory'
+    };
+    
+    const result = await dynamodb.scan(params).promise();
+    let items = (result.Items || []).sort((a, b) => a.date.localeCompare(b.date));
+    
+    if (items.length === 0) {
+      return res.json({
+        dates: [],
+        values: [],
+        drawdowns: []
+      });
+    }
+    
+    // Calculate drawdowns
+    const values = items.map(item => parseFloat(item.totalValue) || 0);
+    const dates = items.map(item => item.date);
+    const drawdowns = [];
+    let peak = values[0];
+    
+    for (let i = 0; i < values.length; i++) {
+      if (values[i] > peak) {
+        peak = values[i];
+      }
+      const drawdown = peak > 0 ? ((values[i] - peak) / peak) * 100 : 0;
+      drawdowns.push(drawdown);
+    }
+    
+    res.json({
+      dates: dates,
+      values: values,
+      drawdowns: drawdowns,
+      returns: items.map(item => parseFloat(item.dailyReturn) || 0),
+      cumulativeReturns: items.map(item => parseFloat(item.cumulativeReturn) || 0)
+    });
+  } catch (error) {
+    console.error('Error fetching equity curve:', error);
+    res.status(500).json({ error: 'Failed to fetch equity curve' });
+  }
+});
+
 app.get('/api/options', (req, res) => {
   res.json(generateOptionsData());
 });

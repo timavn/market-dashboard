@@ -83,3 +83,5 @@ export const getFormattedQuadRanking = (ticker) => {
   return formatQuadRanking(ranking);
 };
 
+
+

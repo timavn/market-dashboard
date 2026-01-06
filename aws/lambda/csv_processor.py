@@ -1,11 +1,12 @@
 import json
 import boto3
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import os
 from io import StringIO
 from urllib.parse import unquote_plus
+import re
 
 def convert_floats_to_decimals(obj):
     """Recursively convert float values to Decimal for DynamoDB compatibility"""
@@ -26,6 +27,8 @@ dynamodb = boto3.resource('dynamodb')
 PORTFOLIO_TABLE = os.environ.get('PORTFOLIO_TABLE', 'PortfolioSnapshots')
 HOLDINGS_TABLE = os.environ.get('HOLDINGS_TABLE', 'Holdings')
 LOGS_TABLE = os.environ.get('LOGS_TABLE', 'ProcessingLogs')
+PERFORMANCE_TABLE = os.environ.get('PERFORMANCE_TABLE', 'PerformanceHistory')
+POSITION_PERFORMANCE_TABLE = os.environ.get('POSITION_PERFORMANCE_TABLE', 'PositionPerformance')
 
 def lambda_handler(event, context):
     """
@@ -51,12 +54,28 @@ def lambda_handler(event, context):
         except UnicodeDecodeError:
             csv_content = body_bytes.decode('cp1252')
 
+        # Extract date from filename
+        trading_date = extract_date_from_filename(key)
+        if not trading_date:
+            # Fallback: use upload timestamp (assume previous day if after market close)
+            upload_time = datetime.utcnow()
+            # If after 4:30 PM ET (8:30 PM UTC), use today, else use yesterday
+            if upload_time.hour >= 20:
+                trading_date = upload_time.strftime('%Y-%m-%d')
+            else:
+                trading_date = (upload_time - timedelta(days=1)).strftime('%Y-%m-%d')
+            print(f"Could not extract date from filename, using: {trading_date}")
+
         # Parse Schwab CSV
         portfolio_data = parse_schwab_csv(csv_content)
 
         # Store in DynamoDB
         snapshot_id = store_portfolio_snapshot(portfolio_data)
         store_holdings(snapshot_id, portfolio_data['holdings'])
+
+        # Store performance data
+        store_performance_data(trading_date, portfolio_data, snapshot_id)
+        store_position_performance_data(trading_date, portfolio_data['holdings'])
 
         # Log successful processing
         log_processing(bucket, key, 'SUCCESS', snapshot_id)
@@ -104,6 +123,7 @@ def parse_schwab_csv(csv_content):
     holdings = []
     total_value = Decimal('0')
     asset_allocation = {}
+    account_total_from_csv = None  # Will store Account Total if found in CSV
 
     for row in reader:
         symbol = row.get('Symbol', '').strip()
@@ -113,15 +133,29 @@ def parse_schwab_csv(csv_content):
         if len(holdings) < 3:
             print(f"Processing row: Symbol='{symbol}', Description='{description[:50]}...'")
 
-        # Skip account totals, cash, and invalid rows
+        # Check for Account Total row first (use this as the authoritative total)
+        if symbol.startswith('Account Total'):
+            account_total_from_csv = parse_number(row.get('Mkt Val (Market Value)', '0'))
+            if account_total_from_csv > 0:
+                print(f"Found Account Total in CSV: ${account_total_from_csv}")
+            continue
+        
+        # Skip other summary rows
         if (not symbol or 
-            symbol.startswith('Account Total') or 
             symbol == 'Totals' or
-            symbol == 'Cash & Cash Investments' or
             symbol == 'Account T' or
             symbol.startswith('---') or
             description == '--'):  # Skip rows where description is just '--'
             print(f"Skipping row: Symbol='{symbol}', Description='{description}'")
+            continue
+
+        # Handle "Cash & Cash Investments" row (this is additional cash, not a security)
+        if symbol == 'Cash & Cash Investments':
+            cash_value = parse_number(row.get('Mkt Val (Market Value)', '0'))
+            if cash_value > 0:
+                print(f"Found additional cash: ${cash_value}")
+                # Add to total but don't create a holding
+                total_value += cash_value
             continue
 
         # Parse numerical values using exact Schwab column names
@@ -132,7 +166,7 @@ def parse_schwab_csv(csv_content):
         # Schwab doesn't provide cost basis, so we'll calculate it
         # Cost basis = Market Value - Gain/Loss
         gain_loss = parse_number(row.get('Gain $ (Gain/Loss $)', '0'))
-        cost_basis = market_value - gain_loss if market_value > 0 else Decimal('0')
+        cost_basis = abs(market_value) - gain_loss if market_value != 0 else Decimal('0')
         
         gain_loss_pct = parse_number(row.get('Gain % (Gain/Loss %)', '0'))
 
@@ -140,8 +174,9 @@ def parse_schwab_csv(csv_content):
         asset_type = row.get('Security Type', 'Unknown')
         asset_class = map_asset_type(asset_type)
 
-        # Only include holdings with actual market value
-        if market_value > 0:
+        # Include holdings with actual market value (both longs and shorts)
+        # IMPORTANT: Use actual market_value (not abs) so shorts subtract correctly
+        if market_value != 0:
             holding = {
                 'symbol': symbol,
                 'description': row.get('Description', '').strip(),
@@ -156,13 +191,14 @@ def parse_schwab_csv(csv_content):
             }
 
             holdings.append(holding)
-            total_value += Decimal(str(market_value))
+            # FIXED: Use actual market_value (not abs) so shorts subtract from total
+            total_value += market_value
 
             # Aggregate asset allocation
             if asset_class in asset_allocation:
-                asset_allocation[asset_class] += market_value
+                asset_allocation[asset_class] += abs(market_value)
             else:
-                asset_allocation[asset_class] = market_value
+                asset_allocation[asset_class] = abs(market_value)
 
     # Calculate percentages for asset allocation
     asset_allocation_pct = {}
@@ -171,15 +207,22 @@ def parse_schwab_csv(csv_content):
             percentage = (Decimal(str(value)) / total_value) * 100
             asset_allocation_pct[asset_class] = percentage
 
+    # Use Account Total from CSV if available (most accurate), otherwise use calculated total
+    final_total_value = account_total_from_csv if account_total_from_csv else total_value
+    if account_total_from_csv:
+        print(f"Using Account Total from CSV: ${final_total_value} (calculated was ${total_value})")
+    else:
+        print(f"Using calculated total: ${final_total_value}")
+
     # Calculate summary metrics
     total_gain_loss = sum(h['gainLoss'] for h in holdings)
-    total_cost_basis = sum(h['costBasis'] for h in holdings)
+    total_cost_basis = sum(abs(h['costBasis']) for h in holdings)
     total_gain_loss_pct = (total_gain_loss / total_cost_basis * 100) if total_cost_basis > 0 else Decimal('0')
 
     return {
         'holdings': holdings,
         'summary': {
-            'totalValue': total_value,
+            'totalValue': final_total_value,
             'totalGainLoss': total_gain_loss,
             'totalGainLossPercent': total_gain_loss_pct,
             'positionCount': len(holdings),
@@ -197,13 +240,9 @@ def parse_number(value):
     # Remove $, commas, and % signs
     cleaned = str(value).replace('$', '').replace(',', '').replace('%', '').strip()
 
-    # Handle parentheses for negative numbers
+    # Handle parentheses for negative numbers (accounting notation)
     if cleaned.startswith('(') and cleaned.endswith(')'):
         cleaned = '-' + cleaned[1:-1]
-
-    # Handle negative signs at the beginning
-    if cleaned.startswith('-'):
-        cleaned = '-' + cleaned[1:]
 
     try:
         return Decimal(cleaned)
@@ -307,6 +346,206 @@ def delete_all_holdings(table):
         # Don't fail the whole function if deletion fails
 
 
+def extract_date_from_filename(filename):
+    """
+    Extract date from filename
+    Supports formats:
+    - portfolio_2025-01-15.csv
+    - 2025-01-15.csv
+    - statement_2025-01-15.csv
+    """
+    date_pattern = r'(\d{4}-\d{2}-\d{2})'
+    match = re.search(date_pattern, filename)
+    if match:
+        date_str = match.group(1)
+        # Validate date format
+        try:
+            datetime.strptime(date_str, '%Y-%m-%d')
+            return date_str
+        except ValueError:
+            print(f"Invalid date format extracted: {date_str}")
+            return None
+    return None
+
+
+def get_previous_day_value(trading_date):
+    """Get previous trading day's portfolio value"""
+    try:
+        table = dynamodb.Table(PERFORMANCE_TABLE)
+        
+        # Convert date string to datetime for calculation
+        date_obj = datetime.strptime(trading_date, '%Y-%m-%d')
+        
+        # Try previous days (skip weekends)
+        for days_back in range(1, 8):
+            prev_date = (date_obj - timedelta(days=days_back)).strftime('%Y-%m-%d')
+            response = table.get_item(Key={'date': prev_date})
+            
+            if 'Item' in response:
+                return response['Item'].get('totalValue', Decimal('0'))
+        
+        return None
+    except Exception as e:
+        print(f"Error getting previous day value: {str(e)}")
+        return None
+
+
+def calculate_daily_return(current_value, previous_value):
+    """Calculate daily return percentage"""
+    if not previous_value or previous_value == 0:
+        return Decimal('0')
+    
+    return ((current_value - previous_value) / previous_value) * 100
+
+
+def get_cumulative_return(trading_date, current_value):
+    """Calculate cumulative return since inception (first record)"""
+    try:
+        table = dynamodb.Table(PERFORMANCE_TABLE)
+        
+        # Scan to find earliest date (excluding current date if it exists)
+        response = table.scan()
+        items = response.get('Items', [])
+        
+        # Filter out current date to avoid comparing to itself
+        items = [item for item in items if item['date'] != trading_date]
+        
+        if not items:
+            # First record - no cumulative return yet
+            return Decimal('0')
+        
+        # Find earliest date
+        earliest_item = min(items, key=lambda x: x['date'])
+        initial_value = earliest_item.get('totalValue', current_value)
+        
+        if initial_value == 0 or initial_value is None:
+            return Decimal('0')
+        
+        return ((current_value - initial_value) / initial_value) * 100
+    except Exception as e:
+        print(f"Error calculating cumulative return: {str(e)}")
+        return Decimal('0')
+
+
+def store_performance_data(trading_date, portfolio_data, snapshot_id):
+    """Store performance snapshot in PerformanceHistory table"""
+    try:
+        table = dynamodb.Table(PERFORMANCE_TABLE)
+        
+        current_value = portfolio_data['summary']['totalValue']
+        previous_value = get_previous_day_value(trading_date)
+        daily_return = calculate_daily_return(current_value, previous_value) if previous_value else Decimal('0')
+        cumulative_return = get_cumulative_return(trading_date, current_value)
+        
+        item = {
+            'date': trading_date,
+            'totalValue': convert_floats_to_decimals(current_value),
+            'dailyReturn': convert_floats_to_decimals(daily_return),
+            'cumulativeReturn': convert_floats_to_decimals(cumulative_return),
+            'snapshotId': snapshot_id,
+            'positionCount': portfolio_data['summary']['positionCount'],
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        # Replace if exists (duplicate date handling)
+        table.put_item(Item=item)
+        print(f"Stored performance data for {trading_date}: daily return = {daily_return}%, cumulative = {cumulative_return}%")
+        
+    except Exception as e:
+        print(f"Error storing performance data: {str(e)}")
+        # Don't fail the whole function if performance storage fails
+        pass
+
+
+def get_previous_position_data(symbol, trading_date):
+    """Get previous day's position data for a symbol"""
+    try:
+        table = dynamodb.Table(POSITION_PERFORMANCE_TABLE)
+        
+        # Query by symbol, get most recent date before trading_date
+        response = table.query(
+            KeyConditionExpression='symbol = :symbol',
+            ExpressionAttributeValues={':symbol': symbol},
+            ScanIndexForward=False  # Descending order
+        )
+        
+        items = response.get('Items', [])
+        # Filter to only dates before trading_date and sort
+        previous_items = [item for item in items if item['date'] < trading_date]
+        if previous_items:
+            # Return most recent
+            return max(previous_items, key=lambda x: x['date'])
+        
+        return None
+    except Exception as e:
+        print(f"Error getting previous position data for {symbol}: {str(e)}")
+        return None
+
+
+def store_position_performance_data(trading_date, holdings):
+    """Store position-level performance data"""
+    try:
+        table = dynamodb.Table(POSITION_PERFORMANCE_TABLE)
+        
+        with table.batch_writer() as batch:
+            for holding in holdings:
+                symbol = holding['symbol']
+                current_value = holding['marketValue']
+                current_price = holding['price']
+                
+                # Get previous day's data
+                prev_data = get_previous_position_data(symbol, trading_date)
+                
+                # Calculate daily return
+                if prev_data and prev_data.get('price', 0) > 0:
+                    prev_price = prev_data['price']
+                    daily_return = ((current_price - prev_price) / prev_price) * 100
+                else:
+                    daily_return = Decimal('0')
+                
+                # Calculate cumulative return (since first held)
+                # Try to find the first occurrence of this position
+                if prev_data:
+                    # Use previous cumulative return as base, or calculate from cost basis
+                    prev_cumulative = prev_data.get('cumulativeReturn', Decimal('0'))
+                    # If we have previous data, we can calculate based on price change
+                    if prev_data.get('price', 0) > 0:
+                        # Calculate from first cost basis
+                        first_cost_basis = prev_data.get('costBasis', holding['costBasis'])
+                        if first_cost_basis and first_cost_basis > 0:
+                            cumulative_return = ((current_value - first_cost_basis) / first_cost_basis) * 100
+                        else:
+                            cumulative_return = holding.get('gainLossPercent', Decimal('0'))
+                    else:
+                        cumulative_return = holding.get('gainLossPercent', Decimal('0'))
+                else:
+                    # First time seeing this position - use gain/loss percent
+                    cumulative_return = holding.get('gainLossPercent', Decimal('0'))
+                
+                item = {
+                    'symbol': symbol,
+                    'date': trading_date,
+                    'quantity': convert_floats_to_decimals(holding['quantity']),
+                    'price': convert_floats_to_decimals(holding['price']),
+                    'marketValue': convert_floats_to_decimals(holding['marketValue']),
+                    'costBasis': convert_floats_to_decimals(holding['costBasis']),
+                    'gainLoss': convert_floats_to_decimals(holding['gainLoss']),
+                    'gainLossPercent': convert_floats_to_decimals(holding['gainLossPercent']),
+                    'dailyReturn': convert_floats_to_decimals(daily_return),
+                    'cumulativeReturn': convert_floats_to_decimals(cumulative_return),
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                
+                batch.put_item(Item=item)
+        
+        print(f"Stored position performance data for {len(holdings)} positions")
+        
+    except Exception as e:
+        print(f"Error storing position performance data: {str(e)}")
+        # Don't fail the whole function if position performance storage fails
+        pass
+
+
 def log_processing(bucket, key, status, snapshot_id=None, error=None):
     """Log processing attempt in DynamoDB"""
     try:
@@ -331,5 +570,3 @@ def log_processing(bucket, key, status, snapshot_id=None, error=None):
     except Exception as e:
         # Don't fail the whole function if logging fails
         print(f"Warning: Could not log to ProcessingLogs: {str(e)}")
-
-

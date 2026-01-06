@@ -8,6 +8,7 @@ import {
   formatDate
 } from '../../utils/portfolioBreakdownUtils';
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
+import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
 
 // Asset class colors - 5 core asset classes
 const ASSET_CLASS_COLORS = {
@@ -100,6 +101,7 @@ const calculateAssetClassAllocationFromUniverse = (holdings) => {
 };
 
 const PortfolioBreakdown = ({ portfolioData }) => {
+  const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
   const holdings = portfolioData?.holdings || [];
   const totalValue = portfolioData?.summary?.totalValue || 0;
   const factorExposures = portfolioData?.factorExposures || {};
@@ -338,8 +340,60 @@ const PortfolioBreakdown = ({ portfolioData }) => {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '10px' }}>
           {/* Left Column - Top 5 Factor Exposures */}
-          <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-blue-50 dark:bg-blue-900/10 rounded border border-blue-200 dark:border-blue-700">
-            <div className="font-medium text-blue-700 dark:text-blue-400" style={{ marginBottom: '2px' }}>Top 5 Factors:</div>
+          <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-blue-50 dark:bg-blue-900/10 rounded border border-blue-200 dark:border-blue-700 relative">
+            <div className="flex items-center gap-1" style={{ marginBottom: '2px' }}>
+              <div className="font-medium text-blue-700 dark:text-blue-400">Top 5 Factors:</div>
+              <button
+                onClick={() => setShowFactorExposureInfo(!showFactorExposureInfo)}
+                className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-300"
+                title="Factor Exposure Information"
+                style={{ 
+                  width: '12px', 
+                  height: '12px', 
+                  borderRadius: '50%', 
+                  border: '1px solid currentColor',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '8px',
+                  cursor: 'pointer',
+                  lineHeight: '1'
+                }}
+              >
+                i
+              </button>
+            </div>
+            {showFactorExposureInfo && (
+              <div 
+                className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg"
+                style={{ 
+                  maxWidth: '400px', 
+                  maxHeight: '500px', 
+                  overflowY: 'auto',
+                  left: '0',
+                  top: '100%',
+                  marginTop: '4px'
+                }}
+              >
+                <Text className="text-xs font-semibold mb-2 block dark:text-white">Factor Definitions</Text>
+                <div className="space-y-3">
+                  {Object.entries(FACTOR_DEFINITIONS.factors).map(([factorName, factorData]) => (
+                    <div key={factorName} className="border-b border-gray-200 dark:border-gray-700 pb-2 last:border-b-0">
+                      <Text className="text-xs font-semibold dark:text-white">{factorData.title || factorName}</Text>
+                      <Text className="text-xs text-gray-600 dark:text-gray-400 mt-1 block">
+                        {factorData.description}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setShowFactorExposureInfo(false)}
+                  className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Close
+                </button>
+              </div>
+            )}
             <div>
               {topFactorExposures.length > 0 ? (
                 topFactorExposures.map((item, idx) => (
