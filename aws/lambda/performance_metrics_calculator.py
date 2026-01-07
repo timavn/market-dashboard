@@ -247,3 +247,4 @@ def store_metrics(metric_type, calculation_date, metrics):
         print(f"Error storing metrics: {str(e)}")
         raise e
 
+

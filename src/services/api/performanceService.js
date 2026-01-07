@@ -109,6 +109,35 @@ class PerformanceService {
       throw error;
     }
   }
+
+  /**
+   * Get list of all statement dates (archive)
+   * @returns {Promise<Object>} List of statements with dates
+   */
+  static async getStatements() {
+    try {
+      const response = await apiClient.get(ENDPOINTS.PERFORMANCE_STATEMENTS);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching statements:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get statement data for a specific date
+   * @param {string} date - Date in YYYY-MM-DD format
+   * @returns {Promise<Object>} Statement data for the date
+   */
+  static async getStatementByDate(date) {
+    try {
+      const response = await apiClient.get(`${ENDPOINTS.PERFORMANCE_STATEMENT}/${date}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching statement:', error);
+      throw error;
+    }
+  }
 }
 
 export default PerformanceService;

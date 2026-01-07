@@ -160,18 +160,18 @@ export const SECURITY_CATEGORY_MAPPING = {
   'SOYB': { type: 'assetClasses', category: 'Commodities' },
   'REM': { type: 'equitySectors', category: 'REITs' },
 
-  // Crypto (map to Equities asset class for now, or could be separate)
-  'AVAX': { type: 'assetClasses', category: 'Equities' },
-  'BITCOIN': { type: 'assetClasses', category: 'Equities' },
-  'BLOK': { type: 'assetClasses', category: 'Equities' },
-  'BMNR': { type: 'assetClasses', category: 'Equities' },
-  'BTC': { type: 'assetClasses', category: 'Equities' },
-  'CRCL': { type: 'assetClasses', category: 'Equities' },
-  'ETH': { type: 'assetClasses', category: 'Equities' },
-  'ETHA': { type: 'assetClasses', category: 'Equities' },
-  'IBIT': { type: 'assetClasses', category: 'Equities' },
-  'SOL': { type: 'assetClasses', category: 'Equities' },
-  'XRP': { type: 'assetClasses', category: 'Equities' }
+  // Crypto (Cryptocurrency asset class)
+  'AVAX': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'BITCOIN': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'BLOK': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'BMNR': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'BTC': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'CRCL': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'ETH': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'ETHA': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'IBIT': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'SOL': { type: 'assetClasses', category: 'Cryptocurrency' },
+  'XRP': { type: 'assetClasses', category: 'Cryptocurrency' }
 };
 
 /**

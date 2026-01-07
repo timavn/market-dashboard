@@ -832,10 +832,230 @@ app.get('/api/securities/signal-strength', async (req, res) => {
   }
 });
 
+// Get missing trading days for YTD calculation
+app.get('/api/portfolio/missing-days', async (req, res) => {
+  try {
+    const currentYear = new Date().getFullYear();
+    const yearStart = new Date(currentYear, 0, 1); // January 1st
+    const today = new Date();
+    
+    // Get all snapshots
+    const snapshotParams = {
+      TableName: 'PortfolioSnapshots'
+    };
+    
+    const snapshotResult = await dynamodb.scan(snapshotParams).promise();
+    const allSnapshots = snapshotResult.Items || [];
+    
+    // Get dates from snapshots (convert to YYYY-MM-DD format)
+    const snapshotDates = allSnapshots.map(snapshot => {
+      const timestamp = snapshot.timestamp.endsWith('Z') ? snapshot.timestamp : snapshot.timestamp + 'Z';
+      const date = new Date(timestamp);
+      // Convert to PST/PDT date (not UTC)
+      const pstDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+      return pstDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    });
+    
+    // Generate all trading days from Jan 1 to today
+    const tradingDays = [];
+    const currentDate = new Date(yearStart);
+    
+    while (currentDate <= today) {
+      const dayOfWeek = currentDate.getDay();
+      // Skip weekends (Saturday = 6, Sunday = 0)
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        const dateStr = currentDate.toISOString().split('T')[0];
+        tradingDays.push(dateStr);
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    // Find missing days
+    const missingDays = tradingDays.filter(day => !snapshotDates.includes(day));
+    
+    // Group by month for better readability
+    const missingByMonth = {};
+    missingDays.forEach(day => {
+      const month = day.substring(0, 7); // YYYY-MM
+      if (!missingByMonth[month]) {
+        missingByMonth[month] = [];
+      }
+      missingByMonth[month].push(day);
+    });
+    
+    res.json({
+      year: currentYear,
+      totalTradingDays: tradingDays.length,
+      statementsCount: snapshotDates.length,
+      missingCount: missingDays.length,
+      missingDays: missingDays,
+      missingByMonth: missingByMonth,
+      existingStatements: snapshotDates.sort()
+    });
+    
+  } catch (error) {
+    console.error('[Missing Days] Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to calculate missing days',
+      details: error.message 
+    });
+  }
+});
+
+// Get upload history
+app.get('/api/portfolio/uploads', async (req, res) => {
+  try {
+    const { search } = req.query;
+    
+    console.log('[Upload History] Fetching upload history...');
+    
+    const snapshotParams = {
+      TableName: 'PortfolioSnapshots'
+    };
+    
+    const snapshotResult = await dynamodb.scan(snapshotParams).promise();
+    console.log(`[Upload History] Found ${snapshotResult.Items?.length || 0} items in PortfolioSnapshots`);
+    
+    if (!snapshotResult.Items || snapshotResult.Items.length === 0) {
+      console.log('[Upload History] No items found in PortfolioSnapshots, checking PerformanceHistory...');
+      
+      // Fallback: try PerformanceHistory table
+      try {
+        const perfParams = {
+          TableName: 'PerformanceHistory',
+          ProjectionExpression: 'date, totalValue, snapshotId, timestamp'
+        };
+        const perfResult = await dynamodb.scan(perfParams).promise();
+        
+        if (perfResult.Items && perfResult.Items.length > 0) {
+          console.log(`[Upload History] Found ${perfResult.Items.length} items in PerformanceHistory`);
+          
+          // Get corresponding snapshots
+          const perfItems = perfResult.Items.sort((a, b) => b.date.localeCompare(a.date));
+          const formattedUploads = [];
+          
+          for (const perfItem of perfItems) {
+            if (perfItem.snapshotId) {
+              // Try to get the snapshot
+              const snapshotScan = await dynamodb.scan({
+                TableName: 'PortfolioSnapshots',
+                FilterExpression: 'snapshotId = :snapshotId',
+                ExpressionAttributeValues: {
+                  ':snapshotId': perfItem.snapshotId
+                }
+              }).promise();
+              
+              const snapshot = snapshotScan.Items?.[0];
+              const timestamp = snapshot?.timestamp || perfItem.timestamp || perfItem.date;
+              const date = new Date(timestamp.endsWith('Z') ? timestamp : timestamp + 'Z');
+              
+              formattedUploads.push({
+                snapshotId: perfItem.snapshotId,
+                timestamp: timestamp,
+                date: date.toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                }),
+                time: date.toLocaleTimeString('en-US', {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: true,
+                  timeZone: 'America/Los_Angeles'
+                }),
+                totalValue: parseFloat(perfItem.totalValue || 0),
+                positionCount: perfItem.positionCount || 0
+              });
+            }
+          }
+          
+          return res.json({
+            uploads: formattedUploads,
+            count: formattedUploads.length
+          });
+        }
+      } catch (perfError) {
+        console.error('[Upload History] Error checking PerformanceHistory:', perfError);
+      }
+      
+      return res.json({
+        uploads: [],
+        count: 0
+      });
+    }
+    
+    // Sort by timestamp descending (newest first)
+    let uploads = snapshotResult.Items.sort((a, b) => {
+      const dateA = new Date(a.timestamp.endsWith('Z') ? a.timestamp : a.timestamp + 'Z');
+      const dateB = new Date(b.timestamp.endsWith('Z') ? b.timestamp : b.timestamp + 'Z');
+      return dateB - dateA;
+    });
+    
+    // Filter by search term if provided
+    if (search && search.trim()) {
+      const searchLower = search.toLowerCase().trim();
+      uploads = uploads.filter(item => {
+        const timestamp = item.timestamp.endsWith('Z') ? item.timestamp : item.timestamp + 'Z';
+        const dateStr = new Date(timestamp).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        }).toLowerCase();
+        const snapshotId = (item.snapshotId || '').toLowerCase();
+        return dateStr.includes(searchLower) || snapshotId.includes(searchLower);
+      });
+    }
+    
+    // Format uploads
+    const formattedUploads = uploads.map(item => {
+      const timestamp = item.timestamp.endsWith('Z') ? item.timestamp : item.timestamp + 'Z';
+      const date = new Date(timestamp);
+      
+      // Use PST/PDT timezone for both date and time to avoid date mismatch
+      const pstDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+      
+      return {
+        snapshotId: item.snapshotId,
+        timestamp: timestamp,
+        date: date.toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          timeZone: 'America/Los_Angeles' // Use PST timezone for date
+        }),
+        time: date.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'America/Los_Angeles'
+        }),
+        totalValue: parseFloat(item.summary?.totalValue || 0),
+        positionCount: item.summary?.positionCount || 0
+      };
+    });
+    
+    console.log(`[Upload History] Returning ${formattedUploads.length} formatted uploads`);
+    
+    res.json({
+      uploads: formattedUploads,
+      count: formattedUploads.length
+    });
+    
+  } catch (error) {
+    console.error('[Upload History] Error fetching upload history:', error);
+    console.error('[Upload History] Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch upload history',
+      details: error.message 
+    });
+  }
+});
+
 // Get real portfolio data from DynamoDB
 app.get('/api/portfolio', async (req, res) => {
   try {
-    // Get latest portfolio snapshot - scan all and sort by timestamp
+    const { snapshotId } = req.query; // Allow selecting specific snapshot
+    
     const snapshotParams = {
       TableName: 'PortfolioSnapshots'
     };
@@ -860,36 +1080,120 @@ app.get('/api/portfolio', async (req, res) => {
         },
         assetAllocation: {},
         topHoldings: [],
-        lastUpdated: 'No portfolio data - upload a Schwab CSV to get started'
+        lastUpdated: 'No portfolio data - upload a Schwab CSV to get started',
+        ytdGainLoss: 0,
+        ytdGainLossPercent: 0
       });
     }
     
-    const latestSnapshot = sortedItems[0];
-    const snapshotId = latestSnapshot.snapshotId;
+    // Use selected snapshotId if provided, otherwise use latest
+    let targetSnapshot;
+    if (snapshotId) {
+      targetSnapshot = sortedItems.find(item => item.snapshotId === snapshotId);
+      if (!targetSnapshot) {
+        // If specified snapshot not found, fall back to latest
+        targetSnapshot = sortedItems[0];
+      }
+    } else {
+      targetSnapshot = sortedItems[0];
+    }
+    
+    const targetSnapshotId = targetSnapshot.snapshotId;
     
     // Get holdings for this snapshot
     const holdingsParams = {
       TableName: 'Holdings',
       FilterExpression: 'snapshotId = :snapshotId',
       ExpressionAttributeValues: {
-        ':snapshotId': snapshotId
+        ':snapshotId': targetSnapshotId
       }
     };
     
     const holdingsResult = await dynamodb.scan(holdingsParams).promise();
     const holdings = holdingsResult.Items || [];
     
+    // Calculate YTD P&L by comparing to baseline (last statement of previous year, or first of current year)
+    let ytdGainLoss = 0;
+    let ytdGainLossPercent = 0;
+    
+    try {
+      const currentYear = new Date().getFullYear();
+      const previousYear = currentYear - 1;
+      
+      // Find the latest snapshot from previous year (preferred baseline for YTD)
+      const previousYearSnapshots = sortedItems.filter(item => {
+        const itemDate = new Date(item.timestamp.endsWith('Z') ? item.timestamp : item.timestamp + 'Z');
+        return itemDate.getFullYear() === previousYear;
+      });
+      
+      // Find the earliest snapshot from this year (fallback baseline)
+      const yearSnapshots = sortedItems.filter(item => {
+        const itemDate = new Date(item.timestamp.endsWith('Z') ? item.timestamp : item.timestamp + 'Z');
+        return itemDate.getFullYear() === currentYear;
+      });
+      
+      let baselineSnapshot = null;
+      
+      // Prefer last statement of previous year for true YTD calculation
+      if (previousYearSnapshots.length > 0) {
+        // Sort by date descending to get the last one of previous year
+        const lastOfPreviousYear = previousYearSnapshots.sort((a, b) => {
+          const dateA = new Date(a.timestamp.endsWith('Z') ? a.timestamp : a.timestamp + 'Z');
+          const dateB = new Date(b.timestamp.endsWith('Z') ? b.timestamp : b.timestamp + 'Z');
+          return dateB - dateA;
+        })[0];
+        baselineSnapshot = lastOfPreviousYear;
+        console.log(`[YTD] Using last statement of ${previousYear} as baseline: ${lastOfPreviousYear.snapshotId}`);
+      }
+      // Fallback: use first statement of current year if no previous year data
+      else if (yearSnapshots.length > 0) {
+        // Sort by date ascending to get the first one of the year
+        const firstOfYear = yearSnapshots.sort((a, b) => {
+          const dateA = new Date(a.timestamp.endsWith('Z') ? a.timestamp : a.timestamp + 'Z');
+          const dateB = new Date(b.timestamp.endsWith('Z') ? b.timestamp : b.timestamp + 'Z');
+          return dateA - dateB;
+        })[0];
+        
+        // Only use first of year if it's different from current snapshot
+        if (firstOfYear.snapshotId !== targetSnapshotId) {
+          baselineSnapshot = firstOfYear;
+          console.log(`[YTD] Using first statement of ${currentYear} as baseline: ${firstOfYear.snapshotId}`);
+        }
+      }
+      
+      if (baselineSnapshot) {
+        const baselineValue = parseFloat(baselineSnapshot.summary?.totalValue || 0);
+        const currentValue = parseFloat(targetSnapshot.summary?.totalValue || 0);
+        
+        if (baselineValue > 0) {
+          ytdGainLoss = currentValue - baselineValue;
+          ytdGainLossPercent = (ytdGainLoss / baselineValue) * 100;
+          
+          console.log(`[YTD] Baseline: ${baselineSnapshot.snapshotId} ($${baselineValue.toLocaleString()}), Current: ${targetSnapshotId} ($${currentValue.toLocaleString()}), YTD: $${ytdGainLoss.toLocaleString()} (${ytdGainLossPercent.toFixed(2)}%)`);
+        } else {
+          console.log(`[YTD] Baseline value is 0, cannot calculate YTD`);
+        }
+      } else {
+        console.log(`[YTD] No baseline found - need statement from ${previousYear}-12-31 (last trading day) or ${currentYear}-01-01`);
+      }
+    } catch (ytdError) {
+      console.error('[Portfolio] Error calculating YTD:', ytdError);
+    }
+    
     // Transform to frontend format
     const portfolioData = {
+      snapshotId: targetSnapshotId,
       summary: {
-        totalValue: latestSnapshot.summary?.totalValue || 0,
-        totalDayChange: latestSnapshot.summary?.totalDayChange || 0,
-        totalDayChangePercent: latestSnapshot.summary?.totalDayChangePercent || '0.00',
-        totalGainLoss: latestSnapshot.summary?.totalGainLoss || 0,
-        totalGainLossPercent: latestSnapshot.summary?.totalGainLossPercent || '0.00',
-        positionCount: latestSnapshot.summary?.positionCount || holdings.length
+        totalValue: targetSnapshot.summary?.totalValue || 0,
+        totalDayChange: targetSnapshot.summary?.totalDayChange || 0,
+        totalDayChangePercent: targetSnapshot.summary?.totalDayChangePercent || '0.00',
+        totalGainLoss: targetSnapshot.summary?.totalGainLoss || 0,
+        totalGainLossPercent: targetSnapshot.summary?.totalGainLossPercent || '0.00',
+        positionCount: targetSnapshot.summary?.positionCount || holdings.length
       },
-      assetAllocation: latestSnapshot.assetAllocation || {},
+      assetAllocation: targetSnapshot.assetAllocation || {},
+      ytdGainLoss: ytdGainLoss,
+      ytdGainLossPercent: ytdGainLossPercent,
       holdings: holdings.map(holding => ({
         symbol: holding.symbol,
         description: holding.description || '',
@@ -909,9 +1213,9 @@ app.get('/api/portfolio', async (req, res) => {
       })),
       lastUpdated: (() => {
         // Lambda stores timestamp without 'Z' suffix, so we need to treat it as UTC
-        const timestamp = latestSnapshot.timestamp.endsWith('Z')
-          ? latestSnapshot.timestamp
-          : latestSnapshot.timestamp + 'Z';
+        const timestamp = targetSnapshot.timestamp.endsWith('Z')
+          ? targetSnapshot.timestamp
+          : targetSnapshot.timestamp + 'Z';
         const date = new Date(timestamp);
 
         // Format date part (MM/DD/YYYY)
@@ -1241,6 +1545,134 @@ app.get('/api/performance/equity-curve', async (req, res) => {
   } catch (error) {
     console.error('Error fetching equity curve:', error);
     res.status(500).json({ error: 'Failed to fetch equity curve' });
+  }
+});
+
+// Get list of all statement dates (archive)
+app.get('/api/performance/statements', async (req, res) => {
+  try {
+    const params = {
+      TableName: 'PerformanceHistory',
+      ProjectionExpression: 'date, totalValue, snapshotId, timestamp'
+    };
+    
+    const result = await dynamodb.scan(params).promise();
+    let items = (result.Items || []).sort((a, b) => b.date.localeCompare(a.date)); // Newest first
+    
+    const statements = items.map(item => ({
+      date: item.date,
+      totalValue: parseFloat(item.totalValue) || 0,
+      snapshotId: item.snapshotId,
+      timestamp: item.timestamp
+    }));
+    
+    res.json({
+      statements: statements,
+      count: statements.length
+    });
+  } catch (error) {
+    console.error('Error fetching statement dates:', error);
+    res.status(500).json({ error: 'Failed to fetch statement dates' });
+  }
+});
+
+// Get statement data for a specific date
+app.get('/api/performance/statements/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+    
+    // Get performance history for this date
+    const perfParams = {
+      TableName: 'PerformanceHistory',
+      Key: { date: date }
+    };
+    
+    const perfResult = await dynamodb.get(perfParams).promise();
+    
+    if (!perfResult.Item) {
+      return res.status(404).json({ 
+        error: 'Statement not found',
+        date: date 
+      });
+    }
+    
+    const snapshotId = perfResult.Item.snapshotId;
+    
+    // Get portfolio snapshot
+    const snapshotParams = {
+      TableName: 'PortfolioSnapshots'
+    };
+    
+    const snapshotResult = await dynamodb.scan(snapshotParams).promise();
+    const snapshot = snapshotResult.Items.find(item => item.snapshotId === snapshotId);
+    
+    if (!snapshot) {
+      return res.status(404).json({ 
+        error: 'Portfolio snapshot not found',
+        snapshotId: snapshotId 
+      });
+    }
+    
+    // Get holdings for this snapshot
+    const holdingsParams = {
+      TableName: 'Holdings',
+      FilterExpression: 'snapshotId = :snapshotId',
+      ExpressionAttributeValues: {
+        ':snapshotId': snapshotId
+      }
+    };
+    
+    const holdingsResult = await dynamodb.scan(holdingsParams).promise();
+    const holdings = holdingsResult.Items || [];
+    
+    // Transform to frontend format
+    const statementData = {
+      date: date,
+      snapshotId: snapshotId,
+      timestamp: snapshot.timestamp,
+      summary: {
+        totalValue: snapshot.summary?.totalValue || 0,
+        totalDayChange: snapshot.summary?.totalDayChange || 0,
+        totalDayChangePercent: snapshot.summary?.totalDayChangePercent || '0.00',
+        totalGainLoss: snapshot.summary?.totalGainLoss || 0,
+        totalGainLossPercent: snapshot.summary?.totalGainLossPercent || '0.00',
+        positionCount: snapshot.summary?.positionCount || holdings.length
+      },
+      assetAllocation: snapshot.assetAllocation || {},
+      holdings: holdings.map(holding => ({
+        symbol: holding.symbol,
+        description: holding.description || '',
+        quantity: holding.quantity || 0,
+        price: holding.price || 0,
+        marketValue: holding.marketValue || 0,
+        costBasis: holding.costBasis || 0,
+        gainLoss: holding.gainLoss || 0,
+        gainLossPercent: holding.gainLossPercent || 0,
+        assetType: holding.assetType || 'Unknown',
+        assetClass: holding.assetClass || 'Other'
+      })),
+      performance: {
+        totalValue: parseFloat(perfResult.Item.totalValue) || 0,
+        dailyReturn: parseFloat(perfResult.Item.dailyReturn) || 0,
+        cumulativeReturn: parseFloat(perfResult.Item.cumulativeReturn) || 0,
+        positionCount: perfResult.Item.positionCount || 0
+      }
+    };
+    
+    res.json(statementData);
+    
+  } catch (error) {
+    console.error('Error fetching statement:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch statement',
+      details: error.message 
+    });
   }
 });
 

@@ -3,7 +3,9 @@ import { Card, Metric, Text, Grid, Title, Button, Badge } from '@tremor/react';
 import ReactMarkdown from 'react-markdown';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
+import { usePortfolio } from '../../context/PortfolioContext';
 import CSVUpload from '../CSVUpload';
+import UploadHistory from '../UploadHistory';
 import USDMacroDashboard from './USDMacroDashboard';
 import SecuritiesList from './SecuritiesList';
 import ResizableBottomPanels from './ResizableBottomPanels';
@@ -16,6 +18,7 @@ import PerformanceTracking from './PerformanceTracking';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
+  const { selectedSnapshotId } = usePortfolio();
   const [portfolioData, setPortfolioData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -81,7 +84,7 @@ const PortfolioDashboard = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await MarketDataService.getPortfolio();
+      const data = await MarketDataService.getPortfolio(selectedSnapshotId);
       setPortfolioData(data);
     } catch (e) {
       setError(e.message || 'Failed to load portfolio');
@@ -108,7 +111,8 @@ const PortfolioDashboard = () => {
       isMounted = false;
       window.removeEventListener('portfolioRefresh', handlePortfolioRefresh);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSnapshotId]); // Refetch when selected snapshot changes
 
   // Handle clicks outside book menu
   useEffect(() => {
@@ -294,7 +298,9 @@ const PortfolioDashboard = () => {
     },
     assetAllocation: {},
     topHoldings: [],
-    lastUpdated: 'Schwab Integration Pending'
+    lastUpdated: 'Schwab Integration Pending',
+    ytdGainLoss: 0,
+    ytdGainLossPercent: 0
   };
 
   const displayData = portfolioData || defaultData;
@@ -323,6 +329,7 @@ const PortfolioDashboard = () => {
             console.error('CSV upload failed:', error);
           }}
         />
+        <UploadHistory />
       </div>
       
       {/* Total Portfolio */}
@@ -333,17 +340,10 @@ const PortfolioDashboard = () => {
             ${displayData.summary.totalValue.toLocaleString()}
           </Metric>
           
-          
           <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-            <Text className="text-sm dark:text-white">P&L MTD</Text>
-            <Badge color={parseFloat(displayData.summary.totalDayChange) >= 0 ? 'emerald' : 'rose'}>
-              {displayData.summary.totalDayChange >= 0 ? '+' : ''}${displayData.summary.totalDayChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalDayChangePercent).toFixed(2)}%)
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-            <Text className="text-xs dark:text-white">P&L YTD</Text>
-            <Badge color={parseFloat(displayData.summary.totalGainLoss) >= 0 ? 'emerald' : 'rose'}>
-              {displayData.summary.totalGainLoss >= 0 ? '+' : ''}${displayData.summary.totalGainLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalGainLossPercent).toFixed(2)}%)
+            <Text className="text-sm dark:text-white">P&L YTD</Text>
+            <Badge color={(displayData.ytdGainLoss || 0) >= 0 ? 'emerald' : 'rose'}>
+              {(displayData.ytdGainLoss || 0) >= 0 ? '+' : ''}${(displayData.ytdGainLoss || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({(displayData.ytdGainLossPercent || 0).toFixed(2)}%)
             </Badge>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">

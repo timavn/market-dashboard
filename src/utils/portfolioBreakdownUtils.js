@@ -45,7 +45,7 @@ export const calculateAssetClassAllocation = (holdings, totalValue) => {
 
   holdings.forEach(holding => {
     const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
-    const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType || 'Other');
+    const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType);
     
     if (!allocation[assetClass]) {
       allocation[assetClass] = 0;
@@ -55,13 +55,14 @@ export const calculateAssetClassAllocation = (holdings, totalValue) => {
   });
 
   // Convert to percentage and create pie chart data
+  // Filter out "Other" category to ensure it never appears
   const pieData = Object.entries(allocation)
     .map(([name, value]) => ({
       name,
       value: parseFloat(value.toFixed(2)),
       percentage: groupTotal > 0 ? parseFloat(((value / groupTotal) * 100).toFixed(1)) : 0
     }))
-    .filter(item => item.value > 0)
+    .filter(item => item.value > 0 && item.name !== 'Other')
     .sort((a, b) => b.value - a.value);
 
   return pieData;
@@ -70,35 +71,43 @@ export const calculateAssetClassAllocation = (holdings, totalValue) => {
 /**
  * Map asset class to display category
  * @param {string} assetClass - Original asset class from data
- * @returns {string} Display category
+ * @returns {string} Display category (never returns "Other")
  */
 export const mapAssetClassToDisplay = (assetClass) => {
-  if (!assetClass) return 'Other';
+  if (!assetClass) {
+    // Default to Equities instead of "Other"
+    return 'Equities';
+  }
   
   const lower = assetClass.toLowerCase();
   
   // Map to display categories
-  if (lower.includes('equity') || lower.includes('stock') || lower.includes('etf')) {
+  if (lower.includes('equity') || lower.includes('stock') || lower.includes('etf') || lower.includes('equities')) {
     // Check if it's international
     if (lower.includes('international') || lower.includes('foreign') || lower.includes('eaf') || lower.includes('eem')) {
-      return 'International Stock';
+      return 'Equities'; // Map international to Equities
     }
-    return 'US Stock';
+    return 'Equities';
   }
   
-  if (lower.includes('bond') || lower.includes('fixed income') || lower.includes('treasury')) {
-    return 'Bond';
+  if (lower.includes('bond') || lower.includes('fixed income') || lower.includes('treasury') || lower.includes('credit') || lower.includes('mbs') || lower.includes('tips')) {
+    return 'Fixed Income';
   }
   
-  if (lower.includes('currency') || lower.includes('fx') || lower.includes('forex')) {
-    return 'Currency';
+  if (lower.includes('currency') || lower.includes('fx') || lower.includes('forex') || lower.includes('usd') || lower.includes('gold') || lower.includes('silver')) {
+    return 'Currencies';
   }
   
-  if (lower.includes('commodity') || lower.includes('gold') || lower.includes('oil') || lower.includes('metal')) {
-    return 'Commodity';
+  if (lower.includes('commodity') || lower.includes('oil') || lower.includes('metal') || lower.includes('energy') || lower.includes('agriculture') || lower.includes('corn') || lower.includes('wheat')) {
+    return 'Commodities';
   }
   
-  return 'Other';
+  if (lower.includes('crypto') || lower.includes('bitcoin') || lower.includes('ethereum')) {
+    return 'Equities'; // Crypto mapped to Equities per existing logic
+  }
+  
+  // Default to Equities instead of "Other" to ensure we never show "Other"
+  return 'Equities';
 };
 
 /**
@@ -154,7 +163,7 @@ export const prepareDoublePieData = (holdings, totalValue, factorExposures) => {
   const assetClassMap = {};
   holdings.forEach(holding => {
     const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
-    const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType || 'Other');
+    const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType);
     
     if (!assetClassMap[assetClass]) {
       assetClassMap[assetClass] = 0;
@@ -167,7 +176,7 @@ export const prepareDoublePieData = (holdings, totalValue, factorExposures) => {
       name,
       value: parseFloat(value.toFixed(2))
     }))
-    .filter(item => item.value > 0)
+    .filter(item => item.value > 0 && item.name !== 'Other')
     .sort((a, b) => b.value - a.value);
 
   // Calculate factor exposure (outer ring)
@@ -211,7 +220,7 @@ export const prepareDoublePieData = (holdings, totalValue, factorExposures) => {
     // Fallback: Map each asset class to its primary factor and aggregate
     holdings.forEach(holding => {
       const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
-      const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType || 'Other');
+      const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType);
       const factor = mapAssetClassToFactor(assetClass, factorExposures);
       
       if (!factorMap[factor]) {

@@ -29,9 +29,10 @@ export class MarketDataService {
   }
 
   // Get portfolio summary and holdings
-  static async getPortfolio() {
+  static async getPortfolio(snapshotId = null) {
     try {
-      const response = await apiClient.get(ENDPOINTS.PORTFOLIO);
+      const params = snapshotId ? { snapshotId } : {};
+      const response = await apiClient.get(ENDPOINTS.PORTFOLIO, { params });
       const data = response.data;
       
       // Handle both AWS API Gateway format (with snapshot/holdings) and local server format (direct)

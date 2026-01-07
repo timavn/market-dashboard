@@ -27,6 +27,10 @@ const PerformanceTracking = () => {
   const [metrics, setMetrics] = useState(null);
   const [benchmarkData, setBenchmarkData] = useState(null);
   const [performanceHistory, setPerformanceHistory] = useState(null);
+  const [statements, setStatements] = useState([]);
+  const [selectedStatementDate, setSelectedStatementDate] = useState(null);
+  const [selectedStatement, setSelectedStatement] = useState(null);
+  const [loadingStatement, setLoadingStatement] = useState(false);
 
   const isDark = theme === 'dark';
 
@@ -37,17 +41,19 @@ const PerformanceTracking = () => {
         setLoading(true);
         setError(null);
 
-        const [equityData, metricsData, historyData, benchmarkData] = await Promise.all([
+        const [equityData, metricsData, historyData, benchmarkData, statementsData] = await Promise.all([
           PerformanceService.getEquityCurve(),
           PerformanceService.getPerformanceMetrics(selectedPeriod),
           PerformanceService.getPerformanceHistory(),
-          PerformanceService.getBenchmarkComparison()
+          PerformanceService.getBenchmarkComparison(),
+          PerformanceService.getStatements().catch(() => ({ statements: [], count: 0 })) // Don't fail if no statements
         ]);
 
         setEquityCurve(equityData);
         setMetrics(metricsData);
         setPerformanceHistory(historyData);
         setBenchmarkData(benchmarkData);
+        setStatements(statementsData.statements || []);
       } catch (err) {
         console.error('Error fetching performance data:', err);
         // Provide more helpful error messages
@@ -65,6 +71,29 @@ const PerformanceTracking = () => {
 
     fetchData();
   }, [selectedPeriod]);
+
+  // Fetch statement when date is selected
+  useEffect(() => {
+    const fetchStatement = async () => {
+      if (!selectedStatementDate) {
+        setSelectedStatement(null);
+        return;
+      }
+
+      try {
+        setLoadingStatement(true);
+        const statementData = await PerformanceService.getStatementByDate(selectedStatementDate);
+        setSelectedStatement(statementData);
+      } catch (err) {
+        console.error('Error fetching statement:', err);
+        setSelectedStatement(null);
+      } finally {
+        setLoadingStatement(false);
+      }
+    };
+
+    fetchStatement();
+  }, [selectedStatementDate]);
 
   // Format date for display
   const formatDate = (dateStr) => {
@@ -492,6 +521,161 @@ const PerformanceTracking = () => {
               </tbody>
             </table>
           </div>
+        </Card>
+      )}
+
+      {/* Statement Archive */}
+      {statements.length > 0 && (
+        <Card>
+          <div className="flex justify-between items-center mb-4">
+            <Title>Statement Archive</Title>
+            <Select
+              value={selectedStatementDate || ''}
+              onValueChange={setSelectedStatementDate}
+              className="w-48"
+              placeholder="Select a date..."
+            >
+              {statements.map((stmt) => (
+                <SelectItem key={stmt.date} value={stmt.date}>
+                  {new Date(stmt.date).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                  })} - {formatCurrency(stmt.totalValue)}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+
+          {loadingStatement && (
+            <div className="text-center py-8">
+              <Text>Loading statement...</Text>
+            </div>
+          )}
+
+          {selectedStatement && !loadingStatement && (
+            <div className="space-y-6">
+              {/* Statement Summary */}
+              <div>
+                <Text className="text-lg font-semibold mb-3">
+                  Statement for {new Date(selectedStatement.date).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </Text>
+                <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-4">
+                  <Card>
+                    <Text>Total Value</Text>
+                    <Metric>{formatCurrency(selectedStatement.summary?.totalValue || 0)}</Metric>
+                  </Card>
+                  <Card>
+                    <Text>Day Change</Text>
+                    <Metric className={getValueColor(parseFloat(selectedStatement.summary?.totalDayChangePercent || 0))}>
+                      {formatCurrency(selectedStatement.summary?.totalDayChange || 0)} ({selectedStatement.summary?.totalDayChangePercent || '0.00'}%)
+                    </Metric>
+                  </Card>
+                  <Card>
+                    <Text>Total Gain/Loss</Text>
+                    <Metric className={getValueColor(parseFloat(selectedStatement.summary?.totalGainLossPercent || 0))}>
+                      {formatCurrency(selectedStatement.summary?.totalGainLoss || 0)} ({selectedStatement.summary?.totalGainLossPercent || '0.00'}%)
+                    </Metric>
+                  </Card>
+                  <Card>
+                    <Text>Positions</Text>
+                    <Metric>{selectedStatement.summary?.positionCount || 0}</Metric>
+                  </Card>
+                </Grid>
+              </div>
+
+              {/* Performance Metrics */}
+              {selectedStatement.performance && (
+                <Card>
+                  <Title className="mb-3">Performance Metrics</Title>
+                  <Grid numItems={1} numItemsSm={3} className="gap-4">
+                    <div>
+                      <Text>Daily Return</Text>
+                      <Metric className={getValueColor(selectedStatement.performance.dailyReturn)}>
+                        {formatPercent(selectedStatement.performance.dailyReturn)}
+                      </Metric>
+                    </div>
+                    <div>
+                      <Text>Cumulative Return</Text>
+                      <Metric className={getValueColor(selectedStatement.performance.cumulativeReturn)}>
+                        {formatPercent(selectedStatement.performance.cumulativeReturn)}
+                      </Metric>
+                    </div>
+                    <div>
+                      <Text>Portfolio Value</Text>
+                      <Metric>{formatCurrency(selectedStatement.performance.totalValue)}</Metric>
+                    </div>
+                  </Grid>
+                </Card>
+              )}
+
+              {/* Asset Allocation */}
+              {selectedStatement.assetAllocation && Object.keys(selectedStatement.assetAllocation).length > 0 && (
+                <Card>
+                  <Title className="mb-3">Asset Allocation</Title>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                    {Object.entries(selectedStatement.assetAllocation).map(([asset, percent]) => (
+                      <div key={asset}>
+                        <Text className="text-sm">{asset}</Text>
+                        <Metric className="text-lg">{parseFloat(percent).toFixed(1)}%</Metric>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* Holdings Table */}
+              {selectedStatement.holdings && selectedStatement.holdings.length > 0 && (
+                <Card>
+                  <Title className="mb-3">Holdings</Title>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-2">Symbol</th>
+                          <th className="text-left p-2">Description</th>
+                          <th className="text-right p-2">Quantity</th>
+                          <th className="text-right p-2">Price</th>
+                          <th className="text-right p-2">Market Value</th>
+                          <th className="text-right p-2">Cost Basis</th>
+                          <th className="text-right p-2">Gain/Loss</th>
+                          <th className="text-right p-2">Gain/Loss %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedStatement.holdings.map((holding, idx) => (
+                          <tr key={`${holding.symbol}-${idx}`} className="border-b">
+                            <td className="p-2 font-medium">{holding.symbol}</td>
+                            <td className="p-2 text-sm text-gray-600 dark:text-gray-400">{holding.description}</td>
+                            <td className="text-right p-2">{holding.quantity?.toLocaleString() || '0'}</td>
+                            <td className="text-right p-2">{formatCurrency(holding.price || 0)}</td>
+                            <td className="text-right p-2">{formatCurrency(holding.marketValue || 0)}</td>
+                            <td className="text-right p-2">{formatCurrency(holding.costBasis || 0)}</td>
+                            <td className={`text-right p-2 ${getValueColor(holding.gainLossPercent || 0)}`}>
+                              {formatCurrency(holding.gainLoss || 0)}
+                            </td>
+                            <td className={`text-right p-2 ${getValueColor(holding.gainLossPercent || 0)}`}>
+                              {formatPercent(holding.gainLossPercent || 0)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {!selectedStatementDate && !loadingStatement && (
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              <Text>Select a date from the dropdown above to view a statement</Text>
+            </div>
+          )}
         </Card>
       )}
     </div>

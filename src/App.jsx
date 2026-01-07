@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
+import { PortfolioProvider } from './context/PortfolioContext';
 import PortfolioDashboard from './components/Dashboard/PortfolioDashboard';
 
 function App() {
@@ -89,9 +90,11 @@ function App() {
 
   return (
     <ThemeProvider>
-      <div className="App">
-        <PortfolioDashboard />
-      </div>
+      <PortfolioProvider>
+        <div className="App">
+          <PortfolioDashboard />
+        </div>
+      </PortfolioProvider>
     </ThemeProvider>
   );
 }
