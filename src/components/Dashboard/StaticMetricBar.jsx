@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Text } from '@tremor/react';
 import { MarketDataService } from '../../services/api/marketDataService';
+import LiquidityTable from './LiquidityTable';
 
 // Metric boxes configuration
 // Top row: Major daily indicators (moved from bottom row with improved names)
@@ -235,7 +236,7 @@ const VolumeTable = () => {
     <div style={{
       fontSize: '9px',
       border: '1px solid #E5E7EB',
-      borderRadius: '4px',
+      borderRadius: '0.375rem',
       overflow: 'hidden',
     }}
     className="dark:border-gray-600">
@@ -431,6 +432,8 @@ const VolatilityTable = () => {
 const StaticMetricBar = () => {
   const [prices, setPrices] = useState({});
   const [loading, setLoading] = useState(true);
+  const [liquidityData, setLiquidityData] = useState(null);
+  const [liquidityLoading, setLiquidityLoading] = useState(true);
 
   // Fetch macro indicators
   const fetchMacroIndicators = async () => {
@@ -455,9 +458,24 @@ const StaticMetricBar = () => {
     }
   };
 
+  // Fetch liquidity indicators
+  const fetchLiquidityIndicators = async () => {
+    try {
+      setLiquidityLoading(true);
+      const data = await MarketDataService.getLiquidityIndicators();
+      setLiquidityData(data);
+    } catch (error) {
+      console.error('Error fetching liquidity indicators:', error);
+      setLiquidityData(null);
+    } finally {
+      setLiquidityLoading(false);
+    }
+  };
+
   // Initial fetch
   useEffect(() => {
     fetchMacroIndicators();
+    fetchLiquidityIndicators();
   }, []);
 
   // Set up polling interval (every 8 seconds, similar to SecuritiesList)
@@ -465,6 +483,15 @@ const StaticMetricBar = () => {
     const interval = setInterval(() => {
       fetchMacroIndicators();
     }, 8000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Set up polling interval for liquidity indicators (less frequent - every 5 minutes)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchLiquidityIndicators();
+    }, 300000); // 5 minutes
 
     return () => clearInterval(interval);
   }, []);
@@ -505,9 +532,10 @@ const StaticMetricBar = () => {
         gap: '12px',
         width: '100%',
       }}>
-        {/* Left: Volume Metrics */}
+        {/* Left: Volume Metrics and Liquidity */}
         <div>
           <VolumeTable />
+          <LiquidityTable data={liquidityData} loading={liquidityLoading} />
         </div>
 
         {/* Right: Yield Curve and Volatility Tables */}

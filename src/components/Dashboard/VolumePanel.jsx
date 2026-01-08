@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Text, Flex, Badge } from '@tremor/react';
+import { Text, Flex, Badge } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
@@ -636,7 +636,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
   };
 
   return (
-    <Card className="p-2 dark:bg-gray-800" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div className="p-3 h-full" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Top Controls Row */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
@@ -700,7 +700,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
                   searchInputRef.current?.blur();
                 }
               }}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-none bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 w-full"
+              className="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 w-full"
             />
             {showSearchResults && filteredSecurities.length > 0 && (
               <div
@@ -1007,7 +1007,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
           <Text className="dark:text-gray-300">{typeof metrics.beta === 'number' ? metrics.beta.toFixed(2) : metrics.beta}</Text>
         </div>
       </Flex>
-    </Card>
+    </div>
   );
 };
 

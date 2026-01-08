@@ -322,4 +322,15 @@ export class MarketDataService {
       throw error;
     }
   }
+
+  // Get liquidity indicators (M3 proxy, Money Supply vs GDP)
+  static async getLiquidityIndicators() {
+    try {
+      const response = await apiClient.get('/api/liquidity-indicators');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching liquidity indicators:', error);
+      throw error;
+    }
+  }
 }

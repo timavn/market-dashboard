@@ -185,7 +185,7 @@ const DailyNotepad = () => {
   ];
 
   return (
-    <Card className="bg-gray-50 dark:bg-gray-800" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Card className="bg-gray-50 dark:bg-gray-800 rounded-lg" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         {/* Toggle buttons */}
         <div style={{ display: 'flex', gap: '4px', marginRight: '8px' }}>
@@ -267,8 +267,8 @@ const DailyNotepad = () => {
               <Text className="text-gray-500 dark:text-gray-400">Loading...</Text>
             </div>
           ) : (
-            <div className="bg-white dark:bg-gray-700 rounded" style={{ 
-              borderRadius: '4px',
+            <div className="bg-white dark:bg-gray-700 rounded-md" style={{ 
+              borderRadius: '0.375rem',
               flex: 1,
               display: 'flex',
               flexDirection: 'column',

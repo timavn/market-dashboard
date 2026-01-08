@@ -13,15 +13,6 @@ export const ENDPOINTS = {
   POSITIONS: '/api/positions',
   PERFORMANCE: '/api/performance',
   
-  // Performance tracking
-  PERFORMANCE_HISTORY: '/api/performance/history',
-  PERFORMANCE_METRICS: '/api/performance/metrics',
-  PERFORMANCE_POSITIONS: '/api/performance/positions',
-  PERFORMANCE_BENCHMARK: '/api/performance/benchmark-comparison',
-  PERFORMANCE_EQUITY_CURVE: '/api/performance/equity-curve',
-  PERFORMANCE_STATEMENTS: '/api/performance/statements',
-  PERFORMANCE_STATEMENT: '/api/performance/statements',
-  
   // Economic indicators
   VIX: '/api/indicators/vix',
   VOLATILITY: '/api/indicators/volatility',
@@ -29,6 +20,9 @@ export const ENDPOINTS = {
   
   // Risk ranges
   RISK_RANGES: '/api/risk-ranges',
+  
+  // Workflow status
+  WORKFLOW_STATUS: '/api/workflow-status',
   
   // WebSocket endpoints
   WS_MARKET_DATA: '/ws/market',

@@ -159,7 +159,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
     <div>
       {/* Upload Area */}
       <Card 
-        className={`cursor-pointer transition-all ${isDragging ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'}`}
+        className={`cursor-pointer transition-all rounded-lg ${isDragging ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -192,7 +192,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
 
       {/* Status Message */}
       {uploadStatus && (
-        <Card className={`mt-3 ${uploadStatus.type === 'success' ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+        <Card className={`mt-3 rounded-lg ${uploadStatus.type === 'success' ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
           <Badge 
             color={uploadStatus.type === 'success' ? 'emerald' : 'red'}
             size="lg"

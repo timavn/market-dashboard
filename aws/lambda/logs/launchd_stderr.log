@@ -1,0 +1,2 @@
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+/bin/bash: /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/run_hedgeye_scraper.sh: Operation not permitted

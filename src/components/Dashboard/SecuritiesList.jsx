@@ -4,7 +4,7 @@ import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
 import './SecuritiesList.css';
 
-const SecuritiesList = () => {
+const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandToggle }) => {
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
@@ -17,7 +17,6 @@ const SecuritiesList = () => {
     weekly: { upside: [], downside: [] },
     monthly: { upside: [], downside: [] }
   });
-  const legendRef = useRef(null);
   const dotLegendRef = useRef(null);
   const rowRefs = useRef({});
   const pricesRef = useRef({}); // Ref to track current prices for stale closure prevention
@@ -492,62 +491,59 @@ const SecuritiesList = () => {
   // Close popover when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (legendRef.current && !legendRef.current.contains(e.target)) {
-        setShowLegend(false);
-      }
       if (dotLegendRef.current && !dotLegendRef.current.contains(e.target)) {
         setShowDotLegend(false);
       }
     };
-    if (showLegend || showDotLegend) {
+    if (showDotLegend) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showLegend, showDotLegend]);
+  }, [showDotLegend]);
 
   return (
-    <Card className="relative securities-card dark:bg-gray-800" style={{ overflow: 'visible' }}>
-      <div 
-        className="relative" 
-        ref={legendRef}
-        onMouseEnter={() => setShowLegend(true)}
-        onMouseLeave={() => setShowLegend(false)}
-      >
-        <Title 
-          className="cursor-pointer hover:opacity-70 inline-block"
-          onClick={() => setShowLegend(!showLegend)}
-        >
-          Signal Strength
-        </Title>
-        
-        {/* Asset Class Legend Popover */}
-        {showLegend && (
-          <div 
-            className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[200px]"
-          >
-            <Text className="text-xs font-semibold mb-2 block dark:text-white">Asset Classes</Text>
-            <div className="flex flex-col gap-2">
-              {['fixedIncome', 'equity', 'currency', 'commodity', 'crypto'].map((assetClass) => {
-                const colorMap = {
-                  fixedIncome: '#3B82F6',  // Blue
-                  equity: '#10B981',        // Green
-                  currency: '#8B5CF6',     // Violet
-                  commodity: '#F97316',    // Orange
-                  crypto: '#EAB308'        // Yellow
-                };
-                return (
-                  <div key={assetClass} className="flex items-center gap-2">
-                    <div 
-                      className="w-4 h-4 rounded-sm"
-                      style={{ backgroundColor: colorMap[assetClass] || '#6B7280' }}
-                    />
-                    <Text className="text-xs dark:text-gray-300">{getAssetClassName(assetClass)}</Text>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+    <Card className="relative securities-card dark:bg-gray-800 rounded-lg" style={{ overflow: 'hidden' }}>
+      <div className="relative">
+        <div className="flex items-center justify-center w-full relative">
+          <Title className="inline-block text-center">
+            Signal Strength
+          </Title>
+          {onExpandToggle && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onExpandToggle();
+              }}
+              className="absolute right-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              title={isExpanded ? "Collapse Signal Strength" : "Expand Signal Strength"}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                padding: '0'
+              }}
+            >
+              <svg 
+                width="16" 
+                height="16" 
+                viewBox="0 0 16 16" 
+                fill="none" 
+                xmlns="http://www.w3.org/2000/svg"
+                className="text-gray-700 dark:text-gray-300"
+              >
+                <path 
+                  d={isExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
+                  stroke="currentColor" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
       
       {/* Top Movers Section - Compact Table Format */}
@@ -633,9 +629,38 @@ const SecuritiesList = () => {
         </div>
       </div>
       
+      {/* Asset Class Legend - Horizontal, above column titles */}
+      <div className="flex items-center justify-between px-2 py-1.5 border-b border-gray-200 dark:border-gray-700" style={{ maxWidth: '100%', flexWrap: 'nowrap' }}>
+        {['fixedIncome', 'equity', 'currency', 'commodity', 'crypto'].map((assetClass) => {
+          const colorMap = {
+            fixedIncome: '#3B82F6',  // Blue
+            equity: '#10B981',        // Green
+            currency: '#8B5CF6',     // Violet
+            commodity: '#F97316',    // Orange
+            crypto: '#EAB308'        // Yellow
+          };
+          return (
+            <div key={assetClass} className="flex items-center gap-1 flex-1 justify-center">
+              <div 
+                className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                style={{ backgroundColor: colorMap[assetClass] || '#6B7280' }}
+              />
+              <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap text-[10px] leading-tight">{getAssetClassName(assetClass)}</span>
+            </div>
+          );
+        })}
+      </div>
+      
       <div className="securities-table-wrapper">
         {/* Header Row */}
-        <div className="securities-header-row">
+        <div 
+          className="securities-header-row"
+          style={{
+            gridTemplateColumns: isExpanded 
+              ? '20px 30px 60px 70px 50px 50px 80px 45px' 
+              : '20px 30px 60px 70px 50px 50px'
+          }}
+        >
           <div 
             className="header-dot relative"
             ref={dotLegendRef}
@@ -688,8 +713,12 @@ const SecuritiesList = () => {
           <div className="header-price">Spot Price</div>
           <div className="header-lrr">LRR</div>
           <div className="header-hrr">HRR</div>
-          <div className="header-odds">+/-</div>
-          <div className="header-signal">Signal</div>
+          {isExpanded && (
+            <>
+              <div className="header-odds">+/-</div>
+              <div className="header-signal">Signal</div>
+            </>
+          )}
         </div>
         
         {/* Data Rows */}
@@ -698,6 +727,11 @@ const SecuritiesList = () => {
             <div 
               key={security.ticker}
               className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
+              style={{
+                gridTemplateColumns: isExpanded 
+                  ? '20px 30px 60px 70px 50px 50px 80px 45px' 
+                  : '20px 30px 60px 70px 50px 50px'
+              }}
             >
               <div className="data-dot-cell">
                 {(() => {
@@ -785,39 +819,43 @@ const SecuritiesList = () => {
                   })()}
                 </span>
               </div>
-              <div className="data-odds-cell">
-                {(() => {
-                  const priceData = prices[security.ticker];
-                  const spotPrice = priceData?.price || priceData;
-                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                  const lrr = riskRangeData?.lrr || '--';
-                  const hrr = riskRangeData?.hrr || '--';
-                  const odds = calculateOdds(spotPrice, lrr, hrr);
-                  
-                  if (odds.upside === null && odds.downside === null) {
-                    return <span className="data-odds">--</span>;
-                  }
-                  
-                  const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
-                  const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
-                  
-                  return (
-                    <span className="data-odds">
-                      {odds.upside !== null && (
-                        <span className="odds-upside">{upsideStr}</span>
-                      )}
-                      {odds.upside !== null && odds.downside !== null && ' / '}
-                      {odds.downside !== null && (
-                        <span className="odds-downside">{downsideStr}</span>
-                      )}
-                      {odds.upside === null && odds.downside === null && '--'}
-                    </span>
-                  );
-                })()}
-              </div>
-              <div className="data-signal-cell">
-                <span className="data-signal">0</span>
-              </div>
+              {isExpanded && (
+                <>
+                  <div className="data-odds-cell">
+                    {(() => {
+                      const priceData = prices[security.ticker];
+                      const spotPrice = priceData?.price || priceData;
+                      const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                      const lrr = riskRangeData?.lrr || '--';
+                      const hrr = riskRangeData?.hrr || '--';
+                      const odds = calculateOdds(spotPrice, lrr, hrr);
+                      
+                      if (odds.upside === null && odds.downside === null) {
+                        return <span className="data-odds">--</span>;
+                      }
+                      
+                      const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
+                      const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
+                      
+                      return (
+                        <span className="data-odds">
+                          {odds.upside !== null && (
+                            <span className="odds-upside">{upsideStr}</span>
+                          )}
+                          {odds.upside !== null && odds.downside !== null && ' / '}
+                          {odds.downside !== null && (
+                            <span className="odds-downside">{downsideStr}</span>
+                          )}
+                          {odds.upside === null && odds.downside === null && '--'}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div className="data-signal-cell">
+                    <span className="data-signal">0</span>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>

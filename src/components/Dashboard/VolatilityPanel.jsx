@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Text, Badge, Flex } from '@tremor/react';
+import { Text, Badge, Flex } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { LineChart, Line, Bar, ComposedChart, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { MarketDataService } from '../../services/api/marketDataService';
@@ -362,7 +362,7 @@ const VolatilityPanel = () => {
   };
 
   return (
-    <Card className="p-2 dark:bg-gray-800" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div className="p-3 h-full" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Top Controls Row */}
       <Flex className="mb-2 gap-2" justifyContent="between" alignItems="center">
         <div className="flex items-center gap-2">
@@ -604,7 +604,7 @@ const VolatilityPanel = () => {
           </Text>
         </div>
       </Flex>
-    </Card>
+    </div>
   );
 };
 

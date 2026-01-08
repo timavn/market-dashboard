@@ -227,7 +227,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
 
   if (error) {
     return (
-      <Card className="bg-red-50 border-red-200">
+      <Card className="bg-red-50 border-red-200 rounded-lg">
         <Text className="text-red-600">Error loading USD data: {error}</Text>
       </Card>
     );
@@ -243,7 +243,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
     const indexIsPositive = indexInfo ? parseFloat(indexInfo.changePercent) >= 0 : false;
     
     return (
-      <Card key={pair.pair} className="dark:bg-gray-700">
+      <Card key={pair.pair} className="dark:bg-gray-700 rounded-lg">
         <Flex justifyContent="between" alignItems="center" className="mb-2">
           <Text className="text-xs font-semibold truncate mr-1 dark:text-white">{pair.name}</Text>
           <PopoverSelect
@@ -305,13 +305,13 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
   };
 
   return (
-    <Card className="dark:bg-gray-800">
+    <Card className="dark:bg-gray-800 rounded-lg">
       <Grid numItems={1} numItemsSm={1} numItemsLg={12} className="gap-4">
         {/* DXY and UUP Highlight */}
         <div className="col-span-12 lg:col-span-4">
           <Grid numItems={1} className="gap-4">
             {/* DXY Card */}
-            <Card className="bg-blue-50 dark:bg-blue-900/20">
+            <Card className="bg-blue-50 dark:bg-blue-900/20 rounded-lg">
               <Text className="text-sm font-semibold mb-2 dark:text-white">DXY</Text>
               <Metric className="dark:text-white">
                 {dxy?.value ? dxy.value.toFixed(2) : '--'}
@@ -327,7 +327,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
             
             {/* UUP Card */}
             {indexData['UUP'] && (
-              <Card className="bg-blue-50 dark:bg-blue-900/20">
+              <Card className="bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                 <Text className="text-sm font-semibold mb-2 dark:text-white">UUP (USD Index)</Text>
                 <Metric className="dark:text-white">
                   {indexData['UUP'].value.toFixed(2)}
@@ -344,7 +344,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
             
             {/* GLD Card */}
             {indexData['GLD'] && (
-              <Card className="bg-amber-50 dark:bg-amber-900/20">
+              <Card className="bg-amber-50 dark:bg-amber-900/20 rounded-lg">
                 <Text className="text-sm font-semibold mb-2 dark:text-white">GLD (Gold)</Text>
                 <Metric className="dark:text-white">
                   {indexData['GLD'].value.toFixed(2)}

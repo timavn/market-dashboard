@@ -58,7 +58,7 @@ const USDMacroDashboard = () => {
   return (
     <div className="space-y-4">
       {/* Banner with Title and Metric Bar */}
-      <Card className="dark:bg-gray-800 relative macro-dashboard-card">
+      <Card className="dark:bg-gray-800 relative macro-dashboard-card rounded-lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className="macro-dashboard-title-container">
             <Title className="dark:text-white">Macro Dashboard</Title>
@@ -71,7 +71,7 @@ const USDMacroDashboard = () => {
       <div className="flex flex-col md:flex-row gap-4" style={{ alignItems: 'stretch' }}>
         {/* Left: Events & Signals */}
         <div className="flex-1">
-          <Card className="dark:bg-gray-800" style={{ height: '100%' }}>
+          <Card className="dark:bg-gray-800 rounded-lg" style={{ height: '100%' }}>
             <Title className="mb-4 dark:text-white">Events & Signals</Title>
             <div className="space-y-3">
               <div>
@@ -141,7 +141,7 @@ const USDMacroDashboard = () => {
 
       {/* Error overlay */}
       {error && (
-        <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800">
+        <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800 rounded-lg">
           <Title className="text-red-600 dark:text-red-400">Error Loading USD Data</Title>
           <Text className="mb-4 dark:text-gray-300">{error}</Text>
         </Card>

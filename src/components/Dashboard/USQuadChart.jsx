@@ -74,7 +74,7 @@ const USQuadChart = () => {
       <div style={{
         backgroundColor: 'white',
         border: '1px solid #e5e7eb',
-        borderRadius: '4px',
+        borderRadius: '0.375rem',
         padding: '8px',
       }}>
         <p style={{ margin: '0 0 4px 0', fontWeight: 'bold' }}>{data.month}</p>
@@ -258,7 +258,7 @@ const USQuadChart = () => {
   };
 
   return (
-    <Card className="bg-white dark:bg-gray-800">
+    <Card className="bg-white dark:bg-gray-800 rounded-lg">
       {/* Two-column layout: Left QU/AD label, Right Chart + Exposures Table */}
       <div style={{ display: 'flex', alignItems: 'stretch' }}>
         {/* Left label: QU over AD - stretches to cover chart + table */}
@@ -272,6 +272,8 @@ const USQuadChart = () => {
             // Match app card outline (blue divider)
             borderRight: '2px solid #60A5FA',
             alignSelf: 'stretch',
+            borderTopLeftRadius: '0.5rem',
+            borderBottomLeftRadius: '0.5rem',
           }}
         >
           <div
@@ -434,7 +436,7 @@ const USQuadChart = () => {
         <div style={{ marginBottom: '6px', fontSize: '10.5px', fontWeight: 'bold' }}>
           Hedgeye Macro GIP Model Signals
         </div>
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ overflowX: 'auto', borderRadius: '0.375rem', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px' }}>
             <thead>
               {/* First header row: Date and section headers */}

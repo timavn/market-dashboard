@@ -708,7 +708,7 @@ const PortfolioBreakdown = ({ portfolioData }) => {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
             {/* Longs Section */}
-            <Card className="dark:bg-gray-800" style={{ padding: 0 }}>
+            <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0 }}>
             {/* Longs Banner */}
             <div style={{ 
               textAlign: 'center', 
@@ -1538,7 +1538,7 @@ const PortfolioBreakdown = ({ portfolioData }) => {
         {/* Total Asset Allocation Section */}
         <div style={{ marginTop: '32px' }}>
           <Title className="text-lg mb-4 dark:text-white">Total Asset Allocation</Title>
-          <Card className="dark:bg-gray-800">
+          <Card className="dark:bg-gray-800 rounded-lg">
             {innerData.length > 0 && outerData.length > 0 ? (
               <ResponsiveContainer width="100%" height={400}>
                 <PieChart>

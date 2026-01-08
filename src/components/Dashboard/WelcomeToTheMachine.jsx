@@ -8,7 +8,7 @@ const WelcomeToTheMachine = () => {
   const machineAccent = '#1F2937'; // Dark gray accent
 
   return (
-    <Card className="bg-white dark:bg-gray-800">
+    <Card className="bg-white dark:bg-gray-800 rounded-lg">
       {/* Header section at top */}
       <div style={{ 
         display: 'flex', 

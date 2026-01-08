@@ -124,7 +124,7 @@ const UploadHistory = () => {
 
   if (loading) {
     return (
-      <Card className="mt-4">
+      <Card className="mt-4 rounded-lg">
         <Text>Loading upload history...</Text>
       </Card>
     );
@@ -132,7 +132,7 @@ const UploadHistory = () => {
 
   if (uploads.length === 0 && !loading) {
     return (
-      <Card className="mt-4 dark:bg-gray-800">
+      <Card className="mt-4 dark:bg-gray-800 rounded-lg">
         <Title className="text-sm mb-2 dark:text-white">Upload History</Title>
         {error ? (
           <div className="space-y-2">
@@ -176,7 +176,7 @@ const UploadHistory = () => {
       
       {/* Missing Trading Days */}
       {showMissingDays && missingDays && missingDays.missingCount > 0 && (
-        <Card className="mb-4 dark:bg-gray-700 border-amber-200 dark:border-amber-800">
+        <Card className="mb-4 dark:bg-gray-700 border-amber-200 dark:border-amber-800 rounded-lg">
           <div className="mb-3">
             <Title className="text-sm dark:text-white">
               Missing Trading Days for YTD ({missingDays.year})

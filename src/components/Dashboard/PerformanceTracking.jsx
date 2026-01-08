@@ -199,7 +199,7 @@ const PerformanceTracking = () => {
   if (loading) {
     return (
       <div className="p-6">
-        <Card>
+        <Card className="rounded-lg">
           <Text>Loading performance data...</Text>
         </Card>
       </div>
@@ -209,7 +209,7 @@ const PerformanceTracking = () => {
   if (error) {
     return (
       <div className="p-6">
-        <Card>
+        <Card className="rounded-lg">
           <Title>Performance Tracking</Title>
           <Text className="text-red-500 mt-4">Error: {error}</Text>
           <Text className="text-sm text-gray-600 dark:text-gray-400 mt-4">
@@ -228,7 +228,7 @@ const PerformanceTracking = () => {
   if (!equityCurve || equityCurve.dates.length === 0) {
     return (
       <div className="p-6">
-        <Card>
+        <Card className="rounded-lg">
           <Title>Performance Tracking</Title>
           <Text className="mt-4">
             No performance data available yet.
@@ -270,21 +270,21 @@ const PerformanceTracking = () => {
 
       {/* Key Metrics */}
       <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-4">
-        <Card>
+        <Card className="rounded-lg">
           <Text>Sharpe Ratio</Text>
           <Metric>{metrics?.sharpeRatio?.toFixed(2) || 'N/A'}</Metric>
         </Card>
-        <Card>
+        <Card className="rounded-lg">
           <Text>Max Drawdown</Text>
           <Metric className={getValueColor(metrics?.maxDrawdown)}>
             {metrics?.maxDrawdown ? formatPercent(metrics.maxDrawdown) : 'N/A'}
           </Metric>
         </Card>
-        <Card>
+        <Card className="rounded-lg">
           <Text>Volatility</Text>
           <Metric>{metrics?.volatility ? `${metrics.volatility.toFixed(2)}%` : 'N/A'}</Metric>
         </Card>
-        <Card>
+        <Card className="rounded-lg">
           <Text>Win Rate</Text>
           <Metric>{metrics?.winRate ? `${metrics.winRate.toFixed(1)}%` : 'N/A'}</Metric>
         </Card>
@@ -292,25 +292,25 @@ const PerformanceTracking = () => {
 
       {/* Additional Metrics */}
       <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-4">
-        <Card>
+        <Card className="rounded-lg">
           <Text>Avg Daily Return</Text>
           <Metric className={getValueColor(metrics?.avgDailyReturn)}>
             {metrics?.avgDailyReturn ? formatPercent(metrics.avgDailyReturn) : 'N/A'}
           </Metric>
         </Card>
-        <Card>
+        <Card className="rounded-lg">
           <Text>Best Day</Text>
           <Metric className={getValueColor(metrics?.bestDay)}>
             {metrics?.bestDay ? formatPercent(metrics.bestDay) : 'N/A'}
           </Metric>
         </Card>
-        <Card>
+        <Card className="rounded-lg">
           <Text>Worst Day</Text>
           <Metric className={getValueColor(metrics?.worstDay)}>
             {metrics?.worstDay ? formatPercent(metrics.worstDay) : 'N/A'}
           </Metric>
         </Card>
-        <Card>
+        <Card className="rounded-lg">
           <Text>Current Value</Text>
           <Metric>
             {equityCurve?.values?.length > 0 
@@ -322,7 +322,7 @@ const PerformanceTracking = () => {
 
       {/* Rolling Returns */}
       {metrics?.rollingReturns && Object.keys(metrics.rollingReturns).length > 0 && (
-        <Card>
+        <Card className="rounded-lg">
           <Title>Rolling Returns</Title>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={Object.entries(metrics.rollingReturns).map(([period, value]) => ({
@@ -409,7 +409,7 @@ const PerformanceTracking = () => {
 
       {/* Performance vs Benchmarks */}
       {benchmarkChartData.length > 0 && (
-        <Card>
+        <Card className="rounded-lg">
           <Title>Performance vs Benchmarks</Title>
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={benchmarkChartData}>
@@ -464,7 +464,7 @@ const PerformanceTracking = () => {
 
       {/* Daily Returns Distribution */}
       {returnsHistogram.length > 0 && (
-        <Card>
+        <Card className="rounded-lg">
           <Title>Daily Returns Distribution</Title>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={returnsHistogram}>
@@ -493,7 +493,7 @@ const PerformanceTracking = () => {
 
       {/* Benchmark Comparison Table */}
       {metrics?.vsBenchmark && Object.keys(metrics.vsBenchmark).length > 0 && (
-        <Card>
+        <Card className="rounded-lg">
           <Title>Benchmark Comparison</Title>
           <div className="overflow-x-auto mt-4">
             <table className="w-full">
@@ -526,7 +526,7 @@ const PerformanceTracking = () => {
 
       {/* Statement Archive */}
       {statements.length > 0 && (
-        <Card>
+        <Card className="rounded-lg">
           <div className="flex justify-between items-center mb-4">
             <Title>Statement Archive</Title>
             <Select
@@ -565,23 +565,23 @@ const PerformanceTracking = () => {
                   })}
                 </Text>
                 <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-4">
-                  <Card>
+                  <Card className="rounded-lg">
                     <Text>Total Value</Text>
                     <Metric>{formatCurrency(selectedStatement.summary?.totalValue || 0)}</Metric>
                   </Card>
-                  <Card>
+                  <Card className="rounded-lg">
                     <Text>Day Change</Text>
                     <Metric className={getValueColor(parseFloat(selectedStatement.summary?.totalDayChangePercent || 0))}>
                       {formatCurrency(selectedStatement.summary?.totalDayChange || 0)} ({selectedStatement.summary?.totalDayChangePercent || '0.00'}%)
                     </Metric>
                   </Card>
-                  <Card>
+                  <Card className="rounded-lg">
                     <Text>Total Gain/Loss</Text>
                     <Metric className={getValueColor(parseFloat(selectedStatement.summary?.totalGainLossPercent || 0))}>
                       {formatCurrency(selectedStatement.summary?.totalGainLoss || 0)} ({selectedStatement.summary?.totalGainLossPercent || '0.00'}%)
                     </Metric>
                   </Card>
-                  <Card>
+                  <Card className="rounded-lg">
                     <Text>Positions</Text>
                     <Metric>{selectedStatement.summary?.positionCount || 0}</Metric>
                   </Card>
@@ -590,7 +590,7 @@ const PerformanceTracking = () => {
 
               {/* Performance Metrics */}
               {selectedStatement.performance && (
-                <Card>
+                <Card className="rounded-lg">
                   <Title className="mb-3">Performance Metrics</Title>
                   <Grid numItems={1} numItemsSm={3} className="gap-4">
                     <div>
@@ -615,7 +615,7 @@ const PerformanceTracking = () => {
 
               {/* Asset Allocation */}
               {selectedStatement.assetAllocation && Object.keys(selectedStatement.assetAllocation).length > 0 && (
-                <Card>
+                <Card className="rounded-lg">
                   <Title className="mb-3">Asset Allocation</Title>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                     {Object.entries(selectedStatement.assetAllocation).map(([asset, percent]) => (
@@ -630,7 +630,7 @@ const PerformanceTracking = () => {
 
               {/* Holdings Table */}
               {selectedStatement.holdings && selectedStatement.holdings.length > 0 && (
-                <Card>
+                <Card className="rounded-lg">
                   <Title className="mb-3">Holdings</Title>
                   <div className="overflow-x-auto">
                     <table className="w-full">

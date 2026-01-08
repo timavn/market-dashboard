@@ -6,7 +6,7 @@ import { CorrelationHelpers } from '../../services/api/usdMarketService';
 const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) => {
   if (loading) {
     return (
-      <Card>
+      <Card className="rounded-lg">
         <Title className="mb-2">$USD Correlations</Title>
         <Text className="text-xs text-gray-500 mb-4">*Days = Trading Days*</Text>
         <div className="text-center py-8">
@@ -19,7 +19,7 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
 
   if (error) {
     return (
-      <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800">
+      <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800 rounded-lg">
         <Title className="mb-2 dark:text-red-400">$USD Correlations</Title>
         <Text className="text-red-600 dark:text-red-400">Error loading correlation data: {error}</Text>
       </Card>
@@ -28,7 +28,7 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
 
   if (!correlations || !rollingStats) {
     return (
-      <Card>
+      <Card className="rounded-lg">
         <Title className="mb-2">$USD Correlations</Title>
         <Text className="text-center py-8">No correlation data available</Text>
       </Card>
@@ -95,7 +95,7 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
                     
                     return (
                       <TableCell key={period}>
-                        <div className={`inline-block px-1 py-0.5 border ${style.border} ${style.text} text-xs`}>
+                        <div className={`inline-block px-1 py-0.5 border rounded ${style.border} ${style.text} text-xs`}>
                           {displayValue}
                         </div>
                       </TableCell>
@@ -104,12 +104,12 @@ const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) =>
                   
                   {/* Rolling statistics */}
                   <TableCell>
-                    <div className={`inline-block px-1 py-0.5 border ${highStyle.border} ${highStyle.text} text-xs`}>
+                    <div className={`inline-block px-1 py-0.5 border rounded ${highStyle.border} ${highStyle.text} text-xs`}>
                       {metricRollingStats.high?.toFixed(3) || '--'}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className={`inline-block px-1 py-0.5 border ${lowStyle.border} ${lowStyle.text} text-xs`}>
+                    <div className={`inline-block px-1 py-0.5 border rounded ${lowStyle.border} ${lowStyle.text} text-xs`}>
                       {metricRollingStats.low?.toFixed(3) || '--'}
                     </div>
                   </TableCell>

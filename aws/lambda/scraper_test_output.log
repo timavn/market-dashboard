@@ -1,0 +1,49 @@
+Warning: playwright-stealth not installed. Run: pip install playwright-stealth
+
+============================================================
+HEDGEYE RISK RANGE SCRAPER
+Time: 2026-01-07 18:00:41
+============================================================
+✓ Loaded 28 cookies from /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/hedgeye_cookies.json
+
+============================================================
+AUTOMATED SCRAPE MODE
+============================================================
+Using cookies: /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/hedgeye_cookies.json
+Using session: /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/hedgeye_session.json
+Target URL: https://app.hedgeye.com/feed_items/all?page=1&with_category=33-risk-range-signals
+============================================================
+
+Using Chrome profile from: /Users/timsmith/Library/Application Support/Google/Chrome
+Traceback (most recent call last):
+  File "/Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/hedgeye_local_scraper.py", line 813, in <module>
+    main()
+  File "/Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/hedgeye_local_scraper.py", line 800, in main
+    data = run_scrape_mode(store_to_dynamodb=store_to_db, use_chrome_profile=args.chrome, headless=headless_mode)
+  File "/Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/hedgeye_local_scraper.py", line 333, in run_scrape_mode
+    browser = p.chromium.launch_persistent_context(
+  File "/Users/timsmith/Library/Python/3.9/lib/python/site-packages/playwright/sync_api/_generated.py", line 14834, in launch_persistent_context
+    self._sync(
+  File "/Users/timsmith/Library/Python/3.9/lib/python/site-packages/playwright/_impl/_sync_base.py", line 115, in _sync
+    return task.result()
+  File "/Users/timsmith/Library/Python/3.9/lib/python/site-packages/playwright/_impl/_browser_type.py", line 166, in launch_persistent_context
+    result = await self._channel.send_return_as_dict(
+  File "/Users/timsmith/Library/Python/3.9/lib/python/site-packages/playwright/_impl/_connection.py", line 83, in send_return_as_dict
+    return await self._connection.wrap_api_call(
+  File "/Users/timsmith/Library/Python/3.9/lib/python/site-packages/playwright/_impl/_connection.py", line 559, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.Error: BrowserType.launch_persistent_context: Failed to create a ProcessSingleton for your profile directory. This usually means that the profile is already in use by another instance of Chromium.
+Call log:
+  - <launching> /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-extensions --disable-features=AcceptCHFrame,AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --enable-automation --enable-unsafe-swiftshader --no-sandbox --user-data-dir=/Users/timsmith/Library/Application Support/Google/Chrome --remote-debugging-pipe about:blank
+  - <launched> pid=65955
+  - [pid=65955][err] [65955:11875847:0107/180041.525449:ERROR:chrome/browser/process_singleton_posix.cc:340] Failed to create /Users/timsmith/Library/Application Support/Google/Chrome/SingletonLock: File exists (17)
+  - [pid=65955][err] [65955:11875847:0107/180041.526449:ERROR:chrome/app/chrome_main_delegate.cc:514] Failed to create a ProcessSingleton for your profile directory. This means that running multiple instances would start multiple browser processes rather than opening a new window in the existing process. Aborting now to avoid profile corruption.
+  - [pid=65955] <gracefully close start>
+  - [pid=65955] <kill>
+  - [pid=65955] <will force kill>
+  - [pid=65955] exception while trying to kill process: Error: kill EPERM
+  - [pid=65955] <process did exit: exitCode=21, signal=null>
+  - [pid=65955] starting temporary directories cleanup
+  - [pid=65955] finished temporary directories cleanup
+  - [pid=65955] <gracefully close end>
+

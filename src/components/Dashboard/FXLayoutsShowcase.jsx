@@ -359,7 +359,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
   // Handle loading and error states
   if (loading) {
     return (
-      <Card className="dark:bg-gray-800">
+      <Card className="dark:bg-gray-800 rounded-lg">
         <Text className="text-sm dark:text-white">Loading currency data...</Text>
       </Card>
     );
@@ -367,7 +367,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
 
   if (error || !currencyPairs || !Array.isArray(currencyPairs) || currencyPairs.length === 0) {
     return (
-      <Card className="dark:bg-gray-800">
+      <Card className="dark:bg-gray-800 rounded-lg">
         <Text className="text-sm font-bold mb-2 dark:text-white">USD Proxies</Text>
         <Text className="text-xs text-gray-600 dark:text-gray-400">
           {error ? `Error: ${error}` : 'No currency pairs data available.'}
@@ -398,7 +398,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
   ];
 
   return (
-    <Card className="dark:bg-gray-800">
+    <Card className="dark:bg-gray-800 rounded-lg">
       <div className="grid grid-cols-2 gap-6">
         {/* Left: Spot Rates */}
         <div>
@@ -406,7 +406,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
           <div className="space-y-2">
             {/* DXY Card */}
             {dxy && (
-              <Card className="p-3 dark:bg-gray-700">
+              <Card className="p-3 dark:bg-gray-700 rounded-lg">
                 <Flex justifyContent="between" alignItems="center" className="mb-2">
                   <div>
                     <Text className="text-xs font-semibold dark:text-white">DXY</Text>
@@ -430,7 +430,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
               const pairData = historicalData[pair.pair] || [];
               const pairFullYearData = fullYearData[pair.pair] || [];
               return (
-                <Card key={pair.pair} className="p-3 dark:bg-gray-700">
+                <Card key={pair.pair} className="p-3 dark:bg-gray-700 rounded-lg">
                   <Flex justifyContent="between" alignItems="center" className="mb-2">
                     <div>
                       <Text className="text-xs font-semibold dark:text-white">{pair.name}</Text>
@@ -458,7 +458,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
           <div className="space-y-2">
             {/* UUP Card */}
             {mockIndexData['UUP'] && (
-              <Card className="p-3 dark:bg-gray-700">
+              <Card className="p-3 dark:bg-gray-700 rounded-lg">
                 <Flex justifyContent="between" alignItems="center" className="mb-2">
                   <div>
                     <Text className="text-xs font-semibold dark:text-white">UUP</Text>
@@ -485,7 +485,7 @@ const FXLayoutsShowcase = ({ dxy, currencyPairs, indexData, loading, error }) =>
               const indexDataHistorical = index ? (indexHistoricalData[index.ticker] || []) : [];
               const indexFullYearData = index ? (fullYearData[index.ticker] || []) : [];
               return (
-                <Card key={index.ticker} className="p-3 dark:bg-gray-700">
+                <Card key={index.ticker} className="p-3 dark:bg-gray-700 rounded-lg">
                   <Flex justifyContent="between" alignItems="center" className="mb-2">
                     <div>
                       <Text className="text-xs font-semibold dark:text-white">{index.ticker}</Text>

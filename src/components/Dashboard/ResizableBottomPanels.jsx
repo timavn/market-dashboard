@@ -1,257 +1,129 @@
-import React from 'react';
-import { Title } from '@tremor/react';
+import React, { useState, useEffect } from 'react';
 import VolatilityPanel from './VolatilityPanel';
-import SecuritiesPanel from './VolumePanel';
+import VolumePanel from './VolumePanel';
 
-const COLLAPSED_HEIGHT = 30; // Height when collapsed (shows label only) - 25% thinner than original 40px
-const EXPANDED_HEIGHT = 500; // Height when expanded (25% taller than 400px)
+const MIN_HEIGHT = 30; // Minimum visible height (collapsed state - tab only, reduced by 33% from 45)
+const MAX_HEIGHT = 400; // Maximum panel height
+// Expanded panels take up 40% of screen height
+const getDefaultHeight = () => Math.round(window.innerHeight * 0.4);
+// Match portfolio bar width: calc((100vw - 16px) * (2/12) + 16px + 128px)
+const PORTFOLIO_BAR_WIDTH = 'calc((100vw - 16px) * (2/12) + 16px + 128px)';
 
-const ResizableBottomPanels = ({ 
-  volatilityExpanded, 
-  securitiesExpanded, 
-  onVolatilityToggle, 
-  onSecuritiesToggle,
-  securitiesFullWidth,
-  onSecuritiesFullWidthToggle,
-  selectedTicker
+// Individual Panel Component
+const BottomPanel = ({ 
+  label, 
+  position, // 'left' or 'right'
+  children 
 }) => {
-  const volatilityHeight = volatilityExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
-  const securitiesHeight = securitiesExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
+  const [panelHeight, setPanelHeight] = useState(() => {
+    const saved = localStorage.getItem(`bottomPanelHeight_${label}`);
+    if (saved) {
+      return parseInt(saved, 10);
+    }
+    // Default to collapsed (tab only) if no saved state
+    return MIN_HEIGHT;
+  });
+
+  useEffect(() => {
+    localStorage.setItem(`bottomPanelHeight_${label}`, panelHeight.toString());
+  }, [panelHeight, label]);
+
+  const isCollapsed = panelHeight <= MIN_HEIGHT;
+
+  const handleTabClick = () => {
+    if (isCollapsed) {
+      setPanelHeight(getDefaultHeight());
+    } else {
+      setPanelHeight(MIN_HEIGHT);
+    }
+  };
+
+  // Position panels to stretch across full bottom, each taking half
+  const positionStyles = position === 'left' 
+    ? { 
+        left: 0,
+        right: '50%',
+      }
+    : { 
+        right: 0,
+        left: '50%',
+      };
 
   return (
-    <>
-      {/* Volatility Panel - Left Side - Only show when Securities is not in full-width mode */}
-      {!securitiesFullWidth && (
-        <div
+    <div
+      className="fixed bottom-0 z-50 transition-all duration-300"
+      style={{
+        width: '50%',
+        height: isCollapsed ? 'auto' : `${panelHeight}px`,
+        ...positionStyles
+      }}
+    >
+      {isCollapsed ? (
+        // Collapsed Tab State - Simple, clean tab spanning full width
+        <button
+          onClick={handleTabClick}
+          className={`w-full px-5 py-2 bg-white dark:bg-gray-900 shadow-sm border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-200 ${
+            position === 'left' 
+              ? 'border-l border-r border-gray-300 dark:border-gray-600 rounded-tl-xl rounded-tr-xl' 
+              : 'border-r border-l border-gray-300 dark:border-gray-600 rounded-tr-xl rounded-tl-xl'
+          }`}
           style={{
-            position: 'fixed',
-            bottom: 0,
-            left: 0,
-            width: '50%',
-            height: `${volatilityHeight}px`,
-            zIndex: 1000,
-            backgroundColor: '#f9fafb', // Solid opaque background
-            borderTop: '1px solid #e5e7eb',
-            borderRight: '1px solid #e5e7eb',
-            boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.1)',
-            transition: 'height 0.3s ease-in-out',
             display: 'flex',
-            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
-          className="dark:bg-gray-900 dark:border-gray-700"
         >
-        {/* Collapsed State - Label Only */}
-        {!volatilityExpanded && (
-          <div
-            style={{
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              padding: '0 16px',
-            }}
-            onClick={() => onVolatilityToggle(true)}
+          <span className="text-gray-700 dark:text-gray-300" style={{ fontSize: '18px', fontWeight: 700 }}>
+            {label}
+          </span>
+        </button>
+      ) : (
+        // Expanded Panel State
+        <div 
+          className={`relative overflow-hidden bg-white dark:bg-gray-900/95 shadow-lg border-t border-gray-200/60 dark:border-gray-700/60 backdrop-blur-sm h-full ${
+            position === 'left' 
+              ? 'border-l border-r border-gray-300 dark:border-gray-600 rounded-tl-2xl rounded-tr-2xl' 
+              : 'border-r border-l border-gray-300 dark:border-gray-600 rounded-tr-2xl rounded-tl-2xl'
+          }`}
+          style={{ 
+            display: 'flex',
+            flexDirection: 'column'
+          }}
+        >
+          {/* Label Bar - Clickable to collapse */}
+          <button
+            onClick={handleTabClick}
+            className="px-5 py-3 bg-gradient-to-b from-gray-50/80 to-gray-100/50 dark:from-gray-800/80 dark:to-gray-700/50 border-b border-gray-200/40 dark:border-gray-700/40 backdrop-blur-sm hover:from-gray-100/90 hover:to-gray-200/60 dark:hover:from-gray-700/90 dark:hover:to-gray-600/60 transition-all duration-200 w-full text-left"
           >
-            <Title
-              style={{
-                fontSize: '18px',
-                fontWeight: 700,
-                color: '#374151',
-                margin: 0,
-                userSelect: 'none',
-              }}
-              className="dark:text-gray-300"
-            >
-              Volatility
-            </Title>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
+              {label}
+            </h3>
+          </button>
+          {/* Panel Content */}
+          <div className="flex-1 p-3" style={{ minHeight: 0, overflow: 'visible' }}>
+            {children}
           </div>
-        )}
-
-        {/* Expanded State - Full Content */}
-        {volatilityExpanded && (
-          <>
-            {/* Header with Centered Title (Clickable to Collapse) */}
-            <div
-              style={{
-                padding: '4px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
-              onClick={() => onVolatilityToggle(false)}
-            >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
-                  fontWeight: 700,
-                  color: '#374151',
-                  margin: 0,
-                  userSelect: 'none',
-                }}
-              >
-                Volatility
-              </Title>
-            </div>
-
-            {/* Scrollable Content */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '8px',
-              }}
-            >
-              <VolatilityPanel />
-            </div>
-          </>
-        )}
         </div>
       )}
+    </div>
+  );
+};
 
-      {/* Securities Panel - Right Side */}
-      <div
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          right: 0,
-          width: securitiesFullWidth ? '100%' : '50%',
-          left: securitiesFullWidth ? 0 : 'auto',
-          height: `${securitiesHeight}px`,
-          zIndex: 1000,
-          backgroundColor: '#f9fafb', // Solid opaque background
-          borderTop: '1px solid #e5e7eb',
-          borderLeft: securitiesFullWidth ? 'none' : '1px solid #e5e7eb',
-          borderRight: securitiesFullWidth ? '1px solid #e5e7eb' : 'none',
-          boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.1)',
-          transition: 'height 0.3s ease-in-out',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-        className="dark:bg-gray-900 dark:border-gray-700"
-      >
-        {/* Collapsed State - Label Only */}
-        {!securitiesExpanded && (
-          <div
-            style={{
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '0 16px',
-              gap: '8px',
-            }}
-          >
-            {/* Securities Text - Clickable for Normal 50% Expansion */}
-            <div
-              style={{
-                cursor: 'pointer',
-              }}
-              onClick={() => onSecuritiesToggle(true)}
-            >
-              <Title
-                style={{
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  color: '#374151',
-                  margin: 0,
-                  userSelect: 'none',
-                }}
-                className="dark:text-gray-300"
-              >
-                Securities
-              </Title>
-            </div>
-            {/* Triangle Icon - Clickable for Full-Width Expansion */}
-            <div
-              style={{
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginTop: '-2px', // Slightly elevate relative to text baseline
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSecuritiesFullWidthToggle(true);
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M6 2L10 10H2L6 2Z"
-                  fill="#6b7280"
-                  className="dark:fill-gray-400"
-                />
-              </svg>
-            </div>
-          </div>
-        )}
+const ResizableBottomPanels = () => {
+  return (
+    <>
+      {/* Volume Panel - Bottom Left */}
+      <BottomPanel label="Volume" position="left">
+        <VolumePanel />
+      </BottomPanel>
 
-        {/* Expanded State - Full Content */}
-        {securitiesExpanded && (
-          <>
-            {/* Header with Centered Title (Clickable to Collapse) */}
-            <div
-              style={{
-                padding: '4px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
-              onClick={() => {
-                if (securitiesFullWidth) {
-                  // When full-width, collapse completely
-                  onSecuritiesFullWidthToggle(false);
-                  onSecuritiesToggle(false);
-                } else {
-                  // Normal collapse
-                  onSecuritiesToggle(false);
-                }
-              }}
-            >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
-                  fontWeight: 700,
-                  color: '#374151',
-                  margin: 0,
-                  userSelect: 'none',
-                }}
-              >
-                Securities
-              </Title>
-            </div>
-
-            {/* Scrollable Content */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '8px',
-              }}
-            >
-              <SecuritiesPanel selectedTicker={selectedTicker} />
-            </div>
-          </>
-        )}
-      </div>
+      {/* Securities Panel - Bottom Right */}
+      <BottomPanel label="Securities" position="right">
+        <VolatilityPanel />
+      </BottomPanel>
     </>
   );
 };
 
 export default ResizableBottomPanels;
+

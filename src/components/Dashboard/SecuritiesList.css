@@ -7,6 +7,7 @@
   background: #00FFFF;
   border: 6px solid #000000;
   box-shadow: 8px 8px 0px 0px #000000;
+  border-radius: 0.5rem;
 }
 
 /* Color Legend */
@@ -222,7 +223,8 @@
 
 /* Securities card and table wrapper */
 .securities-card {
-  overflow: visible !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
   padding: 0 !important;
 }
 

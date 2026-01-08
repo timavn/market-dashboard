@@ -29,7 +29,7 @@ const PopoverSelect = ({ value, options, onChange, buttonClassName = '', menuCla
       <button
         type="button"
         className={`px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 dark:text-white border-gray-300 dark:border-gray-600 shadow-sm ${buttonClassName}`}
-        style={{ borderRadius: '0.25rem' }}
+        className="rounded-md"
         onClick={() => setOpen((v) => !v)}
       >
         {displayLabel}

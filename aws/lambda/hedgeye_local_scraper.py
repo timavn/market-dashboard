@@ -428,6 +428,41 @@ def run_scrape_mode(store_to_dynamodb: bool = True, use_chrome_profile: bool = F
             except PlaywrightTimeout:
                 print("⚠ No table found, will try parsing anyway...")
             
+            # Capture screenshot for manual review
+            screenshot_s3_key = None
+            try:
+                timestamp = datetime.now(timezone.utc)
+                date_str = timestamp.strftime('%Y-%m-%d')
+                time_str = timestamp.strftime('%H%M%S')
+                screenshot_filename = f"hedgeye_screenshot_{date_str}_{time_str}.png"
+                screenshot_path = SCRIPT_DIR / screenshot_filename
+                
+                print("Capturing screenshot...")
+                page.screenshot(path=str(screenshot_path), full_page=True)
+                print(f"✓ Screenshot saved: {screenshot_path}")
+                
+                # Upload to S3 if available
+                if BOTO3_AVAILABLE:
+                    try:
+                        s3_client = boto3.client('s3', region_name='us-west-1')
+                        s3_key = f"hedgeye-screenshots/{date_str}/risk-ranges-{date_str}-{time_str}.png"
+                        s3_client.upload_file(
+                            str(screenshot_path),
+                            'market-dashboard-csv-data',
+                            s3_key,
+                            ExtraArgs={'ContentType': 'image/png'}
+                        )
+                        screenshot_s3_key = s3_key
+                        print(f"✓ Screenshot uploaded to S3: {s3_key}")
+                    except Exception as s3_error:
+                        print(f"⚠ Could not upload screenshot to S3: {s3_error}")
+                        print(f"  Screenshot saved locally at: {screenshot_path}")
+                else:
+                    print(f"⚠ boto3 not available, screenshot saved locally only: {screenshot_path}")
+            except Exception as screenshot_error:
+                print(f"⚠ Screenshot capture failed: {screenshot_error}")
+                print("  Continuing with scrape...")
+            
             # Get page content
             html_content = page.content()
             
@@ -447,11 +482,52 @@ def run_scrape_mode(store_to_dynamodb: bool = True, use_chrome_profile: bool = F
                 # Save to local JSON
                 save_to_json(risk_range_data)
                 
+                # Export to CSV
+                csv_path = export_to_csv(risk_range_data)
+                csv_s3_key = None
+                
+                # Upload CSV to S3 if available
+                if csv_path and BOTO3_AVAILABLE and risk_range_data:
+                    try:
+                        s3_client = boto3.client('s3', region_name='us-west-1')
+                        date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                        csv_s3_key = f"hedgeye-exports/risk-ranges-{date_str}.csv"
+                        s3_client.upload_file(
+                            str(csv_path),
+                            'market-dashboard-csv-data',
+                            csv_s3_key,
+                            ExtraArgs={'ContentType': 'text/csv'}
+                        )
+                        print(f"✓ CSV uploaded to S3: {csv_s3_key}")
+                    except Exception as csv_s3_error:
+                        print(f"⚠ Could not upload CSV to S3: {csv_s3_error}")
+                
                 # Store to DynamoDB if enabled
                 if store_to_dynamodb and BOTO3_AVAILABLE:
-                    store_to_dynamodb_table(risk_range_data)
+                    store_to_dynamodb_table(risk_range_data, screenshot_s3_key, csv_s3_key)
             else:
                 print("\n✗ No data scraped. Check hedgeye_debug.html for page content.")
+                # Still store screenshot in DynamoDB even if data extraction failed
+                if screenshot_s3_key and store_to_dynamodb and BOTO3_AVAILABLE:
+                    try:
+                        dynamodb = boto3.resource('dynamodb', region_name='us-west-1')
+                        snapshot_table = dynamodb.Table('HedgeyeDailySnapshot')
+                        date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                        timestamp = datetime.now(timezone.utc).isoformat()
+                        
+                        snapshot_item = {
+                            'date': date_str,
+                            'snapshotType': 'risk-ranges',
+                            'riskRangeCount': 0,
+                            'data': {},
+                            'scrapedAt': timestamp,
+                            'screenshotS3Key': screenshot_s3_key,
+                            'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
+                        }
+                        snapshot_table.put_item(Item=snapshot_item)
+                        print(f"✓ Stored screenshot reference in DynamoDB (no data extracted)")
+                    except Exception as db_error:
+                        print(f"⚠ Could not store screenshot reference: {db_error}")
                 
         except Exception as e:
             print(f"\n✗ Error during scrape: {e}")
@@ -577,7 +653,29 @@ def save_to_json(risk_range_data: Dict[str, Dict]):
     print(f"✓ Saved to: {OUTPUT_FILE}")
 
 
-def store_to_dynamodb_table(risk_range_data: Dict[str, Dict]):
+def export_to_csv(risk_range_data: Dict[str, Dict]) -> Optional[Path]:
+    """Export risk range data to CSV file"""
+    if not risk_range_data:
+        return None
+    
+    date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    csv_path = SCRIPT_DIR / f"hedgeye_risk_ranges_{date_str}.csv"
+    
+    try:
+        with open(csv_path, 'w', newline='') as f:
+            f.write("ticker,lrr,hrr,original_name,timestamp\n")
+            for ticker, data in risk_range_data.items():
+                original_name = data.get('original_name', ticker).replace(',', '')
+                f.write(f"{ticker},{data['lrr']},{data['hrr']},{original_name},{data['timestamp']}\n")
+        
+        print(f"✓ CSV exported to: {csv_path}")
+        return csv_path
+    except Exception as e:
+        print(f"⚠ Error exporting CSV: {e}")
+        return None
+
+
+def store_to_dynamodb_table(risk_range_data: Dict[str, Dict], screenshot_s3_key: Optional[str] = None, csv_s3_key: Optional[str] = None):
     """Store risk range data in DynamoDB"""
     if not BOTO3_AVAILABLE:
         print("⚠ boto3 not available, skipping DynamoDB storage")
@@ -624,8 +722,19 @@ def store_to_dynamodb_table(risk_range_data: Dict[str, Dict]):
                 'scrapedAt': timestamp,
                 'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
             }
+            
+            # Add screenshot and CSV S3 keys if available
+            if screenshot_s3_key:
+                snapshot_item['screenshotS3Key'] = screenshot_s3_key
+            if csv_s3_key:
+                snapshot_item['csvS3Key'] = csv_s3_key
+            
             snapshot_table.put_item(Item=snapshot_item)
             print(f"✓ Stored snapshot for {date_str} with {len(risk_range_data)} securities")
+            if screenshot_s3_key:
+                print(f"  Screenshot: {screenshot_s3_key}")
+            if csv_s3_key:
+                print(f"  CSV: {csv_s3_key}")
         except Exception as e:
             print(f"⚠ Could not store snapshot: {e}")
         

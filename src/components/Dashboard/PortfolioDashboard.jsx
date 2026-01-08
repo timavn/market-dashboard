@@ -3,22 +3,19 @@ import { Card, Metric, Text, Grid, Title, Button, Badge } from '@tremor/react';
 import ReactMarkdown from 'react-markdown';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
-import { usePortfolio } from '../../context/PortfolioContext';
 import CSVUpload from '../CSVUpload';
-import UploadHistory from '../UploadHistory';
 import USDMacroDashboard from './USDMacroDashboard';
 import SecuritiesList from './SecuritiesList';
 import ResizableBottomPanels from './ResizableBottomPanels';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
-import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
 import { bookContent } from '../../constants/bookContent';
-import PortfolioBreakdown from './PortfolioBreakdown';
+import WorkflowStatus from './WorkflowStatus';
 import SecuritiesUniverse from './SecuritiesUniverse';
 import PerformanceTracking from './PerformanceTracking';
+import PortfolioBreakdown from './PortfolioBreakdown';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
-  const { selectedSnapshotId } = usePortfolio();
   const [portfolioData, setPortfolioData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -27,6 +24,7 @@ const PortfolioDashboard = () => {
   const [volatilityExpanded, setVolatilityExpanded] = useState(false);
   const [securitiesExpanded, setSecuritiesExpanded] = useState(false);
   const [securitiesFullWidth, setSecuritiesFullWidth] = useState(false);
+  const [signalStrengthExpanded, setSignalStrengthExpanded] = useState(false);
   const [selectedSecurityTicker, setSelectedSecurityTicker] = useState(null);
   const [peaPodImageError, setPeaPodImageError] = useState(false);
   const [bookImageError, setBookImageError] = useState(false);
@@ -37,14 +35,14 @@ const PortfolioDashboard = () => {
   const [bookMenuPosition, setBookMenuPosition] = useState({ top: 0, right: 0 });
   const bookMenuRef = useRef(null);
   const bookPopoverRef = useRef(null);
-  const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
+  const [showWorkflowStatus, setShowWorkflowStatus] = useState(false);
+  const [workflowStatusImageError, setWorkflowStatusImageError] = useState(false);
   const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(false);
   const [showPerformanceTracking, setShowPerformanceTracking] = useState(false);
-  const [showAssetClassInfo, setShowAssetClassInfo] = useState(false);
-  const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
-  const [portfolioConstructionImageError, setPortfolioConstructionImageError] = useState(false);
+  const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
   const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
   const [performanceImageError, setPerformanceImageError] = useState(false);
+  const [portfolioBreakdownImageError, setPortfolioBreakdownImageError] = useState(false);
   
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
@@ -84,7 +82,7 @@ const PortfolioDashboard = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await MarketDataService.getPortfolio(selectedSnapshotId);
+      const data = await MarketDataService.getPortfolio();
       setPortfolioData(data);
     } catch (e) {
       setError(e.message || 'Failed to load portfolio');
@@ -111,8 +109,7 @@ const PortfolioDashboard = () => {
       isMounted = false;
       window.removeEventListener('portfolioRefresh', handlePortfolioRefresh);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSnapshotId]); // Refetch when selected snapshot changes
+  }, []);
 
   // Handle clicks outside book menu
   useEffect(() => {
@@ -298,9 +295,7 @@ const PortfolioDashboard = () => {
     },
     assetAllocation: {},
     topHoldings: [],
-    lastUpdated: 'Schwab Integration Pending',
-    ytdGainLoss: 0,
-    ytdGainLossPercent: 0
+    lastUpdated: 'Schwab Integration Pending'
   };
 
   const displayData = portfolioData || defaultData;
@@ -329,7 +324,6 @@ const PortfolioDashboard = () => {
             console.error('CSV upload failed:', error);
           }}
         />
-        <UploadHistory />
       </div>
       
       {/* Total Portfolio */}
@@ -340,10 +334,47 @@ const PortfolioDashboard = () => {
             ${displayData.summary.totalValue.toLocaleString()}
           </Metric>
           
+          {/* Position Sizing Legend */}
+          <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1 pt-2 border-t dark:border-gray-700">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+              <div>
+                <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Long:</div>
+                <div>FX : 4-12%</div>
+                <div>Fixed Income : 4-10%</div>
+                <div>Equities : 2-6%</div>
+                <div>Commodities : 2-4%</div>
+                <div>Crypto : 2-4%</div>
+              </div>
+              <div>
+                <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Short:</div>
+                <div>FX : 2-6%</div>
+                <div>Fixed Income : 2-5%</div>
+                <div>Equities : 1-3%</div>
+                <div>Commodities : 1-2%</div>
+                <div>Crypto : 1-2%</div>
+              </div>
+            </div>
+            <div className="pt-1 border-t dark:border-gray-700 mt-1">
+              <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Basis Points:</div>
+              <div className="grid grid-cols-4 gap-x-2">
+                <div>25 bps: ${Math.floor(displayData.summary.totalValue * 0.0025).toLocaleString()}</div>
+                <div>50 bps: ${Math.floor(displayData.summary.totalValue * 0.005).toLocaleString()}</div>
+                <div>100 bps: ${Math.floor(displayData.summary.totalValue * 0.01).toLocaleString()}</div>
+                <div>500 bps: ${Math.floor(displayData.summary.totalValue * 0.05).toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+          
           <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-            <Text className="text-sm dark:text-white">P&L YTD</Text>
-            <Badge color={(displayData.ytdGainLoss || 0) >= 0 ? 'emerald' : 'rose'}>
-              {(displayData.ytdGainLoss || 0) >= 0 ? '+' : ''}${(displayData.ytdGainLoss || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({(displayData.ytdGainLossPercent || 0).toFixed(2)}%)
+            <Text className="text-sm dark:text-white">P&L MTD</Text>
+            <Badge color={parseFloat(displayData.summary.totalDayChange) >= 0 ? 'emerald' : 'rose'}>
+              {displayData.summary.totalDayChange >= 0 ? '+' : ''}${displayData.summary.totalDayChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalDayChangePercent).toFixed(2)}%)
+            </Badge>
+          </div>
+          <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+            <Text className="text-xs dark:text-white">P&L YTD</Text>
+            <Badge color={parseFloat(displayData.summary.totalGainLoss) >= 0 ? 'emerald' : 'rose'}>
+              {displayData.summary.totalGainLoss >= 0 ? '+' : ''}${displayData.summary.totalGainLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalGainLossPercent).toFixed(2)}%)
             </Badge>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
@@ -358,7 +389,7 @@ const PortfolioDashboard = () => {
         <div className="mb-6 pt-6 border-t dark:border-gray-700">
           <Title className="text-sm mb-3 dark:text-white">Net Exposure</Title>
           <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Gross Exposure</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.exposureMetrics.grossExposure || 0).toFixed(2)}%</Text>
             </div>
@@ -374,7 +405,7 @@ const PortfolioDashboard = () => {
                 {parseFloat(displayData.exposureMetrics.netShortExposure || 0).toFixed(2)}%
               </Badge>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Net Exposure</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.exposureMetrics.netExposure || 0).toFixed(2)}%</Text>
             </div>
@@ -387,11 +418,11 @@ const PortfolioDashboard = () => {
         <div className="mb-6 pt-6 border-t dark:border-gray-700">
           <Title className="text-sm mb-3 dark:text-white">Risk Metrics</Title>
           <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Sharpe Ratio</Text>
               <Text className="text-xs font-semibold dark:text-white">{displayData.riskMetrics.sharpeRatio || '0.00'}</Text>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Sortino Ratio</Text>
               <Text className="text-xs font-semibold dark:text-white">{displayData.riskMetrics.sortinoRatio || '0.00'}</Text>
             </div>
@@ -403,7 +434,7 @@ const PortfolioDashboard = () => {
               <Text className="text-xs dark:text-white">Max Drawdown</Text>
               <Badge color="amber" size="xs">{displayData.riskMetrics.maxDrawdown || '0.00'}%</Badge>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Volatility (Ann.)</Text>
               <Text className="text-xs font-semibold dark:text-white">{displayData.riskMetrics.volatility || '0.00'}%</Text>
             </div>
@@ -413,51 +444,8 @@ const PortfolioDashboard = () => {
 
       {/* Asset Class Allocation */}
       {Object.keys(displayData.assetAllocation).length > 0 && (
-        <div className="mb-6 pt-6 border-t dark:border-gray-700 relative">
-          <div className="flex items-center gap-2 mb-3">
-            <Title className="text-sm dark:text-white">Asset Class Allocation</Title>
-            <button
-              onClick={() => setShowAssetClassInfo(!showAssetClassInfo)}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title="Asset Class Information"
-              style={{ 
-                width: '16px', 
-                height: '16px', 
-                borderRadius: '50%', 
-                border: '1px solid currentColor',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '10px',
-                cursor: 'pointer'
-              }}
-            >
-              i
-            </button>
-            {showAssetClassInfo && (
-              <div 
-                className="absolute z-50 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg"
-                style={{ 
-                  maxWidth: '300px', 
-                  top: '32px',
-                  left: '0'
-                }}
-              >
-                <Text className="text-xs font-semibold mb-2 block dark:text-white">Asset Classes</Text>
-                <div className="space-y-1">
-                  {Object.values(ASSET_CLASS_NAMES).map((assetClass) => (
-                    <Text key={assetClass} className="text-xs dark:text-gray-300">• {assetClass}</Text>
-                  ))}
-                </div>
-                <button
-                  onClick={() => setShowAssetClassInfo(false)}
-                  className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  Close
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="mb-6 pt-6 border-t dark:border-gray-700">
+          <Title className="text-sm mb-3 dark:text-white">Asset Class Allocation</Title>
           <div className="space-y-2">
             {Object.entries(displayData.assetAllocation).map(([type, percentage]) => (
               <div key={type} className="space-y-1">
@@ -499,19 +487,19 @@ const PortfolioDashboard = () => {
         <div className="mb-6 pt-6 border-t dark:border-gray-700">
           <Title className="text-sm mb-3 dark:text-white">Geographic Exposure</Title>
           <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">North America</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.northAmerica || 0).toFixed(2)}%</Text>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Europe</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.europe || 0).toFixed(2)}%</Text>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Asia Pacific</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.asiaPacific || 0).toFixed(2)}%</Text>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Emerging Markets</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.emergingMarkets || 0).toFixed(2)}%</Text>
             </div>
@@ -524,15 +512,15 @@ const PortfolioDashboard = () => {
         <div className="pt-6 border-t dark:border-gray-700">
           <Title className="text-sm mb-3 dark:text-white">Concentration Risk</Title>
           <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Top 10 Holdings</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.concentrationMetrics.top10HoldingsPercent || 0).toFixed(2)}%</Text>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">Largest Position</Text>
               <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.concentrationMetrics.largestPositionPercent || 0).toFixed(2)}%</Text>
             </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
               <Text className="text-xs dark:text-white">HHI Index</Text>
               <Text className="text-xs font-semibold dark:text-white">{displayData.concentrationMetrics.hhiIndex || '0.000'}</Text>
             </div>
@@ -546,7 +534,7 @@ const PortfolioDashboard = () => {
   if (loading) {
     return (
       <div className="min-h-screen p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <Card className="text-center max-w-md">
+        <Card className="text-center max-w-md rounded-lg">
           <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
           <Text className="dark:text-gray-300">Loading market data...</Text>
         </Card>
@@ -558,7 +546,7 @@ const PortfolioDashboard = () => {
   if (error) {
     return (
       <div className="min-h-screen p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <Card className="text-center max-w-md">
+        <Card className="text-center max-w-md rounded-lg">
           <Title className="text-red-600 dark:text-red-400 mb-4">Error loading data</Title>
           <Text className="mb-4 dark:text-gray-300">{error}</Text>
           <Button onClick={() => window.location.reload()} color="red">
@@ -582,10 +570,13 @@ const PortfolioDashboard = () => {
         
         {/* Left Sidebar - Securities List */}
         <div 
-          className={showPortfolioMetrics ? 'col-span-12 md:col-span-2' : 'col-span-12 md:col-span-3'}
+          className={signalStrengthExpanded 
+            ? 'col-span-12 md:col-span-3' 
+            : 'col-span-12 md:col-span-2'}
           style={{
-            zIndex: showPortfolioMetrics ? 100 : 'auto', // Lower z-index when Portfolio Metrics overlays
+            zIndex: showPortfolioMetrics ? (signalStrengthExpanded ? 1200 : 100) : 'auto',
             overflow: 'visible', // Allow card to expand beyond container
+            transition: 'all 0.3s ease-in-out',
           }}
         >
           <SecuritiesList 
@@ -593,14 +584,20 @@ const PortfolioDashboard = () => {
               setSelectedSecurityTicker(ticker);
               setSecuritiesExpanded(true);
             }}
+            isPortfolioOpen={showPortfolioMetrics}
+            isExpanded={signalStrengthExpanded}
+            onExpandToggle={() => setSignalStrengthExpanded(!signalStrengthExpanded)}
           />
         </div>
 
         {/* Center Panel - USD Macro Dashboard */}
         <div 
-          className={showPortfolioMetrics ? 'col-span-12 md:col-span-7' : 'col-span-12 md:col-span-9'}
+          className={showPortfolioMetrics 
+            ? (signalStrengthExpanded ? 'col-span-12 md:col-span-6' : 'col-span-12 md:col-span-7')
+            : (signalStrengthExpanded ? 'col-span-12 md:col-span-9' : 'col-span-12 md:col-span-10')}
           style={{
             marginRight: showPortfolioMetrics ? '0px' : '16px', // Match left side p-4 spacing (16px) - main container already has paddingRight: 40px for Portfolio tab
+            transition: 'all 0.3s ease-in-out',
           }}
         >
           <USDMacroDashboard />
@@ -620,13 +617,16 @@ const PortfolioDashboard = () => {
             : '40px', // Matches collapsed height of bottom tabs
           height: '100vh',
           zIndex: showPortfolioMetrics ? 1100 : 1000, // Higher z-index when open to overlay Securities
-          backgroundColor: '#f9fafb', // Solid opaque background
+          backgroundColor: showPortfolioMetrics ? '#ffffff' : '#f9fafb', // Match bottom panels when expanded
           borderLeft: showPortfolioMetrics ? '1px solid #e5e7eb' : 'none', // Left border when overlaying Securities
           borderRight: '1px solid #e5e7eb', // Always right border
+          borderTop: 'none',
+          borderBottom: 'none',
+          borderRadius: showPortfolioMetrics ? '1rem 0 0 0' : '0.75rem 0 0 0', // Rounded top-left corner (2xl when expanded, xl when collapsed)
           boxShadow: showPortfolioMetrics 
             ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
             : '-2px 0 8px rgba(0, 0, 0, 0.1)',
-          transition: 'width 0.3s ease-in-out',
+          transition: 'width 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -645,41 +645,36 @@ const PortfolioDashboard = () => {
           className="dark:border-gray-700"
         >
           {/* Night Mode Toggle */}
-          <Button
+          <button
             onClick={toggleTheme}
-            variant="secondary"
-            size="sm"
-            className="shadow-sm w-full"
-            style={{ minWidth: '32px', height: '32px', padding: '0' }}
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full"
+            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
             {theme === 'dark' ? '☀️' : '🌙'}
-          </Button>
+          </button>
           
           {/* X/Twitter Logo Button */}
-          <Button
+          <button
             onClick={() => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer')}
-            variant="secondary"
-            size="sm"
-            className="shadow-sm w-full mt-2"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="Open X (Twitter) List"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
             </svg>
-          </Button>
+          </button>
           
           {/* The Pods Button */}
-          <Button
+          <button
             onClick={() => setShowPeaPodWindow(!showPeaPodWindow)}
-            variant="secondary"
-            size="sm"
-            className="shadow-sm w-full mt-2"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
             title="The Pods"
           >
             {peaPodImageError ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
                 <path d="M7 4C5.5 4 4 5.5 4 7.5c0 1.5.8 2.5 2 3v8c0 1.1.9 2 2 2s2-.9 2-2v-8c1.2-.5 2-1.5 2-3 0-2-1.5-3.5-3-3.5zm-1 4.5c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S4.5 10.8 4.5 10s.7-1.5 1.5-1.5zm3 0c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S7.5 10.8 7.5 10s.7-1.5 1.5-1.5z"/>
               </svg>
             ) : (
@@ -690,20 +685,18 @@ const PortfolioDashboard = () => {
                 onError={() => setPeaPodImageError(true)}
               />
             )}
-          </Button>
+          </button>
 
           {/* Book/Notes Button */}
-          <Button
+          <button
             ref={bookMenuRef}
             onClick={() => setShowBookMenu(!showBookMenu)}
-            variant="secondary"
-            size="sm"
-            className="shadow-sm w-full mt-2"
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
             title="Open Notes"
           >
             {bookImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
                 <path d="M4 6 L12 4 L12 20 L4 18 Z M12 4 L20 6 L20 18 L12 20 Z"/>
               </svg>
             ) : (
@@ -714,99 +707,7 @@ const PortfolioDashboard = () => {
                 onError={() => setBookImageError(true)}
               />
             )}
-          </Button>
-
-          {/* Portfolio Construction Button */}
-          <Button
-            onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
-            variant="secondary"
-            size="sm"
-            className="shadow-sm w-full mt-2"
-            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-            title="Portfolio Construction"
-          >
-            {portfolioConstructionImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8"/>
-                <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4"/>
-                <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2"/>
-              </svg>
-            ) : (
-              <img 
-                src="/images/icons/portfolio-construction.png" 
-                alt="Portfolio Construction" 
-                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                onError={() => setPortfolioConstructionImageError(true)}
-              />
-            )}
-          </Button>
-
-          {/* Performance Tracking Button */}
-          <Button
-            onClick={() => setShowPerformanceTracking(!showPerformanceTracking)}
-            variant="secondary"
-            size="sm"
-            className="shadow-sm w-full mt-2"
-            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-            title="Performance Tracking"
-          >
-            {performanceImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 6 13.5 15.5 8.5 10.5 2 17" />
-                <polyline points="16 6 22 6 22 12" />
-              </svg>
-            ) : (
-              <img 
-                src="/images/icons/performance.png" 
-                alt="Performance Tracking" 
-                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                onError={() => setPerformanceImageError(true)}
-              />
-            )}
-          </Button>
-
-          {/* Securities Universe Button */}
-          <Button
-            onClick={() => setShowSecuritiesUniverse(!showSecuritiesUniverse)}
-            variant="secondary"
-            size="sm"
-            className="shadow-sm w-full mt-2"
-            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-            title="Securities Universe"
-          >
-            {securitiesUniverseImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <defs>
-                  <radialGradient id="planetGradient" cx="0.4" cy="0.3">
-                    <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9"/>
-                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95"/>
-                    <stop offset="100%" stopColor="#663399" stopOpacity="1"/>
-                  </radialGradient>
-                  <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8"/>
-                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9"/>
-                    <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8"/>
-                  </linearGradient>
-                </defs>
-                <circle cx="12" cy="12" r="7" fill="url(#planetGradient)"/>
-                <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4"/>
-                <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3"/>
-                <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9"/>
-                <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7"/>
-                <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8"/>
-                <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6"/>
-                <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7"/>
-              </svg>
-            ) : (
-              <img 
-                src="/images/icons/securities-universe.png" 
-                alt="Securities Universe" 
-                style={{ width: '24px', height: '24px', objectFit: 'contain' }}
-                onError={() => setSecuritiesUniverseImageError(true)}
-              />
-            )}
-          </Button>
+          </button>
           
           {/* Popover Menu */}
           {showBookMenu && (
@@ -852,67 +753,185 @@ const PortfolioDashboard = () => {
               ))}
             </div>
           )}
-        </div>
 
-        {/* Collapsed "Portfolio" Text - Vertical and Centered */}
-        {!showPortfolioMetrics && (
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              padding: '0 16px',
+          {/* Separator for Main Navigation Buttons */}
+          <div style={{ 
+            width: '100%', 
+            height: '1px', 
+            backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb', 
+            margin: '12px 0 8px 0' 
+          }} />
+
+          {/* Securities Universe Button */}
+          <button
+            onClick={() => setShowSecuritiesUniverse(!showSecuritiesUniverse)}
+            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${
+              showSecuritiesUniverse 
+                ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white' 
+                : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            style={{ 
+              minWidth: '32px', 
+              height: '32px', 
+              padding: '0', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              overflow: 'hidden',
+              marginTop: '4px'
             }}
-            onClick={() => setShowPortfolioMetrics(true)}
+            title="Securities Universe"
           >
-            <Title
-              style={{
-                writingMode: 'vertical-rl',
-                textOrientation: 'mixed',
-                fontSize: '18px',
-                fontWeight: 700,
-                color: '#374151',
-                margin: 0,
-                userSelect: 'none',
-              }}
-              className="dark:text-gray-300"
+            {securitiesUniverseImageError ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showSecuritiesUniverse ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                <defs>
+                  <radialGradient id="planetGradient" cx="0.4" cy="0.3">
+                    <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9"/>
+                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95"/>
+                    <stop offset="100%" stopColor="#663399" stopOpacity="1"/>
+                  </radialGradient>
+                  <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8"/>
+                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9"/>
+                    <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8"/>
+                  </linearGradient>
+                </defs>
+                <circle cx="12" cy="12" r="7" fill="url(#planetGradient)"/>
+                <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4"/>
+                <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3"/>
+                <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9"/>
+                <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7"/>
+                <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8"/>
+                <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6"/>
+                <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7"/>
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/securities-universe.png" 
+                alt="Securities Universe" 
+                style={{ width: '24px', height: '24px', objectFit: 'contain' }}
+                onError={() => setSecuritiesUniverseImageError(true)}
+              />
+            )}
+          </button>
+
+          {/* Performance Tracking Button */}
+          <button
+            onClick={() => setShowPerformanceTracking(!showPerformanceTracking)}
+            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${
+              showPerformanceTracking 
+                ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white' 
+                : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            style={{ 
+              minWidth: '32px', 
+              height: '32px', 
+              padding: '0', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              overflow: 'hidden',
+              marginTop: '4px'
+            }}
+            title="Performance Tracking"
+          >
+            {performanceImageError ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPerformanceTracking ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                <polyline points="22 6 13.5 15.5 8.5 10.5 2 17" />
+                <polyline points="16 6 22 6 22 12" />
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/performance.png" 
+                alt="Performance Tracking" 
+                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                onError={() => setPerformanceImageError(true)}
+              />
+            )}
+          </button>
+
+          {/* Portfolio Breakdown Button */}
+          <button
+            onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
+            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${
+              showPortfolioBreakdown 
+                ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white' 
+                : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            style={{ 
+              minWidth: '32px', 
+              height: '32px', 
+              padding: '0', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              overflow: 'hidden',
+              marginTop: '4px'
+            }}
+            title="Portfolio Breakdown"
+          >
+            {portfolioBreakdownImageError ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8"/>
+                <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4"/>
+                <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2"/>
+              </svg>
+            ) : (
+              <img 
+                src="/images/icons/portfolio-construction.png" 
+                alt="Portfolio Breakdown" 
+                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                onError={() => setPortfolioBreakdownImageError(true)}
+              />
+            )}
+          </button>
+
+          {/* Expand/Collapse Portfolio Bar Button */}
+          <button
+            onClick={() => setShowPortfolioMetrics(!showPortfolioMetrics)}
+            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors mt-2 w-full"
+            title={showPortfolioMetrics ? "Collapse Portfolio" : "Expand Portfolio"}
+            style={{ 
+              minWidth: '32px',
+              height: '30px', 
+              padding: '0', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center'
+            }}
+          >
+            <svg 
+              width="16" 
+              height="16" 
+              viewBox="0 0 16 16" 
+              fill="none" 
+              xmlns="http://www.w3.org/2000/svg"
+              className="text-gray-700 dark:text-gray-300"
             >
-              Portfolio
-            </Title>
-          </div>
-        )}
+              <path 
+                d={showPortfolioMetrics ? "M6 12L10 8L6 4" : "M10 12L6 8L10 4"}
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
 
         {/* Expanded Content Area */}
         {showPortfolioMetrics && (
           <>
             {/* Header with Centered Title (Clickable to Collapse) */}
-            <div
-              style={{
-                padding: '12px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
+            <button
               onClick={() => setShowPortfolioMetrics(false)}
+              className="px-5 py-3 bg-gradient-to-b from-gray-50/80 to-gray-100/50 dark:from-gray-800/80 dark:to-gray-700/50 border-b border-gray-200/40 dark:border-gray-700/40 backdrop-blur-sm hover:from-gray-100/90 hover:to-gray-200/60 dark:hover:from-gray-700/90 dark:hover:to-gray-600/60 transition-all duration-200 w-full text-left"
             >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
-                  fontWeight: 700,
-                  color: '#374151',
-                  margin: 0,
-                  userSelect: 'none',
-                }}
-              >
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
                 Portfolio Metrics
-              </Title>
-            </div>
+              </h3>
+            </button>
 
             {/* Scrollable Content */}
             <div
@@ -944,10 +963,11 @@ const PortfolioDashboard = () => {
           backgroundColor: '#f9fafb',
           borderLeft: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
           borderRight: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
+          borderRadius: showPeaPodWindow ? '0.75rem 0 0 0' : '0',
           boxShadow: showPeaPodWindow 
             ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
             : 'none',
-          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPeaPodWindow ? 'flex' : 'none',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -1037,7 +1057,7 @@ const PortfolioDashboard = () => {
                       podsSearchInputRef.current?.blur();
                     }
                   }}
-                  className="px-3 py-2 text-sm border border-gray-300 rounded-none bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 w-full"
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 w-full"
                 />
                 {podsShowSearchResults && podsFilteredSecurities.length > 0 && (
                   <div
@@ -1081,7 +1101,7 @@ const PortfolioDashboard = () => {
                 
                 <div className="space-y-4">
                   {/* POD1 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
                     <div className="flex items-center justify-between mb-2">
                       <Text className="text-sm font-semibold dark:text-white">
                         POD1
@@ -1101,7 +1121,7 @@ const PortfolioDashboard = () => {
                   </div>
 
                   {/* POD2 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
                     <div className="flex items-center justify-between mb-2">
                       <Text className="text-sm font-semibold dark:text-white">
                         POD2
@@ -1121,7 +1141,7 @@ const PortfolioDashboard = () => {
                   </div>
 
                   {/* POD3 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
                     <div className="flex items-center justify-between mb-2">
                       <Text className="text-sm font-semibold dark:text-white">
                         POD3
@@ -1167,148 +1187,6 @@ const PortfolioDashboard = () => {
         )}
       </div>
 
-      {/* Portfolio Breakdown Window - Slides in from right */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: showPortfolioMetrics 
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
-            : '40px', // Position to the left of collapsed portfolio bar
-          width: showPortfolioBreakdown 
-            ? (showPortfolioMetrics 
-                ? 'calc((100vw - 16px) * (10/12) - 128px)' // Width when portfolio metrics open
-                : 'calc((100vw - 16px) * (9/12) - 40px)') // Width when portfolio metrics closed
-            : '0px',
-          height: '100vh',
-          zIndex: showPortfolioBreakdown ? 1300 : -1, // Higher z-index than The Pods window
-          backgroundColor: '#f9fafb',
-          borderLeft: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
-          borderRight: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
-          boxShadow: showPortfolioBreakdown 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
-            : 'none',
-          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
-          display: showPortfolioBreakdown ? 'flex' : 'none',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-        className="dark:bg-gray-900 dark:border-gray-700"
-      >
-        {showPortfolioBreakdown && (
-          <>
-            {/* Header with Centered Title (Clickable to Close) */}
-            <div
-              style={{
-                padding: '12px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
-              onClick={() => setShowPortfolioBreakdown(false)}
-            >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
-                  fontWeight: 700,
-                  color: '#374151',
-                  margin: 0,
-                  userSelect: 'none',
-                }}
-              >
-                Portfolio Construction
-              </Title>
-            </div>
-
-            {/* Scrollable Content */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '16px',
-              }}
-            >
-              <PortfolioBreakdown portfolioData={portfolioData} />
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Securities Universe Window - Slides in from right */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: showPortfolioMetrics 
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
-            : '40px', // Position to the left of collapsed portfolio bar
-          width: showSecuritiesUniverse 
-            ? (showPortfolioMetrics 
-                ? 'calc((100vw - 16px) * (10/12) - 128px)' // Width when portfolio metrics open
-                : 'calc((100vw - 16px) * (9/12) - 40px)') // Width when portfolio metrics closed
-            : '0px',
-          height: '100vh',
-          zIndex: showSecuritiesUniverse ? 1400 : -1, // Higher z-index than Portfolio Breakdown
-          backgroundColor: '#f9fafb',
-          borderLeft: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
-          borderRight: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
-          boxShadow: showSecuritiesUniverse 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
-            : 'none',
-          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
-          display: showSecuritiesUniverse ? 'flex' : 'none',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-        className="dark:bg-gray-900 dark:border-gray-700"
-      >
-        {showSecuritiesUniverse && (
-          <>
-            {/* Header with Centered Title (Clickable to Close) */}
-            <div
-              style={{
-                padding: '12px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
-              onClick={() => setShowSecuritiesUniverse(false)}
-            >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
-                  fontWeight: 700,
-                  color: '#374151',
-                  margin: 0,
-                  userSelect: 'none',
-                }}
-              >
-                Securities Universe
-              </Title>
-            </div>
-
-            {/* Scrollable Content */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '16px',
-              }}
-            >
-              <SecuritiesUniverse />
-            </div>
-          </>
-        )}
-      </div>
-
       {/* Book/Notes Modal */}
       {showBookModal && selectedBookContent && (
         <div
@@ -1333,7 +1211,7 @@ const PortfolioDashboard = () => {
           <div
             style={{
               backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-              borderRadius: '0.5rem',
+              borderRadius: '0.75rem',
               width: '90%',
               maxWidth: selectedTag ? '1400px' : '1200px',
               maxHeight: '90vh',
@@ -1799,28 +1677,98 @@ const PortfolioDashboard = () => {
         selectedTicker={selectedSecurityTicker}
       />
 
+      {/* Securities Universe Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: showPortfolioMetrics 
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' 
+            : '40px',
+          width: showSecuritiesUniverse 
+            ? (showPortfolioMetrics 
+                ? 'calc((100vw - 16px) * (10/12) - 128px)' 
+                : 'calc((100vw - 16px) * (9/12) - 40px)')
+            : '0px',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: showSecuritiesUniverse ? 1400 : -1,
+          borderLeft: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
+          borderRight: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
+          borderRadius: showSecuritiesUniverse ? '0.75rem 0 0 0' : '0',
+          boxShadow: showSecuritiesUniverse 
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+            : 'none',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
+          display: showSecuritiesUniverse ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showSecuritiesUniverse && (
+          <>
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => setShowSecuritiesUniverse(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Securities Universe
+              </Title>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: 0,
+              }}
+            >
+              <SecuritiesUniverse />
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Performance Tracking Panel */}
       <div
         style={{
           position: 'fixed',
           top: 0,
           right: showPortfolioMetrics 
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
-            : '40px', // Position to the left of collapsed portfolio bar
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' 
+            : '40px',
           width: showPerformanceTracking 
             ? (showPortfolioMetrics 
-                ? 'calc((100vw - 16px) * (10/12) - 128px)' // Width when portfolio metrics open
-                : 'calc((100vw - 16px) * (9/12) - 40px)') // Width when portfolio metrics closed
+                ? 'calc((100vw - 16px) * (10/12) - 128px)' 
+                : 'calc((100vw - 16px) * (9/12) - 40px)')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: showPerformanceTracking ? 1500 : -1,
           borderLeft: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
           borderRight: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
+          borderRadius: showPerformanceTracking ? '0.75rem 0 0 0' : '0',
           boxShadow: showPerformanceTracking 
             ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
             : 'none',
-          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPerformanceTracking ? 'flex' : 'none',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -1829,7 +1777,6 @@ const PortfolioDashboard = () => {
       >
         {showPerformanceTracking && (
           <>
-            {/* Header with Centered Title (Clickable to Close) */}
             <div
               style={{
                 padding: '12px 16px',
@@ -1855,8 +1802,6 @@ const PortfolioDashboard = () => {
                 Performance Tracking
               </Title>
             </div>
-
-            {/* Scrollable Content */}
             <div
               style={{
                 flex: 1,
@@ -1868,6 +1813,181 @@ const PortfolioDashboard = () => {
             </div>
           </>
         )}
+      </div>
+
+      {/* Portfolio Breakdown Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: showPortfolioMetrics 
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' 
+            : '40px',
+          width: showPortfolioBreakdown 
+            ? (showPortfolioMetrics 
+                ? 'calc((100vw - 16px) * (10/12) - 128px)' 
+                : 'calc((100vw - 16px) * (9/12) - 40px)')
+            : '0px',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: showPortfolioBreakdown ? 1300 : -1,
+          borderLeft: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
+          borderRight: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
+          borderRadius: showPortfolioBreakdown ? '0.75rem 0 0 0' : '0',
+          boxShadow: showPortfolioBreakdown 
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+            : 'none',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
+          display: showPortfolioBreakdown ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showPortfolioBreakdown && (
+          <>
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => setShowPortfolioBreakdown(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Portfolio Breakdown
+              </Title>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px',
+              }}
+            >
+              <PortfolioBreakdown portfolioData={portfolioData} />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Workflow Status Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: 0, // Always anchored to right edge
+          width: showWorkflowStatus 
+            ? 'calc((100vw - 16px) * (4/12))' // Fixed width, independent of portfolio bar
+            : '0px',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: showWorkflowStatus ? 1600 : -1,
+          borderLeft: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showWorkflowStatus 
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1)' 
+            : 'none',
+          transition: 'width 0.3s ease-in-out',
+          display: showWorkflowStatus ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showWorkflowStatus && (
+          <>
+            {/* Header with Centered Title (Clickable to Close) */}
+            <div
+              style={{
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderBottom: '1px solid #e5e7eb',
+                cursor: 'pointer',
+              }}
+              className="dark:border-gray-700"
+              onClick={() => setShowWorkflowStatus(false)}
+            >
+              <Title 
+                className="dark:text-white" 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: 700,
+                  color: '#374151',
+                  margin: 0,
+                  userSelect: 'none',
+                }}
+              >
+                Analytics
+              </Title>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: 0,
+              }}
+            >
+              <WorkflowStatus />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Analytics Button - Standalone in Bottom Right Corner */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: '16px',
+          right: '16px',
+          zIndex: 1700,
+        }}
+      >
+        <Button
+          onClick={() => setShowWorkflowStatus(!showWorkflowStatus)}
+          variant={showWorkflowStatus ? 'primary' : 'secondary'}
+          size="md"
+          className="shadow-lg"
+          style={{
+            minWidth: '48px',
+            height: '48px',
+            padding: '0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '50%',
+            border: showWorkflowStatus ? '2px solid #3b82f6' : '2px solid #e5e7eb',
+            backgroundColor: '#ffffff',
+            transition: 'all 0.2s ease-in-out',
+          }}
+          title="Analytics"
+        >
+          <img 
+            src="/images/icons/analytics.png" 
+            alt="Analytics" 
+            style={{ 
+              width: '24px', 
+              height: '24px', 
+              objectFit: 'contain',
+            }}
+          />
+        </Button>
       </div>
     </div>
   );
