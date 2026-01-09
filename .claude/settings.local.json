@@ -45,7 +45,9 @@
       "Bash(./manage_scraper.sh:*)",
       "Bash(aws dynamodb list-tables:*)",
       "Bash(npm run lint:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(pgrep:*)",
+      "Bash(killall:*)"
     ],
     "deny": []
   }

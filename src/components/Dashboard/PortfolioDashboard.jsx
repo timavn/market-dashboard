@@ -622,7 +622,7 @@ const PortfolioDashboard = () => {
           borderRight: '1px solid #e5e7eb', // Always right border
           borderTop: 'none',
           borderBottom: 'none',
-          borderRadius: showPortfolioMetrics ? '1rem 0 0 0' : '0.75rem 0 0 0', // Rounded top-left corner (2xl when expanded, xl when collapsed)
+          borderRadius: showPortfolioMetrics ? '1rem 0 0 1rem' : '0.75rem 0 0 0.75rem', // Rounded left corners (top and bottom)
           boxShadow: showPortfolioMetrics 
             ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
             : '-2px 0 8px rgba(0, 0, 0, 0.1)',
@@ -922,28 +922,15 @@ const PortfolioDashboard = () => {
 
         {/* Expanded Content Area */}
         {showPortfolioMetrics && (
-          <>
-            {/* Header with Centered Title (Clickable to Collapse) */}
-            <button
-              onClick={() => setShowPortfolioMetrics(false)}
-              className="px-5 py-3 bg-gradient-to-b from-gray-50/80 to-gray-100/50 dark:from-gray-800/80 dark:to-gray-700/50 border-b border-gray-200/40 dark:border-gray-700/40 backdrop-blur-sm hover:from-gray-100/90 hover:to-gray-200/60 dark:hover:from-gray-700/90 dark:hover:to-gray-600/60 transition-all duration-200 w-full text-left"
-            >
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
-                Portfolio Metrics
-              </h3>
-            </button>
-
-            {/* Scrollable Content */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '16px',
-              }}
-            >
-              <PortfolioMetricsContent />
-            </div>
-          </>
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '16px',
+            }}
+          >
+            <PortfolioMetricsContent />
+          </div>
         )}
       </div>
 
@@ -1897,6 +1884,8 @@ const PortfolioDashboard = () => {
           backgroundColor: '#ffffff',
           zIndex: showWorkflowStatus ? 1600 : -1,
           borderLeft: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
+          borderTop: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
+          borderBottom: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
           boxShadow: showWorkflowStatus 
             ? '-2px 0 8px rgba(0, 0, 0, 0.1)' 
             : 'none',
@@ -1904,8 +1893,9 @@ const PortfolioDashboard = () => {
           display: showWorkflowStatus ? 'flex' : 'none',
           flexDirection: 'column',
           overflow: 'hidden',
+          borderRadius: showWorkflowStatus ? '0.75rem 0 0 0' : '0', // Rounded top-left corner
         }}
-        className="dark:bg-gray-900 dark:border-gray-700"
+        className="dark:bg-gray-900/95 dark:border-gray-700 backdrop-blur-sm"
       >
         {showWorkflowStatus && (
           <>
@@ -1918,8 +1908,9 @@ const PortfolioDashboard = () => {
                 alignItems: 'center',
                 borderBottom: '1px solid #e5e7eb',
                 cursor: 'pointer',
+                background: 'linear-gradient(to bottom, rgba(249, 250, 251, 0.8), rgba(243, 244, 246, 0.5))',
               }}
-              className="dark:border-gray-700"
+              className="dark:border-gray-700 dark:bg-gradient-to-b dark:from-gray-800/80 dark:to-gray-700/50"
               onClick={() => setShowWorkflowStatus(false)}
             >
               <Title 

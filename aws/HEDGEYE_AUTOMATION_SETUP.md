@@ -19,23 +19,15 @@ Hedgeye Website → Lambda Scraper → DynamoDB → API Endpoint → Frontend Da
 4. **Frontend**: `SecuritiesList.jsx` - Displays LRR/HRR in securities table
 5. **EventBridge Schedule**: Runs daily at 5:00 PM EST
 
-## Scraping Methods
+## Scraping Method
 
-The scraper supports three methods (in order of preference):
+The local scraper uses **Playwright with cookies** extracted after manual login. This is the simplest and most reliable approach:
 
-1. **Firecrawl** (Recommended) - Handles JavaScript rendering and authentication automatically
-2. **Playwright** - Browser automation fallback
-3. **Requests/BeautifulSoup** - Simple HTTP requests (may not work for JS-heavy pages)
+1. **Manual Login**: Log into Hedgeye in Chrome each morning (~7 EST)
+2. **Extract Cookies**: Run `extract_hedgeye_cookies.py` to save cookies
+3. **Automated Scraping**: Scraper uses cookies to navigate and extract data
 
-### Firecrawl Setup (Recommended)
-
-Firecrawl is the preferred scraping method as it handles authentication and JavaScript rendering more reliably.
-
-1. **Get Firecrawl API Key**: Sign up at [firecrawl.dev](https://www.firecrawl.dev) and get your API key
-2. **Set Environment Variable**: Add `FIRECRAWL_API_KEY` to your Lambda function's environment variables
-3. **Install Package**: The `firecrawl-py` package is already in `requirements.txt`
-
-The scraper will automatically use Firecrawl if the API key is set, otherwise it falls back to Playwright or requests.
+**Note**: For Lambda/cloud deployment, you may need to adapt this approach or use a different authentication method.
 
 ## Quick Start
 
@@ -134,51 +126,16 @@ aws dynamodb get-item \
 
 ### Environment Variables
 
-Set these in Lambda function configuration:
+For local scraping, no environment variables are needed. Cookies are extracted manually and stored in `hedgeye_cookies.json`.
 
-**Required:**
-- `HEDGEYE_EMAIL`: Your Hedgeye login email
-- `HEDGEYE_PASSWORD`: Your Hedgeye login password
-
-**Optional (but recommended):**
-- `FIRECRAWL_API_KEY`: Your Firecrawl API key (get from [firecrawl.dev](https://www.firecrawl.dev))
-  - If set, the scraper will use Firecrawl (preferred method)
-  - If not set, falls back to Playwright or requests
-  - Can be set via environment variable or added to `hedgeye_config.json` as `firecrawl_api_key`
+For Lambda/cloud deployment, you would need to adapt the approach:
+- Store cookies in AWS Secrets Manager or Parameter Store
+- Update the scraper to load cookies from the secret store
+- Or use a different authentication method suitable for serverless
 
 **Defaults:**
-- `RISK_RANGE_TABLE`: `RiskRangeData`
-- `HEDGEYE_LOGIN_URL`: `https://app.hedgeye.com/users/sign_in`
+- `RISK_RANGE_TABLE`: `HedgeyeRiskRanges` (or `RiskRangeData` for legacy)
 - `HEDGEYE_RISK_RANGE_URL`: `https://app.hedgeye.com/feed_items/all?page=1&with_category=33-risk-range-signals`
-
-#### Setting Firecrawl API Key
-
-**Option 1: Environment Variable (Recommended for Lambda)**
-```bash
-# When deploying, set the environment variable:
-export FIRECRAWL_API_KEY="fc-your-api-key-here"
-./deploy.sh
-```
-
-**Option 2: Config File (For Local Testing)**
-Add to `aws/lambda/hedgeye_config.json`:
-```json
-{
-  "email": "your-email@example.com",
-  "password": "your-password",
-  "firecrawl_api_key": "fc-your-api-key-here"
-}
-```
-
-**Option 3: AWS Console**
-1. Go to Lambda → Functions → HedgeyeRiskRangeScraper
-2. Configuration → Environment variables
-3. Add: `FIRECRAWL_API_KEY` = `fc-your-api-key-here`
-4. Save
-
-#### Firecrawl Pricing
-
-Firecrawl charges per API call. Check [firecrawl.dev/pricing](https://www.firecrawl.dev/pricing) for current rates. The scraper makes 1-2 API calls per execution (one for login + navigation, one for scraping the data page).
 
 ### Ticker Mapping
 
@@ -202,10 +159,11 @@ TICKER_MAPPING = {
 
 ### Scraping Process
 
-1. **Login**: Lambda function logs into Hedgeye using credentials
-2. **Navigate**: Goes to Risk Range Signals page
-3. **Parse**: Extracts table data with INDEX, BUY TRADE (LRR), SELL TRADE (HRR)
-4. **Store**: Saves to DynamoDB with timestamp
+1. **Manual Login**: User logs into Hedgeye in Chrome each morning (~7 EST)
+2. **Extract Cookies**: Run `extract_hedgeye_cookies.py` to save cookies
+3. **Navigate**: Scraper uses cookies to navigate to Risk Range Signals page
+4. **Parse**: Extracts table data with INDEX, BUY TRADE (LRR), SELL TRADE (HRR)
+5. **Store**: Saves to DynamoDB with timestamp
 
 ### Data Storage
 
@@ -221,11 +179,11 @@ TICKER_MAPPING = {
 
 ## Troubleshooting
 
-### Login Fails
+### Cookies Expired
 
-- Check credentials in Lambda environment variables
-- Verify Hedgeye login URL hasn't changed
-- Check CloudWatch logs for specific error messages
+- Log into Hedgeye again in Chrome
+- Run `python3 extract_hedgeye_cookies.py` to refresh cookies
+- Re-run the scraper
 
 ### No Data Scraped
 

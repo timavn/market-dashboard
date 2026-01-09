@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Browser automation
+.playwright-chrome-profile/
+hedgeye_screenshot_*.png
+hedgeye_debug.html
+hedgeye_cookies.json
+hedgeye_risk_ranges.json
+hedgeye_risk_ranges_*.csv
+
+# Test files
+test_run_*.log
+test_undetected.py
+
+# Logs
+logs/*.log
+*.log

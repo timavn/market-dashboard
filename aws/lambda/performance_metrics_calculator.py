@@ -248,3 +248,4 @@ def store_metrics(metric_type, calculation_date, metrics):
         raise e
 
 
+

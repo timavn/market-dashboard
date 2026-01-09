@@ -191,15 +191,19 @@ const WorkflowStatus = () => {
       {/* Header */}
       <div
         style={{
-          padding: '16px',
+          padding: '12px 16px',
           borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          backgroundColor: isDark ? '#111827' : '#ffffff'
+          background: isDark 
+            ? 'linear-gradient(to bottom, rgba(31, 41, 55, 0.8), rgba(55, 65, 81, 0.5))' 
+            : 'linear-gradient(to bottom, rgba(249, 250, 251, 0.8), rgba(243, 244, 246, 0.5))',
+          backdropFilter: 'blur(4px)',
         }}
+        className="dark:border-gray-700"
       >
-        <Title style={{ fontSize: '18px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
+        <Title style={{ fontSize: '16px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
           Service Tracking & Status
         </Title>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -223,8 +227,10 @@ const WorkflowStatus = () => {
           display: 'flex',
           borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
           backgroundColor: isDark ? '#1f2937' : '#f9fafb',
-          overflowX: 'auto'
+          overflowX: 'auto',
+          backdropFilter: 'blur(4px)',
         }}
+        className="dark:border-gray-700"
       >
         {['status', 'data', 'apis', 'services', 'preview'].map((tab) => {
           const tabLabels = {

@@ -1,54 +1,18 @@
 [
   {
-    "name": "_clck",
-    "value": "",
-    "url": "https://hedgeye.com/",
-    "expires": 13405183924,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "visitor_id764243",
-    "value": "",
-    "url": "https://accounts.hedgeye.com/",
-    "expires": 13408208332,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "visitor_id764243-hash",
-    "value": "",
-    "url": "https://accounts.hedgeye.com/",
-    "expires": 13408208332,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
     "name": "__ar_v4",
     "value": "",
     "url": "https://accounts.hedgeye.com/",
-    "expires": 13405184336,
+    "expires": 13443934129,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
   },
   {
-    "name": "_ga_LDV26PQWEW",
+    "name": "_clck",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13408208341,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "_gac_UA-6305796-14",
-    "value": "",
-    "url": "https://hedgeye.com/",
-    "expires": 13381423961,
+    "expires": 13443934110,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -57,7 +21,7 @@
     "name": "_hjSessionUser_2978504",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13405184335,
+    "expires": 13443934129,
     "httpOnly": false,
     "secure": true,
     "sameSite": "Lax"
@@ -66,25 +30,34 @@
     "name": "_omappvp",
     "value": "",
     "url": "https://accounts.hedgeye.com/",
-    "expires": 13408208336,
+    "expires": 13446958129,
     "httpOnly": false,
     "secure": true,
     "sameSite": "Lax"
   },
   {
-    "name": "customer_type",
+    "name": "hedgeye_user_segmentation_dismissed",
+    "value": "",
+    "url": "https://app.hedgeye.com/",
+    "expires": 13413002927,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "osid",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13408208340,
+    "expires": 13427950129,
     "httpOnly": false,
     "secure": true,
     "sameSite": "Lax"
   },
   {
-    "name": "remember_user_token",
+    "name": "cf_clearance",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13405184339,
+    "expires": 13443934110,
     "httpOnly": true,
     "secure": true,
     "sameSite": "Lax"
@@ -93,7 +66,7 @@
     "name": "__adroll_fpc",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13405209215,
+    "expires": 13443955732,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -102,7 +75,25 @@
     "name": "__ar_v4",
     "value": "",
     "url": "https://app.hedgeye.com/",
-    "expires": 13405187615,
+    "expires": 13443934132,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_clsk",
+    "value": "",
+    "url": "https://hedgeye.com/",
+    "expires": 13412484532,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_fbp",
+    "value": "",
+    "url": "https://hedgeye.com/",
+    "expires": 13420174132,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -111,16 +102,16 @@
     "name": "_ga",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13408211621,
+    "expires": 13446958132,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
   },
   {
-    "name": "_gac_UA-6305796-1",
+    "name": "_ga_0GQ35E7XC0",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13381423961,
+    "expires": 13446958132,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -129,16 +120,7 @@
     "name": "_gcl_au",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13381423920,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "_gcl_aw",
-    "value": "",
-    "url": "https://hedgeye.com/",
-    "expires": 13381423962,
+    "expires": 13420174111,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -147,7 +129,7 @@
     "name": "_hedgeye_session",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13404667954,
+    "expires": 13443929269,
     "httpOnly": true,
     "secure": true,
     "sameSite": "Lax"
@@ -156,43 +138,61 @@
     "name": "_omappvp",
     "value": "",
     "url": "https://app.hedgeye.com/",
-    "expires": 13408211615,
+    "expires": 13446958132,
     "httpOnly": false,
     "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_uetsid",
+    "value": "",
+    "url": "https://hedgeye.com/",
+    "expires": 13412484532,
+    "httpOnly": false,
+    "secure": false,
     "sameSite": "Lax"
   },
   {
     "name": "_uetvid",
     "value": "",
     "url": "https://hedgeye.com/",
-    "expires": 13407347615,
+    "expires": 13446094132,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
   },
   {
-    "name": "omSeen-jxp1ldkw2bzlegtdgucc",
+    "name": "customer_type",
     "value": "",
-    "url": "https://app.hedgeye.com/",
-    "expires": 13376243622,
+    "url": "https://hedgeye.com/",
+    "expires": 13446958132,
     "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "remember_user_token",
+    "value": "",
+    "url": "https://hedgeye.com/",
+    "expires": 13443934132,
+    "httpOnly": true,
     "secure": true,
     "sameSite": "Lax"
   },
   {
     "name": "visitor_id764243",
     "value": "",
-    "url": "https://app.hedgeye.com/",
-    "expires": 13408211623,
+    "url": "https://accounts.hedgeye.com/",
+    "expires": 13443934130,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
   },
   {
-    "name": "visitor_id764243-hash",
+    "name": "visitor_id764243",
     "value": "",
     "url": "https://app.hedgeye.com/",
-    "expires": 13408211623,
+    "expires": 13443934133,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
@@ -201,7 +201,7 @@
     "name": "visitor_id764243",
     "value": "",
     "url": "https://info.hedgeye.com/",
-    "expires": 13408211624,
+    "expires": 13443934133,
     "httpOnly": false,
     "secure": true,
     "sameSite": "Lax"
@@ -209,46 +209,28 @@
   {
     "name": "visitor_id764243-hash",
     "value": "",
-    "url": "https://info.hedgeye.com/",
-    "expires": 13408211624,
-    "httpOnly": false,
-    "secure": true,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "_fbp",
-    "value": "",
-    "url": "https://hedgeye.com/",
-    "expires": 13381428596,
+    "url": "https://accounts.hedgeye.com/",
+    "expires": 13443934130,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"
   },
   {
-    "name": "om-jxp1ldkw2bzlegtdgucc",
+    "name": "visitor_id764243-hash",
     "value": "",
     "url": "https://app.hedgeye.com/",
-    "expires": 13376267510,
+    "expires": 13443934133,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "visitor_id764243-hash",
+    "value": "",
+    "url": "https://info.hedgeye.com/",
+    "expires": 13443934133,
     "httpOnly": false,
     "secure": true,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "_ga_0GQ35E7XC0",
-    "value": "",
-    "url": "https://hedgeye.com/",
-    "expires": 13408489807,
-    "httpOnly": false,
-    "secure": false,
-    "sameSite": "Lax"
-  },
-  {
-    "name": "_ga_VJNZ06HSW8",
-    "value": "",
-    "url": "https://hedgeye.com/",
-    "expires": 13408489807,
-    "httpOnly": false,
-    "secure": false,
     "sameSite": "Lax"
   }
 ]

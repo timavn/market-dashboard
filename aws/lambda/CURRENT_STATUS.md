@@ -111,3 +111,4 @@
 - Data extraction requires Chrome profile to bypass Cloudflare
 - Preview tab UI is complete and functional
 
+

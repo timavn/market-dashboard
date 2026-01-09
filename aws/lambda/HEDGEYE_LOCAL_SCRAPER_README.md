@@ -2,7 +2,7 @@
 
 ## Overview
 
-This scraper uses Playwright with persistent browser sessions to pull Risk Range data from Hedgeye after you login manually once.
+This scraper uses Playwright with cookies extracted after manual login to pull Risk Range data from Hedgeye. You manually log in each morning (~7 EST), extract cookies, and the scraper handles the rest.
 
 ## Prerequisites
 
@@ -14,25 +14,24 @@ This scraper uses Playwright with persistent browser sessions to pull Risk Range
 ## Files
 
 - `hedgeye_local_scraper.py` - Main scraper script
-- `hedgeye_config.json` - Your Hedgeye credentials (already configured)
-- `hedgeye_session.json` - Saved browser session (created after login)
+- `extract_hedgeye_cookies.py` - Cookie extraction script (run after manual login)
+- `hedgeye_cookies.json` - Extracted cookies (created after running extract script)
 - `hedgeye_risk_ranges.json` - Latest scraped data (local backup)
 - `hedgeye_debug.html` - Debug HTML from last scrape
 
 ## Usage
 
-### Step 1: Login Manually (Easiest Method)
+### Morning Routine (Manual - ~7 EST)
 
-**Just log into Hedgeye in your regular Chrome browser** (solve CAPTCHA manually), then:
+1. **Log into Hedgeye manually in Chrome** (solve CAPTCHA if needed)
+2. **Extract cookies**:
+   ```bash
+   cd /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda
+   python3 extract_hedgeye_cookies.py
+   ```
+3. Done! Cookies are saved for the day.
 
-```bash
-cd /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda
-python3 extract_hedgeye_cookies.py
-```
-
-This extracts cookies from Chrome and saves them. Much simpler than automated login!
-
-### Step 2: Run Scrape
+### Automated Scraping
 
 ```bash
 # Scrape and store to DynamoDB
@@ -40,6 +39,9 @@ python3 hedgeye_local_scraper.py --scrape
 
 # Scrape to local file only
 python3 hedgeye_local_scraper.py --scrape --no-dynamodb
+
+# Scrape with visible browser (for debugging)
+python3 hedgeye_local_scraper.py --scrape --headless=false
 ```
 
 ### Daily Automated Runs
@@ -74,11 +76,11 @@ crontab -e
 15 17 * * 1-5 cd /Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda && python3 hedgeye_local_scraper.py --scrape >> /tmp/hedgeye_scrape.log 2>&1
 ```
 
-## Session Expiration
+## Cookie Expiration
 
-Hedgeye sessions typically last 1-4 weeks. When expired:
-1. Run `--check` to verify
-2. Run `--login` to re-authenticate
+Hedgeye cookies typically last 1-4 weeks. When expired:
+1. Log into Hedgeye again in Chrome
+2. Run `python3 extract_hedgeye_cookies.py` to refresh cookies
 3. Continue with `--scrape`
 
 ## Data Storage
@@ -90,31 +92,30 @@ Hedgeye sessions typically last 1-4 weeks. When expired:
 
 ## Troubleshooting
 
-**"Session expired"**: Run `--login` again
+**"No cookies found"**: Log into Hedgeye in Chrome, then run `python3 extract_hedgeye_cookies.py`
+
+**"Redirected to login page"**: Cookies expired - log in again and re-extract cookies
 
 **"No data scraped"**: Check `hedgeye_debug.html` for page content
 
-**Timeout errors**: Session may be expired, or Hedgeye may be slow
+**Timeout errors**: Hedgeye may be slow, or cookies may have expired
 
 **DynamoDB errors**: Check AWS credentials with `aws sts get-caller-identity`
 
 ## Command Reference
 
 ```bash
-# Login and save session
-python3 hedgeye_local_scraper.py --login
-
-# Login with longer wait
-python3 hedgeye_local_scraper.py --login --wait 180
-
-# Check session validity
-python3 hedgeye_local_scraper.py --check
+# Extract cookies (after manual login in Chrome)
+python3 extract_hedgeye_cookies.py
 
 # Scrape (with DynamoDB)
 python3 hedgeye_local_scraper.py --scrape
 
 # Scrape (local only)
 python3 hedgeye_local_scraper.py --scrape --no-dynamodb
+
+# Scrape with visible browser
+python3 hedgeye_local_scraper.py --scrape --headless=false
 
 # Show help
 python3 hedgeye_local_scraper.py --help

@@ -15,15 +15,32 @@ from pathlib import Path
 import sqlite3
 from datetime import datetime
 
-# Chrome cookie database location
-CHROME_COOKIE_DB = Path.home() / "Library/Application Support/Google/Chrome/Default/Cookies"
+# Chrome cookie database locations (try multiple profiles)
+def find_chrome_cookie_db():
+    """Find Chrome cookie database - try Default first, then Profile 1, Profile 2, etc."""
+    chrome_dir = Path.home() / "Library/Application Support/Google/Chrome"
+    
+    # Try Default first
+    default_db = chrome_dir / "Default/Cookies"
+    if default_db.exists():
+        return default_db
+    
+    # Try Profile 1, Profile 2, etc. (most recent first)
+    profile_dirs = sorted(chrome_dir.glob("Profile */Cookies"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if profile_dirs:
+        return profile_dirs[0]
+    
+    return None
 
 def extract_chrome_cookies():
     """Extract Hedgeye cookies from Chrome's cookie database"""
     
-    if not CHROME_COOKIE_DB.exists():
-        print(f"✗ Chrome cookie database not found at: {CHROME_COOKIE_DB}")
+    CHROME_COOKIE_DB = find_chrome_cookie_db()
+    
+    if not CHROME_COOKIE_DB:
+        print("✗ Chrome cookie database not found")
         print("  Make sure Chrome is installed and you've logged into Hedgeye")
+        print("  Tried: Default, Profile 1, Profile 2, etc.")
         return None
     
     print(f"Reading cookies from: {CHROME_COOKIE_DB}")
