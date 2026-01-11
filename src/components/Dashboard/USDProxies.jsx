@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Metric, Text, Grid, Badge, Flex } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis } from 'recharts';
@@ -148,8 +148,8 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
     fetchHistoricalData();
   }, [currencyPairs]);
 
-  // Filter historical data when timeframes change (local filtering)
-  useEffect(() => {
+  // Memoize filtered historical data to avoid recalculating on every render
+  const filteredHistoricalData = useMemo(() => {
     const filteredDataMap = {};
     
     Object.keys(fullHistoryData).forEach(key => {
@@ -162,8 +162,13 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
         filteredDataMap[key] = fullData.filter(item => item.dateObj >= cutoffDate);
     });
     
-    setHistoricalData(filteredDataMap);
+    return filteredDataMap;
   }, [fullHistoryData, timeframes]);
+
+  // Update historicalData state when memoized data changes
+  useEffect(() => {
+    setHistoricalData(filteredHistoricalData);
+  }, [filteredHistoricalData]);
 
   const handleTimeframeChange = (pair, newTimeframe) => {
     setTimeframes(prev => ({

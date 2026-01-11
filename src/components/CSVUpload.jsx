@@ -28,6 +28,9 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
     
     const files = e.dataTransfer.files;
     if (files.length > 0) {
+      // Show immediate feedback
+      setIsUploading(true);
+      setUploadStatus({ type: 'info', message: 'Preparing upload...' });
       checkDateAndUpload(files[0]);
     }
   };
@@ -35,6 +38,9 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
   const handleFileSelect = (e) => {
     const files = e.target.files;
     if (files.length > 0) {
+      // Show immediate feedback
+      setIsUploading(true);
+      setUploadStatus({ type: 'info', message: 'Preparing upload...' });
       checkDateAndUpload(files[0]);
     }
   };
@@ -65,49 +71,78 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
   };
 
   const checkDateAndUpload = async (file) => {
-    try {
-      const csvDate = extractDateFromFilename(file.name);
+    const csvDate = extractDateFromFilename(file.name);
+    let shouldProceed = true;
 
-      if (csvDate) {
+    // Only check date if we can extract it from filename
+    if (csvDate) {
+      try {
         const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-        const response = await fetch(`${backendUrl}/api/portfolio`);
-        const portfolioData = await response.json();
+        
+        // Add timeout to date check (2 seconds max)
+        const dateCheckPromise = fetch(`${backendUrl}/api/portfolio`);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Date check timeout')), 2000)
+        );
 
-        const lastUpdatedStr = portfolioData.lastUpdated;
-        if (lastUpdatedStr && lastUpdatedStr !== 'Schwab Integration Pending') {
-          const dateMatch = lastUpdatedStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-          if (dateMatch) {
-            const existingDate = new Date(dateMatch[3], parseInt(dateMatch[1]) - 1, dateMatch[2]);
+        try {
+          const response = await Promise.race([dateCheckPromise, timeoutPromise]);
+          const portfolioData = await response.json();
 
-            if (csvDate < existingDate) {
-              setWarningData({
-                csvDate: csvDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-                existingDate: existingDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-                file: file
-              });
-              setShowWarning(true);
-              setPendingFile(file);
-              return;
+          const lastUpdatedStr = portfolioData.lastUpdated;
+          if (lastUpdatedStr && lastUpdatedStr !== 'Schwab Integration Pending') {
+            const dateMatch = lastUpdatedStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+            if (dateMatch) {
+              const existingDate = new Date(dateMatch[3], parseInt(dateMatch[1]) - 1, dateMatch[2]);
+
+              if (csvDate < existingDate) {
+                // Show warning dialog
+                setIsUploading(false); // Pause upload state for warning
+                setWarningData({
+                  csvDate: csvDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+                  existingDate: existingDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+                  file: file
+                });
+                setShowWarning(true);
+                setPendingFile(file);
+                setUploadStatus(null);
+                return; // Don't proceed until user confirms
+              }
             }
           }
+        } catch (timeoutError) {
+          // Date check timed out or failed - proceed with upload anyway
+          console.warn('Date check timeout or failed, proceeding with upload:', timeoutError);
+          // Continue to upload
         }
+      } catch (error) {
+        // Date check failed - proceed with upload anyway
+        console.warn('Date check failed, proceeding with upload:', error);
+        // Continue to upload
       }
+    }
 
-      await performUpload(file);
-
-    } catch (error) {
-      console.warn('Date check failed, proceeding with upload:', error);
+    // Proceed with upload
+    if (shouldProceed) {
       await performUpload(file);
     }
   };
 
   const performUpload = async (file) => {
     setIsUploading(true);
-    setUploadStatus(null);
-
+    
     try {
+      // Validate CSV
       PresignedUploadService.validateCSV(file);
+      
+      // Update status: Uploading to S3
+      setUploadStatus({ type: 'info', message: 'Uploading to S3...' });
+      
+      // Upload to S3
       const result = await PresignedUploadService.uploadCSV(file);
+      
+      // Update status: Processing (Lambda is processing)
+      setUploadStatus({ type: 'info', message: 'Processing...' });
       
       setLastUploadTime(new Date().toLocaleTimeString('en-US', {
         hour: 'numeric',
@@ -115,9 +150,10 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
         hour12: true
       }));
 
+      // Update status: Complete
       setUploadStatus({
         type: 'success',
-        message: `Portfolio updated successfully!`
+        message: `Portfolio updated successfully! Processing in background...`
       });
 
       if (onUploadSuccess) {
@@ -128,13 +164,13 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
         fileInputRef.current.value = '';
       }
 
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('portfolioRefresh'));
-      }, 5000);
+      // Trigger refresh immediately (no 5-second delay)
+      window.dispatchEvent(new CustomEvent('portfolioRefresh'));
 
+      // Clear status after 5 seconds
       setTimeout(() => {
         setUploadStatus(null);
-      }, 3000);
+      }, 5000);
 
     } catch (error) {
       console.error('Upload error:', error);
@@ -176,7 +212,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
         {isUploading ? (
           <div className="flex items-center justify-center py-4">
             <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent mr-3"></div>
-            <Text>Uploading...</Text>
+            <Text>{uploadStatus?.message || 'Uploading...'}</Text>
           </div>
         ) : (
           <div className="text-center py-4">
@@ -192,9 +228,15 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
 
       {/* Status Message */}
       {uploadStatus && (
-        <Card className={`mt-3 rounded-lg ${uploadStatus.type === 'success' ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+        <Card className={`mt-3 rounded-lg ${
+          uploadStatus.type === 'success' 
+            ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' 
+            : uploadStatus.type === 'error'
+            ? 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'
+            : 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800'
+        }`}>
           <Badge 
-            color={uploadStatus.type === 'success' ? 'emerald' : 'red'}
+            color={uploadStatus.type === 'success' ? 'emerald' : uploadStatus.type === 'error' ? 'red' : 'blue'}
             size="lg"
           >
             {uploadStatus.message}

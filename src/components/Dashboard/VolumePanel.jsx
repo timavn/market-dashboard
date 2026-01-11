@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Text, Flex, Badge } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
@@ -328,9 +328,9 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     fetchData();
   }, [selectedTicker]); // Only run when ticker changes, not date range
 
-  // Filter chart data when date range or full history changes (local filtering)
-  useEffect(() => {
-    if (!fullHistory || fullHistory.length === 0) return;
+  // Memoize filtered chart data to avoid recalculating on every render
+  const memoizedChartData = useMemo(() => {
+    if (!fullHistory || fullHistory.length === 0) return [];
 
     // Add risk ranges to data points for chart display
     const dataWithRiskRanges = fullHistory.map(item => {
@@ -383,13 +383,19 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     }
     
     console.log(`[SecuritiesPanel] Filtered to ${filteredData.length} data points for ${selectedDateRange} display`);
-    setChartData(filteredData);
+    return filteredData;
+  }, [selectedDateRange, fullHistory, riskRanges]);
+
+  // Update chartData state when memoized data changes
+  useEffect(() => {
+    setChartData(memoizedChartData);
     
     // Re-calculate metrics if risk ranges changed (since metrics depends on risk ranges)
     // Note: Usually metrics calculated on full history, but risk ranges are part of state
-    calculateMetrics(fullHistory.map(item => ({...item, dateValue: item.dateObj})), riskRanges);
-
-  }, [selectedDateRange, fullHistory, riskRanges]);
+    if (fullHistory && fullHistory.length > 0) {
+      calculateMetrics(fullHistory.map(item => ({...item, dateValue: item.dateObj})), riskRanges);
+    }
+  }, [memoizedChartData, fullHistory, riskRanges]);
 
   // Generate mock chart data
   const generateMockChartData = (days) => {

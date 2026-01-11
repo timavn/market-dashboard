@@ -168,7 +168,7 @@ const calculateAssetClassAllocationFromUniverse = (holdings) => {
   });
 };
 
-const PortfolioBreakdown = ({ portfolioData }) => {
+const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
   const holdings = portfolioData?.holdings || [];
   const totalValue = portfolioData?.summary?.totalValue || 0;
@@ -478,12 +478,26 @@ const PortfolioBreakdown = ({ portfolioData }) => {
     return { innerData: allAllocation, outerData: allAllocation };
   }, [holdings]);
 
-  // Early return after all hooks
-  if (!portfolioData) {
+  // Early return after all hooks - check for actual data, not just portfolioData existence
+  // The API returns an object with empty values when no data exists, so we need to check for actual holdings
+  // Don't show "no data" message if we're actively loading/polling
+  if (!isLoading && (!portfolioData || !holdings || holdings.length === 0 || totalValue === 0)) {
     return (
       <div style={{ padding: '32px', textAlign: 'center' }}>
         <Text className="text-gray-500 dark:text-gray-400">
           No portfolio data available. Please upload a Schwab CSV to view portfolio breakdown.
+        </Text>
+      </div>
+    );
+  }
+  
+  // Show loading state if we're actively fetching
+  if (isLoading && (!holdings || holdings.length === 0)) {
+    return (
+      <div style={{ padding: '32px', textAlign: 'center' }}>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+        <Text className="text-gray-500 dark:text-gray-400">
+          Loading portfolio data...
         </Text>
       </div>
     );

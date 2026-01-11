@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Card, Text, Title } from '@tremor/react';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
@@ -23,7 +23,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   const riskRangesRef = useRef({}); // Ref to track current risk ranges for stale closure prevention
 
   // Asset class color mapping - using more vibrant, distinct colors
-  const getAssetClassColor = (assetClass) => {
+  const getAssetClassColor = useCallback((assetClass) => {
     const colors = {
       fixedIncome: 'blue',      // Blue for bonds/fixed income
       equity: 'emerald',         // Green for stocks
@@ -32,10 +32,10 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
       crypto: 'yellow'           // Yellow for crypto
     };
     return colors[assetClass] || 'gray';
-  };
+  }, []);
 
   // Get background color for row highlighting
-  const getAssetClassBgColor = (assetClass) => {
+  const getAssetClassBgColor = useCallback((assetClass) => {
     const bgColors = {
       fixedIncome: 'bg-blue-50 dark:bg-blue-900/20',
       equity: 'bg-emerald-50 dark:bg-emerald-900/20',
@@ -44,9 +44,9 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
       crypto: 'bg-yellow-50 dark:bg-yellow-900/20'
     };
     return bgColors[assetClass] || 'bg-gray-50 dark:bg-gray-900/20';
-  };
+  }, []);
 
-  const getAssetClassName = (assetClass) => {
+  const getAssetClassName = useCallback((assetClass) => {
     const names = {
       fixedIncome: 'Fixed Income',
       equity: 'Equity',
@@ -55,10 +55,10 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
       crypto: 'Crypto'
     };
     return names[assetClass] || assetClass;
-  };
+  }, []);
 
   // Format price based on asset type
-  const formatPrice = (ticker, price, assetClass) => {
+  const formatPrice = useCallback((ticker, price, assetClass) => {
     // Handle undefined/null cases
     if (price === undefined || price === null) {
       return '--';
@@ -93,7 +93,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     
     // For other assets, show as number without $ symbol
     return `${priceNum.toFixed(2)}`;
-  };
+  }, []);
 
   // Check if timestamp is more than 1 market day old
   // Market days are weekdays, and we consider >26 hours as more than 1 market day

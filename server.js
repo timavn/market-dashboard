@@ -67,6 +67,14 @@ app.use(express.json());
 const quotesCache = new Map();
 const CACHE_TTL = parseInt(process.env.QUOTES_CACHE_TTL || '8000'); // 8 seconds default
 
+// Cache for historical data (1 hour TTL - changes daily)
+const historicalCache = new Map();
+const HISTORICAL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+// Cache for risk ranges (1 hour TTL - changes daily)
+const riskRangesCache = new Map();
+const RISK_RANGES_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
 // FRED Series IDs for Treasury Yields
 const FRED_SERIES = {
   'UST30Y': 'DGS30',
@@ -493,21 +501,29 @@ const fetchVIXData = async () => {
 
 // Helper to batch process with delays (rate limiting)
 async function batchProcess(items, batchSize, delayMs, processor) {
+  const batchStartTime = Date.now();
   const results = [];
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
-    console.log(`[API] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(items.length / batchSize)} (${batch.length} symbols)`);
+    const batchNum = Math.floor(i / batchSize) + 1;
+    const totalBatches = Math.ceil(items.length / batchSize);
+    console.log(`[API] Processing batch ${batchNum}/${totalBatches} (${batch.length} symbols)`);
     
     // Process batch with small delay between each item to avoid rate limiting
     const batchResults = [];
+    const itemStartTime = Date.now();
     for (const item of batch) {
+      const itemStart = Date.now();
       const result = await processor(item);
+      const itemTime = Date.now() - itemStart;
       batchResults.push(result);
       // Small delay between requests (100ms to avoid rate limiting)
       if (batch.indexOf(item) < batch.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
+    const batchTime = Date.now() - itemStartTime;
+    console.log(`[API] Batch ${batchNum} completed in ${batchTime}ms (avg ${(batchTime / batch.length).toFixed(0)}ms per item)`);
     results.push(...batchResults);
     
     // Add delay between batches to avoid rate limiting (except for last batch)
@@ -515,11 +531,14 @@ async function batchProcess(items, batchSize, delayMs, processor) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
+  const totalTime = Date.now() - batchStartTime;
+  console.log(`[API] Batch processing completed: ${items.length} items in ${totalTime}ms (avg ${(totalTime / items.length).toFixed(0)}ms per item)`);
   return results;
 }
 
 // API Routes
 app.get('/api/quotes', async (req, res) => {
+  const startTime = Date.now();
   try {
     const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ', 'AAPL'];
     console.log(`[API] /api/quotes called with ${symbols.length} symbols:`, symbols.slice(0, 5), '...');
@@ -531,6 +550,7 @@ app.get('/api/quotes', async (req, res) => {
     const BATCH_SIZE = 5; // Reduced from 10 to avoid rate limiting
     const DELAY_MS = 200; // Increased from 100ms to 200ms between batches
     
+    const fetchStartTime = Date.now();
     const results = await batchProcess(
       symbols.map(s => s.trim()),
       BATCH_SIZE,
@@ -544,6 +564,8 @@ app.get('/api/quotes', async (req, res) => {
         }
       }
     );
+    const fetchTime = Date.now() - fetchStartTime;
+    console.log(`[API] Quote fetching completed in ${fetchTime}ms`);
     
     // Map results back to symbols
     let successCount = 0;
@@ -561,10 +583,12 @@ app.get('/api/quotes', async (req, res) => {
       }
     });
     
-    console.log(`[API] Returning ${successCount} quotes out of ${symbols.length} requested (${failCount} failed)`);
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/quotes completed: ${successCount} quotes out of ${symbols.length} requested (${failCount} failed) in ${totalTime}ms`);
     res.json(quotes);
   } catch (error) {
-    console.error('[API] Error in /api/quotes:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/quotes after ${totalTime}ms:`, error);
     console.error('[API] Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to fetch quotes', details: error.message });
   }
@@ -572,13 +596,27 @@ app.get('/api/quotes', async (req, res) => {
 
 // Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
 app.get('/api/risk-ranges', async (req, res) => {
+  const startTime = Date.now();
   try {
     const { tickers } = req.query;
     const tickerList = tickers ? tickers.split(',').map(t => t.trim().toUpperCase()) : null;
     
+    // Create cache key
+    const cacheKey = tickerList ? tickerList.sort().join(',') : 'all';
+    const now = Date.now();
+    
+    // Check cache
+    const cached = riskRangesCache.get(cacheKey);
+    if (cached && (now - cached.timestamp) < RISK_RANGES_CACHE_TTL) {
+      const totalTime = Date.now() - startTime;
+      console.log(`[API] /api/risk-ranges cache hit for ${cacheKey} (${totalTime}ms)`);
+      return res.json(cached.data);
+    }
+    
     console.log(`[API] /api/risk-ranges called${tickerList ? ` for ${tickerList.length} tickers` : ' for all tickers'}`);
     
     // Get latest snapshot from DynamoDB
+    const dbStartTime = Date.now();
     const params = {
       TableName: 'RiskRangeData',
       Key: {
@@ -588,9 +626,12 @@ app.get('/api/risk-ranges', async (req, res) => {
     };
     
     const result = await dynamodb.get(params).promise();
+    const dbTime = Date.now() - dbStartTime;
+    console.log(`[API] DynamoDB get completed in ${dbTime}ms`);
     
     if (!result.Item || !result.Item.data) {
-      console.log('[API] No risk range data found in DynamoDB');
+      const totalTime = Date.now() - startTime;
+      console.log(`[API] No risk range data found in DynamoDB (${totalTime}ms)`);
       return res.json({});
     }
     
@@ -605,17 +646,26 @@ app.get('/api/risk-ranges', async (req, res) => {
         )
       : allData;
     
-    console.log(`[API] Returning risk ranges for ${Object.keys(riskRanges).length} securities`);
+    // Store in cache
+    riskRangesCache.set(cacheKey, {
+      data: riskRanges,
+      timestamp: now
+    });
+    
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] Returning risk ranges for ${Object.keys(riskRanges).length} securities (total: ${totalTime}ms, DB: ${dbTime}ms)`);
     res.json(riskRanges);
     
   } catch (error) {
-    console.error('[API] Error in /api/risk-ranges:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/risk-ranges after ${totalTime}ms:`, error);
     res.status(500).json({ error: 'Failed to fetch risk ranges', details: error.message });
   }
 });
 
 // Workflow Status endpoint - returns status of automated workflows
 app.get('/api/workflow-status', async (req, res) => {
+  const startTime = Date.now();
   try {
     console.log('[API] /api/workflow-status called');
     
@@ -637,6 +687,7 @@ app.get('/api/workflow-status', async (req, res) => {
 
     // Get latest Hedgeye snapshot
     try {
+      const hedgeyeStartTime = Date.now();
       const snapshotParams = {
         TableName: 'HedgeyeDailySnapshot',
         Key: {
@@ -646,6 +697,8 @@ app.get('/api/workflow-status', async (req, res) => {
       };
 
       const snapshotResult = await dynamodb.get(snapshotParams).promise();
+      const hedgeyeGetTime = Date.now() - hedgeyeStartTime;
+      console.log(`[API] Hedgeye get completed in ${hedgeyeGetTime}ms`);
       
       if (snapshotResult.Item) {
         workflowStatus.hedgeye = {
@@ -655,28 +708,68 @@ app.get('/api/workflow-status', async (req, res) => {
           nextRun: '8:00 AM EST (market days)'
         };
       } else {
-        // Try to find most recent snapshot
-        const scanParams = {
-          TableName: 'HedgeyeDailySnapshot',
-          FilterExpression: 'snapshotType = :type',
-          ExpressionAttributeValues: {
-            ':type': 'risk-ranges'
-          },
-          Limit: 10 // Get more items to find the latest
-        };
+        // Try to find most recent snapshot by querying recent dates (more efficient than scan)
+        const queryStartTime = Date.now();
+        let latest = null;
         
-        // Note: Scan is not ideal for large tables, but works for this use case
-        // In production, consider using a GSI with date as sort key
-        const recentSnapshot = await dynamodb.scan(scanParams).promise();
-        
-        if (recentSnapshot.Items && recentSnapshot.Items.length > 0) {
-          // Sort by date descending to get most recent
-          const latest = recentSnapshot.Items.sort((a, b) => {
-            const dateA = new Date(a.date || 0);
-            const dateB = new Date(b.date || 0);
-            return dateB - dateA;
-          })[0];
+        // Try querying recent dates (last 7 days) in descending order
+        for (let i = 0; i < 7; i++) {
+          const date = new Date();
+          date.setDate(date.getDate() - i);
+          const dateStr = date.toISOString().split('T')[0];
           
+          try {
+            const queryParams = {
+              TableName: 'HedgeyeDailySnapshot',
+              KeyConditionExpression: 'date = :date AND snapshotType = :type',
+              ExpressionAttributeValues: {
+                ':date': dateStr,
+                ':type': 'risk-ranges'
+              }
+            };
+            
+            const queryResult = await dynamodb.query(queryParams).promise();
+            if (queryResult.Items && queryResult.Items.length > 0) {
+              latest = queryResult.Items[0];
+              break;
+            }
+          } catch (err) {
+            // Continue to next date
+            continue;
+          }
+        }
+        
+        // Fallback to scan only if query didn't find anything
+        if (!latest) {
+          const scanStartTime = Date.now();
+          const scanParams = {
+            TableName: 'HedgeyeDailySnapshot',
+            FilterExpression: 'snapshotType = :type',
+            ExpressionAttributeValues: {
+              ':type': 'risk-ranges'
+            },
+            Limit: 10 // Get more items to find the latest
+          };
+          
+          // Note: Scan is not ideal for large tables, but works as fallback
+          const recentSnapshot = await dynamodb.scan(scanParams).promise();
+          const scanTime = Date.now() - scanStartTime;
+          console.log(`[API] Hedgeye scan fallback completed in ${scanTime}ms`);
+          
+          if (recentSnapshot.Items && recentSnapshot.Items.length > 0) {
+            // Sort by date descending to get most recent
+            latest = recentSnapshot.Items.sort((a, b) => {
+              const dateA = new Date(a.date || 0);
+              const dateB = new Date(b.date || 0);
+              return dateB - dateA;
+            })[0];
+          }
+        }
+        
+        const queryTime = Date.now() - queryStartTime;
+        console.log(`[API] Hedgeye query/scan completed in ${queryTime}ms`);
+        
+        if (latest) {
           const latestDate = latest.date;
           const isToday = latestDate === today;
           const isRecent = latestDate && new Date(latestDate) >= new Date(new Date(today).getTime() - 2 * 24 * 60 * 60 * 1000); // Within 2 days
@@ -696,12 +789,15 @@ app.get('/api/workflow-status', async (req, res) => {
 
     // Get latest portfolio snapshot (CSV upload)
     try {
+      const portfolioStartTime = Date.now();
       const portfolioParams = {
         TableName: 'PortfolioSnapshots',
         Limit: 10 // Get more items to find the latest
       };
 
       const portfolioResult = await dynamodb.scan(portfolioParams).promise();
+      const portfolioTime = Date.now() - portfolioStartTime;
+      console.log(`[API] Portfolio scan completed in ${portfolioTime}ms`);
       
       if (portfolioResult.Items && portfolioResult.Items.length > 0) {
         // Sort by snapshotDate descending to get most recent
@@ -726,11 +822,13 @@ app.get('/api/workflow-status', async (req, res) => {
       workflowStatus.csvUpload.status = 'error';
     }
 
-    console.log('[API] Returning workflow status');
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/workflow-status completed in ${totalTime}ms`);
     res.json(workflowStatus);
 
   } catch (error) {
-    console.error('[API] Error in /api/workflow-status:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/workflow-status after ${totalTime}ms:`, error);
     res.status(500).json({ error: 'Failed to fetch workflow status', details: error.message });
   }
 });
@@ -830,6 +928,7 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
 
 // Macro Indicators endpoint - fetches top row indicators
 app.get('/api/macro-indicators', async (req, res) => {
+  const startTime = Date.now();
   try {
     const macroIndicators = ['DXY', 'GLD', 'UST10Y', 'CRB', 'WTI', 'SPY', 'QQQ', 'IWM'];
     console.log(`[API] /api/macro-indicators called for ${macroIndicators.length} indicators`);
@@ -840,6 +939,7 @@ app.get('/api/macro-indicators', async (req, res) => {
     const BATCH_SIZE = 5;
     const DELAY_MS = 200;
     
+    const fetchStartTime = Date.now();
     const results = await batchProcess(
       macroIndicators,
       BATCH_SIZE,
@@ -853,6 +953,8 @@ app.get('/api/macro-indicators', async (req, res) => {
         }
       }
     );
+    const fetchTime = Date.now() - fetchStartTime;
+    console.log(`[API] Macro indicators fetching completed in ${fetchTime}ms`);
     
     // Map results back to indicators
     let successCount = 0;
@@ -876,10 +978,12 @@ app.get('/api/macro-indicators', async (req, res) => {
       }
     });
     
-    console.log(`[API] Returning ${successCount} macro indicators out of ${macroIndicators.length} requested`);
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/macro-indicators completed: ${successCount} indicators out of ${macroIndicators.length} requested in ${totalTime}ms`);
     res.json(indicators);
   } catch (error) {
-    console.error('[API] Error in /api/macro-indicators:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/macro-indicators after ${totalTime}ms:`, error);
     res.status(500).json({ error: 'Failed to fetch macro indicators' });
   }
 });
@@ -992,14 +1096,18 @@ function getValueMonthsAgo(observations, months) {
 
 // Liquidity Indicators endpoint
 app.get('/api/liquidity-indicators', async (req, res) => {
+  const startTime = Date.now();
   try {
     console.log('[API] /api/liquidity-indicators called');
     
     // Fetch MZM (Money Zero Maturity) and GDP data
+    const fredStartTime = Date.now();
     const [mzmData, gdpData] = await Promise.all([
       fetchFredHistoricalData('MZM', 7), // Need 7 months for 6m calculation
       fetchFredHistoricalData('GDP', 7)  // GDP is quarterly, but we'll use last available
     ]);
+    const fredTime = Date.now() - fredStartTime;
+    console.log(`[API] FRED data fetching completed in ${fredTime}ms`);
     
     if (!mzmData || mzmData.length === 0) {
       return res.status(500).json({ error: 'Failed to fetch MZM data from FRED' });
@@ -1084,25 +1192,31 @@ app.get('/api/liquidity-indicators', async (req, res) => {
       timestamp: new Date().toISOString()
     };
     
-    console.log('[API] Returning liquidity indicators:', JSON.stringify(result, null, 2));
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/liquidity-indicators completed in ${totalTime}ms (FRED: ${fredTime}ms)`);
     res.json(result);
   } catch (error) {
-    console.error('[API] Error in /api/liquidity-indicators:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/liquidity-indicators after ${totalTime}ms:`, error);
     res.status(500).json({ error: 'Failed to fetch liquidity indicators', details: error.message });
   }
 });
 
 // Signal Strength Rankings Endpoint
 app.get('/api/securities/signal-strength', async (req, res) => {
+  const startTime = Date.now();
   try {
     // For now, we'll fetch from DynamoDB MarketPriceHistory table
     // Get all unique symbols from the table
+    const scanStartTime = Date.now();
     const scanParams = {
       TableName: 'MarketPriceHistory',
       ProjectionExpression: 'symbol'
     };
     
     const scanResult = await dynamodb.scan(scanParams).promise();
+    const scanTime = Date.now() - scanStartTime;
+    console.log(`[API] Signal strength scan completed in ${scanTime}ms, found ${scanResult.Items.length} items`);
     const uniqueSymbols = [...new Set(scanResult.Items.map(item => item.symbol))];
     
     // If no data in DynamoDB, return empty array (frontend will use fallback)
@@ -1115,6 +1229,7 @@ app.get('/api/securities/signal-strength', async (req, res) => {
     const securitiesData = [];
     
     // For each symbol, get latest market data
+    const queryStartTime = Date.now();
     for (const symbol of uniqueSymbols) {
       try {
         // Get latest price data from DynamoDB
@@ -1202,22 +1317,30 @@ app.get('/api/securities/signal-strength', async (req, res) => {
       };
     }).sort((a, b) => b.signalStrength - a.signalStrength);
     
+    const queryTime = Date.now() - queryStartTime;
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/securities/signal-strength completed: ${rankedSecurities.length} securities (scan: ${scanTime}ms, queries: ${queryTime}ms, total: ${totalTime}ms)`);
     res.json(rankedSecurities);
   } catch (error) {
-    console.error('Error fetching signal strength rankings:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/securities/signal-strength after ${totalTime}ms:`, error);
     res.status(500).json({ error: 'Failed to fetch signal strength rankings' });
   }
 });
 
 // Get real portfolio data from DynamoDB
 app.get('/api/portfolio', async (req, res) => {
+  const startTime = Date.now();
   try {
     // Get latest portfolio snapshot - scan all and sort by timestamp
+    const snapshotStartTime = Date.now();
     const snapshotParams = {
       TableName: 'PortfolioSnapshots'
     };
     
     const snapshotResult = await dynamodb.scan(snapshotParams).promise();
+    const snapshotTime = Date.now() - snapshotStartTime;
+    console.log(`[API] Portfolio snapshot scan completed in ${snapshotTime}ms, found ${snapshotResult.Items.length} items`);
     
     // Sort by timestamp descending to get the latest record
     const sortedItems = snapshotResult.Items.sort((a, b) => 
@@ -1225,6 +1348,8 @@ app.get('/api/portfolio', async (req, res) => {
     );
     
     if (!sortedItems || sortedItems.length === 0) {
+      const totalTime = Date.now() - startTime;
+      console.log(`[API] /api/portfolio completed (no data) in ${totalTime}ms`);
       // No data yet - return empty state
       return res.json({
         summary: {
@@ -1245,6 +1370,7 @@ app.get('/api/portfolio', async (req, res) => {
     const snapshotId = latestSnapshot.snapshotId;
     
     // Get holdings for this snapshot
+    const holdingsStartTime = Date.now();
     const holdingsParams = {
       TableName: 'Holdings',
       FilterExpression: 'snapshotId = :snapshotId',
@@ -1254,6 +1380,8 @@ app.get('/api/portfolio', async (req, res) => {
     };
     
     const holdingsResult = await dynamodb.scan(holdingsParams).promise();
+    const holdingsTime = Date.now() - holdingsStartTime;
+    console.log(`[API] Holdings scan completed in ${holdingsTime}ms, found ${holdingsResult.Items.length} holdings`);
     const holdings = holdingsResult.Items || [];
     
     // Transform to frontend format
@@ -1307,10 +1435,13 @@ app.get('/api/portfolio', async (req, res) => {
       })()
     };
     
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/portfolio completed in ${totalTime}ms (snapshot: ${snapshotTime}ms, holdings: ${holdingsTime}ms)`);
     res.json(portfolioData);
     
   } catch (error) {
-    console.error('Error fetching portfolio data:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/portfolio after ${totalTime}ms:`, error);
     res.status(500).json({ 
       error: 'Failed to fetch portfolio data',
       details: error.message 
@@ -1422,16 +1553,64 @@ app.get('/api/usd/currency-pairs', async (req, res) => {
 
 // Get USD correlations
 app.get('/api/usd/correlations', async (req, res) => {
+  const startTime = Date.now();
   try {
-    const params = {
-      TableName: 'USDCorrelations',
-      ScanIndexForward: false, // Sort by date descending
-      Limit: 1
-    };
+    const dbStartTime = Date.now();
     
-    const result = await dynamodb.scan(params).promise();
+    // Try query by calculationDate first (more efficient than scan)
+    // Get today's date and try recent dates in descending order
+    const today = new Date().toISOString().split('T')[0];
+    let latest = null;
     
-    if (!result.Items || result.Items.length === 0) {
+    // Try today, yesterday, and up to 7 days ago
+    for (let i = 0; i < 7; i++) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      
+      try {
+        const params = {
+          TableName: 'USDCorrelations',
+          Key: {
+            calculationDate: dateStr
+          }
+        };
+        
+        const result = await dynamodb.get(params).promise();
+        if (result.Item) {
+          latest = result.Item;
+          break;
+        }
+      } catch (err) {
+        // Continue to next date
+        continue;
+      }
+    }
+    
+    // Fallback to scan if query didn't find anything
+    if (!latest) {
+      const scanParams = {
+        TableName: 'USDCorrelations',
+        Limit: 1
+      };
+      
+      const scanResult = await dynamodb.scan(scanParams).promise();
+      if (scanResult.Items && scanResult.Items.length > 0) {
+        // Sort by calculationDate descending
+        latest = scanResult.Items.sort((a, b) => {
+          const dateA = new Date(a.calculationDate || 0);
+          const dateB = new Date(b.calculationDate || 0);
+          return dateB - dateA;
+        })[0];
+      }
+    }
+    
+    const dbTime = Date.now() - dbStartTime;
+    console.log(`[API] USD correlations query completed in ${dbTime}ms`);
+    
+    if (!latest) {
+      const totalTime = Date.now() - startTime;
+      console.log(`[API] /api/usd/correlations completed (no data) in ${totalTime}ms`);
       return res.json({ 
         correlations: null, 
         rollingStats: null, 
@@ -1440,8 +1619,8 @@ app.get('/api/usd/correlations', async (req, res) => {
       });
     }
     
-    const latest = result.Items[0];
-    
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/usd/correlations completed in ${totalTime}ms (DB: ${dbTime}ms)`);
     res.json({
       correlations: latest.correlations,
       rollingStats: latest.rollingStats,
@@ -1450,7 +1629,8 @@ app.get('/api/usd/correlations', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error fetching correlation data:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/usd/correlations after ${totalTime}ms:`, error);
     res.status(500).json({ error: 'Failed to fetch correlation data' });
   }
 });
@@ -1482,6 +1662,7 @@ function normalizeCurrencySymbol(symbol) {
 // Get historical price data for a specific symbol
 // Uses query parameter to handle symbols with slashes (e.g., GBP/USD, EUR/USD)
 app.get('/api/usd/historical', async (req, res) => {
+  const startTime = Date.now();
   try {
     const { symbol, days = 30 } = req.query;
     
@@ -1504,6 +1685,7 @@ app.get('/api/usd/historical', async (req, res) => {
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
     
+    const dbStartTime = Date.now();
     const params = {
       TableName: 'MarketPriceHistory',
       KeyConditionExpression: 'symbol = :symbol AND #date BETWEEN :startDate AND :endDate',
@@ -1519,6 +1701,8 @@ app.get('/api/usd/historical', async (req, res) => {
     };
     
     const result = await dynamodb.query(params).promise();
+    const dbTime = Date.now() - dbStartTime;
+    console.log(`[API] Historical data query for ${normalizedSymbol} completed in ${dbTime}ms, found ${result.Items.length} items`);
     
     // If no data in database, try fetching from Yahoo Finance as fallback
     if (!result.Items || result.Items.length === 0) {
@@ -1611,12 +1795,20 @@ app.get('/api/usd/historical', async (req, res) => {
             const trimmedData = historicalData.slice(-minDataPoints);
             
             if (trimmedData.length > 0) {
-              console.log(`Fetched ${trimmedData.length} data points from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol})`);
-              return res.json({
+              const responseData = {
                 symbol: decodedSymbol,
                 data: trimmedData,
                 count: trimmedData.length
+              };
+              
+              // Store in cache (even for Yahoo Finance fallback)
+              historicalCache.set(cacheKey, {
+                data: responseData,
+                timestamp: now
               });
+              
+              console.log(`Fetched ${trimmedData.length} data points from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol})`);
+              return res.json(responseData);
             }
           }
         }
@@ -1641,17 +1833,27 @@ app.get('/api/usd/historical', async (req, res) => {
       volume: item.volume || null
     }));
     
-    console.log(`Fetched ${historicalData.length} data points for ${normalizedSymbol} (original: ${decodedSymbol}, requested ${days} days)`);
-    
-    res.json({
+    const responseData = {
       symbol: decodedSymbol,
       data: historicalData,
       count: historicalData.length
+    };
+    
+    // Store in cache
+    historicalCache.set(cacheKey, {
+      data: responseData,
+      timestamp: now
     });
     
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/usd/historical completed: ${historicalData.length} data points for ${normalizedSymbol} (original: ${decodedSymbol}, requested ${days} days) in ${totalTime}ms (DB: ${dbTime}ms)`);
+    
+    res.json(responseData);
+    
   } catch (error) {
+    const totalTime = Date.now() - startTime;
     const symbolParam = req.query.symbol || 'unknown';
-    console.error(`Error fetching historical data for ${symbolParam}:`, error);
+    console.error(`[API] Error in /api/usd/historical for ${symbolParam} after ${totalTime}ms:`, error);
     res.status(500).json({ error: `Failed to fetch historical data for ${symbolParam}` });
   }
 });

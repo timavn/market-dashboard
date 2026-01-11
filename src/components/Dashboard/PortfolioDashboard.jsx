@@ -19,6 +19,8 @@ const PortfolioDashboard = () => {
   const [portfolioData, setPortfolioData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [dataUpdatedNotification, setDataUpdatedNotification] = useState(null); // For optimistic updates
+  const portfolioDataRef = useRef(null); // Ref to track current portfolio data for polling
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
   const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
   const [volatilityExpanded, setVolatilityExpanded] = useState(false);
@@ -78,16 +80,26 @@ const PortfolioDashboard = () => {
   };
 
   // Fetch portfolio data
-  const fetchPortfolio = async () => {
+  // silent: if true, don't set loading state (for background refreshes)
+  const fetchPortfolio = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true); // Only show loading on initial load
+      }
       setError(null);
       const data = await MarketDataService.getPortfolio();
       setPortfolioData(data);
+      portfolioDataRef.current = data; // Update ref
+      return data; // Return for polling logic
     } catch (e) {
-      setError(e.message || 'Failed to load portfolio');
+      if (!silent) {
+        setError(e.message || 'Failed to load portfolio');
+      }
+      throw e; // Re-throw for error handling
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -99,7 +111,104 @@ const PortfolioDashboard = () => {
     const handlePortfolioRefresh = () => {
       if (isMounted) {
         console.log('Refreshing portfolio data after CSV upload...');
-        fetchPortfolio();
+        
+        // Store the current portfolio timestamp to detect when new data arrives
+        // Capture from ref to get current value
+        const currentData = portfolioDataRef.current;
+        let currentTimestamp = currentData?.lastUpdated;
+        let currentHoldingsCount = currentData?.holdings?.length || 0;
+        let currentTotalValue = currentData?.summary?.totalValue || 0;
+        let pollCount = 0;
+        const maxPolls = 10; // Poll for up to 30 seconds (10 polls × 3 seconds)
+        const pollInterval = 3000; // Poll every 3 seconds
+        let pollIntervalId = null;
+        
+        // Initial fetch (silent mode - no blank screen)
+        fetchPortfolio(true).then(initialData => {
+          if (!isMounted) return;
+          
+          // Update captured values after initial fetch
+          if (initialData) {
+            currentTimestamp = initialData.lastUpdated;
+            currentHoldingsCount = initialData.holdings?.length || 0;
+            currentTotalValue = initialData.summary?.totalValue || 0;
+            console.log('Initial portfolio state:', {
+              timestamp: currentTimestamp,
+              holdingsCount: currentHoldingsCount,
+              totalValue: currentTotalValue
+            });
+          }
+          
+          // Start polling for new data
+          pollIntervalId = setInterval(() => {
+            pollCount++;
+            
+            if (pollCount >= maxPolls) {
+              console.log('Polling timeout reached, stopping...');
+              if (pollIntervalId) clearInterval(pollIntervalId);
+              return;
+            }
+            
+            if (!isMounted) {
+              if (pollIntervalId) clearInterval(pollIntervalId);
+              return;
+            }
+            
+            // Fetch portfolio and check if timestamp changed
+            MarketDataService.getPortfolio()
+              .then(newData => {
+                if (!isMounted) return;
+                
+                const newTimestamp = newData?.lastUpdated;
+                const newHoldingsCount = newData?.holdings?.length || 0;
+                const newTotalValue = newData?.summary?.totalValue || 0;
+                
+                // Check if we have NEW data (not just same empty state)
+                const hasNewData = (
+                  (newTimestamp && newTimestamp !== currentTimestamp) ||
+                  (newHoldingsCount > 0 && newHoldingsCount !== currentHoldingsCount) ||
+                  (newTotalValue > 0 && newTotalValue !== currentTotalValue)
+                );
+                
+                if (hasNewData) {
+                  console.log('New portfolio data detected:', {
+                    timestamp: newTimestamp,
+                    holdingsCount: newHoldingsCount,
+                    totalValue: newTotalValue,
+                    previousTimestamp: currentTimestamp,
+                    previousHoldingsCount: currentHoldingsCount,
+                    previousTotalValue: currentTotalValue
+                  });
+                  setPortfolioData(newData);
+                  portfolioDataRef.current = newData;
+                  
+                  // Show optimistic update notification
+                  setDataUpdatedNotification({
+                    message: 'Portfolio data updated',
+                    timestamp: new Date()
+                  });
+                  
+                  // Clear notification after 3 seconds
+                  setTimeout(() => {
+                    setDataUpdatedNotification(null);
+                  }, 3000);
+                  
+                  if (pollIntervalId) clearInterval(pollIntervalId);
+                } else {
+                  console.log(`Polling for new data... (${pollCount}/${maxPolls})`, {
+                    current: { timestamp: currentTimestamp, holdings: currentHoldingsCount, value: currentTotalValue },
+                    fetched: { timestamp: newTimestamp, holdings: newHoldingsCount, value: newTotalValue }
+                  });
+                }
+              })
+              .catch(error => {
+                console.warn('Error polling for portfolio data:', error);
+                // Continue polling on error
+              });
+          }, pollInterval);
+        }).catch(error => {
+          console.warn('Error in initial portfolio fetch during refresh:', error);
+        });
       }
     };
     
@@ -566,6 +675,24 @@ const PortfolioDashboard = () => {
         transition: 'padding-right 0.3s ease-in-out, padding-bottom 0.3s ease-in-out',
       }}
     >
+      {/* Data Updated Notification (Optimistic Update) */}
+      {dataUpdatedNotification && (
+        <div 
+          className="fixed top-4 right-4 z-50 animate-fade-in"
+          style={{
+            animation: 'fadeIn 0.3s ease-in'
+          }}
+        >
+          <Card className="bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800 shadow-lg">
+            <div className="flex items-center gap-2">
+              <Badge color="emerald" size="sm">
+                ✓ {dataUpdatedNotification.message}
+              </Badge>
+            </div>
+          </Card>
+        </div>
+      )}
+      
       <Grid numItems={12} className="gap-4">
         
         {/* Left Sidebar - Securities List */}
@@ -1865,7 +1992,7 @@ const PortfolioDashboard = () => {
                 padding: '16px',
               }}
             >
-              <PortfolioBreakdown portfolioData={portfolioData} />
+              <PortfolioBreakdown portfolioData={portfolioData} isLoading={loading} />
             </div>
           </>
         )}
