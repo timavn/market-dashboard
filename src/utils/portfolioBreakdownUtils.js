@@ -252,9 +252,9 @@ export const formatPerformance = (value) => {
   }
   const num = parseFloat(value);
   if (num >= 0) {
-    return `${num.toFixed(2)}%`;
+    return `+${num.toFixed(2)}%`;
   } else {
-    return `(${Math.abs(num).toFixed(2)}%)`;
+    return `${num.toFixed(2)}%`;
   }
 };
 

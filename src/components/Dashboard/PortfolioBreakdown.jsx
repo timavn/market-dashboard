@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Card, Title, Text } from '@tremor/react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import {
   separateLongsAndShorts,
   formatPerformance,
@@ -182,9 +182,567 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const [longsSearchFilter, setLongsSearchFilter] = useState('');
   const [shortsSearchFilter, setShortsSearchFilter] = useState('');
 
+  // Column visibility state (shared for both tables)
+  const [columnVisibility, setColumnVisibility] = useState({
+    qty: true,
+    price: true,
+    marketValue: true,
+    pctAccount: true,
+    basisPts: true,
+    percentPortfolio: true,
+    qtyNeeded: true,
+    intradayGainLoss: true,
+    gainLoss: true
+  });
+
+  // Column order state (Intraday G/L after Mkt Value by default)
+  const [columnOrder, setColumnOrder] = useState([
+    'qty',
+    'price',
+    'marketValue',
+    'intradayGainLoss', // Moved after Mkt Value
+    'pctAccount',
+    'basisPts',
+    'percentPortfolio',
+    'qtyNeeded',
+    'gainLoss'
+  ]);
+
+  // Column definitions for toggle buttons
+  const columnDefinitions = [
+    { key: 'qty', label: 'Qty' },
+    { key: 'price', label: 'Price' },
+    { key: 'marketValue', label: 'Mkt Value' },
+    { key: 'pctAccount', label: '% Acct' },
+    { key: 'basisPts', label: 'Basis Pts' },
+    { key: 'percentPortfolio', label: '% Portfolio' },
+    { key: 'qtyNeeded', label: 'Qty Needed' },
+    { key: 'intradayGainLoss', label: 'Intraday G/L' },
+    { key: 'gainLoss', label: 'Total G/L' }
+  ];
+
+  // Drag and drop handlers for column reordering
+  const [draggedColumn, setDraggedColumn] = useState(null);
+  const [dragOverColumn, setDragOverColumn] = useState(null);
+
+  const handleDragStart = (e, columnKey) => {
+    setDraggedColumn(columnKey);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = (e) => {
+    // Reset dragged element opacity
+    e.target.style.opacity = '1';
+    setDraggedColumn(null);
+    setDragOverColumn(null);
+  };
+
+  const handleDragOver = (e, columnKey) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (columnKey !== draggedColumn) {
+      setDragOverColumn(columnKey);
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    // Only clear if we're actually leaving the element (not just moving to a child)
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setDragOverColumn(null);
+    }
+  };
+
+  const handleDrop = (e, targetColumnKey) => {
+    e.preventDefault();
+    if (!draggedColumn || draggedColumn === targetColumnKey) {
+      setDraggedColumn(null);
+      setDragOverColumn(null);
+      return;
+    }
+
+    const newOrder = [...columnOrder];
+    const draggedIndex = newOrder.indexOf(draggedColumn);
+    const targetIndex = newOrder.indexOf(targetColumnKey);
+
+    // Remove dragged column and insert at target position
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(targetIndex, 0, draggedColumn);
+
+    setColumnOrder(newOrder);
+    setDraggedColumn(null);
+    setDragOverColumn(null);
+  };
+
+  // Toggle column visibility
+  const toggleColumn = (columnKey) => {
+    setColumnVisibility(prev => ({
+      ...prev,
+      [columnKey]: !prev[columnKey]
+    }));
+  };
+
+  // Render column header based on column key
+  const renderColumnHeader = (columnKey, isLongs) => {
+    const sortConfig = isLongs ? longsSortConfig : shortsSortConfig;
+    const handleSortClick = (field) => handleSort(field, isLongs);
+    
+    // Map column keys to sort fields
+    const columnToSortField = {
+      'qty': null,
+      'price': null,
+      'marketValue': 'marketValue',
+      'intradayGainLoss': 'intradayGainLoss',
+      'pctAccount': 'pctAccount',
+      'basisPts': null,
+      'percentPortfolio': null,
+      'qtyNeeded': null,
+      'gainLoss': 'gainLoss'
+    };
+    
+    const sortField = columnToSortField[columnKey];
+    const isSorted = sortField && sortConfig.field === sortField;
+    const isDragged = draggedColumn === columnKey;
+    const isDragTarget = dragOverColumn === columnKey && !isDragged;
+    
+    // Base styles with conditional styling
+    const getBaseStyles = (defaultStyles) => ({
+      ...defaultStyles,
+      ...(isDragged && {
+        outline: '2px solid #3b82f6',
+        outlineOffset: '-2px',
+        borderRadius: '4px',
+        opacity: 0.5
+      }),
+      ...(isDragTarget && {
+        backgroundColor: '#dbeafe',
+        borderRadius: '4px',
+        transition: 'background-color 0.2s'
+      }),
+      ...(isSorted && !isDragged && !isDragTarget && {
+        backgroundColor: '#eff6ff',
+        borderRadius: '4px'
+      })
+    });
+    
+    // Get className with dark mode support
+    const getClassName = () => {
+      let className = 'dark:text-white';
+      if (isDragTarget) {
+        className += ' dark:bg-blue-900';
+      } else if (isSorted && !isDragged && !isDragTarget) {
+        className += ' dark:bg-blue-800';
+      }
+      return className;
+    };
+
+    switch (columnKey) {
+      case 'qty':
+        return (
+          <th 
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '8%', cursor: 'move' })} 
+            className={getClassName()}
+          >
+            Qty
+          </th>
+        );
+      case 'price':
+        return (
+          <th 
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })} 
+            className={getClassName()}
+          >
+            Price
+          </th>
+        );
+      case 'marketValue':
+        return (
+          <th
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '12%' })}
+            className={getClassName()}
+            onClick={() => handleSortClick('marketValue')}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+              <div>Mkt</div>
+              <div>Value</div>
+              <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('marketValue', sortConfig)}</span>
+            </div>
+          </th>
+        );
+      case 'intradayGainLoss':
+        return (
+          <th
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '11%' })}
+            className={getClassName()}
+            onClick={() => handleSortClick('intradayGainLoss')}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+              <div>Intraday</div>
+              <div>G/L</div>
+              <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('intradayGainLoss', sortConfig)}</span>
+            </div>
+          </th>
+        );
+      case 'pctAccount':
+        return (
+          <th
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '8%' })}
+            className={getClassName()}
+            onClick={() => handleSortClick('pctAccount')}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+              <div>%</div>
+              <div>Acct</div>
+              <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('pctAccount', sortConfig)}</span>
+            </div>
+          </th>
+        );
+      case 'basisPts':
+        return (
+          <th 
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '9%', cursor: 'move' })} 
+            className={getClassName()}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div>Basis</div>
+              <div>Pts</div>
+            </div>
+          </th>
+        );
+      case 'percentPortfolio':
+        return (
+          <th 
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })} 
+            className={getClassName()}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div>%</div>
+              <div>Portfolio</div>
+            </div>
+          </th>
+        );
+      case 'qtyNeeded':
+        return (
+          <th 
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })} 
+            className={getClassName()}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div>Qty</div>
+              <div>Needed</div>
+            </div>
+          </th>
+        );
+      case 'gainLoss':
+        return (
+          <th
+            key={columnKey}
+            draggable
+            onDragStart={(e) => handleDragStart(e, columnKey)}
+            onDragEnd={handleDragEnd}
+            onDragOver={(e) => handleDragOver(e, columnKey)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, columnKey)}
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '10%' })}
+            className={getClassName()}
+            onClick={() => handleSortClick('gainLoss')}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
+              <div>Total</div>
+              <div>G/L</div>
+              <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('gainLoss', sortConfig)}</span>
+            </div>
+          </th>
+        );
+      default:
+        return null;
+    }
+  };
+
+  // Render column cell based on column key
+  const renderColumnCell = (columnKey, holding, pctOfAccount, isLongs) => {
+    const basisPointsState = isLongs ? longsBasisPoints : shortsBasisPoints;
+    const setBasisPointsState = isLongs ? setLongsBasisPoints : setShortsBasisPoints;
+
+    switch (columnKey) {
+      case 'qty':
+        return (
+          <td key={columnKey} style={{ padding: isLongs ? '6px 4px 6px 2px' : '6px', textAlign: 'center' }} className="dark:text-gray-300">
+            {isLongs ? Math.abs(holding.quantity || 0) : `-${Math.abs(holding.quantity || 0)}`}
+          </td>
+        );
+      case 'price':
+        return (
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center' }} className="dark:text-gray-300">
+            ${parseFloat(holding.price || 0).toFixed(2)}
+          </td>
+        );
+      case 'marketValue':
+        return (
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center' }} className="dark:text-gray-300">
+            ${Math.abs(holding.marketValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+          </td>
+        );
+      case 'intradayGainLoss':
+        return React.cloneElement(renderPerformanceCell(holding.dayChangePercent), { key: columnKey });
+      case 'pctAccount':
+        return (
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center' }} className="dark:text-gray-300">
+            {pctOfAccount}%
+          </td>
+        );
+      case 'basisPts':
+        return (
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center' }}>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <input
+                type="number"
+                step="25"
+                placeholder="bps"
+                value={basisPointsState[holding.symbol] || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setBasisPointsState(prev => ({
+                    ...prev,
+                    [holding.symbol]: value === '' ? undefined : value
+                  }));
+                }}
+                onKeyDown={(e) => {
+                  // Prevent arrow keys from incrementing by 1
+                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const current = parseFloat(basisPointsState[holding.symbol]) || 0;
+                    const increment = e.key === 'ArrowUp' ? 25 : -25;
+                    setBasisPointsState(prev => ({
+                      ...prev,
+                      [holding.symbol]: current + increment
+                    }));
+                  }
+                }}
+                style={{
+                  width: '60px',
+                  padding: '4px 20px 4px 4px',
+                  fontSize: '10px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  textAlign: 'center'
+                }}
+                className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              />
+              <div style={{ position: 'absolute', right: '2px', top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = parseFloat(basisPointsState[holding.symbol]) || 0;
+                    setBasisPointsState(prev => ({
+                      ...prev,
+                      [holding.symbol]: current + 25
+                    }));
+                  }}
+                  style={{
+                    width: '14px',
+                    height: '10px',
+                    padding: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '8px',
+                    color: '#6b7280'
+                  }}
+                  className="dark:text-gray-400 hover:dark:text-gray-200"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = parseFloat(basisPointsState[holding.symbol]) || 0;
+                    setBasisPointsState(prev => ({
+                      ...prev,
+                      [holding.symbol]: current - 25
+                    }));
+                  }}
+                  style={{
+                    width: '14px',
+                    height: '10px',
+                    padding: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '8px',
+                    color: '#6b7280'
+                  }}
+                  className="dark:text-gray-400 hover:dark:text-gray-200"
+                >
+                  ▼
+                </button>
+              </div>
+            </div>
+          </td>
+        );
+      case 'percentPortfolio':
+        return (
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center', fontWeight: '500' }} className="dark:text-gray-300">
+            {(() => {
+              const currentPctAcct = parseFloat(pctOfAccount) || 0;
+              const basisPoints = parseFloat(basisPointsState[holding.symbol]) || 0;
+              const basisPointsAsPercent = basisPoints / 100;
+              const finalPercent = currentPctAcct + basisPointsAsPercent;
+              return finalPercent.toFixed(2) + '%';
+            })()}
+          </td>
+        );
+      case 'qtyNeeded':
+        return (
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center', fontWeight: '600' }} className="dark:text-white">
+            {(() => {
+              const basisPoints = basisPointsState[holding.symbol];
+              let shares = null;
+              
+              if (basisPoints) {
+                shares = calculateSharesFromBasisPoints(holding, basisPoints, totalValue, !isLongs);
+              }
+              
+              if (shares === null) return '--';
+              if (shares === 0) return '0';
+              return shares > 0 ? `+${shares}` : `${shares}`;
+            })()}
+          </td>
+        );
+      case 'gainLoss':
+        return React.cloneElement(renderPerformanceCell(holding.gainLossPercent), { key: columnKey });
+      default:
+        return null;
+    }
+  };
+
   // State for highlighted asset classes in pie charts
   const [highlightedLongsAssetClasses, setHighlightedLongsAssetClasses] = useState(new Set());
   const [highlightedShortsAssetClasses, setHighlightedShortsAssetClasses] = useState(new Set());
+
+  // State for animated radius (for smooth scale animation)
+  const [longsHighlightRadius, setLongsHighlightRadius] = useState(96);
+  const [shortsHighlightRadius, setShortsHighlightRadius] = useState(96);
+
+  // Animate radius when highlighted classes change
+  useEffect(() => {
+    if (highlightedLongsAssetClasses.size > 0) {
+      // Smoothly animate from 96 to 106 over 500ms
+      const startRadius = 96;
+      const endRadius = 106;
+      const duration = 500;
+      const startTime = Date.now();
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Ease-out function for smooth deceleration
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+        const currentRadius = startRadius + (endRadius - startRadius) * easeProgress;
+
+        setLongsHighlightRadius(currentRadius);
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+
+      requestAnimationFrame(animate);
+    } else {
+      setLongsHighlightRadius(96);
+    }
+  }, [highlightedLongsAssetClasses.size]);
+
+  useEffect(() => {
+    if (highlightedShortsAssetClasses.size > 0) {
+      // Smoothly animate from 96 to 106 over 500ms
+      const startRadius = 96;
+      const endRadius = 106;
+      const duration = 500;
+      const startTime = Date.now();
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Ease-out function for smooth deceleration
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+        const currentRadius = startRadius + (endRadius - startRadius) * easeProgress;
+
+        setShortsHighlightRadius(currentRadius);
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+
+      requestAnimationFrame(animate);
+    } else {
+      setShortsHighlightRadius(96);
+    }
+  }, [highlightedShortsAssetClasses.size]);
 
   // State for basis points and % portfolio inputs for each holding
   const [longsBasisPoints, setLongsBasisPoints] = useState({});
@@ -261,10 +819,10 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   // Render sort indicator
   const renderSortIndicator = (field, sortConfig) => {
     if (sortConfig.field !== field) {
-      return <span style={{ marginLeft: '4px', opacity: 0.3 }}>⇅</span>;
+      return <span style={{ opacity: 0.3 }}>⇅</span>;
     }
     return (
-      <span style={{ marginLeft: '4px' }}>
+      <span>
         {sortConfig.direction === 'desc' ? '↓' : '↑'}
       </span>
     );
@@ -504,13 +1062,16 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   }
 
   // Custom label for pie charts - centered in each slice with black text
-  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
-    const RADIAN = Math.PI / 180;
+  // Label renderer for base pie (non-highlighted slices only) - positioned outside pie
+  const renderBasePieLabelLongs = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+    // Don't show label if this slice is highlighted
+    if (highlightedLongsAssetClasses.has(name)) return null;
 
+    const RADIAN = Math.PI / 180;
     if (percent < 0.05) return null; // Don't show labels for slices < 5%
 
-    // Position label centered in the slice (midpoint between inner and outer radius)
-    const radius = (innerRadius + outerRadius) / 2;
+    // Position 15px outside the outer edge
+    const radius = outerRadius + 15;
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
 
@@ -521,7 +1082,116 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         fill="#000000"
         textAnchor="middle"
         dominantBaseline="central"
-        fontSize={7.4} // 11 * 0.67 = 7.37, rounded to 7.4
+        fontSize={7.4}
+        fontWeight="600"
+      >
+        {`${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
+
+  // Label renderer for base pie (non-highlighted slices only) - shorts
+  const renderBasePieLabelShorts = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+    // Don't show label if this slice is highlighted
+    if (highlightedShortsAssetClasses.has(name)) return null;
+
+    const RADIAN = Math.PI / 180;
+    if (percent < 0.05) return null;
+
+    // Position 15px outside the outer edge
+    const radius = outerRadius + 15;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#000000"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={7.4}
+        fontWeight="600"
+      >
+        {`${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
+
+  // Label renderer for highlighted pie (highlighted slices only) - longs
+  const renderHighlightedPieLabelLongs = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+    // Only show label if this slice is highlighted
+    if (!highlightedLongsAssetClasses.has(name)) return null;
+
+    const RADIAN = Math.PI / 180;
+    if (percent < 0.05) return null;
+
+    // Position 15px outside the outer edge (grows with animated radius)
+    const radius = outerRadius + 15;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#000000"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={7.4}
+        fontWeight="600"
+      >
+        {`${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
+
+  // Label renderer for highlighted pie (highlighted slices only) - shorts
+  const renderHighlightedPieLabelShorts = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+    // Only show label if this slice is highlighted
+    if (!highlightedShortsAssetClasses.has(name)) return null;
+
+    const RADIAN = Math.PI / 180;
+    if (percent < 0.05) return null;
+
+    // Position 15px outside the outer edge (grows with animated radius)
+    const radius = outerRadius + 15;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#000000"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={7.4}
+        fontWeight="600"
+      >
+        {`${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
+
+  // Generic label renderer for other pie charts (positioned outside edge)
+  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+    const RADIAN = Math.PI / 180;
+    if (percent < 0.05) return null;
+
+    // Position 15px outside the outer edge
+    const radius = outerRadius + 15;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#000000"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={7.4}
         fontWeight="600"
       >
         {`${(percent * 100).toFixed(1)}%`}
@@ -532,15 +1202,26 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   // Render performance cell without color coding
   const renderPerformanceCell = (value) => {
     const formatted = formatPerformance(value);
+    
+    // Determine color based on value
+    let colorClass = 'text-gray-500';
+    if (value !== null && value !== undefined && !isNaN(value)) {
+      const num = parseFloat(value);
+      if (num > 0) {
+        colorClass = 'text-green-500 dark:text-green-400';
+      } else if (num < 0) {
+        colorClass = 'text-red-500 dark:text-red-400';
+      }
+    }
 
     return (
       <td
         style={{
           padding: '6px',
-          textAlign: 'right',
+          textAlign: 'center',
           fontWeight: '500'
         }}
-        className="dark:text-gray-300"
+        className={colorClass}
       >
         {formatted}
       </td>
@@ -815,7 +1496,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                       cx="60%"
                       cy="50%"
                       labelLine={false}
-                      label={renderCustomLabel}
+                      label={renderBasePieLabelLongs}
                       outerRadius={96}
                       fill="#8884d8"
                       dataKey="value"
@@ -823,80 +1504,50 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                       {longsAssetAllocation
                         .filter(entry => entry.value > 0 && typeof entry.value === 'number')
                         .map((entry, index) => {
-                          const isHighlighted = highlightedLongsAssetClasses.has(entry.name);
                           const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
                           return (
-                            <Cell 
-                              key={`cell-${index}`} 
+                            <Cell
+                              key={`cell-${index}`}
                               fill={baseColor}
                               style={{
-                                opacity: isHighlighted ? 0 : 0.6,
-                                transition: 'opacity 0.3s ease'
+                                opacity: 0.6
                               }}
                             />
                           );
                         })}
                     </Pie>
                     {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
-                    {(() => {
-                      // Create filtered allocation data (excluding 0% slices) to match the base pie chart
-                      const filteredLongsAllocation = longsAssetAllocation.filter(
-                        entry => entry.value > 0 && typeof entry.value === 'number'
-                      );
-                      
-                      return longsAssetAllocation
-                        .filter(entry => 
-                          highlightedLongsAssetClasses.has(entry.name) && 
-                          typeof entry.value === 'number' && 
-                          entry.value > 0
-                        )
-                        .map(entry => {
-                          // Safety check: verify entry exists in filtered data (wasn't filtered out as 0%)
-                          if (!filteredLongsAllocation.find(e => e.name === entry.name)) {
-                            return null;
-                          }
-                          
-                          // Use filtered data for angle calculation to match the rendered pie chart
-                          const { startAngle, endAngle } = calculateSliceAngles(filteredLongsAllocation, entry.name);
-                          
-                          // Critical: If angles are invalid (both 0), don't render Pie component at all
-                          // Recharts interprets startAngle: 0, endAngle: 0 as a full circle
-                          if (startAngle === 0 && endAngle === 0) {
-                            return null;
-                          }
-                          
-                          const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                          
-                          return (
-                            <Pie
-                              key={`highlight-${entry.name}`}
-                              data={[entry]}
-                              cx="60%"
-                              cy="50%"
-                              outerRadius={106}
-                              innerRadius={96}
-                              startAngle={startAngle}
-                              endAngle={endAngle}
-                              fill={baseColor}
-                              dataKey="value"
-                              label={renderCustomLabel}
-                              labelLine={false}
-                            >
-                              <Cell 
+                    {highlightedLongsAssetClasses.size > 0 && (
+                      <Pie
+                        data={longsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
+                        cx="60%"
+                        cy="50%"
+                        labelLine={false}
+                        label={renderHighlightedPieLabelLongs}
+                        outerRadius={longsHighlightRadius}
+                        fill="#8884d8"
+                        dataKey="value"
+                        isAnimationActive={false}
+                      >
+                        {longsAssetAllocation
+                          .filter(entry => entry.value > 0 && typeof entry.value === 'number')
+                          .map((entry, index) => {
+                            const isHighlighted = highlightedLongsAssetClasses.has(entry.name);
+                            const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
+                            return (
+                              <Cell
+                                key={`cell-highlight-${index}`}
                                 fill={baseColor}
                                 style={{
-                                  filter: 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))',
-                                  transition: 'all 0.3s ease'
+                                  opacity: isHighlighted ? 1 : 0,
+                                  filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
+                                  transition: 'opacity 0.5s ease, filter 0.5s ease'
                                 }}
                               />
-                            </Pie>
-                          );
-                        });
-                    })()}
-                    <Tooltip
-                      formatter={(value, name) => [`${value.toFixed(2)}%`, name]}
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '4px', fontSize: '10px' }}
-                    />
+                            );
+                          })}
+                      </Pie>
+                    )}
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -920,93 +1571,62 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                       fontSize: '12px',
                       border: '1px solid #d1d5db',
                       borderRadius: '4px',
-                      outline: 'none'
+                      outline: 'none',
+                      marginBottom: '6px'
                     }}
                     className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   />
+                  {/* Column Toggle Buttons */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {columnDefinitions.map(col => (
+                      <button
+                        key={col.key}
+                        onClick={() => toggleColumn(col.key)}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '10px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
+                          color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
+                          fontWeight: columnVisibility[col.key] ? '600' : '400',
+                          transition: 'all 0.2s',
+                          outline: 'none'
+                        }}
+                        className="dark:border-gray-600 hover:opacity-80"
+                        onMouseEnter={(e) => {
+                          if (!columnVisibility[col.key]) {
+                            e.target.style.backgroundColor = '#e5e7eb';
+                            e.target.style.color = '#374151';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!columnVisibility[col.key]) {
+                            e.target.style.backgroundColor = '#f3f4f6';
+                            e.target.style.color = '#6b7280';
+                          }
+                        }}
+                      >
+                        {col.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
                       <th
-                        style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%' }}
+                        style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
                         className="dark:text-white"
                         onClick={() => handleSort('ticker', true)}
                       >
-                        Ticker{renderSortIndicator('ticker', longsSortConfig)}
+                        Ticker
+                        <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('ticker', longsSortConfig)}</span>
                       </th>
-                      <th style={{ padding: '6px', textAlign: 'right', fontWeight: 600, width: '8%' }} className="dark:text-white">Qty</th>
-                      <th style={{ padding: '6px', textAlign: 'right', fontWeight: 600, width: '10%' }} className="dark:text-white">Price</th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '12%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('marketValue', true)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>Mkt</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>Value</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('marketValue', longsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '8%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('pctAccount', true)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>%</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>Acct</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('pctAccount', longsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
-                      <th style={{ padding: '6px', textAlign: 'center', fontWeight: 600, width: '9%' }} className="dark:text-white">
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <div>Basis</div>
-                          <div>Pts</div>
-                        </div>
-                      </th>
-                      <th style={{ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%' }} className="dark:text-white">
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <div>%</div>
-                          <div>Portfolio</div>
-                        </div>
-                      </th>
-                      <th style={{ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%' }} className="dark:text-white">
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <div>Qty</div>
-                          <div>Needed</div>
-                        </div>
-                      </th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '11%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('intradayGainLoss', true)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>Intraday</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>G/L</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('intradayGainLoss', longsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '10%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('gainLoss', true)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>Total</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>G/L</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('gainLoss', longsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
+                      {columnOrder.map(columnKey => 
+                        columnVisibility[columnKey] && renderColumnHeader(columnKey, true)
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -1037,94 +1657,9 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                               <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
                             </div>
                           </td>
-                          <td style={{ padding: '6px 4px 6px 2px', textAlign: 'right' }} className="dark:text-gray-300">{Math.abs(holding.quantity || 0)}</td>
-                          <td style={{ padding: '6px', textAlign: 'right' }} className="dark:text-gray-300">${parseFloat(holding.price || 0).toFixed(2)}</td>
-                          <td style={{ padding: '6px', textAlign: 'right' }} className="dark:text-gray-300">${Math.abs(holding.marketValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                          <td style={{ padding: '6px', textAlign: 'right' }} className="dark:text-gray-300">{pctOfAccount}%</td>
-                          {renderPerformanceCell(holding.dayChangePercent)}
-                          {renderPerformanceCell(holding.gainLossPercent)}
-                          <td style={{ padding: '6px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              placeholder="bps"
-                              value={longsBasisPoints[holding.symbol] || ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setLongsBasisPoints(prev => ({
-                                  ...prev,
-                                  [holding.symbol]: value === '' ? undefined : value
-                                }));
-                                // Clear % portfolio when basis points is entered
-                                if (value !== '') {
-                                  setLongsPercentPortfolio(prev => {
-                                    const newState = { ...prev };
-                                    delete newState[holding.symbol];
-                                    return newState;
-                                  });
-                                }
-                              }}
-                              style={{
-                                width: '60px',
-                                padding: '4px',
-                                fontSize: '10px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '4px',
-                                textAlign: 'center'
-                              }}
-                              className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </td>
-                          <td style={{ padding: '6px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              step="0.01"
-                              placeholder="%"
-                              value={longsPercentPortfolio[holding.symbol] || ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setLongsPercentPortfolio(prev => ({
-                                  ...prev,
-                                  [holding.symbol]: value === '' ? undefined : value
-                                }));
-                                // Clear basis points when % portfolio is entered
-                                if (value !== '') {
-                                  setLongsBasisPoints(prev => {
-                                    const newState = { ...prev };
-                                    delete newState[holding.symbol];
-                                    return newState;
-                                  });
-                                }
-                              }}
-                              style={{
-                                width: '60px',
-                                padding: '4px',
-                                fontSize: '10px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '4px',
-                                textAlign: 'center'
-                              }}
-                              className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </td>
-                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: '600' }} className="dark:text-white">
-                            {(() => {
-                              const basisPoints = longsBasisPoints[holding.symbol];
-                              const percentPortfolio = longsPercentPortfolio[holding.symbol];
-                              let shares = null;
-                              
-                              if (basisPoints) {
-                                shares = calculateSharesFromBasisPoints(holding, basisPoints, totalValue, false);
-                              } else if (percentPortfolio) {
-                                shares = calculateSharesFromPercent(holding, percentPortfolio, totalValue, false);
-                              }
-                              
-                              if (shares === null) return '--';
-                              if (shares === 0) return '0';
-                              return shares > 0 ? `+${shares}` : `${shares}`;
-                            })()}
-                          </td>
-                          {renderPerformanceCell(holding.dayChangePercent)}
-                          {renderPerformanceCell(holding.gainLossPercent)}
+                          {columnOrder.map(columnKey => 
+                            columnVisibility[columnKey] && renderColumnCell(columnKey, holding, pctOfAccount, true)
+                          )}
                         </tr>
                       );
                     })}
@@ -1228,7 +1763,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                       cx="60%"
                       cy="50%"
                       labelLine={false}
-                      label={renderCustomLabel}
+                      label={renderBasePieLabelShorts}
                       outerRadius={96}
                       fill="#8884d8"
                       dataKey="value"
@@ -1236,80 +1771,50 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                       {shortsAssetAllocation
                         .filter(entry => entry.value > 0 && typeof entry.value === 'number')
                         .map((entry, index) => {
-                          const isHighlighted = highlightedShortsAssetClasses.has(entry.name);
                           const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
                           return (
-                            <Cell 
-                              key={`cell-${index}`} 
+                            <Cell
+                              key={`cell-${index}`}
                               fill={baseColor}
                               style={{
-                                opacity: isHighlighted ? 0 : 0.6,
-                                transition: 'opacity 0.3s ease'
+                                opacity: 0.6
                               }}
                             />
                           );
                         })}
                     </Pie>
                     {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
-                    {(() => {
-                      // Create filtered allocation data (excluding 0% slices) to match the base pie chart
-                      const filteredShortsAllocation = shortsAssetAllocation.filter(
-                        entry => entry.value > 0 && typeof entry.value === 'number'
-                      );
-                      
-                      return shortsAssetAllocation
-                        .filter(entry => 
-                          highlightedShortsAssetClasses.has(entry.name) && 
-                          typeof entry.value === 'number' && 
-                          entry.value > 0
-                        )
-                        .map(entry => {
-                          // Safety check: verify entry exists in filtered data (wasn't filtered out as 0%)
-                          if (!filteredShortsAllocation.find(e => e.name === entry.name)) {
-                            return null;
-                          }
-                          
-                          // Use filtered data for angle calculation to match the rendered pie chart
-                          const { startAngle, endAngle } = calculateSliceAngles(filteredShortsAllocation, entry.name);
-                          
-                          // Critical: If angles are invalid (both 0), don't render Pie component at all
-                          // Recharts interprets startAngle: 0, endAngle: 0 as a full circle
-                          if (startAngle === 0 && endAngle === 0) {
-                            return null;
-                          }
-                          
-                          const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                          
-                          return (
-                            <Pie
-                              key={`highlight-${entry.name}`}
-                              data={[entry]}
-                              cx="60%"
-                              cy="50%"
-                              outerRadius={106}
-                              innerRadius={96}
-                              startAngle={startAngle}
-                              endAngle={endAngle}
-                              fill={baseColor}
-                              dataKey="value"
-                              label={renderCustomLabel}
-                              labelLine={false}
-                            >
-                              <Cell 
+                    {highlightedShortsAssetClasses.size > 0 && (
+                      <Pie
+                        data={shortsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
+                        cx="60%"
+                        cy="50%"
+                        labelLine={false}
+                        label={renderHighlightedPieLabelShorts}
+                        outerRadius={shortsHighlightRadius}
+                        fill="#8884d8"
+                        dataKey="value"
+                        isAnimationActive={false}
+                      >
+                        {shortsAssetAllocation
+                          .filter(entry => entry.value > 0 && typeof entry.value === 'number')
+                          .map((entry, index) => {
+                            const isHighlighted = highlightedShortsAssetClasses.has(entry.name);
+                            const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
+                            return (
+                              <Cell
+                                key={`cell-highlight-${index}`}
                                 fill={baseColor}
                                 style={{
-                                  filter: 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))',
-                                  transition: 'all 0.3s ease'
+                                  opacity: isHighlighted ? 1 : 0,
+                                  filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
+                                  transition: 'opacity 0.5s ease, filter 0.5s ease'
                                 }}
                               />
-                            </Pie>
-                          );
-                        });
-                    })()}
-                    <Tooltip
-                      formatter={(value, name) => [`${value.toFixed(2)}%`, name]}
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '4px', fontSize: '10px' }}
-                    />
+                            );
+                          })}
+                      </Pie>
+                    )}
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -1333,93 +1838,62 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                       fontSize: '12px',
                       border: '1px solid #d1d5db',
                       borderRadius: '4px',
-                      outline: 'none'
+                      outline: 'none',
+                      marginBottom: '6px'
                     }}
                     className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   />
+                  {/* Column Toggle Buttons */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {columnDefinitions.map(col => (
+                      <button
+                        key={col.key}
+                        onClick={() => toggleColumn(col.key)}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '10px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
+                          color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
+                          fontWeight: columnVisibility[col.key] ? '600' : '400',
+                          transition: 'all 0.2s',
+                          outline: 'none'
+                        }}
+                        className="dark:border-gray-600 hover:opacity-80"
+                        onMouseEnter={(e) => {
+                          if (!columnVisibility[col.key]) {
+                            e.target.style.backgroundColor = '#e5e7eb';
+                            e.target.style.color = '#374151';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!columnVisibility[col.key]) {
+                            e.target.style.backgroundColor = '#f3f4f6';
+                            e.target.style.color = '#6b7280';
+                          }
+                        }}
+                      >
+                        {col.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
                       <th
-                        style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%' }}
+                        style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
                         className="dark:text-white"
                         onClick={() => handleSort('ticker', false)}
                       >
-                        Ticker{renderSortIndicator('ticker', shortsSortConfig)}
+                        Ticker
+                        <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('ticker', shortsSortConfig)}</span>
                       </th>
-                      <th style={{ padding: '6px', textAlign: 'right', fontWeight: 600, width: '8%' }} className="dark:text-white">Qty</th>
-                      <th style={{ padding: '6px', textAlign: 'right', fontWeight: 600, width: '10%' }} className="dark:text-white">Price</th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '12%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('marketValue', false)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>Mkt</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>Value</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('marketValue', shortsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '8%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('pctAccount', false)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>%</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>Acct</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('pctAccount', shortsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
-                      <th style={{ padding: '6px', textAlign: 'center', fontWeight: 600, width: '9%' }} className="dark:text-white">
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <div>Basis</div>
-                          <div>Pts</div>
-                        </div>
-                      </th>
-                      <th style={{ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%' }} className="dark:text-white">
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <div>%</div>
-                          <div>Portfolio</div>
-                        </div>
-                      </th>
-                      <th style={{ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%' }} className="dark:text-white">
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <div>Qty</div>
-                          <div>Needed</div>
-                        </div>
-                      </th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '11%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('intradayGainLoss', false)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>Intraday</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>G/L</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('intradayGainLoss', shortsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
-                      <th
-                        style={{ padding: '6px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', userSelect: 'none', position: 'relative', width: '10%' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('gainLoss', false)}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', position: 'relative' }}>
-                          <div>Total</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                            <span>G/L</span>
-                            <span style={{ fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('gainLoss', shortsSortConfig)}</span>
-                          </div>
-                        </div>
-                      </th>
+                      {columnOrder.map(columnKey => 
+                        columnVisibility[columnKey] && renderColumnHeader(columnKey, false)
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -1450,94 +1924,9 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                               <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
                             </div>
                           </td>
-                          <td style={{ padding: '6px', textAlign: 'right' }} className="dark:text-gray-300">-{Math.abs(holding.quantity || 0)}</td>
-                          <td style={{ padding: '6px', textAlign: 'right' }} className="dark:text-gray-300">${parseFloat(holding.price || 0).toFixed(2)}</td>
-                          <td style={{ padding: '6px', textAlign: 'right' }} className="dark:text-gray-300">${Math.abs(holding.marketValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                          <td style={{ padding: '6px', textAlign: 'right' }} className="dark:text-gray-300">{pctOfAccount}%</td>
-                          {renderPerformanceCell(holding.dayChangePercent)}
-                          {renderPerformanceCell(holding.gainLossPercent)}
-                          <td style={{ padding: '6px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              placeholder="bps"
-                              value={shortsBasisPoints[holding.symbol] || ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setShortsBasisPoints(prev => ({
-                                  ...prev,
-                                  [holding.symbol]: value === '' ? undefined : value
-                                }));
-                                // Clear % portfolio when basis points is entered
-                                if (value !== '') {
-                                  setShortsPercentPortfolio(prev => {
-                                    const newState = { ...prev };
-                                    delete newState[holding.symbol];
-                                    return newState;
-                                  });
-                                }
-                              }}
-                              style={{
-                                width: '60px',
-                                padding: '4px',
-                                fontSize: '10px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '4px',
-                                textAlign: 'center'
-                              }}
-                              className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </td>
-                          <td style={{ padding: '6px', textAlign: 'center' }}>
-                            <input
-                              type="number"
-                              step="0.01"
-                              placeholder="%"
-                              value={shortsPercentPortfolio[holding.symbol] || ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setShortsPercentPortfolio(prev => ({
-                                  ...prev,
-                                  [holding.symbol]: value === '' ? undefined : value
-                                }));
-                                // Clear basis points when % portfolio is entered
-                                if (value !== '') {
-                                  setShortsBasisPoints(prev => {
-                                    const newState = { ...prev };
-                                    delete newState[holding.symbol];
-                                    return newState;
-                                  });
-                                }
-                              }}
-                              style={{
-                                width: '60px',
-                                padding: '4px',
-                                fontSize: '10px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '4px',
-                                textAlign: 'center'
-                              }}
-                              className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </td>
-                          <td style={{ padding: '6px', textAlign: 'center', fontWeight: '600' }} className="dark:text-white">
-                            {(() => {
-                              const basisPoints = shortsBasisPoints[holding.symbol];
-                              const percentPortfolio = shortsPercentPortfolio[holding.symbol];
-                              let shares = null;
-                              
-                              if (basisPoints) {
-                                shares = calculateSharesFromBasisPoints(holding, basisPoints, totalValue, true);
-                              } else if (percentPortfolio) {
-                                shares = calculateSharesFromPercent(holding, percentPortfolio, totalValue, true);
-                              }
-                              
-                              if (shares === null) return '--';
-                              if (shares === 0) return '0';
-                              return shares > 0 ? `+${shares}` : `${shares}`;
-                            })()}
-                          </td>
-                          {renderPerformanceCell(holding.dayChangePercent)}
-                          {renderPerformanceCell(holding.gainLossPercent)}
+                          {columnOrder.map(columnKey => 
+                            columnVisibility[columnKey] && renderColumnCell(columnKey, holding, pctOfAccount, false)
+                          )}
                         </tr>
                       );
                     })}
@@ -1570,10 +1959,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                       <Cell key={`cell-${index}`} fill="#9CA3AF" />
                     ))}
                   </Pie>
-                  <Tooltip
-                    formatter={(value, name) => [`${value.toFixed(1)}%`, name]}
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '4px' }}
-                  />
                   <Legend
                     wrapperStyle={{ paddingTop: '20px' }}
                     payload={innerData.map((entry) => ({

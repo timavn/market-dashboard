@@ -1,12 +1,14 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card, Button, Text, Title, Badge, Flex } from '@tremor/react';
 import { PresignedUploadService } from '../services/presignedUploadService';
+import { MarketDataService } from '../services/api/marketDataService';
 
 const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
   const [lastUploadTime, setLastUploadTime] = useState(null);
+  const [viewingDate, setViewingDate] = useState(null);
   const [showWarning, setShowWarning] = useState(false);
   const [warningData, setWarningData] = useState(null);
   const [pendingFile, setPendingFile] = useState(null);
@@ -191,6 +193,62 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
     fileInputRef.current?.click();
   };
 
+  // Fetch portfolio data to get the market day being viewed
+  useEffect(() => {
+    const fetchViewingDate = async () => {
+      try {
+        const portfolioData = await MarketDataService.getPortfolio();
+        const lastUpdatedStr = portfolioData?.lastUpdated;
+        
+        if (lastUpdatedStr && 
+            lastUpdatedStr !== 'Schwab Integration Pending' && 
+            lastUpdatedStr !== 'No portfolio data - upload a Schwab CSV to get started') {
+          // Extract date from lastUpdated string (format: "MM/DD/YYYY, HH:MM AM/PM PST / HH:MM AM/PM EST")
+          // Example: "01/11/2026, 8:19 AM PST / 11:19 AM EST"
+          const dateMatch = lastUpdatedStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+          
+          if (dateMatch && dateMatch.length >= 4) {
+            const year = dateMatch[3];
+            const month = parseInt(dateMatch[1]) - 1; // Month is 0-indexed
+            const day = dateMatch[2];
+            const date = new Date(year, month, day);
+            
+            // Verify date is valid
+            if (!isNaN(date.getTime())) {
+              // Format as "Month Day, Year" (e.g., "January 11, 2026")
+              const formattedDate = date.toLocaleDateString('en-US', {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric'
+              });
+              setViewingDate(formattedDate);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch viewing date:', error);
+        // Don't set viewingDate if fetch fails
+      }
+    };
+
+    // Fetch immediately
+    fetchViewingDate();
+
+    // Listen for portfolio refresh events to update viewing date
+    const handlePortfolioRefresh = () => {
+      // Small delay to allow backend to process
+      setTimeout(() => {
+        fetchViewingDate();
+      }, 3000);
+    };
+
+    window.addEventListener('portfolioRefresh', handlePortfolioRefresh);
+    
+    return () => {
+      window.removeEventListener('portfolioRefresh', handlePortfolioRefresh);
+    };
+  }, []); // Only run once on mount
+
   return (
     <div>
       {/* Upload Area */}
@@ -219,7 +277,12 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
             <Text className="text-base font-semibold mb-1">
               📁 {lastUploadTime ? `Updated ${lastUploadTime}` : 'Upload Schwab CSV'}
             </Text>
-            <Text className="text-sm text-gray-500">
+            {viewingDate ? (
+              <Text className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                Viewing: {viewingDate}
+              </Text>
+            ) : null}
+            <Text className="text-sm text-gray-500 mt-1">
               Click or drag CSV file here
             </Text>
           </div>
