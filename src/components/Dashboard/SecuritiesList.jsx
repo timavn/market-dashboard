@@ -629,6 +629,25 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
         </div>
       </div>
       
+      {/* Quick Section - ADDED and REMOVED */}
+      <div className="quick-section px-2 py-1.5 border-b border-gray-200 dark:border-gray-700">
+        <div className="quick-item">
+          <span className="quick-label" style={{ color: '#10B981' }}>ADDED:</span>
+          <span className="quick-tickers">
+            <span className="quick-ticker">AAPL</span>
+            <span className="quick-ticker">MSFT</span>
+            <span className="quick-ticker">GOOGL</span>
+          </span>
+        </div>
+        <div className="quick-item">
+          <span className="quick-label" style={{ color: '#EF4444' }}>REMOVED:</span>
+          <span className="quick-tickers">
+            <span className="quick-ticker">TSLA</span>
+            <span className="quick-ticker">NVDA</span>
+          </span>
+        </div>
+      </div>
+
       {/* Asset Class Legend - Horizontal, above column titles */}
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-gray-200 dark:border-gray-700" style={{ maxWidth: '100%', flexWrap: 'nowrap' }}>
         {['fixedIncome', 'equity', 'currency', 'commodity', 'crypto'].map((assetClass) => {

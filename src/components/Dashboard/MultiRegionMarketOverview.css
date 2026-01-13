@@ -1,0 +1,354 @@
+/* Multi-Region Market Overview - Light Theme */
+
+.multi-region-overview {
+  width: 100%;
+  background: #E8F4F8; /* Light blue background */
+  padding: 16px;
+  border-radius: 8px;
+}
+
+/* Market Countdown */
+.market-countdown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: #D6EAF8; /* Lighter blue for countdown */
+  border-radius: 6px;
+  border: 1px solid #B8D4E0;
+}
+
+.market-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.market-countdown .status-icon {
+  font-size: 14px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.market-countdown .status-text {
+  font-size: 13px;
+  color: #000080; /* Navy text */
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.market-countdown .game-day-text {
+  font-size: 12px;
+  color: #000080; /* Navy text */
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  text-align: right;
+}
+
+/* Error Message */
+.error-message {
+  padding: 12px;
+  margin-bottom: 16px;
+  background: #fee;
+  border: 1px solid #fcc;
+  border-radius: 4px;
+  color: #c00;
+  font-size: 13px;
+}
+
+/* Regions Container */
+.regions-container {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr); /* 8 equal columns for all regions */
+  gap: 12px;
+}
+
+/* Responsive: Stack on smaller screens */
+@media (max-width: 1920px) {
+  .regions-container {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1600px) {
+  .regions-container {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1200px) {
+  .regions-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .regions-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Region Panel */
+.region-panel {
+  background: #E8F4F8; /* Light blue background */
+  border-radius: 4px; /* 50% smaller from 8px */
+  padding: 6px; /* 50% smaller from 12px */
+  border: 1px solid #B8D4E0; /* Light blue border */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); /* 50% smaller shadow */
+}
+
+.region-title {
+  font-size: 10.5px; /* 25% smaller from 14px */
+  font-weight: 700;
+  color: #000080; /* Navy text */
+  margin-bottom: 6px; /* 50% smaller from 12px */
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #4682B4; /* 50% smaller from 2px */
+  padding-bottom: 3px; /* 50% smaller from 6px */
+}
+
+/* Indices Grid - 2 columns per region */
+.indices-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); /* 2 columns of 3 cards each = 6 total */
+  gap: 4px; /* 50% smaller from 8px */
+}
+
+/* Index Card */
+.index-card {
+  background: #FFFFFF; /* White background for individual cards */
+  border: 1px solid #B8D4E0; /* Light blue border */
+  border-radius: 3px; /* 25% smaller from 4px */
+  padding: 7.5px; /* 25% smaller from 10px */
+  min-height: 82.5px; /* 25% smaller from 110px */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative; /* For absolute positioning of percentage */
+  transition: box-shadow 0.2s ease;
+}
+
+.index-card:hover {
+  box-shadow: 0 1.5px 4.5px rgba(0, 0, 128, 0.1); /* 25% smaller shadow */
+}
+
+.index-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.index-name-with-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.market-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.index-name {
+  font-size: 9px; /* 25% smaller from 12px */
+  color: #000080; /* Navy text */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.index-value-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 0;
+}
+
+.index-prev-close {
+  font-size: 10px;
+  font-weight: 600;
+  color: #666666; /* Gray text for previous close */
+  font-variant-numeric: tabular-nums;
+  padding: 3px 5px;
+  border: 1px solid #B8D4E0;
+  border-radius: 2px;
+  background: #F0F8FF; /* Very light blue background */
+}
+
+.index-value {
+  font-size: 6.75px; /* 50% smaller from 13.5px */
+  font-weight: 700;
+  color: #000080; /* Navy text */
+  font-variant-numeric: tabular-nums;
+  padding: 2.25px 3.75px; /* 50% smaller from 4.5px 7.5px */
+  border: 0.75px solid #4682B4; /* 50% smaller from 1.5px */
+  border-radius: 1.5px; /* 50% smaller from 3px */
+  background: #ffffff; /* White background for value box */
+  display: inline-block;
+  width: fit-content;
+}
+
+/* Sparkline Container */
+.sparkline-container {
+  height: 22.5px; /* 25% smaller from 30px */
+  margin: 3px 0; /* 25% smaller from 4px */
+  display: flex;
+  align-items: center;
+}
+
+/* Index Change */
+.index-change {
+  font-size: 9px; /* 25% smaller from 12px */
+  font-weight: 600;
+  display: flex;
+  gap: 3px; /* 25% smaller from 4px */
+  align-items: center;
+}
+
+.index-change.positive {
+  color: #16a34a; /* Dark green for positive */
+}
+
+.index-change.negative {
+  color: #dc2626; /* Dark red for negative */
+}
+
+.index-change .arrow {
+  font-size: 7.5px; /* 25% smaller from 10px */
+}
+
+/* Index Percent - Bottom Right */
+.index-percent {
+  position: absolute;
+  bottom: 7.5px; /* 25% smaller from 10px */
+  right: 7.5px; /* 25% smaller from 10px */
+  font-size: 8.25px; /* 25% smaller from 11px */
+  font-weight: 600;
+  padding: 2.25px 4.5px; /* 25% smaller from 3px 6px */
+  border-radius: 2.25px; /* 25% smaller from 3px */
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.index-percent.positive {
+  color: #16a34a; /* Dark green for positive */
+}
+
+.index-percent.negative {
+  color: #dc2626; /* Dark red for negative */
+}
+
+/* Liquidity Container */
+.liquidity-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Liquidity Card */
+.liquidity-card {
+  background: #FFFFFF; /* White background for liquidity card */
+  border: 1px solid #B8D4E0; /* Light blue border */
+  border-radius: 3px;
+  padding: 7.5px;
+  min-height: 82.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liquidity-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.liquidity-section:not(:last-child) {
+  padding-bottom: 8px;
+  border-bottom: 1px solid #D3D3D3;
+}
+
+.liquidity-header {
+  margin-bottom: 6px;
+}
+
+.liquidity-title {
+  font-size: 8px;
+  color: #000080; /* Navy text */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+}
+
+.liquidity-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.liquidity-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  flex-wrap: wrap;
+}
+
+.liquidity-metric-label {
+  font-size: 8px;
+  color: #000080; /* Navy text */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.liquidity-metric-sublabel {
+  font-size: 6px;
+  color: #666666; /* Gray text */
+  font-weight: 500;
+  font-style: italic;
+  margin-top: 2px;
+  flex-basis: 100%;
+  text-align: right;
+}
+
+.liquidity-metric-value {
+  font-size: 9px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 4px;
+  border-radius: 2px;
+  background: #ffffff;
+  border: 0.75px solid #4682B4;
+}
+
+.liquidity-metric-value.positive {
+  color: #16a34a; /* Dark green for positive */
+}
+
+.liquidity-metric-value.negative {
+  color: #dc2626; /* Dark red for negative */
+}
+
+.liquidity-note {
+  font-size: 7px;
+  color: #666666;
+  font-style: italic;
+  line-height: 1.3;
+  margin-top: auto;
+  padding-top: 4px;
+  border-top: 1px solid #D3D3D3;
+}

@@ -653,4 +653,48 @@
   font-style: italic;
 }
 
+/* Quick Section - ADDED and REMOVED */
+.quick-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quick-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.quick-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.quick-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.quick-ticker {
+  font-size: 11px;
+  font-weight: 600;
+  color: #000000;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.dark .quick-ticker {
+  color: rgb(229 231 235);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 

@@ -201,6 +201,25 @@ export class MarketDataService {
     }
   }
 
+  // Get multi-region market quotes (US, Europe, Asia, Crypto, Rates)
+  static async getMultiRegionQuotes(regions = null, includeSparklines = true) {
+    try {
+      const params = {};
+      if (regions) {
+        params.regions = regions.join(',');
+      }
+      if (includeSparklines !== undefined) {
+        params.includeSparklines = includeSparklines.toString();
+      }
+
+      const response = await apiClient.get('/api/multi-region-quotes', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching multi-region quotes:', error);
+      throw error;
+    }
+  }
+
   // Get volume data
   static async getVolumeData(symbols) {
     try {

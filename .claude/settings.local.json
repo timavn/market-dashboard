@@ -47,7 +47,27 @@
       "Bash(npm run lint:*)",
       "Bash(git checkout:*)",
       "Bash(pgrep:*)",
-      "Bash(killall:*)"
+      "Bash(killall:*)",
+      "Bash(git reset:*)",
+      "Bash(docker logs:*)",
+      "Bash(ls:*)",
+      "Bash(osascript:*)",
+      "Bash(pip3 install:*)",
+      "Bash(mdfind:*)",
+      "Bash(pip3 list:*)",
+      "Bash(/opt/homebrew/bin/brew install:*)",
+      "Bash(pdftoppm:*)",
+      "Bash(export PATH=\"/opt/homebrew/bin:$PATH\")",
+      "Bash(grep:*)",
+      "Bash(./deploy_hedgeye_lambda.sh:*)",
+      "Bash(aws lambda create-function:*)",
+      "Bash(aws lambda add-permission:*)",
+      "Bash(aws s3 cp:*)",
+      "Bash(aws lambda get-function --function-name hedgeye-pdf-processor --region us-west-1 --query 'Configuration.State' --output text)",
+      "Bash(aws lambda invoke:*)",
+      "Bash(aws dynamodb query:*)",
+      "Bash(npm install:*)",
+      "Bash(kill:*)"
     ],
     "deny": []
   }

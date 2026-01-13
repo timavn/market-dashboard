@@ -195,7 +195,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     gainLoss: true
   });
 
-  // Column order state (Intraday G/L after Mkt Value by default)
+  // Column order state (Intraday G/L after Mkt Value by default, % Portfolio after Basis Pts)
   const [columnOrder, setColumnOrder] = useState([
     'qty',
     'price',
@@ -203,7 +203,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     'intradayGainLoss', // Moved after Mkt Value
     'pctAccount',
     'basisPts',
-    'percentPortfolio',
+    'percentPortfolio', // Moved to right after Basis Pts
     'qtyNeeded',
     'gainLoss'
   ]);
@@ -580,9 +580,10 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   fontSize: '10px',
                   border: '1px solid #d1d5db',
                   borderRadius: '4px',
-                  textAlign: 'center'
+                  textAlign: 'center',
+                  MozAppearance: 'textfield' // Firefox: hide spinner
                 }}
-                className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                className="dark:bg-gray-700 dark:border-gray-600 dark:text-white [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <div style={{ position: 'absolute', right: '2px', top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: '1px' }}>
                 <button
@@ -644,26 +645,192 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
           </td>
         );
       case 'percentPortfolio':
+        const percentPortfolioState = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
+        const setPercentPortfolioState = isLongs ? setLongsPercentPortfolio : setShortsPercentPortfolio;
+        const currentPctAcct = parseFloat(pctOfAccount) || 0;
+        const basisPoints = parseFloat(basisPointsState[holding.symbol]) || 0;
+        const basisPointsAsPercent = basisPoints / 100;
+        const targetPercent = percentPortfolioState[holding.symbol];
+        
+        // Use target % if set, otherwise calculate from basis points
+        const displayPercent = targetPercent !== undefined 
+          ? parseFloat(targetPercent) 
+          : currentPctAcct + basisPointsAsPercent;
+        
         return (
-          <td key={columnKey} style={{ padding: '6px', textAlign: 'center', fontWeight: '500' }} className="dark:text-gray-300">
-            {(() => {
-              const currentPctAcct = parseFloat(pctOfAccount) || 0;
-              const basisPoints = parseFloat(basisPointsState[holding.symbol]) || 0;
-              const basisPointsAsPercent = basisPoints / 100;
-              const finalPercent = currentPctAcct + basisPointsAsPercent;
-              return finalPercent.toFixed(2) + '%';
-            })()}
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center' }}>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <input
+                type="number"
+                step="0.25"
+                placeholder="%"
+                value={targetPercent !== undefined ? targetPercent : displayPercent.toFixed(2)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '') {
+                    setPercentPortfolioState(prev => {
+                      const newState = { ...prev };
+                      delete newState[holding.symbol];
+                      return newState;
+                    });
+                    // Clear basis points when setting target %
+                    setBasisPointsState(prev => {
+                      const newState = { ...prev };
+                      delete newState[holding.symbol];
+                      return newState;
+                    });
+                  } else {
+                    const numValue = parseFloat(value);
+                    if (!isNaN(numValue)) {
+                      setPercentPortfolioState(prev => ({
+                        ...prev,
+                        [holding.symbol]: numValue
+                      }));
+                      // Clear basis points when setting target %
+                      setBasisPointsState(prev => {
+                        const newState = { ...prev };
+                        delete newState[holding.symbol];
+                        return newState;
+                      });
+                    }
+                  }
+                }}
+                onKeyDown={(e) => {
+                  // Prevent arrow keys from incrementing by step
+                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const current = parseFloat(targetPercent !== undefined ? targetPercent : displayPercent) || 0;
+                    let newValue;
+                    if (e.key === 'ArrowUp') {
+                      // Round up to nearest 0.10
+                      newValue = Math.ceil(current * 10) / 10;
+                      // If already at a 0.10 increment, add 0.10
+                      if (newValue === current) {
+                        newValue = current + 0.10;
+                      }
+                    } else {
+                      // Round down to nearest 0.10
+                      newValue = Math.floor(current * 10) / 10;
+                      // If already at a 0.10 increment, keep it the same
+                    }
+                    setPercentPortfolioState(prev => ({
+                      ...prev,
+                      [holding.symbol]: newValue
+                    }));
+                    // Clear basis points when setting target %
+                    setBasisPointsState(prev => {
+                      const newState = { ...prev };
+                      delete newState[holding.symbol];
+                      return newState;
+                    });
+                  }
+                }}
+                style={{
+                  width: '60px',
+                  padding: '4px 20px 4px 4px',
+                  fontSize: '10px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  textAlign: 'center',
+                  MozAppearance: 'textfield' // Firefox: hide spinner
+                }}
+                className="dark:bg-gray-700 dark:border-gray-600 dark:text-white [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <div style={{ position: 'absolute', right: '2px', top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = parseFloat(targetPercent !== undefined ? targetPercent : displayPercent) || 0;
+                    // Round up to nearest 0.10
+                    let newValue = Math.ceil(current * 10) / 10;
+                    // If already at a 0.10 increment, add 0.10
+                    if (newValue === current) {
+                      newValue = current + 0.10;
+                    }
+                    setPercentPortfolioState(prev => ({
+                      ...prev,
+                      [holding.symbol]: newValue
+                    }));
+                    // Clear basis points when setting target %
+                    setBasisPointsState(prev => {
+                      const newState = { ...prev };
+                      delete newState[holding.symbol];
+                      return newState;
+                    });
+                  }}
+                  style={{
+                    width: '14px',
+                    height: '10px',
+                    padding: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '8px',
+                    color: '#6b7280'
+                  }}
+                  className="dark:text-gray-400 hover:dark:text-gray-200"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = parseFloat(targetPercent !== undefined ? targetPercent : displayPercent) || 0;
+                    // Round down to nearest 0.10
+                    const newValue = Math.floor(current * 10) / 10;
+                    // If already at a 0.10 increment, keep it the same
+                    setPercentPortfolioState(prev => ({
+                      ...prev,
+                      [holding.symbol]: newValue
+                    }));
+                    // Clear basis points when setting target %
+                    setBasisPointsState(prev => {
+                      const newState = { ...prev };
+                      delete newState[holding.symbol];
+                      return newState;
+                    });
+                  }}
+                  style={{
+                    width: '14px',
+                    height: '10px',
+                    padding: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '8px',
+                    color: '#6b7280'
+                  }}
+                  className="dark:text-gray-400 hover:dark:text-gray-200"
+                >
+                  ▼
+                </button>
+              </div>
+            </div>
           </td>
         );
       case 'qtyNeeded':
+        const percentPortfolioStateForQty = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
+        const targetPercentForQty = percentPortfolioStateForQty[holding.symbol];
+        const basisPointsForQty = basisPointsState[holding.symbol];
+        
         return (
           <td key={columnKey} style={{ padding: '6px', textAlign: 'center', fontWeight: '600' }} className="dark:text-white">
             {(() => {
-              const basisPoints = basisPointsState[holding.symbol];
               let shares = null;
               
-              if (basisPoints) {
-                shares = calculateSharesFromBasisPoints(holding, basisPoints, totalValue, !isLongs);
+              // Prioritize target % portfolio over basis points
+              if (targetPercentForQty !== undefined) {
+                shares = calculateSharesFromPercent(holding, targetPercentForQty, totalValue, !isLongs);
+              } else if (basisPointsForQty) {
+                shares = calculateSharesFromBasisPoints(holding, basisPointsForQty, totalValue, !isLongs);
               }
               
               if (shares === null) return '--';

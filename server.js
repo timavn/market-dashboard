@@ -75,31 +75,64 @@ const HISTORICAL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const riskRangesCache = new Map();
 const RISK_RANGES_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
-// FRED Series IDs for Treasury Yields
+// Cache for intraday sparkline data (5-minute TTL)
+const intradayCache = new Map();
+const INTRADAY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// FRED Series IDs for Treasury Yields and Rates
 const FRED_SERIES = {
   'UST30Y': 'DGS30',
   'UST10Y': 'DGS10',
+  'UST5Y': 'DGS5',
   'UST2Y': 'DGS2',
+  'UST13W': 'DGS3MO',
+  'SOFR': 'SOFR',
 };
 
 // Yahoo Finance ticker mappings (consolidated from securitiesConfig.js)
 // This should match src/constants/securitiesConfig.js YAHOO_TICKER_MAP
 const YAHOO_TICKER_MAP = {
-  // Indices
+  // Indices - US
   'SPX': '^GSPC',
+  'SPY': '^GSPC',
+  'DJI': '^DJI',
   'COMPQ': '^IXIC',
+  'IXIC': '^IXIC',
   'RUT': '^RUT',
   'VIX': '^VIX',
-  'DAX': '^GDAXI',
-  'NIKK': '^N225',
-  'SSEC': '000001.SS',
   'CRB': '^CRB',
-  
+
+  // Indices - European
+  'DAX': '^GDAXI',
+  'FTSE': '^FTSE',
+  'CAC': '^FCHI',
+  'N100': '^N100',
+
+  // Indices - Asian
+  'NIKK': '^N225',
+  'N225': '^N225',
+  'HSI': '^HSI',
+  'SSEC': '000001.SS',
+  'AXJO': '^AXJO',
+
+  // Indices - Other
+  'MOVE': '^MOVE',
+  'TNX': '^TNX',
+
   // Currency pairs
   'EUR/USD': 'EURUSD=X',
+  'EURUSD': 'EURUSD=X',
   'USD/YEN': 'JPY=X',
+  'USDJPY': 'JPY=X',
+  'JPY=X': 'JPY=X',
   'GBP/USD': 'GBPUSD=X',
+  'GBPUSD': 'GBPUSD=X',
   'CAD/USD': 'CADUSD=X',
+  'USDCAD': 'CADUSD=X',
+  'AUDUSD': 'AUDUSD=X',
+  'USDMXN': 'MXN=X',
+  'USDCNY': 'CNY=X',
+  'CNY=X': 'CNY=X',
   'USD': 'DX-Y.NYB',
   'DXY': 'DX-Y.NYB',
   
@@ -113,19 +146,111 @@ const YAHOO_TICKER_MAP = {
   // Commodities
   'WTIC': 'CL=F',
   'WTI': 'CL=F',
+  'CL': 'CL=F',
   'BRENT': 'BZ=F',
+  'BZ': 'BZ=F',
   'NATGAS': 'NG=F',
+  'NG': 'NG=F',
   'GOLD': 'GC=F',
+  'GC': 'GC=F',
   'SILVER': 'SI=F',
+  'SI': 'SI=F',
   'COPPER': 'HG=F',
+  'HG': 'HG=F',
   
   // Crypto
   'BTC': 'BTC-USD',
   'BITCOIN': 'BTC-USD',
   'ETH': 'ETH-USD',
+  'ETHEREUM': 'ETH-USD',
+  'BNB': 'BNB-USD',
+  'ADA': 'ADA-USD',
+  'CARDANO': 'ADA-USD',
   'SOL': 'SOL-USD',
+  'SOLANA': 'SOL-USD',
   'AVAX': 'AVAX-USD',
   'XRP': 'XRP-USD',
+};
+
+// Multi-region market configuration
+const MARKET_REGIONS = {
+  us: {
+    label: 'US',
+    indices: [
+      { symbol: 'SPY', name: 'S&P 500', yahooSymbol: '^GSPC' },
+      { symbol: 'DJI', name: 'Dow 30', yahooSymbol: '^DJI' },
+      { symbol: 'IXIC', name: 'Nasdaq', yahooSymbol: '^IXIC' },
+      { symbol: 'RUT', name: 'Russell 2000', yahooSymbol: '^RUT' },
+      { symbol: 'VIX', name: 'VIX', yahooSymbol: '^VIX' },
+      { symbol: 'GLD', name: 'Gold', yahooSymbol: 'GC=F' }
+    ]
+  },
+  europe: {
+    label: 'Europe',
+    indices: [
+      { symbol: 'FTSE', name: 'FTSE 100', yahooSymbol: '^FTSE' },
+      { symbol: 'CAC', name: 'CAC 40', yahooSymbol: '^FCHI' },
+      { symbol: 'DAX', name: 'DAX', yahooSymbol: '^GDAXI' },
+      { symbol: 'N100', name: 'Euronext 100', yahooSymbol: '^N100' },
+      { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X' },
+      { symbol: 'GBPUSD', name: 'USD/GBP', yahooSymbol: 'GBPUSD=X' }
+    ]
+  },
+  asia: {
+    label: 'Asia',
+    indices: [
+      { symbol: 'N225', name: 'Nikkei 225', yahooSymbol: '^N225' },
+      { symbol: 'HSI', name: 'Hang Seng', yahooSymbol: '^HSI' },
+      { symbol: 'SSEC', name: 'Shanghai', yahooSymbol: '000001.SS' },
+      { symbol: 'AXJO', name: 'ASX 200', yahooSymbol: '^AXJO' },
+      { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X' },
+      { symbol: 'USDCNY', name: 'USD/CNY', yahooSymbol: 'CNY=X' }
+    ]
+  },
+  crypto: {
+    label: 'Cryptocurrencies',
+    indices: [
+      { symbol: 'BTC', name: 'Bitcoin', yahooSymbol: 'BTC-USD' },
+      { symbol: 'ETH', name: 'Ethereum', yahooSymbol: 'ETH-USD' },
+      { symbol: 'BNB', name: 'Binance Coin', yahooSymbol: 'BNB-USD' },
+      { symbol: 'ADA', name: 'Cardano', yahooSymbol: 'ADA-USD' },
+      { symbol: 'SOL', name: 'Solana', yahooSymbol: 'SOL-USD' },
+      { symbol: 'XRP', name: 'XRP', yahooSymbol: 'XRP-USD' }
+    ]
+  },
+  rates: {
+    label: 'Rates',
+    indices: [
+      { symbol: 'UST13W', name: '13-Wk Bond', fredSymbol: 'DGS3MO' },
+      { symbol: 'UST5Y', name: '5-Yr Bond', fredSymbol: 'DGS5' },
+      { symbol: 'UST10Y', name: '10-Yr Bond', fredSymbol: 'DGS10' },
+      { symbol: 'UST30Y', name: '30-Yr Bond', fredSymbol: 'DGS30' },
+      { symbol: 'UST2Y', name: '2 Yr Yld Fut', fredSymbol: 'DGS2' },
+      { symbol: 'TNX', name: '10 Yr T-Note', yahooSymbol: '^TNX' }
+    ]
+  },
+  commodities: {
+    label: 'Commodities',
+    indices: [
+      { symbol: 'CL', name: 'Crude Oil', yahooSymbol: 'CL=F' },
+      { symbol: 'GC', name: 'Gold', yahooSymbol: 'GC=F' },
+      { symbol: 'SI', name: 'Silver', yahooSymbol: 'SI=F' },
+      { symbol: 'HG', name: 'Copper', yahooSymbol: 'HG=F' },
+      { symbol: 'NG', name: 'Natural Gas', yahooSymbol: 'NG=F' },
+      { symbol: 'BZ', name: 'Brent Crude', yahooSymbol: 'BZ=F' }
+    ]
+  },
+  currencies: {
+    label: 'Currencies',
+    indices: [
+      { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X' },
+      { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X' },
+      { symbol: 'GBPUSD', name: 'USD/GBP', yahooSymbol: 'GBPUSD=X' },
+      { symbol: 'AUDUSD', name: 'USD/AUD', yahooSymbol: 'AUDUSD=X' },
+      { symbol: 'USDCAD', name: 'USD/CAD', yahooSymbol: 'CADUSD=X' },
+      { symbol: 'USDMXN', name: 'USD/MXN', yahooSymbol: 'MXN=X' }
+    ]
+  }
 };
 
 // Helper to get ticker mapping (matches securitiesConfig.js logic)
@@ -244,11 +369,12 @@ async function fetchYahooQuote(yahooTicker) {
       const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
       
       console.log(`[Yahoo Finance] Successfully fetched ${yahooTicker}: price=${currentPrice}, change=${change}, source=${availablePriceFields.join(',')}`);
-      
+
       return {
         price: currentPrice.toFixed(2),
         change: change.toFixed(2),
         changePercent: changePercent.toFixed(2),
+        previousClose: previousClose.toFixed(2),
         timestamp: new Date().toISOString()
       };
     } else {
@@ -396,6 +522,60 @@ async function getQuote(symbol) {
   }
   
   return null;
+}
+
+// Fetch intraday data for sparklines (5-minute intervals, last 50 points)
+async function getIntradayData(symbol, range = '1d') {
+  const cacheKey = `intraday:${symbol.toUpperCase()}`;
+
+  // Check cache
+  const cached = intradayCache.get(cacheKey);
+  if (cached) {
+    console.log(`[IntradayCache] Hit for ${cacheKey}`);
+    return cached;
+  }
+
+  console.log(`[IntradayCache] Miss for ${cacheKey}, fetching...`);
+
+  try {
+    // Get the Yahoo ticker mapping
+    const mapping = getTickerMapping(symbol);
+    const yahooSymbol = mapping.source === 'yahoo' ? mapping.ticker : symbol;
+
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?range=${range}&interval=5m`;
+
+    const response = await axios.get(url, {
+      timeout: 5000,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    const result = response.data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]?.close) {
+      console.warn(`[IntradayData] No valid data for ${symbol}`);
+      return [];
+    }
+
+    const closePrices = result.indicators.quote[0].close;
+
+    // Extract last 50 data points for sparkline, filter out null values
+    const sparklineData = closePrices
+      .filter(price => price !== null && price !== undefined)
+      .slice(-50)
+      .map(price => parseFloat(price.toFixed(2)));
+
+    // Cache for 5 minutes
+    intradayCache.set(cacheKey, sparklineData);
+    setTimeout(() => {
+      intradayCache.delete(cacheKey);
+      console.log(`[IntradayCache] Expired and deleted ${cacheKey}`);
+    }, INTRADAY_CACHE_TTL);
+
+    console.log(`[IntradayCache] Stored sparkline for ${cacheKey}: ${sparklineData.length} points`);
+    return sparklineData;
+  } catch (error) {
+    console.error(`[IntradayData] Failed to fetch for ${symbol}:`, error.message);
+    return [];
+  }
 }
 
 // Mock portfolio data
@@ -988,6 +1168,76 @@ app.get('/api/macro-indicators', async (req, res) => {
   }
 });
 
+// Multi-Region Quotes endpoint - fetches quotes and sparklines for all regions
+app.get('/api/multi-region-quotes', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { regions, includeSparklines = 'true' } = req.query;
+    const requestedRegions = regions ? regions.split(',') : Object.keys(MARKET_REGIONS);
+
+    console.log(`[API] /api/multi-region-quotes called for regions: ${requestedRegions.join(', ')}, sparklines: ${includeSparklines}`);
+
+    const results = {};
+
+    for (const regionKey of requestedRegions) {
+      const region = MARKET_REGIONS[regionKey];
+      if (!region) {
+        console.warn(`[API] Unknown region: ${regionKey}`);
+        continue;
+      }
+
+      console.log(`[API] Fetching ${region.indices.length} indices for ${regionKey}...`);
+
+      // Fetch quotes for all indices in this region in parallel
+      const quotes = await Promise.all(
+        region.indices.map(async (index) => {
+          try {
+            // Use yahooSymbol or fredSymbol as appropriate
+            const symbol = index.yahooSymbol || index.fredSymbol;
+            const quote = await getQuote(symbol);
+
+            // Fetch sparkline data if requested (default: true)
+            let sparklineData = [];
+            if (includeSparklines === 'true' && index.yahooSymbol) {
+              // Only fetch sparklines for Yahoo symbols (not FRED)
+              sparklineData = await getIntradayData(symbol);
+            }
+
+            return {
+              symbol: index.symbol,
+              name: index.name,
+              price: quote?.price || null,
+              change: quote?.change || null,
+              changePercent: quote?.changePercent || null,
+              timestamp: quote?.timestamp || new Date().toISOString(),
+              sparklineData
+            };
+          } catch (error) {
+            console.error(`[API] Error fetching ${index.symbol}:`, error.message);
+            return {
+              symbol: index.symbol,
+              name: index.name,
+              price: null,
+              error: 'Failed to fetch quote'
+            };
+          }
+        })
+      );
+
+      results[regionKey] = quotes;
+      console.log(`[API] Completed ${regionKey}: ${quotes.length} quotes fetched`);
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/multi-region-quotes completed in ${totalTime}ms`);
+    res.json(results);
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/multi-region-quotes after ${totalTime}ms:`, error);
+    res.status(500).json({ error: 'Failed to fetch multi-region quotes' });
+  }
+});
+
 // Helper function to fetch FRED historical data
 async function fetchFredHistoricalData(seriesId, months = 7) {
   try {
@@ -1384,6 +1634,44 @@ app.get('/api/portfolio', async (req, res) => {
     console.log(`[API] Holdings scan completed in ${holdingsTime}ms, found ${holdingsResult.Items.length} holdings`);
     const holdings = holdingsResult.Items || [];
     
+    // Fetch real-time quotes for all holdings to get intraday G/L
+    const quotesStartTime = Date.now();
+    const symbols = holdings.map(h => h.symbol).filter(Boolean);
+    let quotes = {};
+    
+    if (symbols.length > 0) {
+      try {
+        const BATCH_SIZE = 5;
+        const DELAY_MS = 200;
+        const quoteResults = await batchProcess(
+          symbols,
+          BATCH_SIZE,
+          DELAY_MS,
+          async (symbol) => {
+            try {
+              return await getQuote(symbol);
+            } catch (error) {
+              console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
+              return null;
+            }
+          }
+        );
+        
+        symbols.forEach((symbol, index) => {
+          const quote = quoteResults[index];
+          if (quote && quote.changePercent) {
+            quotes[symbol.toUpperCase()] = quote;
+          }
+        });
+        
+        const quotesTime = Date.now() - quotesStartTime;
+        console.log(`[API] Quotes fetched for ${Object.keys(quotes).length} holdings in ${quotesTime}ms`);
+      } catch (error) {
+        console.error(`[API] Error fetching quotes for holdings:`, error.message);
+        // Continue without quotes - holdings will have null dayChangePercent
+      }
+    }
+    
     // Transform to frontend format
     const portfolioData = {
       summary: {
@@ -1395,6 +1683,28 @@ app.get('/api/portfolio', async (req, res) => {
         positionCount: latestSnapshot.summary?.positionCount || holdings.length
       },
       assetAllocation: latestSnapshot.assetAllocation || {},
+      // Include full holdings array for PortfolioBreakdown component
+      holdings: holdings.map(holding => {
+        const symbolUpper = holding.symbol?.toUpperCase();
+        const quote = quotes[symbolUpper] || null;
+        // dayChangePercent comes from real-time quotes API (intraday change)
+        const dayChangePercent = quote?.changePercent ? parseFloat(quote.changePercent) : null;
+        
+        return {
+          symbol: holding.symbol,
+          description: holding.description || '',
+          quantity: holding.quantity || 0,
+          price: holding.price || 0,
+          marketValue: holding.marketValue || 0,
+          costBasis: holding.costBasis || 0,
+          gainLoss: holding.gainLoss || 0,
+          gainLossPercent: holding.gainLossPercent || 0,
+          dayChangePercent: dayChangePercent, // Intraday G/L from real-time market prices
+          assetType: holding.assetType || '',
+          assetClass: holding.assetClass || ''
+        };
+      }),
+      // Keep topHoldings for summary views
       topHoldings: holdings.slice(0, 10).map(holding => ({
         symbol: holding.symbol,
         marketValue: holding.marketValue,

@@ -3,7 +3,7 @@ import { Card, Title, Text } from '@tremor/react';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
 import USQuadChart from './USQuadChart';
 import WelcomeToTheMachine from './WelcomeToTheMachine';
-import StaticMetricBar from './StaticMetricBar';
+import MultiRegionMarketOverview from './MultiRegionMarketOverview';
 import DailyNotepad from './DailyNotepad';
 import FXLayoutsShowcase from './FXLayoutsShowcase';
 import { USDMarketService } from '../../services/api/usdMarketService';
@@ -63,7 +63,7 @@ const USDMacroDashboard = () => {
           <div className="macro-dashboard-title-container">
             <Title className="dark:text-white">Macro Dashboard</Title>
           </div>
-          <StaticMetricBar />
+          <MultiRegionMarketOverview />
         </div>
       </Card>
 
