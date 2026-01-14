@@ -1,10 +1,176 @@
 /* Multi-Region Market Overview - Light Theme */
 
 .multi-region-overview {
-  width: 100%;
+  width: calc(100% + 48px); /* Extend beyond parent Card padding (typically 24px on each side) */
+  margin-left: -24px; /* Offset parent Card padding */
+  margin-right: -24px; /* Offset parent Card padding */
+  margin-top: 0; /* Keep at top border of card */
+  margin-bottom: -24px; /* Extend to bottom edge */
   background: #E8F4F8; /* Light blue background */
-  padding: 16px;
-  border-radius: 8px;
+  padding: 0; /* No padding - bars and content handle their own spacing */
+  border-radius: 8px; /* Match card's rounded-lg (8px) on all corners */
+}
+
+/* Timezone Clock Bar - Timeline Design - Standalone */
+.timezone-clock-bar {
+  position: relative;
+  margin-bottom: 0;
+  padding: 16px 14px 14px 14px; /* Adjusted padding for better alignment */
+  border-radius: 8px; /* All corners rounded for standalone component */
+  border: none;
+  min-height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  width: calc(100% + 48px); /* Extend beyond parent Card padding (typically 24px on each side) */
+  margin-left: -24px; /* Offset parent Card padding */
+  margin-right: -24px; /* Offset parent Card padding */
+}
+
+/* Timeline line - horizontal line running behind cities */
+.timeline-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 2px;
+  background: #87CEEB; /* Light blue */
+  z-index: 1;
+}
+
+/* Container for all timeline nodes */
+.timeline-cities {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 100%;
+  z-index: 2;
+  gap: 8px;
+}
+
+/* Individual timeline node */
+.timezone-timeline-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+
+/* Home icon above LA - positioned to align with others */
+.home-icon {
+  width: 12px;
+  height: 12px;
+  margin-bottom: 4px; /* Even spacing */
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.3));
+  flex-shrink: 0;
+}
+
+/* City label above the line */
+.timezone-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffffff; /* White text for visibility on gradient */
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 5px; /* Even spacing */
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+/* Home timezone (LA) highlight */
+.timezone-timeline-node.home-timezone .timezone-label {
+  color: #000080; /* Brand navy blue */
+  font-weight: 800;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+/* Time icon marker above the timeline line */
+.timeline-marker-above {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  position: relative;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.4));
+  margin-bottom: 5px; /* Even spacing above the line */
+  flex-shrink: 0;
+}
+
+.time-icon {
+  display: block;
+}
+
+/* Home timezone icon highlight */
+.timezone-timeline-node.home-timezone .timeline-marker-above {
+  filter: drop-shadow(0 0 4px rgba(0, 0, 128, 0.6));
+}
+
+/* Small marker on the timeline line itself - perfectly centered on line */
+.timeline-line-marker {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #87CEEB;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  z-index: 3;
+  position: relative;
+  margin-bottom: 5px; /* Even spacing below the line */
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+  /* Center the circle on the line by adjusting position */
+  margin-top: -1px; /* Half of border width to center on 2px line */
+}
+
+/* Home timezone line marker highlight */
+.timezone-timeline-node.home-timezone .timeline-line-marker {
+  background: #000080;
+  border-color: #ffffff;
+  box-shadow: 0 0 4px rgba(0, 0, 128, 0.6);
+  width: 8px;
+  height: 8px;
+  margin-top: -2px; /* Adjust for larger size to center on line */
+}
+
+/* Time container for both formats */
+.timezone-time-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: 0; /* No extra margin, spacing handled by marker margin-bottom */
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+/* Time display below the line (12-hour format) */
+.timezone-time {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff; /* White text for visibility on gradient */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 24-hour format display */
+.timezone-time-24 {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85); /* Slightly transparent white */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Home timezone time with underline */
+.timezone-time.home-time {
+  color: #ffffff;
+  border-bottom: 2px solid #000080; /* Brand navy blue underline */
+  padding-bottom: 2px;
+  font-weight: 700;
 }
 
 /* Market Countdown */
@@ -16,8 +182,11 @@
   margin-bottom: 16px;
   padding: 10px 14px;
   background: #D6EAF8; /* Lighter blue for countdown */
-  border-radius: 6px;
-  border: 1px solid #B8D4E0;
+  border-radius: 0; /* No border radius to reach edges */
+  border-left: none; /* No left border */
+  border-right: none; /* No right border */
+  border-top: 1px solid #B8D4E0;
+  border-bottom: 1px solid #B8D4E0;
 }
 
 .market-status-row {
@@ -67,6 +236,7 @@
   display: grid;
   grid-template-columns: repeat(8, 1fr); /* 8 equal columns for all regions */
   gap: 12px;
+  padding: 0 16px 16px 16px; /* Top, right, bottom, left - keep padding for content spacing */
 }
 
 /* Responsive: Stack on smaller screens */
@@ -99,7 +269,7 @@
   background: #E8F4F8; /* Light blue background */
   border-radius: 4px; /* 50% smaller from 8px */
   padding: 6px; /* 50% smaller from 12px */
-  border: 1px solid #B8D4E0; /* Light blue border */
+  border: 1px solid #4682B4; /* Dark blue border to match title */
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); /* 50% smaller shadow */
 }
 
@@ -112,6 +282,9 @@
   letter-spacing: 0.5px;
   border-bottom: 1px solid #4682B4; /* 50% smaller from 2px */
   padding-bottom: 3px; /* 50% smaller from 6px */
+  word-wrap: break-word;
+  white-space: normal;
+  line-height: 1.3;
 }
 
 /* Indices Grid - 2 columns per region */

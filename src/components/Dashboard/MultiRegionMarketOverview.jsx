@@ -63,6 +63,7 @@ const isMarketOpen = (region) => {
 const MARKET_REGIONS = {
   us: {
     label: 'US',
+    tradingHours: 'NYSE: 9:30 AM - 4:00 PM EST',
     indices: [
       { symbol: 'SPY', name: 'S&P 500' },
       { symbol: 'DJI', name: 'Dow 30' },
@@ -74,6 +75,7 @@ const MARKET_REGIONS = {
   },
   europe: {
     label: 'Europe',
+    tradingHours: 'LSE: 8:00 AM - 4:30 PM GMT',
     indices: [
       { symbol: 'FTSE', name: 'FTSE 100' },
       { symbol: 'CAC', name: 'CAC 40' },
@@ -85,6 +87,7 @@ const MARKET_REGIONS = {
   },
   asia: {
     label: 'Asia',
+    tradingHours: 'Tokyo: 9:00 AM - 3:00 PM JST',
     indices: [
       { symbol: 'N225', name: 'Nikkei 225' },
       { symbol: 'HSI', name: 'Hang Seng' },
@@ -96,6 +99,7 @@ const MARKET_REGIONS = {
   },
   crypto: {
     label: 'Cryptocurrencies',
+    tradingHours: '24/7',
     indices: [
       { symbol: 'BTC', name: 'Bitcoin' },
       { symbol: 'ETH', name: 'Ethereum' },
@@ -107,6 +111,7 @@ const MARKET_REGIONS = {
   },
   rates: {
     label: 'Rates',
+    tradingHours: 'NYSE: 9:30 AM - 4:00 PM EST',
     indices: [
       { symbol: 'UST13W', name: '13-Wk Bond' },
       { symbol: 'UST5Y', name: '5-Yr Bond' },
@@ -118,6 +123,7 @@ const MARKET_REGIONS = {
   },
   commodities: {
     label: 'Commodities',
+    tradingHours: 'Extended: 6:00 PM - 5:00 PM EST',
     indices: [
       { symbol: 'CL', name: 'Crude Oil' },
       { symbol: 'GC', name: 'Gold' },
@@ -129,6 +135,7 @@ const MARKET_REGIONS = {
   },
   currencies: {
     label: 'Currencies',
+    tradingHours: '24 hours (Sun 5PM - Fri 5PM EST, closed weekends)',
     indices: [
       { symbol: 'EURUSD', name: 'EUR/USD' },
       { symbol: 'USDJPY', name: 'USD/JPY' },
@@ -297,7 +304,7 @@ function RegionPanel({ region, data, loading }) {
 
   return (
     <div className="region-panel">
-      <h3 className="region-title">{region.label}</h3>
+      <h3 className="region-title">{region.label}{region.tradingHours ? ` - ${region.tradingHours}` : ''}</h3>
       <div className="indices-grid">
         {region.indices.map((index) => {
           const quote = data?.find(d => d.symbol === index.symbol);

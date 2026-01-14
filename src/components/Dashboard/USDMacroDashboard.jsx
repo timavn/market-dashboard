@@ -4,6 +4,7 @@ import USDCorrelationMatrix from './USDCorrelationMatrix';
 import USQuadChart from './USQuadChart';
 import WelcomeToTheMachine from './WelcomeToTheMachine';
 import MultiRegionMarketOverview from './MultiRegionMarketOverview';
+import TimezoneClockBar from './TimezoneClockBar';
 import DailyNotepad from './DailyNotepad';
 import FXLayoutsShowcase from './FXLayoutsShowcase';
 import { USDMarketService } from '../../services/api/usdMarketService';
@@ -57,12 +58,16 @@ const USDMacroDashboard = () => {
 
   return (
     <div className="space-y-4">
+      {/* Timezone Bar - Standalone */}
+      <Card className="dark:bg-gray-800 relative macro-dashboard-card rounded-lg">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <TimezoneClockBar />
+        </div>
+      </Card>
+
       {/* Banner with Title and Metric Bar */}
       <Card className="dark:bg-gray-800 relative macro-dashboard-card rounded-lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div className="macro-dashboard-title-container">
-            <Title className="dark:text-white">Macro Dashboard</Title>
-          </div>
           <MultiRegionMarketOverview />
         </div>
       </Card>
