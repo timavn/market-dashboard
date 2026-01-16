@@ -1,31 +1,44 @@
 import React, { useState, useEffect } from 'react';
+import { isMarketHoliday, getHolidayName, getTradingDaysCount } from '../../utils/marketHolidays';
 
 export default function MarketCountdown() {
   const [marketStatus, setMarketStatus] = useState('calculating...');
   const [isOpen, setIsOpen] = useState(true);
   const [gameDay, setGameDay] = useState(null);
 
-  // Calculate trading days from Jan 1, 2026 to today
+  // Calculate trading days from Jan 2, 2026 (first trading day) to today
+  // Only count today if market has opened (9:30 AM ET or later)
   const calculateGameDay = () => {
     const now = new Date();
     const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const startOfSeason = new Date('2026-01-01');
+
+    // First trading day of 2026 is Jan 2 (Jan 1 is New Year's Day holiday)
+    const startOfSeason = new Date('2026-01-02');
     startOfSeason.setHours(0, 0, 0, 0);
-    
-    let tradingDays = 0;
+
     const currentDate = new Date(etTime);
     currentDate.setHours(0, 0, 0, 0);
-    
-    // Count trading days (Mon-Fri) from Jan 1, 2026 to today
-    for (let date = new Date(startOfSeason); date <= currentDate; date.setDate(date.getDate() + 1)) {
-      const dayOfWeek = date.getDay();
-      // Count Monday (1) through Friday (5) as trading days
-      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-        tradingDays++;
-      }
+
+    // Check if market has opened today (9:30 AM ET)
+    const currentHour = etTime.getHours();
+    const currentMinute = etTime.getMinutes();
+    const marketHasOpened = (currentHour > 9) || (currentHour === 9 && currentMinute >= 30);
+
+    // If today is a trading day but market hasn't opened yet, count up to yesterday
+    const dayOfWeek = etTime.getDay();
+    const isWeekday = dayOfWeek !== 0 && dayOfWeek !== 6;
+    const isTodayHoliday = isMarketHoliday(currentDate);
+    const isTodayTradingDay = isWeekday && !isTodayHoliday;
+
+    let endDate = currentDate;
+    if (isTodayTradingDay && !marketHasOpened) {
+      // Count up to yesterday since today's trading session hasn't started
+      endDate = new Date(currentDate);
+      endDate.setDate(endDate.getDate() - 1);
     }
-    
-    return tradingDays;
+
+    // Count actual trading days (excluding weekends and holidays)
+    return getTradingDaysCount(startOfSeason, endDate);
   };
 
   useEffect(() => {
@@ -33,6 +46,18 @@ export default function MarketCountdown() {
       // Get current time in ET timezone
       const now = new Date();
       const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+
+      // Create date object for today (for holiday checking)
+      const today = new Date(etTime);
+      today.setHours(0, 0, 0, 0);
+
+      // Check for holidays first
+      if (isMarketHoliday(today)) {
+        const holidayName = getHolidayName(today);
+        setIsOpen(false);
+        setMarketStatus(`US market closed (${holidayName})`);
+        return;
+      }
 
       // Market hours: 9:30 AM - 4:00 PM ET (Mon-Fri)
       const dayOfWeek = etTime.getDay(); // 0=Sunday, 6=Saturday
@@ -42,7 +67,7 @@ export default function MarketCountdown() {
       // Weekend check
       if (dayOfWeek === 0 || dayOfWeek === 6) {
         setIsOpen(false);
-        setMarketStatus('Markets closed (weekend)');
+        setMarketStatus('US market closed (weekend)');
         return;
       }
 
@@ -60,7 +85,7 @@ export default function MarketCountdown() {
 
         const hours = Math.floor(diff / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        setMarketStatus(`Markets open in ${hours}h ${minutes}m`);
+        setMarketStatus(`US markets open in ${hours}h ${minutes}m`);
       } else if (currentTime >= marketOpenTime && currentTime < marketCloseTime) {
         // Market is open
         setIsOpen(true);
@@ -70,11 +95,11 @@ export default function MarketCountdown() {
 
         const hours = Math.floor(diff / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        setMarketStatus(`U.S. markets close in ${hours}h ${minutes}m`);
+        setMarketStatus(`US markets open. Close in ${hours}h ${minutes}m`);
       } else {
         // After market close
         setIsOpen(false);
-        setMarketStatus('Markets closed');
+        setMarketStatus('US market closed');
       }
     };
 

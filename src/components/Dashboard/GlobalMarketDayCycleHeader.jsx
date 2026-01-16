@@ -42,6 +42,44 @@ const formatLocalTime = (now, timezone) => {
 };
 
 /**
+ * Get the day offset for a city relative to UTC
+ * Returns: -1 (yesterday), 0 (today), +1 (tomorrow)
+ */
+const getDayOffset = (timezone, now) => {
+  const zonedTime = utcToZonedTime(now, timezone);
+  
+  // Get date strings in YYYY-MM-DD format for comparison
+  const utcDateStr = format(now, 'yyyy-MM-dd', { timeZone: 'UTC' });
+  const zonedDateStr = format(zonedTime, 'yyyy-MM-dd');
+  
+  if (zonedDateStr === utcDateStr) return 0;
+  
+  // Compare dates
+  const utcParts = utcDateStr.split('-').map(Number);
+  const zonedParts = zonedDateStr.split('-').map(Number);
+  
+  const utcDateObj = new Date(utcParts[0], utcParts[1] - 1, utcParts[2]);
+  const zonedDateObj = new Date(zonedParts[0], zonedParts[1] - 1, zonedParts[2]);
+  
+  const diffMs = zonedDateObj - utcDateObj;
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  
+  // Clamp to -1, 0, or 1 (shouldn't be more than 1 day difference)
+  return Math.max(-1, Math.min(1, diffDays));
+};
+
+/**
+ * Get day label for a city (formatted date like "Jan 15")
+ */
+const getDayLabel = (timezone, now) => {
+  const zonedTime = utcToZonedTime(now, timezone);
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[zonedTime.getMonth()];
+  const day = zonedTime.getDate();
+  return `${month} ${day}`;
+};
+
+/**
  * Convert local market hours to UTC time ranges
  * Returns array of segments: [{ start: 0-1440, end: 0-1440, type: 'pre-market'|'regular'|'post-market' }]
  */
@@ -243,18 +281,18 @@ const getNextMarketEvent = (markets, now) => {
 };
 
 /**
- * Status dot component with appropriate color and glow
+ * Status dot component - using emoji for high-quality shiny look
  */
 const StatusDot = ({ status }) => {
-  const statusStyles = {
-    'open': 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]',
-    'pre-market': 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.6)]',
-    'post-market': 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.6)]',
-    'closed': 'bg-gray-600'
+  const statusEmojis = {
+    'open': '🟢', // Green circle emoji
+    'pre-market': '🔵', // Blue circle emoji
+    'post-market': '🔵', // Blue circle emoji
+    'closed': '🔴' // Red circle emoji
   };
 
   return (
-    <span className={`w-2 h-2 rounded-full transition-all duration-300 ${statusStyles[status] || statusStyles.closed}`} />
+    <span className="text-[8px] leading-none">{statusEmojis[status] || statusEmojis.closed}</span>
   );
 };
 
@@ -340,82 +378,6 @@ const LivingSkyRibbon = ({ now }) => {
     >
       {/* Translucent background - only covers the 40px ribbon */}
       <div className="absolute top-0 left-0 right-0 h-[40px] bg-white/5 dark:bg-black/20" />
-      
-      {/* Sun with glow */}
-      <motion.div
-        className="absolute"
-        style={{
-          top: '20px', // Center of 40px ribbon
-          left: `${celestialPosition.xPercent}%`,
-        }}
-        animate={{
-          x: '-50%', // Center the icon
-          y: celestialPosition.arcHeight,
-          opacity: celestialOpacity.sunOpacity,
-        }}
-        transition={{
-          type: 'spring',
-          stiffness: 50,
-          damping: 20,
-        }}
-      >
-        {/* Sun glow effect - spills over bottom border */}
-        <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-          style={{
-            width: '80px',
-            height: '80px',
-            background: 'radial-gradient(circle, rgba(251, 191, 36, 0.3) 0%, transparent 70%)',
-            zIndex: 6,
-          }}
-        />
-        {/* Sun icon */}
-        <div className="relative" style={{ zIndex: 7 }}>
-          <Sun
-            size={iconSize}
-            className="text-amber-400"
-            style={{ filter: 'drop-shadow(0 0 4px rgba(251, 191, 36, 0.5))' }}
-          />
-        </div>
-      </motion.div>
-
-      {/* Moon with glow */}
-      <motion.div
-        className="absolute"
-        style={{
-          top: '20px', // Center of 40px ribbon
-          left: `${celestialPosition.xPercent}%`,
-        }}
-        animate={{
-          x: '-50%', // Center the icon
-          y: celestialPosition.arcHeight,
-          opacity: celestialOpacity.moonOpacity,
-        }}
-        transition={{
-          type: 'spring',
-          stiffness: 50,
-          damping: 20,
-        }}
-      >
-        {/* Moon glow effect - spills over bottom border */}
-        <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-          style={{
-            width: '80px',
-            height: '80px',
-            background: 'radial-gradient(circle, rgba(147, 197, 253, 0.2) 0%, transparent 70%)',
-            zIndex: 6,
-          }}
-        />
-        {/* Moon icon */}
-        <div className="relative" style={{ zIndex: 7 }}>
-          <Moon
-            size={iconSize}
-            className="text-blue-300"
-            style={{ filter: 'drop-shadow(0 0 4px rgba(147, 197, 253, 0.4))' }}
-          />
-        </div>
-      </motion.div>
     </div>
   );
 };
@@ -914,10 +876,23 @@ const CityNode = ({ market, now, onClick }) => {
   const localTime = formatLocalTime(now, market.timezone);
   const isDaytime = isLocalDaytime(market.timezone, now);
   const utcOffset = getUTCOffsetLabel(market.timezone, now);
+  const dayOffset = getDayOffset(market.timezone, now);
+  const dayLabel = getDayLabel(market.timezone, now);
 
   const handleClick = (e) => {
     onClick(market, e.currentTarget);
   };
+
+  // Determine styling based on day offset
+  const dayIndicatorStyle = useMemo(() => {
+    if (dayOffset === -1) {
+      return 'text-gray-500 bg-gray-100'; // Yesterday - muted
+    } else if (dayOffset === 0) {
+      return 'text-gray-700 bg-blue-50 border border-blue-200'; // Today - highlighted
+    } else {
+      return 'text-gray-500 bg-purple-50 border border-purple-200'; // Tomorrow - subtle highlight
+    }
+  }, [dayOffset]);
 
   return (
     <motion.div
@@ -926,15 +901,6 @@ const CityNode = ({ market, now, onClick }) => {
       whileHover={{ scale: 1.05 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
-      {/* Day/Night Icon */}
-      <div className="h-4 flex items-center justify-center mb-0.5">
-        {isDaytime ? (
-          <Sun size={14} className="text-amber-500" />
-        ) : (
-          <Moon size={14} className="text-gray-500" />
-        )}
-      </div>
-
       {/* Status Dot + City Code */}
       <div className="flex items-center gap-1.5 mb-0.5">
         <StatusDot status={status} />
@@ -947,6 +913,11 @@ const CityNode = ({ market, now, onClick }) => {
       <span className="font-mono text-sm text-gray-900 tabular-nums">
         {localTime}
       </span>
+
+      {/* Day Indicator - Subtle badge showing which day */}
+      <div className={`text-[8px] px-1.5 py-0.5 rounded mt-0.5 font-medium ${dayIndicatorStyle}`}>
+        {dayLabel}
+      </div>
 
       {/* UTC Offset */}
       <span className="text-[9px] text-gray-600 mt-0.5">
@@ -1029,7 +1000,7 @@ const GlobalMarketDayCycleHeader = () => {
             </h2>
             {stats.openCount > 0 && (
               <div className="flex items-center gap-1.5 text-[11px] text-gray-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
+                <span className="text-[8px] leading-none">🟢</span>
                 <span>{stats.openCount} market{stats.openCount !== 1 ? 's' : ''} open</span>
               </div>
             )}
@@ -1051,87 +1022,6 @@ const GlobalMarketDayCycleHeader = () => {
           {/* Living Sky Ribbon - Celestial layer with animated Sun and Moon */}
           <LivingSkyRibbon now={now} />
 
-          {/* Base day/night gradient background - Dark night, bright day */}
-          <div
-            className="absolute inset-0 transition-all duration-1000"
-            style={{
-              background: `
-                linear-gradient(
-                  to right,
-                  rgba(15, 23, 42, 0.95) 0%,
-                  rgba(30, 41, 59, 0.85) 15%,
-                  rgba(51, 65, 85, 0.6) 30%,
-                  rgba(251, 191, 36, 0.4) 45%,
-                  rgba(255, 237, 111, 0.6) 50%,
-                  rgba(251, 191, 36, 0.4) 55%,
-                  rgba(51, 65, 85, 0.6) 70%,
-                  rgba(30, 41, 59, 0.85) 85%,
-                  rgba(15, 23, 42, 0.95) 100%
-                )
-              `
-            }}
-          />
-
-          {/* Fixed Sunlight Mesh Gradient - Light theme glow */}
-          <div
-            className="absolute inset-0 transition-opacity duration-1000"
-            style={{
-              background: `
-                radial-gradient(
-                  ellipse 90% 180% at ${50 + sunlightPosition}% 35%,
-                  rgba(251, 191, 36, 0.5) 0%,
-                  rgba(251, 191, 36, 0.35) 20%,
-                  rgba(251, 191, 36, 0.2) 35%,
-                  rgba(251, 191, 36, 0.1) 50%,
-                  transparent 70%
-                )
-              `,
-              filter: 'blur(25px)'
-            }}
-          />
-
-          {/* Bright center glow - Light theme */}
-          <div
-            className="absolute inset-0 transition-opacity duration-1000"
-            style={{
-              background: `
-                radial-gradient(
-                  ellipse 70% 140% at ${50 + sunlightPosition}% 40%,
-                  rgba(255, 255, 255, 0.4) 0%,
-                  rgba(251, 191, 36, 0.25) 25%,
-                  rgba(251, 191, 36, 0.1) 45%,
-                  transparent 65%
-                )
-              `,
-              mixBlendMode: 'screen'
-            }}
-          />
-
-          {/* Additional warm glow layer */}
-          <div
-            className="absolute inset-0 transition-opacity duration-1000"
-            style={{
-              background: `
-                radial-gradient(
-                  ellipse 50% 100% at ${50 + sunlightPosition}% 45%,
-                  rgba(251, 191, 36, 0.4) 0%,
-                  transparent 50%
-                )
-              `,
-              mixBlendMode: 'overlay',
-              opacity: 0.8
-            }}
-          />
-
-          {/* Subtle ambient glow - Reduced for darker night areas */}
-          <div className="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-transparent opacity-50" />
-
-          {/* Midnight UTC Marker (Date Change) */}
-          <MidnightMarker now={now} />
-
-          {/* UTC Time Marker */}
-          <UTCTimeMarker now={now} />
-
           {/* City Nodes Container */}
           <div className="relative h-full flex items-center justify-around px-4 sm:px-8 z-20">
             {GLOBAL_MARKETS.map((market) => (
@@ -1147,11 +1037,6 @@ const GlobalMarketDayCycleHeader = () => {
             ))}
           </div>
 
-          {/* Timeline Ribbon with Market Hours */}
-          <TimelineRibbon markets={GLOBAL_MARKETS} now={now} />
-
-          {/* Hour Tick Marks */}
-          <HourTicks />
         </div>
       </div>
 

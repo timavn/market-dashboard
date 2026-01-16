@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, Title, Text } from '@tremor/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import {
@@ -173,6 +173,42 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const holdings = portfolioData?.holdings || [];
   const totalValue = portfolioData?.summary?.totalValue || 0;
   const factorExposures = portfolioData?.factorExposures || {};
+  
+  // Column visibility state (shared for both tables)
+  // Default selection: % Acct, % Portfolio, Buy/Sell, Intraday G/L
+  const [columnVisibility, setColumnVisibility] = useState({
+    qty: false,
+    price: false,
+    marketValue: false,
+    pctAccount: true,
+    basisPts: false,
+    percentPortfolio: true,
+    qtyNeeded: true,
+    intradayGainLoss: true,
+    gainLoss: false
+  });
+
+  // Refs for measuring filter button widths to match search input width
+  const longsButtonRowRef = useRef(null);
+  const shortsButtonRowRef = useRef(null);
+  const longsInputRef = useRef(null);
+  const shortsInputRef = useRef(null);
+
+  // Update search input width to match button row width
+  useEffect(() => {
+    const updateWidths = () => {
+      if (longsButtonRowRef.current && longsInputRef.current) {
+        longsInputRef.current.style.width = `${longsButtonRowRef.current.offsetWidth}px`;
+      }
+      if (shortsButtonRowRef.current && shortsInputRef.current) {
+        shortsInputRef.current.style.width = `${shortsButtonRowRef.current.offsetWidth}px`;
+      }
+    };
+    
+    updateWidths();
+    window.addEventListener('resize', updateWidths);
+    return () => window.removeEventListener('resize', updateWidths);
+  }, [columnVisibility]);
 
   // Sorting state for longs and shorts tables
   const [longsSortConfig, setLongsSortConfig] = useState({ field: null, direction: 'desc' });
@@ -181,19 +217,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   // Search filters for tickers
   const [longsSearchFilter, setLongsSearchFilter] = useState('');
   const [shortsSearchFilter, setShortsSearchFilter] = useState('');
-
-  // Column visibility state (shared for both tables)
-  const [columnVisibility, setColumnVisibility] = useState({
-    qty: true,
-    price: true,
-    marketValue: true,
-    pctAccount: true,
-    basisPts: true,
-    percentPortfolio: true,
-    qtyNeeded: true,
-    intradayGainLoss: true,
-    gainLoss: true
-  });
 
   // Column order state (Intraday G/L after Mkt Value by default, % Portfolio after Basis Pts)
   const [columnOrder, setColumnOrder] = useState([
@@ -213,11 +236,11 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     { key: 'qty', label: 'Qty' },
     { key: 'price', label: 'Price' },
     { key: 'marketValue', label: 'Mkt Value' },
-    { key: 'pctAccount', label: '% Acct' },
+    { key: 'pctAccount', label: '% Portfolio' },
     { key: 'basisPts', label: 'Basis Pts' },
-    { key: 'percentPortfolio', label: '% Portfolio' },
-    { key: 'qtyNeeded', label: 'Qty Needed' },
-    { key: 'intradayGainLoss', label: 'Intraday G/L' },
+    { key: 'percentPortfolio', label: 'Δ Portfolio' },
+    { key: 'qtyNeeded', label: 'Buy/Sell' },
+    { key: 'intradayGainLoss', label: 'Day G/L' },
     { key: 'gainLoss', label: 'Total G/L' }
   ];
 
@@ -404,7 +427,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             onClick={() => handleSortClick('intradayGainLoss')}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-              <div>Intraday</div>
+              <div>Day</div>
               <div>G/L</div>
               <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('intradayGainLoss', sortConfig)}</span>
             </div>
@@ -426,7 +449,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
               <div>%</div>
-              <div>Acct</div>
+              <div>Portfolio</div>
               <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('pctAccount', sortConfig)}</span>
             </div>
           </th>
@@ -464,7 +487,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             className={getClassName()}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div>%</div>
+              <div>Δ</div>
               <div>Portfolio</div>
             </div>
           </th>
@@ -483,8 +506,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             className={getClassName()}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div>Qty</div>
-              <div>Needed</div>
+              <div>Buy/Sell</div>
             </div>
           </th>
         );
@@ -651,29 +673,62 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         const basisPoints = parseFloat(basisPointsState[holding.symbol]) || 0;
         const basisPointsAsPercent = basisPoints / 100;
         const targetPercent = percentPortfolioState[holding.symbol];
-        
+
         // Use target % if set, otherwise calculate from basis points
-        const displayPercent = targetPercent !== undefined 
-          ? parseFloat(targetPercent) 
+        const displayPercent = targetPercent !== undefined
+          ? parseFloat(targetPercent)
           : currentPctAcct + basisPointsAsPercent;
-        
+
+        // Check if this input is currently being edited
+        const editingKey = `${isLongs ? 'long' : 'short'}_${holding.symbol}`;
+        const isEditing = editingPercentPortfolio[editingKey] !== undefined;
+        const editingValue = editingPercentPortfolio[editingKey];
+
         return (
           <td key={columnKey} style={{ padding: '6px', textAlign: 'center' }}>
             <div style={{ position: 'relative', display: 'inline-block' }}>
               <input
-                type="number"
-                step="0.25"
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*\.?[0-9]*"
                 placeholder="%"
-                value={targetPercent !== undefined ? targetPercent : displayPercent.toFixed(2)}
+                value={isEditing ? editingValue : displayPercent.toFixed(2)}
+                onFocus={(e) => {
+                  // Start editing - store current value as string
+                  setEditingPercentPortfolio(prev => ({
+                    ...prev,
+                    [editingKey]: displayPercent.toFixed(2)
+                  }));
+                  // Select all text on focus for easy replacement
+                  e.target.select();
+                }}
                 onChange={(e) => {
                   const value = e.target.value;
+                  // Allow any input while typing (including intermediate states like "2." or empty)
+                  // Only allow digits and one decimal point
+                  if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                    setEditingPercentPortfolio(prev => ({
+                      ...prev,
+                      [editingKey]: value
+                    }));
+                  }
+                }}
+                onBlur={(e) => {
+                  const value = e.target.value;
+                  // Clear editing state
+                  setEditingPercentPortfolio(prev => {
+                    const newState = { ...prev };
+                    delete newState[editingKey];
+                    return newState;
+                  });
+
                   if (value === '') {
+                    // Clear the target percent
                     setPercentPortfolioState(prev => {
                       const newState = { ...prev };
                       delete newState[holding.symbol];
                       return newState;
                     });
-                    // Clear basis points when setting target %
                     setBasisPointsState(prev => {
                       const newState = { ...prev };
                       delete newState[holding.symbol];
@@ -682,9 +737,11 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   } else {
                     const numValue = parseFloat(value);
                     if (!isNaN(numValue)) {
+                      // Store value rounded to 2 decimal places
+                      const roundedValue = Math.round(numValue * 100) / 100;
                       setPercentPortfolioState(prev => ({
                         ...prev,
-                        [holding.symbol]: numValue
+                        [holding.symbol]: roundedValue
                       }));
                       // Clear basis points when setting target %
                       setBasisPointsState(prev => {
@@ -696,22 +753,37 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   }
                 }}
                 onKeyDown={(e) => {
-                  // Prevent arrow keys from incrementing by step
-                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                  if (e.key === 'Enter') {
+                    e.target.blur();
+                  } else if (e.key === 'Escape') {
+                    // Cancel editing - restore original value
+                    setEditingPercentPortfolio(prev => {
+                      const newState = { ...prev };
+                      delete newState[editingKey];
+                      return newState;
+                    });
+                    e.target.blur();
+                  } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                     e.preventDefault();
-                    const current = parseFloat(targetPercent !== undefined ? targetPercent : displayPercent) || 0;
+                    const current = parseFloat(isEditing ? editingValue : displayPercent.toFixed(2)) || 0;
+                    // Round to 2 decimal places first to avoid floating point issues
+                    const rounded = Math.round(current * 100) / 100;
+                    // Check if current value is a multiple of 0.10 (last digit in hundredths place is 0)
+                    const isMultipleOfTen = Math.round(rounded * 100) % 10 === 0;
+                    // If at a rounded 10, increment by 0.10, otherwise by 0.01
+                    const increment = isMultipleOfTen ? 0.10 : 0.01;
                     let newValue;
                     if (e.key === 'ArrowUp') {
-                      // Round up to nearest 0.10
-                      newValue = Math.ceil(current * 10) / 10;
-                      // If already at a 0.10 increment, add 0.10
-                      if (newValue === current) {
-                        newValue = current + 0.10;
-                      }
+                      newValue = Math.round((rounded + increment) * 100) / 100;
                     } else {
-                      // Round down to nearest 0.10
-                      newValue = Math.floor(current * 10) / 10;
-                      // If already at a 0.10 increment, keep it the same
+                      newValue = Math.round((rounded - increment) * 100) / 100;
+                    }
+                    // Update editing value if editing, otherwise update state directly
+                    if (isEditing) {
+                      setEditingPercentPortfolio(prev => ({
+                        ...prev,
+                        [editingKey]: newValue.toFixed(2)
+                      }));
                     }
                     setPercentPortfolioState(prev => ({
                       ...prev,
@@ -742,12 +814,13 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   onClick={(e) => {
                     e.preventDefault();
                     const current = parseFloat(targetPercent !== undefined ? targetPercent : displayPercent) || 0;
-                    // Round up to nearest 0.10
-                    let newValue = Math.ceil(current * 10) / 10;
-                    // If already at a 0.10 increment, add 0.10
-                    if (newValue === current) {
-                      newValue = current + 0.10;
-                    }
+                    // Round to 2 decimal places first to avoid floating point issues
+                    const rounded = Math.round(current * 100) / 100;
+                    // Check if current value is a multiple of 0.10 (last digit in hundredths place is 0)
+                    const isMultipleOfTen = Math.round(rounded * 100) % 10 === 0;
+                    // If at a rounded 10, increment by 0.10, otherwise by 0.01
+                    const increment = isMultipleOfTen ? 0.10 : 0.01;
+                    const newValue = Math.round((rounded + increment) * 100) / 100;
                     setPercentPortfolioState(prev => ({
                       ...prev,
                       [holding.symbol]: newValue
@@ -781,9 +854,13 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   onClick={(e) => {
                     e.preventDefault();
                     const current = parseFloat(targetPercent !== undefined ? targetPercent : displayPercent) || 0;
-                    // Round down to nearest 0.10
-                    const newValue = Math.floor(current * 10) / 10;
-                    // If already at a 0.10 increment, keep it the same
+                    // Round to 2 decimal places first to avoid floating point issues
+                    const rounded = Math.round(current * 100) / 100;
+                    // Check if current value is a multiple of 0.10 (last digit in hundredths place is 0)
+                    const isMultipleOfTen = Math.round(rounded * 100) % 10 === 0;
+                    // If at a rounded 10, decrement by 0.10, otherwise by 0.01
+                    const decrement = isMultipleOfTen ? 0.10 : 0.01;
+                    const newValue = Math.round((rounded - decrement) * 100) / 100;
                     setPercentPortfolioState(prev => ({
                       ...prev,
                       [holding.symbol]: newValue
@@ -822,7 +899,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         const basisPointsForQty = basisPointsState[holding.symbol];
         
         return (
-          <td key={columnKey} style={{ padding: '6px', textAlign: 'center', fontWeight: '600' }} className="dark:text-white">
+          <td key={columnKey} style={{ padding: '6px', textAlign: 'center', fontWeight: '600' }}>
             {(() => {
               let shares = null;
               
@@ -833,9 +910,15 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                 shares = calculateSharesFromBasisPoints(holding, basisPointsForQty, totalValue, !isLongs);
               }
               
-              if (shares === null) return '--';
-              if (shares === 0) return '0';
-              return shares > 0 ? `+${shares}` : `${shares}`;
+              if (shares === null) return <span className="dark:text-gray-400">--</span>;
+              if (shares === 0) return <span className="dark:text-gray-300">0</span>;
+              
+              // Format with color: negative (red) = sell, positive (green) = buy
+              if (shares < 0) {
+                return <span className="text-red-500 dark:text-red-400">{shares}</span>;
+              } else {
+                return <span className="text-green-500 dark:text-green-400">+{shares}</span>;
+              }
             })()}
           </td>
         );
@@ -916,6 +999,9 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const [longsPercentPortfolio, setLongsPercentPortfolio] = useState({});
   const [shortsBasisPoints, setShortsBasisPoints] = useState({});
   const [shortsPercentPortfolio, setShortsPercentPortfolio] = useState({});
+
+  // State for tracking raw input values while editing (allows typing intermediate values like "2.")
+  const [editingPercentPortfolio, setEditingPercentPortfolio] = useState({});
 
   // Separate longs and shorts
   const { longs, shorts } = useMemo(() => {
@@ -1124,27 +1210,43 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
 
   // Calculate shares needed based on target % of portfolio
   const calculateSharesFromPercent = (holding, targetPercent, totalValue, isShort = false) => {
-    if (!holding || !targetPercent || !totalValue || !holding.price) return null;
+    if (!holding || targetPercent === undefined || targetPercent === null || !totalValue || !holding.price) return null;
     const price = parseFloat(holding.price);
     if (price === 0) return null;
-    
-    // Current % of portfolio (use absolute value for calculation)
-    const currentPercent = totalValue > 0 ? ((Math.abs(holding.marketValue) / totalValue) * 100) : 0;
+
+    // Current % of portfolio - use rounded value to match what's displayed
+    // This ensures the calculation matches user expectations from the UI
+    const currentPercentRaw = totalValue > 0 ? ((Math.abs(holding.marketValue) / totalValue) * 100) : 0;
+    const currentPercent = Math.round(currentPercentRaw * 100) / 100; // Round to 2 decimal places
     const targetPercentNum = parseFloat(targetPercent);
-    
-    // Difference in percentage
-    const percentDiff = targetPercentNum - currentPercent;
-    
+
+    // Round target to 2 decimal places as well for consistent comparison
+    const targetPercentRounded = Math.round(targetPercentNum * 100) / 100;
+
+    // Difference in percentage (using rounded values)
+    const percentDiff = targetPercentRounded - currentPercent;
+
+    // If no difference after rounding, return 0
+    if (Math.abs(percentDiff) < 0.001) return 0;
+
     // Dollar amount needed: (percentDiff / 100) * totalValue
     const dollarAmount = (percentDiff / 100) * totalValue;
     let shares = dollarAmount / price;
-    
+
     // For shorts: if target % is higher than current, we need to sell more (negative shares)
     // If target % is lower, we need to buy back (positive shares)
     if (isShort) {
       shares = -shares; // Flip sign for shorts
     }
-    
+
+    // Round shares, but ensure at least 1 or -1 if there's any non-zero diff
+    // This prevents the counter showing 0 when the user has changed the target %
+    if (shares > 0 && shares < 1) {
+      return 1;
+    } else if (shares < 0 && shares > -1) {
+      return -1;
+    }
+
     return Math.round(shares);
   };
 
@@ -1725,15 +1827,15 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             {/* Longs Data Table */}
             {longs.length > 0 && (
               <div style={{ overflowX: 'auto' }}>
-                {/* Search Box */}
-                <div style={{ marginBottom: '8px' }}>
+                {/* Search Box and Filter Buttons Container */}
+                <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   <input
+                    ref={longsInputRef}
                     type="text"
                     placeholder="Search ticker..."
                     value={longsSearchFilter}
                     onChange={(e) => setLongsSearchFilter(e.target.value)}
                     style={{
-                      width: '100%',
                       padding: '6px 10px',
                       fontSize: '12px',
                       border: '1px solid #d1d5db',
@@ -1744,7 +1846,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                     className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   />
                   {/* Column Toggle Buttons */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  <div ref={longsButtonRowRef} style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center', width: 'fit-content' }}>
                     {columnDefinitions.map(col => (
                       <button
                         key={col.key}
@@ -1837,7 +1939,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
           </Card>
 
           {/* Shorts Section */}
-          <Card className="dark:bg-gray-800" style={{ padding: 0 }}>
+          <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0 }}>
             {/* Shorts Banner */}
             <div style={{ 
               textAlign: 'center', 
@@ -1992,15 +2094,15 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             {/* Shorts Data Table */}
             {shorts.length > 0 && (
               <div style={{ overflowX: 'auto' }}>
-                {/* Search Box */}
-                <div style={{ marginBottom: '8px' }}>
+                {/* Search Box and Filter Buttons Container */}
+                <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   <input
+                    ref={shortsInputRef}
                     type="text"
                     placeholder="Search ticker..."
                     value={shortsSearchFilter}
                     onChange={(e) => setShortsSearchFilter(e.target.value)}
                     style={{
-                      width: '100%',
                       padding: '6px 10px',
                       fontSize: '12px',
                       border: '1px solid #d1d5db',
@@ -2011,7 +2113,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                     className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   />
                   {/* Column Toggle Buttons */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  <div ref={shortsButtonRowRef} style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center', width: 'fit-content' }}>
                     {columnDefinitions.map(col => (
                       <button
                         key={col.key}

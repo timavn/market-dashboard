@@ -8,7 +8,8 @@
   margin-bottom: -24px; /* Extend to bottom edge */
   background: #E8F4F8; /* Light blue background */
   padding: 0; /* No padding - bars and content handle their own spacing */
-  border-radius: 8px; /* Match card's rounded-lg (8px) on all corners */
+  border-radius: 8px 8px 8px 8px; /* Rounded corners on all sides */
+  overflow: hidden; /* Ensure content respects rounded corners */
 }
 
 /* Timezone Clock Bar - Timeline Design - Standalone */
@@ -49,6 +50,34 @@
   width: 100%;
   z-index: 2;
   gap: 8px;
+}
+
+/* Date boundary line - vertical white line marking date changes */
+.date-boundary-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.6);
+  z-index: 2;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* Date label on the boundary line */
+.date-boundary-label {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.3);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
 }
 
 /* Individual timeline node */
@@ -306,6 +335,10 @@
   justify-content: space-between;
   position: relative; /* For absolute positioning of percentage */
   transition: box-shadow 0.2s ease;
+  overflow: hidden; /* Ensure fill respects rounded corners */
+  /* Clip background to rounded corners */
+  clip-path: inset(0 round 3px);
+  -webkit-clip-path: inset(0 round 3px);
 }
 
 .index-card:hover {
@@ -330,6 +363,13 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.market-status-emoji {
+  font-size: 6px;
+  line-height: 1;
   flex-shrink: 0;
   display: inline-block;
 }
@@ -439,6 +479,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden; /* Ensure fill respects rounded corners */
+  /* Clip background to rounded corners */
+  clip-path: inset(0 round 3px);
+  -webkit-clip-path: inset(0 round 3px);
 }
 
 .liquidity-section {

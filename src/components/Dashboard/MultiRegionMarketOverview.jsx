@@ -135,7 +135,7 @@ const MARKET_REGIONS = {
   },
   currencies: {
     label: 'Currencies',
-    tradingHours: '24 hours (Sun 5PM - Fri 5PM EST, closed weekends)',
+    tradingHours: 'Sun 5PM - Fri 5PM EST',
     indices: [
       { symbol: 'EURUSD', name: 'EUR/USD' },
       { symbol: 'USDJPY', name: 'USD/JPY' },
@@ -192,10 +192,11 @@ function IndexCard({ name, value, change, changePercent, previousClose, sparklin
         <div className="index-name-with-status">
           {showStatus && (
             <span
-              className="market-status-dot"
-              style={{ backgroundColor: marketOpen && hasData ? '#10B981' : '#EF4444' }}
+              className="market-status-emoji"
               title={marketOpen && hasData ? 'Market open - receiving data' : marketOpen ? 'Market open - no data' : 'Market closed'}
-            />
+            >
+              {marketOpen && hasData ? '🟢' : '🔴'}
+            </span>
           )}
           <span className="index-name">{name}</span>
         </div>

@@ -114,29 +114,29 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   const getUpdateStatus = (timestamp, lrrTimestamp = null, hrrTimestamp = null) => {
     // Priority 1: Check if LRR or HRR are more than 1 market day old (blue)
     if (lrrTimestamp && isMoreThanOneMarketDayOld(lrrTimestamp)) {
-      return { status: 'lrr-stale', color: '#3B82F6' }; // Blue
+      return { status: 'lrr-stale', color: '#3B82F6', emoji: '🔵' }; // Blue
     }
     if (hrrTimestamp && isMoreThanOneMarketDayOld(hrrTimestamp)) {
-      return { status: 'hrr-stale', color: '#3B82F6' }; // Blue
+      return { status: 'hrr-stale', color: '#3B82F6', emoji: '🔵' }; // Blue
     }
-    
+
     // Priority 2: Check price update status
     if (!timestamp) {
-      return { status: 'stale', color: '#EF4444' }; // Red for no timestamp
+      return { status: 'stale', color: '#EF4444', emoji: '🔴' }; // Red for no timestamp
     }
-    
+
     const now = Date.now();
     const timestampMs = typeof timestamp === 'string' ? new Date(timestamp).getTime() : timestamp;
     const elapsedMs = now - timestampMs;
     const elapsedSeconds = elapsedMs / 1000;
     const elapsedMinutes = elapsedSeconds / 60;
-    
+
     if (elapsedMinutes < 1) {
-      return { status: 'fresh', color: '#10B981' }; // Green
+      return { status: 'fresh', color: '#10B981', emoji: '🟢' }; // Green
     } else if (elapsedMinutes < 5) {
-      return { status: 'recent', color: '#F59E0B' }; // Orange
+      return { status: 'recent', color: '#F59E0B', emoji: '🟡' }; // Yellow/Orange
     } else {
-      return { status: 'stale', color: '#EF4444' }; // Red
+      return { status: 'stale', color: '#EF4444', emoji: '🔴' }; // Red
     }
   };
 
@@ -649,22 +649,26 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
       </div>
 
       {/* Asset Class Legend - Horizontal, above column titles */}
-      <div className="flex items-center justify-between px-2 py-1.5 border-b border-gray-200 dark:border-gray-700" style={{ maxWidth: '100%', flexWrap: 'nowrap' }}>
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-gray-200 dark:border-gray-700">
         {['fixedIncome', 'equity', 'currency', 'commodity', 'crypto'].map((assetClass) => {
-          const colorMap = {
-            fixedIncome: '#3B82F6',  // Blue
-            equity: '#10B981',        // Green
-            currency: '#8B5CF6',     // Violet
-            commodity: '#F97316',    // Orange
-            crypto: '#EAB308'        // Yellow
+          const emojiMap = {
+            fixedIncome: '🟦',  // Blue square
+            equity: '🟩',       // Green square
+            currency: '🟪',     // Purple square
+            commodity: '🟧',    // Orange square
+            crypto: '🟨'        // Yellow square
+          };
+          const shortNames = {
+            fixedIncome: 'FI',
+            equity: 'Eq',
+            currency: 'FX',
+            commodity: 'Com',
+            crypto: 'Crypto'
           };
           return (
-            <div key={assetClass} className="flex items-center gap-1 flex-1 justify-center">
-              <div 
-                className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                style={{ backgroundColor: colorMap[assetClass] || '#6B7280' }}
-              />
-              <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap text-[10px] leading-tight">{getAssetClassName(assetClass)}</span>
+            <div key={assetClass} className="flex items-center gap-0.5" title={getAssetClassName(assetClass)}>
+              <span className="text-[10px] leading-none">{emojiMap[assetClass]}</span>
+              <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap text-[10px] leading-tight">{shortNames[assetClass]}</span>
             </div>
           );
         })}
@@ -696,31 +700,19 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                 <Text className="text-xs font-semibold mb-2 block dark:text-white">Update Status</Text>
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
-                    <div 
-                      className="w-4 h-4 rounded-full"
-                      style={{ backgroundColor: '#10B981' }}
-                    />
+                    <span className="text-sm leading-none">🟢</span>
                     <Text className="text-xs dark:text-gray-300">Fresh (&lt; 1 min)</Text>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div 
-                      className="w-4 h-4 rounded-full"
-                      style={{ backgroundColor: '#F59E0B' }}
-                    />
+                    <span className="text-sm leading-none">🟡</span>
                     <Text className="text-xs dark:text-gray-300">Recent (1-5 min)</Text>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div 
-                      className="w-4 h-4 rounded-full"
-                      style={{ backgroundColor: '#EF4444' }}
-                    />
+                    <span className="text-sm leading-none">🔴</span>
                     <Text className="text-xs dark:text-gray-300">Stale (&gt; 5 min)</Text>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div 
-                      className="w-4 h-4 rounded-full"
-                      style={{ backgroundColor: '#3B82F6' }}
-                    />
+                    <span className="text-sm leading-none">🔵</span>
                     <Text className="text-xs dark:text-gray-300">LRR/HRR &gt; 1 market day old</Text>
                   </div>
                 </div>
@@ -777,11 +769,11 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                   }
                   
                   return (
-                    <span 
-                      className="ticker-dot" 
-                      style={{ backgroundColor: status.color }}
+                    <span
+                      className="ticker-dot-emoji"
                       title={tooltipText}
-                    ></span>
+                      style={{ fontSize: '8px', lineHeight: 1 }}
+                    >{status.emoji}</span>
                   );
                 })()}
               </div>
