@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sparklines, SparklinesLine } from 'react-sparklines';
 import { MarketDataService } from '../../services/api/marketDataService';
-import MarketCountdown from './MarketCountdown';
+import MarketChartCard, { prefetchChartData } from './MarketChartCard';
 import './MultiRegionMarketOverview.css';
 
 // Utility functions to check if markets are open
@@ -59,35 +59,35 @@ const isMarketOpen = (region) => {
   }
 };
 
-// Market regions configuration
-const MARKET_REGIONS = {
+// Main market regions configuration (for 3x2 grid with full charts)
+const MAIN_MARKET_REGIONS = {
   us: {
     label: 'US',
-    tradingHours: 'NYSE: 9:30 AM - 4:00 PM EST',
+    regionKey: 'US',
     indices: [
       { symbol: 'SPY', name: 'S&P 500' },
       { symbol: 'DJI', name: 'Dow 30' },
       { symbol: 'IXIC', name: 'Nasdaq' },
-      { symbol: 'RUT', name: 'Russell 2000' },
-      { symbol: 'VIX', name: 'VIX' },
-      { symbol: 'GLD', name: 'Gold' }
+      { symbol: 'RUT', name: 'Russell' },
+      { symbol: 'QQQ', name: 'QQQ' },
+      { symbol: 'RSP', name: 'EW S&P' }
     ]
   },
   europe: {
     label: 'Europe',
-    tradingHours: 'LSE: 8:00 AM - 4:30 PM GMT',
+    regionKey: 'Europe',
     indices: [
       { symbol: 'FTSE', name: 'FTSE 100' },
       { symbol: 'CAC', name: 'CAC 40' },
       { symbol: 'DAX', name: 'DAX' },
       { symbol: 'N100', name: 'Euronext 100' },
       { symbol: 'EURUSD', name: 'EUR/USD' },
-      { symbol: 'GBPUSD', name: 'USD/GBP' }
+      { symbol: 'GBPUSD', name: 'GBP/USD' }
     ]
   },
   asia: {
     label: 'Asia',
-    tradingHours: 'Tokyo: 9:00 AM - 3:00 PM JST',
+    regionKey: 'Asia',
     indices: [
       { symbol: 'N225', name: 'Nikkei 225' },
       { symbol: 'HSI', name: 'Hang Seng' },
@@ -98,12 +98,12 @@ const MARKET_REGIONS = {
     ]
   },
   crypto: {
-    label: 'Cryptocurrencies',
-    tradingHours: '24/7',
+    label: 'Crypto',
+    regionKey: 'Cryptocurrencies',
     indices: [
       { symbol: 'BTC', name: 'Bitcoin' },
       { symbol: 'ETH', name: 'Ethereum' },
-      { symbol: 'BNB', name: 'Binance Coin' },
+      { symbol: 'BNB', name: 'BNB' },
       { symbol: 'ADA', name: 'Cardano' },
       { symbol: 'SOL', name: 'Solana' },
       { symbol: 'XRP', name: 'XRP' }
@@ -111,53 +111,51 @@ const MARKET_REGIONS = {
   },
   rates: {
     label: 'Rates',
-    tradingHours: 'NYSE: 9:30 AM - 4:00 PM EST',
+    regionKey: 'Rates',
     indices: [
-      { symbol: 'UST13W', name: '13-Wk Bond' },
-      { symbol: 'UST5Y', name: '5-Yr Bond' },
-      { symbol: 'UST10Y', name: '10-Yr Bond' },
-      { symbol: 'UST30Y', name: '30-Yr Bond' },
-      { symbol: 'UST2Y', name: '2 Yr Yld Fut' },
-      { symbol: 'TNX', name: '10 Yr T-Note' }
+      { symbol: 'UST2Y', name: '2-Yr' },
+      { symbol: 'UST5Y', name: '5-Yr' },
+      { symbol: 'UST10Y', name: '10-Yr' },
+      { symbol: 'UST30Y', name: '30-Yr' },
+      { symbol: 'UST13W', name: '13-Wk' },
+      { symbol: 'FEDFUNDS', name: 'Fed Funds' }
     ]
   },
   commodities: {
     label: 'Commodities',
-    tradingHours: 'Extended: 6:00 PM - 5:00 PM EST',
+    regionKey: 'Commodities',
     indices: [
-      { symbol: 'CL', name: 'Crude Oil' },
+      { symbol: 'BZ', name: 'Brent' },
+      { symbol: 'CL', name: 'WTI' },
       { symbol: 'GC', name: 'Gold' },
       { symbol: 'SI', name: 'Silver' },
       { symbol: 'HG', name: 'Copper' },
-      { symbol: 'NG', name: 'Natural Gas' },
-      { symbol: 'BZ', name: 'Brent Crude' }
+      { symbol: 'PL', name: 'Platinum' }
     ]
-  },
-  currencies: {
-    label: 'Currencies',
-    tradingHours: 'Sun 5PM - Fri 5PM EST',
-    indices: [
-      { symbol: 'EURUSD', name: 'EUR/USD' },
-      { symbol: 'USDJPY', name: 'USD/JPY' },
-      { symbol: 'GBPUSD', name: 'USD/GBP' },
-      { symbol: 'AUDUSD', name: 'USD/AUD' },
-      { symbol: 'USDCAD', name: 'USD/CAD' },
-      { symbol: 'USDMXN', name: 'USD/MXN' }
-    ]
-  },
-  liquidity: {
-    label: 'Liquidity',
-    indices: [] // Special handling for liquidity metrics
   }
 };
 
-// IndexCard component - displays individual market index
-function IndexCard({ name, value, change, changePercent, previousClose, sparklineData, loading, showStatus = true, region }) {
+// Currencies configuration (for mini cards in secondary section)
+const CURRENCIES_CONFIG = {
+  label: 'Currencies',
+  tradingHours: 'Sun 5PM - Fri 5PM EST',
+  indices: [
+    { symbol: 'EURUSD', name: 'EUR/USD' },
+    { symbol: 'USDJPY', name: 'USD/JPY' },
+    { symbol: 'GBPUSD', name: 'GBP/USD' },
+    { symbol: 'AUDUSD', name: 'AUD/USD' },
+    { symbol: 'USDCAD', name: 'USD/CAD' },
+    { symbol: 'USDMXN', name: 'USD/MXN' }
+  ]
+};
+
+// IndexCard component - displays individual market index (used for currencies)
+function IndexCard({ symbol, name, value, change, changePercent, sparklineData, loading, showStatus = true, region }) {
   // Parse change to determine if positive/negative
   const changeNum = change ? parseFloat(change.toString().replace(/[^0-9.-]/g, '')) : 0;
   const isPositive = changeNum >= 0;
 
-  // Check if market is currently open (not just if data exists)
+  // Check if market is currently open
   const [marketOpen, setMarketOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -166,23 +164,20 @@ function IndexCard({ name, value, change, changePercent, previousClose, sparklin
     };
 
     updateMarketStatus();
-    // Update market status every minute
     const interval = setInterval(updateMarketStatus, 60000);
     return () => clearInterval(interval);
   }, [region]);
 
-  // Check if data is being received (API is live)
+  // Check if data is being received
   const hasData = !loading && value && value !== '--';
 
-  // Normalize sparkline data to show percentage changes from first data point
-  // This makes small movements in currency pairs visible
+  // Normalize sparkline data
   const normalizedSparklineData = React.useMemo(() => {
     if (!sparklineData || sparklineData.length === 0) return null;
 
     const firstValue = sparklineData[0];
     if (!firstValue || firstValue === 0) return sparklineData;
 
-    // Convert to percentage changes from first value
     return sparklineData.map(price => ((price - firstValue) / firstValue) * 100);
   }, [sparklineData]);
 
@@ -215,7 +210,7 @@ function IndexCard({ name, value, change, changePercent, previousClose, sparklin
             margin={1.5}
           >
             <SparklinesLine
-              color={isPositive ? '#16a34a' : '#dc2626'} // Dark green or dark red
+              color={isPositive ? '#16a34a' : '#dc2626'}
               style={{ strokeWidth: 1.125, fill: 'none' }}
             />
           </Sparklines>
@@ -230,7 +225,7 @@ function IndexCard({ name, value, change, changePercent, previousClose, sparklin
         </div>
       )}
 
-      {/* Percent - Bottom Right */}
+      {/* Percent */}
       {!loading && (
         <div className={`index-percent ${isPositive ? 'positive' : 'negative'}`}>
           {changePercent ? `${changePercent}%` : '--'}
@@ -289,38 +284,85 @@ function LiquidityCard() {
   );
 }
 
-// RegionPanel component - displays a group of indices for one region
-function RegionPanel({ region, data, loading }) {
-  // Special handling for liquidity region
-  if (region.label === 'Liquidity') {
-    return (
-      <div className="region-panel">
-        <h3 className="region-title">{region.label}</h3>
-        <div className="liquidity-container">
-          <LiquidityCard />
-        </div>
-      </div>
-    );
-  }
+// RegionChartPanel component - displays a single full chart for a region with index tabs
+function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectIndex }) {
+  const { label, indices, regionKey: marketRegionKey } = region;
+  const currentIndex = indices[selectedIndex];
+  const quote = data?.find(d => d.symbol === currentIndex.symbol);
+
+  // Helper to get change data for an index
+  const getIndexChange = (symbol) => {
+    const indexQuote = data?.find(d => d.symbol === symbol);
+    if (!indexQuote?.changePercent) return null;
+    const changeNum = parseFloat(indexQuote.changePercent.toString().replace(/[^0-9.-]/g, ''));
+    return {
+      percent: indexQuote.changePercent,
+      isPositive: changeNum >= 0
+    };
+  };
 
   return (
-    <div className="region-panel">
-      <h3 className="region-title">{region.label}{region.tradingHours ? ` - ${region.tradingHours}` : ''}</h3>
-      <div className="indices-grid">
-        {region.indices.map((index) => {
+    <div className="region-chart-panel">
+      <div className="region-chart-header">
+        <span className="region-label">{label}</span>
+        <div className="index-tabs">
+          {indices.map((idx, i) => {
+            const change = getIndexChange(idx.symbol);
+            return (
+              <button
+                key={idx.symbol}
+                className={`index-tab ${i === selectedIndex ? 'active' : ''}`}
+                onClick={() => onSelectIndex(regionKey, i)}
+              >
+                <span className="index-tab-name">{idx.name}</span>
+                {change && (
+                  <span className={`index-tab-change ${change.isPositive ? 'positive' : 'negative'}`}>
+                    {change.isPositive ? '▲' : '▼'}{change.percent}%
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <MarketChartCard
+        key={currentIndex.symbol}
+        symbol={currentIndex.symbol}
+        name={currentIndex.name}
+        initialData={{
+          price: quote?.price,
+          change: quote?.change,
+          changePercent: quote?.changePercent
+        }}
+        isOpen={isMarketOpen(marketRegionKey)}
+      />
+    </div>
+  );
+}
+
+// CurrenciesPanel component - displays mini currency cards
+function CurrenciesPanel({ data, loading }) {
+  return (
+    <div className="currencies-panel">
+      <div className="currencies-header">
+        <span className="currencies-title">Currencies</span>
+        <span className="currencies-hours">{CURRENCIES_CONFIG.tradingHours}</span>
+      </div>
+      <div className="currencies-grid">
+        {CURRENCIES_CONFIG.indices.map((index) => {
           const quote = data?.find(d => d.symbol === index.symbol);
           return (
             <IndexCard
               key={index.symbol}
+              symbol={index.symbol}
               name={index.name}
               value={quote?.price}
               change={quote?.change}
               changePercent={quote?.changePercent}
-              previousClose={quote?.previousClose}
               sparklineData={quote?.sparklineData}
               loading={loading}
               showStatus={true}
-              region={region.label}
+              region="Currencies"
             />
           );
         })}
@@ -334,6 +376,34 @@ export default function MultiRegionMarketOverview() {
   const [marketData, setMarketData] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const prefetchedRef = useRef(false);
+  // Track which index is selected for each region (default to first index = 0)
+  const [selectedIndices, setSelectedIndices] = useState({
+    us: 0,
+    europe: 0,
+    asia: 0,
+    crypto: 0,
+    rates: 0,
+    commodities: 0
+  });
+
+  // Prefetch chart data for default indices on mount
+  useEffect(() => {
+    if (prefetchedRef.current) return;
+    prefetchedRef.current = true;
+
+    // Prefetch the first index of each region (shown by default)
+    const defaultSymbols = Object.values(MAIN_MARKET_REGIONS).map(
+      region => region.indices[0].symbol
+    );
+
+    // Stagger prefetch requests to avoid overwhelming the server
+    defaultSymbols.forEach((symbol, idx) => {
+      setTimeout(() => {
+        prefetchChartData(symbol);
+      }, idx * 100); // 100ms stagger between requests
+    });
+  }, []);
 
   useEffect(() => {
     fetchMarketData();
@@ -354,9 +424,29 @@ export default function MultiRegionMarketOverview() {
     }
   };
 
+  // Map region keys to data keys in marketData
+  const getRegionData = (regionKey) => {
+    const keyMap = {
+      'us': 'us',
+      'europe': 'europe',
+      'asia': 'asia',
+      'crypto': 'crypto',
+      'rates': 'rates',
+      'commodities': 'commodities'
+    };
+    return marketData[keyMap[regionKey]];
+  };
+
+  // Handle index tab selection
+  const handleSelectIndex = (regionKey, index) => {
+    setSelectedIndices(prev => ({
+      ...prev,
+      [regionKey]: index
+    }));
+  };
+
   return (
     <div className="multi-region-overview">
-      <MarketCountdown />
 
       {error && (
         <div className="error-message">
@@ -364,15 +454,27 @@ export default function MultiRegionMarketOverview() {
         </div>
       )}
 
-      <div className="regions-container">
-        {Object.keys(MARKET_REGIONS).map((regionKey) => (
-          <RegionPanel
+      {/* Main 3x2 Grid of Full Charts */}
+      <div className="main-markets-grid">
+        {Object.keys(MAIN_MARKET_REGIONS).map((regionKey) => (
+          <RegionChartPanel
             key={regionKey}
-            region={MARKET_REGIONS[regionKey]}
-            data={marketData[regionKey]}
-            loading={loading}
+            region={MAIN_MARKET_REGIONS[regionKey]}
+            regionKey={regionKey}
+            data={getRegionData(regionKey)}
+            selectedIndex={selectedIndices[regionKey]}
+            onSelectIndex={handleSelectIndex}
           />
         ))}
+      </div>
+
+      {/* Secondary Section - Currencies & Liquidity */}
+      <div className="secondary-markets-section">
+        <CurrenciesPanel
+          data={marketData.currencies}
+          loading={loading}
+        />
+        <LiquidityCard />
       </div>
     </div>
   );

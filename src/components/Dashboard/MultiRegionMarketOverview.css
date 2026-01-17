@@ -260,15 +260,206 @@
   font-size: 13px;
 }
 
-/* Regions Container */
-.regions-container {
+/* Main Markets Grid - 3x2 layout for full Google Finance-style charts */
+.main-markets-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr); /* 8 equal columns for all regions */
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
-  padding: 0 16px 16px 16px; /* Top, right, bottom, left - keep padding for content spacing */
+  padding: 12px 16px;
 }
 
-/* Responsive: Stack on smaller screens */
+/* Responsive: Adjust grid on smaller screens */
+@media (max-width: 1200px) {
+  .main-markets-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .main-markets-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Region Chart Panel - wrapper for each full chart */
+.region-chart-panel {
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
+}
+
+/* Region Chart Header with Index Tabs */
+.region-chart-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  gap: 8px;
+}
+
+.region-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #000080;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.index-tabs {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.index-tab {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  font-size: 9px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.index-tab:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.index-tab.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.index-tab-name {
+  /* Name text inherits color from parent */
+}
+
+.index-tab-change {
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.index-tab-change.positive {
+  color: #16a34a;
+}
+
+.index-tab-change.negative {
+  color: #dc2626;
+}
+
+/* Legacy region-chart-title (keep for backwards compatibility) */
+.region-chart-title {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #000080;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Override MarketChartCard styling when inside region panel */
+.region-chart-panel .market-chart-card {
+  border-radius: 0;
+  box-shadow: none;
+  border: none;
+}
+
+/* Secondary Markets Section - Currencies & Liquidity */
+.secondary-markets-section {
+  display: flex;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+/* Currencies Panel */
+.currencies-panel {
+  flex: 1;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
+}
+
+.currencies-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.currencies-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #000080;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.currencies-hours {
+  font-size: 9px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.currencies-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 12px;
+}
+
+@media (max-width: 768px) {
+  .currencies-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Liquidity card in secondary section */
+.secondary-markets-section .liquidity-card {
+  flex: 0 0 280px;
+  min-height: auto;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
+}
+
+@media (max-width: 768px) {
+  .secondary-markets-section {
+    flex-direction: column;
+  }
+
+  .secondary-markets-section .liquidity-card {
+    flex: none;
+    width: 100%;
+  }
+}
+
+/* Legacy regions-container - kept for backwards compatibility if needed */
+.regions-container {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 12px;
+  padding: 0 16px 16px 16px;
+}
+
 @media (max-width: 1920px) {
   .regions-container {
     grid-template-columns: repeat(4, 1fr);
@@ -568,4 +759,42 @@
   margin-top: auto;
   padding-top: 4px;
   border-top: 1px solid #D3D3D3;
+}
+
+/* Clickable index cards */
+.index-card.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.index-card.clickable:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 128, 0.15);
+  border-color: #4682B4;
+  transform: translateY(-1px);
+}
+
+.index-card.clickable:active {
+  transform: translateY(0);
+}
+
+.index-card.clickable:focus {
+  outline: 2px solid #4682B4;
+  outline-offset: 2px;
+}
+
+/* Expanded chart wrapper */
+.expanded-chart-wrapper {
+  grid-column: 1 / -1; /* Span full width of grid */
+  animation: expandChart 0.3s ease;
+}
+
+@keyframes expandChart {
+  from {
+    opacity: 0;
+    transform: scaleY(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
 }

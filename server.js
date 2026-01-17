@@ -87,6 +87,7 @@ const FRED_SERIES = {
   'UST2Y': 'DGS2',
   'UST13W': 'DGS3MO',
   'SOFR': 'SOFR',
+  'FEDFUNDS': 'DFF',  // Federal Funds Effective Rate
 };
 
 // Yahoo Finance ticker mappings (consolidated from securitiesConfig.js)
@@ -157,6 +158,12 @@ const YAHOO_TICKER_MAP = {
   'SI': 'SI=F',
   'COPPER': 'HG=F',
   'HG': 'HG=F',
+  'PLATINUM': 'PL=F',
+  'PL': 'PL=F',
+
+  // ETFs for market breadth
+  'QQQ': 'QQQ',
+  'RSP': 'RSP',
   
   // Crypto
   'BTC': 'BTC-USD',
@@ -181,8 +188,8 @@ const MARKET_REGIONS = {
       { symbol: 'DJI', name: 'Dow 30', yahooSymbol: '^DJI' },
       { symbol: 'IXIC', name: 'Nasdaq', yahooSymbol: '^IXIC' },
       { symbol: 'RUT', name: 'Russell 2000', yahooSymbol: '^RUT' },
-      { symbol: 'VIX', name: 'VIX', yahooSymbol: '^VIX' },
-      { symbol: 'GLD', name: 'Gold', yahooSymbol: 'GC=F' }
+      { symbol: 'QQQ', name: 'QQQ (Tech)', yahooSymbol: 'QQQ' },
+      { symbol: 'RSP', name: 'EW S&P (Breadth)', yahooSymbol: 'RSP' }
     ]
   },
   europe: {
@@ -221,23 +228,23 @@ const MARKET_REGIONS = {
   rates: {
     label: 'Rates',
     indices: [
-      { symbol: 'UST13W', name: '13-Wk Bond', fredSymbol: 'DGS3MO' },
-      { symbol: 'UST5Y', name: '5-Yr Bond', fredSymbol: 'DGS5' },
-      { symbol: 'UST10Y', name: '10-Yr Bond', fredSymbol: 'DGS10' },
-      { symbol: 'UST30Y', name: '30-Yr Bond', fredSymbol: 'DGS30' },
-      { symbol: 'UST2Y', name: '2 Yr Yld Fut', fredSymbol: 'DGS2' },
-      { symbol: 'TNX', name: '10 Yr T-Note', yahooSymbol: '^TNX' }
+      { symbol: 'UST2Y', name: '2-Yr', fredSymbol: 'DGS2' },
+      { symbol: 'UST5Y', name: '5-Yr', fredSymbol: 'DGS5' },
+      { symbol: 'UST10Y', name: '10-Yr', fredSymbol: 'DGS10' },
+      { symbol: 'UST30Y', name: '30-Yr', fredSymbol: 'DGS30' },
+      { symbol: 'UST13W', name: '13-Wk', fredSymbol: 'DGS3MO' },
+      { symbol: 'FEDFUNDS', name: 'Fed Funds', fredSymbol: 'DFF' }
     ]
   },
   commodities: {
     label: 'Commodities',
     indices: [
-      { symbol: 'CL', name: 'Crude Oil', yahooSymbol: 'CL=F' },
+      { symbol: 'BZ', name: 'Brent Crude', yahooSymbol: 'BZ=F' },
+      { symbol: 'CL', name: 'WTI Crude', yahooSymbol: 'CL=F' },
       { symbol: 'GC', name: 'Gold', yahooSymbol: 'GC=F' },
       { symbol: 'SI', name: 'Silver', yahooSymbol: 'SI=F' },
       { symbol: 'HG', name: 'Copper', yahooSymbol: 'HG=F' },
-      { symbol: 'NG', name: 'Natural Gas', yahooSymbol: 'NG=F' },
-      { symbol: 'BZ', name: 'Brent Crude', yahooSymbol: 'BZ=F' }
+      { symbol: 'PL', name: 'Platinum', yahooSymbol: 'PL=F' }
     ]
   },
   currencies: {
@@ -773,6 +780,232 @@ app.get('/api/quotes', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch quotes', details: error.message });
   }
 });
+
+// Chart Data endpoint - fetches OHLC data for expanded market charts
+// Cache for chart data with different TTLs based on range
+const chartDataCache = new Map();
+
+app.get('/api/chart-data/:symbol', async (req, res) => {
+  const startTime = Date.now();
+  const { symbol } = req.params;
+  const { range = '1d' } = req.query;
+
+  // Validate range parameter
+  const validRanges = ['1d', '5d', '1mo', '3mo', '6mo', '1y'];
+  if (!validRanges.includes(range)) {
+    return res.status(400).json({ error: `Invalid range. Must be one of: ${validRanges.join(', ')}` });
+  }
+
+  // Determine interval based on range
+  const intervalMap = {
+    '1d': '5m',
+    '5d': '15m',
+    '1mo': '1h',
+    '3mo': '1d',
+    '6mo': '1d',
+    '1y': '1d'
+  };
+  const interval = intervalMap[range];
+
+  // Cache TTL based on range (shorter for intraday, longer for historical)
+  // Client-side caching handles more frequent updates, so server cache can be longer
+  const cacheTTLMap = {
+    '1d': 2 * 60 * 1000,    // 2 minutes for intraday (client caches 30s)
+    '5d': 10 * 60 * 1000,   // 10 minutes (client caches 1 min)
+    '1mo': 15 * 60 * 1000,  // 15 minutes (client caches 5 min)
+    '3mo': 30 * 60 * 1000,  // 30 minutes (client caches 5 min)
+    '6mo': 60 * 60 * 1000,  // 1 hour (client caches 10 min)
+    '1y': 60 * 60 * 1000    // 1 hour (client caches 10 min)
+  };
+  const cacheTTL = cacheTTLMap[range];
+
+  const cacheKey = `chart:${symbol.toUpperCase()}:${range}`;
+
+  // Check cache
+  const cached = chartDataCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp) < cacheTTL) {
+    console.log(`[ChartData] Cache hit for ${cacheKey}`);
+    return res.json(cached.data);
+  }
+
+  try {
+    // Get the Yahoo ticker mapping
+    const mapping = getTickerMapping(symbol);
+
+    // Check if this is a FRED symbol (Treasury yields)
+    if (mapping.source === 'fred') {
+      // For FRED data, we only have daily data, so disable intraday ranges
+      if (range === '1d' || range === '5d') {
+        return res.json({
+          symbol: symbol.toUpperCase(),
+          name: symbol.toUpperCase(),
+          error: 'Intraday data not available for Treasury yields',
+          availableRanges: ['1mo', '3mo', '6mo', '1y'],
+          chartData: []
+        });
+      }
+
+      // Fetch FRED historical data
+      const fredData = await fetchFREDHistorical(mapping.ticker, range);
+      if (fredData) {
+        const responseData = {
+          symbol: symbol.toUpperCase(),
+          name: symbol.toUpperCase(),
+          source: 'fred',
+          current: fredData.current,
+          ohlc: null, // FRED doesn't provide OHLC
+          chartData: fredData.chartData,
+          meta: {
+            currency: 'USD',
+            dataSource: 'FRED',
+            range,
+            interval: '1d'
+          }
+        };
+
+        // Cache the result
+        chartDataCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+        return res.json(responseData);
+      }
+    }
+
+    // Yahoo Finance data
+    const yahooSymbol = mapping.source === 'yahoo' ? mapping.ticker : symbol;
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=${range}&interval=${interval}&includePrePost=false`;
+
+    console.log(`[ChartData] Fetching ${url}`);
+
+    const response = await axios.get(url, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    const result = response.data?.chart?.result?.[0];
+    if (!result) {
+      return res.status(404).json({ error: `No chart data found for ${symbol}` });
+    }
+
+    const meta = result.meta || {};
+    const timestamps = result.timestamp || [];
+    const quote = result.indicators?.quote?.[0] || {};
+
+    // Build chart data array
+    const chartData = timestamps.map((ts, i) => ({
+      timestamp: ts * 1000, // Convert to milliseconds
+      open: quote.open?.[i] ?? null,
+      high: quote.high?.[i] ?? null,
+      low: quote.low?.[i] ?? null,
+      close: quote.close?.[i] ?? null,
+      volume: quote.volume?.[i] ?? null
+    })).filter(d => d.close !== null); // Filter out null closes
+
+    // Get current day's OHLC from meta
+    const currentPrice = meta.regularMarketPrice ?? meta.previousClose;
+    const previousClose = meta.chartPreviousClose ?? meta.previousClose;
+    const change = currentPrice && previousClose ? currentPrice - previousClose : null;
+    const changePercent = currentPrice && previousClose ? ((change / previousClose) * 100) : null;
+
+    // Find today's OHLC from chart data (last trading day)
+    const todayData = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+
+    const responseData = {
+      symbol: symbol.toUpperCase(),
+      name: meta.shortName || meta.symbol || symbol.toUpperCase(),
+      source: 'yahoo',
+      current: {
+        price: currentPrice?.toFixed(2) ?? null,
+        change: change?.toFixed(2) ?? null,
+        changePercent: changePercent?.toFixed(2) ?? null,
+        previousClose: previousClose?.toFixed(2) ?? null
+      },
+      ohlc: {
+        open: (meta.regularMarketOpen ?? todayData?.open)?.toFixed(2) ?? null,
+        high: (meta.regularMarketDayHigh ?? todayData?.high)?.toFixed(2) ?? null,
+        low: (meta.regularMarketDayLow ?? todayData?.low)?.toFixed(2) ?? null,
+        close: currentPrice?.toFixed(2) ?? null
+      },
+      chartData,
+      meta: {
+        currency: meta.currency || 'USD',
+        exchangeTimezone: meta.exchangeTimezoneName || meta.timezone,
+        regularMarketTime: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
+        range,
+        interval,
+        dataPoints: chartData.length
+      }
+    };
+
+    // Cache the result
+    chartDataCache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[ChartData] ${symbol} (${range}) completed in ${totalTime}ms with ${chartData.length} data points`);
+
+    res.json(responseData);
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[ChartData] Error fetching ${symbol} after ${totalTime}ms:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch chart data', details: error.message });
+  }
+});
+
+// Helper function to fetch FRED historical data for charts
+async function fetchFREDHistorical(seriesId, range) {
+  try {
+    const fredApiKey = process.env.FRED_API_KEY;
+    if (!fredApiKey) {
+      console.warn('[FRED] No API key configured');
+      return null;
+    }
+
+    // Calculate start date based on range
+    const endDate = new Date();
+    const startDate = new Date();
+    switch (range) {
+      case '1mo': startDate.setMonth(startDate.getMonth() - 1); break;
+      case '3mo': startDate.setMonth(startDate.getMonth() - 3); break;
+      case '6mo': startDate.setMonth(startDate.getMonth() - 6); break;
+      case '1y': startDate.setFullYear(startDate.getFullYear() - 1); break;
+      default: startDate.setMonth(startDate.getMonth() - 1);
+    }
+
+    const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${fredApiKey}&file_type=json&observation_start=${startDate.toISOString().split('T')[0]}&observation_end=${endDate.toISOString().split('T')[0]}`;
+
+    const response = await axios.get(url, { timeout: 10000 });
+    const observations = response.data?.observations || [];
+
+    if (observations.length === 0) return null;
+
+    const chartData = observations
+      .filter(obs => obs.value !== '.')
+      .map(obs => ({
+        timestamp: new Date(obs.date).getTime(),
+        open: null,
+        high: null,
+        low: null,
+        close: parseFloat(obs.value),
+        volume: null
+      }));
+
+    const latestValue = chartData.length > 0 ? chartData[chartData.length - 1].close : null;
+    const previousValue = chartData.length > 1 ? chartData[chartData.length - 2].close : null;
+    const change = latestValue && previousValue ? latestValue - previousValue : null;
+    const changePercent = latestValue && previousValue ? ((change / previousValue) * 100) : null;
+
+    return {
+      current: {
+        price: latestValue?.toFixed(2) ?? null,
+        change: change?.toFixed(2) ?? null,
+        changePercent: changePercent?.toFixed(2) ?? null,
+        previousClose: previousValue?.toFixed(2) ?? null
+      },
+      chartData
+    };
+  } catch (error) {
+    console.error(`[FRED] Error fetching historical for ${seriesId}:`, error.message);
+    return null;
+  }
+}
 
 // Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
 app.get('/api/risk-ranges', async (req, res) => {
