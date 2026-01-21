@@ -13,6 +13,12 @@ from decimal import Decimal
 from pathlib import Path
 from date_utils import extract_date_from_pdf
 
+try:
+    from pdf2image import convert_from_path
+    HAS_PDF2IMAGE = True
+except ImportError:
+    HAS_PDF2IMAGE = False
+
 
 def extract_specific_pages_as_pdf(pdf_path, page_numbers):
     """Extract specific pages from PDF and return as bytes"""
@@ -31,6 +37,24 @@ def extract_specific_pages_as_pdf(pdf_path, page_numbers):
     return pdf_bytes.getvalue()
 
 
+def convert_page_to_image_bytes(pdf_path, page_number):
+    """Convert a specific PDF page to PNG bytes for Textract"""
+    if not HAS_PDF2IMAGE:
+        print("   ⚠️ pdf2image not installed, cannot convert to image")
+        return None
+
+    try:
+        images = convert_from_path(pdf_path, first_page=page_number, last_page=page_number, dpi=200)
+        if images:
+            img_bytes = io.BytesIO()
+            images[0].save(img_bytes, format='PNG')
+            return img_bytes.getvalue()
+    except Exception as e:
+        print(f"   ⚠️ Error converting page {page_number} to image: {e}")
+
+    return None
+
+
 def extract_bitcoin_tracker(pdf_path, s3_key=None):
     """Extract crypto data from Bitcoin Trend Tracker PDF using AWS Textract"""
     print(f"\n📄 Reading Bitcoin Tracker PDF: {pdf_path}")
@@ -44,27 +68,39 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
     # Initialize Textract client
     textract = boto3.client('textract', region_name='us-west-1')
 
-    # Extract pages 3 and 10 (crypto and stock tables)
-    print("   📑 Extracting pages 3 and 10 from PDF...")
-    pdf_subset = extract_specific_pages_as_pdf(pdf_path, [3, 10])
+    # Extract pages 3 and 10 (crypto and stock tables) as images
+    pages_to_extract = [3, 10]
+    all_tables = []
 
-    if not pdf_subset:
-        print("   ❌ Failed to extract PDF pages")
-        return data
+    for page_num in pages_to_extract:
+        print(f"   📑 Converting page {page_num} to image...")
+        page_bytes = convert_page_to_image_bytes(pdf_path, page_num)
 
-    print("   🔍 Using AWS Textract to extract table data...")
-    response = textract.analyze_document(
-        Document={'Bytes': pdf_subset},
-        FeatureTypes=['TABLES']
-    )
+        if not page_bytes:
+            print(f"   ⚠️ Could not convert page {page_num}")
+            continue
 
-    # Parse Textract response
-    blocks = response['Blocks']
+        print(f"   🔍 Using AWS Textract to extract table data from page {page_num}...")
+        try:
+            response = textract.analyze_document(
+                Document={'Bytes': page_bytes},
+                FeatureTypes=['TABLES']
+            )
 
-    # Find all tables in the document
-    tables = [block for block in blocks if block['BlockType'] == 'TABLE']
+            # Parse Textract response
+            blocks = response['Blocks']
+            tables = [block for block in blocks if block['BlockType'] == 'TABLE']
+            print(f"   Found {len(tables)} tables on page {page_num}")
 
-    print(f"   Found {len(tables)} tables in PDF")
+            # Store tables with their blocks for processing
+            for table in tables:
+                all_tables.append({'table': table, 'blocks': blocks, 'page': page_num})
+        except Exception as e:
+            print(f"   ⚠️ Textract error on page {page_num}: {e}")
+            continue
+
+    tables = all_tables
+    print(f"   Found {len(tables)} tables total")
 
     # Helper function to extract table data
     def get_table_data(table_block, blocks):
@@ -110,8 +146,8 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
         return rows
 
     # Process each table to find crypto and stock tables
-    for table in tables:
-        table_data = get_table_data(table, blocks)
+    for table_info in all_tables:
+        table_data = get_table_data(table_info['table'], table_info['blocks'])
 
         if not table_data or len(table_data) < 2:
             continue

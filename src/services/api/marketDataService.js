@@ -317,6 +317,17 @@ export class MarketDataService {
     }
   }
 
+  // Get Hedgeye freshness status for all 6 data types
+  static async getHedgeyeFreshness() {
+    try {
+      const response = await apiClient.get('/api/hedgeye/freshness');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Hedgeye freshness:', error);
+      throw error;
+    }
+  }
+
   // Get historical price data for a symbol
   static async getHistoricalData(symbol, days = 30) {
     try {
@@ -349,6 +360,20 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching liquidity indicators:', error);
+      throw error;
+    }
+  }
+
+  // Get chart data for expanded market cards (OHLC, multiple time ranges)
+  // Returns: { symbol, name, current, ohlc, chartData, meta }
+  static async getChartData(symbol, range = '1d') {
+    try {
+      const response = await apiClient.get(`/api/chart-data/${encodeURIComponent(symbol)}`, {
+        params: { range }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching chart data for ${symbol}:`, error);
       throw error;
     }
   }

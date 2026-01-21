@@ -300,6 +300,14 @@
   gap: 8px;
 }
 
+/* Region status emoji - shows market open/extended/closed status */
+.region-status-emoji {
+  font-size: 8px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
 .region-label {
   font-size: 11px;
   font-weight: 700;

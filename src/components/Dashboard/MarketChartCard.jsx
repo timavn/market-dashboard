@@ -129,7 +129,8 @@ const MarketChartCard = ({
   name,
   initialData = null, // Initial data from parent (current price, change, etc.)
   onClose,
-  isOpen: marketIsOpen = false
+  isOpen: marketIsOpen = false,
+  hideStatus = false // Hide the status indicator (shown at region level instead)
 }) => {
   const [range, setRange] = useState('1d');
   const [chartData, setChartData] = useState(null);
@@ -225,7 +226,7 @@ const MarketChartCard = ({
       {/* Header */}
       <div className="chart-header">
         <div className="chart-header-left">
-          <span className="chart-status-emoji">{marketIsOpen ? '🟢' : '🔴'}</span>
+          {!hideStatus && <span className="chart-status-emoji">{marketIsOpen ? '🟢' : '🔴'}</span>}
           <span className="chart-symbol">{name || symbol}</span>
         </div>
         <div className="chart-header-right">

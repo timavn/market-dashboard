@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Parse Hedgeye Early Look PDF
-Extracts risk ranges from second-to-last page
+Extracts risk ranges from last page (OUR LEVELS section)
 """
 
 import re
@@ -30,19 +30,19 @@ TICKER_MAP = {
 
 
 def extract_early_look(pdf_path):
-    """Extract risk range data from Early Look PDF (second-to-last page)"""
+    """Extract risk range data from Early Look PDF (last page - OUR LEVELS section)"""
     print(f"\n📄 Reading Early Look PDF: {pdf_path}")
 
     data = {}
     ts = datetime.now(timezone.utc).isoformat()
 
     with pdfplumber.open(pdf_path) as pdf:
-        # Get second-to-last page
-        if len(pdf.pages) < 2:
-            print("❌ PDF has fewer than 2 pages")
+        # Get last page (OUR LEVELS section)
+        if len(pdf.pages) < 1:
+            print("❌ PDF has no pages")
             return data
 
-        page_idx = len(pdf.pages) - 2
+        page_idx = len(pdf.pages) - 1
         page_text = pdf.pages[page_idx].extract_text()
         lines = page_text.split('\n')
 

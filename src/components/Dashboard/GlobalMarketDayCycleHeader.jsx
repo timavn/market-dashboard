@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sun, Moon, X } from 'lucide-react';
 import { utcToZonedTime, format } from 'date-fns-tz';
-import { GLOBAL_MARKETS, getMarketStatus, getMarketCountdown } from '../../constants/globalMarkets';
+import { GLOBAL_MARKETS, getMarketStatus, getMarketCountdown, US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, HK_MARKET_HOLIDAYS, isMarketHoliday } from '../../constants/globalMarkets';
 
 /**
  * Check if a timezone is currently in daytime (6 AM - 6 PM)
@@ -80,6 +80,26 @@ const getDayLabel = (timezone, now) => {
 };
 
 /**
+ * Get the appropriate holiday list for a market
+ */
+const getMarketHolidaysLocal = (market) => {
+  switch (market.id) {
+    case 'nyc':
+    case 'chi':
+    case 'lax':
+      return US_MARKET_HOLIDAYS;
+    case 'lon':
+      return UK_MARKET_HOLIDAYS;
+    case 'tyo':
+      return JP_MARKET_HOLIDAYS;
+    case 'hkg':
+      return HK_MARKET_HOLIDAYS;
+    default:
+      return [];
+  }
+};
+
+/**
  * Convert local market hours to UTC time ranges
  * Returns array of segments: [{ start: 0-1440, end: 0-1440, type: 'pre-market'|'regular'|'post-market' }]
  */
@@ -87,9 +107,15 @@ const getMarketHoursInUTC = (market, now) => {
   const segments = [];
   const zonedTime = utcToZonedTime(now, market.timezone);
   const dayOfWeek = zonedTime.getDay();
-  
+
   // Weekend - no segments
   if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return [];
+  }
+
+  // Holiday check - no segments on holidays
+  const holidays = getMarketHolidaysLocal(market);
+  if (isMarketHoliday(zonedTime, holidays)) {
     return [];
   }
 
@@ -152,13 +178,13 @@ const getMarketHoursInUTC = (market, now) => {
 };
 
 /**
- * Count currently open markets
+ * Count currently open markets (including pre/post market as "active")
  */
 const getOpenMarketsCount = (markets, now) => {
   return markets.filter(market => {
     const zonedTime = utcToZonedTime(now, market.timezone);
     const status = getMarketStatus(market, zonedTime);
-    return status === 'open';
+    return status === 'open' || status === 'pre-market' || status === 'post-market';
   }).length;
 };
 
@@ -190,8 +216,8 @@ const getNextMarketEvent = (markets, now) => {
     const dayOfWeek = zonedTime.getDay();
     const currentMinutes = zonedTime.getHours() * 60 + zonedTime.getMinutes();
 
-    // Skip weekends
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
+    // Skip weekends and holidays
+    if (dayOfWeek === 0 || dayOfWeek === 6 || status === 'holiday') {
       return;
     }
 
@@ -288,6 +314,7 @@ const StatusDot = ({ status }) => {
     'open': '🟢', // Green circle emoji
     'pre-market': '🔵', // Blue circle emoji
     'post-market': '🔵', // Blue circle emoji
+    'holiday': '🔴', // Red circle emoji for holidays
     'closed': '🔴' // Red circle emoji
   };
 

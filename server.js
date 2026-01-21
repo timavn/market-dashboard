@@ -1011,68 +1011,326 @@ async function fetchFREDHistorical(seriesId, range) {
 app.get('/api/risk-ranges', async (req, res) => {
   const startTime = Date.now();
   try {
-    const { tickers } = req.query;
+    const { tickers, date } = req.query;
     const tickerList = tickers ? tickers.split(',').map(t => t.trim().toUpperCase()) : null;
-    
+
     // Create cache key
     const cacheKey = tickerList ? tickerList.sort().join(',') : 'all';
     const now = Date.now();
-    
-    // Check cache
+
+    // Check cache (5 minute TTL)
     const cached = riskRangesCache.get(cacheKey);
     if (cached && (now - cached.timestamp) < RISK_RANGES_CACHE_TTL) {
       const totalTime = Date.now() - startTime;
       console.log(`[API] /api/risk-ranges cache hit for ${cacheKey} (${totalTime}ms)`);
       return res.json(cached.data);
     }
-    
+
     console.log(`[API] /api/risk-ranges called${tickerList ? ` for ${tickerList.length} tickers` : ' for all tickers'}`);
-    
-    // Get latest snapshot from DynamoDB
+
+    // Query HedgeyeRiskRanges table - scan for latest date
     const dbStartTime = Date.now();
-    const params = {
-      TableName: 'RiskRangeData',
-      Key: {
-        ticker: 'LATEST',
-        date: 'latest'
-      }
+
+    // Scan to find all items and group by date to find the most recent with good data
+    let targetDate = date;
+    let allItems = [];
+
+    // Full scan to get all items (table should be small - just risk ranges)
+    const scanParams = {
+      TableName: 'HedgeyeRiskRanges'
     };
-    
-    const result = await dynamodb.get(params).promise();
+
+    let lastKey = null;
+    let fullScan = [];
+    do {
+      if (lastKey) scanParams.ExclusiveStartKey = lastKey;
+      const scanResult = await dynamodb.scan(scanParams).promise();
+      fullScan = fullScan.concat(scanResult.Items || []);
+      lastKey = scanResult.LastEvaluatedKey;
+    } while (lastKey);
+
+    console.log(`[API] Full scan returned ${fullScan.length} total items`);
+
+    // Group by date
+    const byDate = {};
+    fullScan.forEach(item => {
+      const d = item.date;
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(item);
+    });
+
+    // Find the date with the most items (best coverage) or use specified date
+    const dates = Object.keys(byDate).sort().reverse(); // Most recent first
+    console.log(`[API] Found dates: ${dates.join(', ')}`);
+
+    if (targetDate && byDate[targetDate]) {
+      allItems = byDate[targetDate];
+    } else {
+      // Find date with most items (best data quality)
+      let bestDate = dates[0];
+      let bestCount = 0;
+      dates.forEach(d => {
+        if (byDate[d].length > bestCount) {
+          bestCount = byDate[d].length;
+          bestDate = d;
+        }
+      });
+      targetDate = bestDate;
+      allItems = byDate[targetDate] || [];
+      console.log(`[API] Selected date ${targetDate} with ${allItems.length} items (best coverage)`);
+    }
+
     const dbTime = Date.now() - dbStartTime;
-    console.log(`[API] DynamoDB get completed in ${dbTime}ms`);
-    
-    if (!result.Item || !result.Item.data) {
+    console.log(`[API] DynamoDB scan completed in ${dbTime}ms, found ${allItems.length} items for date ${targetDate}`);
+
+    if (allItems.length === 0) {
       const totalTime = Date.now() - startTime;
       console.log(`[API] No risk range data found in DynamoDB (${totalTime}ms)`);
       return res.json({});
     }
-    
-    const allData = result.Item.data;
-    
+
+    // Transform to expected format: { ticker: { lrr, hrr, trend, timestamp } }
+    const allData = {};
+    allItems.forEach(item => {
+      allData[item.ticker] = {
+        lrr: parseFloat(item.lrr) || 0,
+        hrr: parseFloat(item.hrr) || 0,
+        trend: item.trend || 'N/A',
+        timestamp: item.updatedAt || null,
+        date: item.date
+      };
+    });
+
     // Filter by tickers if provided
-    const riskRanges = tickerList 
+    const riskRanges = tickerList
       ? Object.fromEntries(
           tickerList
             .map(ticker => [ticker, allData[ticker] || null])
             .filter(([_, data]) => data !== null)
         )
       : allData;
-    
+
     // Store in cache
     riskRangesCache.set(cacheKey, {
       data: riskRanges,
       timestamp: now
     });
-    
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] Returning risk ranges for ${Object.keys(riskRanges).length} securities (total: ${totalTime}ms, DB: ${dbTime}ms)`);
     res.json(riskRanges);
-    
+
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/risk-ranges after ${totalTime}ms:`, error);
     res.status(500).json({ error: 'Failed to fetch risk ranges', details: error.message });
+  }
+});
+
+// Hedgeye Freshness endpoint - returns status of all 6 Hedgeye data types
+app.get('/api/hedgeye/freshness', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    console.log('[API] /api/hedgeye/freshness called');
+
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+
+    // Define all 6 data types and their sources
+    const dataTypes = {
+      'risk-ranges': { name: 'Risk Ranges', source: 'HedgeyeRiskRanges', unit: 'items' },
+      'early-look': { name: 'Early Look', source: 'HedgeyeDailySnapshot', unit: 'themes' },
+      'bitcoin-trend-tracker': { name: 'Bitcoin Tracker', source: 'HedgeyeDailySnapshot', unit: 'cryptos' },
+      'momo-tracker': { name: 'MOMO Tracker', source: 'HedgeyeDailySnapshot', unit: 'signals' },
+      'signal-strength': { name: 'Signal Strength', source: 'HedgeyeDailySnapshot', unit: 'signals' },
+      'portfolio-solutions': { name: 'Portfolio Solutions', source: 'HedgeyeDailySnapshot', unit: 'recs' }
+    };
+
+    const results = {};
+    const alerts = [];
+
+    // Helper to calculate freshness status
+    const getFreshnessStatus = (lastUpdated) => {
+      if (!lastUpdated) return 'missing';
+      const hoursAgo = (now - new Date(lastUpdated)) / (1000 * 60 * 60);
+      if (hoursAgo < 24) return 'fresh';
+      if (hoursAgo < 48) return 'stale';
+      return 'missing';
+    };
+
+    // 1. Query Risk Ranges from HedgeyeRiskRanges table
+    try {
+      const scanParams = { TableName: 'HedgeyeRiskRanges' };
+      let allItems = [];
+      let lastKey = null;
+
+      do {
+        if (lastKey) scanParams.ExclusiveStartKey = lastKey;
+        const scanResult = await dynamodb.scan(scanParams).promise();
+        allItems = allItems.concat(scanResult.Items || []);
+        lastKey = scanResult.LastEvaluatedKey;
+      } while (lastKey);
+
+      // Group by date to find the most recent
+      const byDate = {};
+      allItems.forEach(item => {
+        const d = item.date;
+        if (!byDate[d]) byDate[d] = [];
+        byDate[d].push(item);
+      });
+
+      const dates = Object.keys(byDate).sort().reverse();
+      const latestDate = dates[0];
+      const latestItems = byDate[latestDate] || [];
+      const latestUpdatedAt = latestItems.length > 0 ? latestItems[0].updatedAt : null;
+
+      results['risk-ranges'] = {
+        status: getFreshnessStatus(latestUpdatedAt),
+        lastUpdated: latestUpdatedAt || null,
+        itemCount: latestItems.length,
+        date: latestDate || null,
+        source: 'HedgeyeRiskRanges'
+      };
+
+      if (results['risk-ranges'].status === 'stale') {
+        const hoursAgo = Math.round((now - new Date(latestUpdatedAt)) / (1000 * 60 * 60));
+        alerts.push({ type: 'risk-ranges', message: `Data is ${hoursAgo} hours old`, severity: 'warning' });
+      } else if (results['risk-ranges'].status === 'missing') {
+        if (latestUpdatedAt) {
+          const daysAgo = Math.round((now - new Date(latestUpdatedAt)) / (1000 * 60 * 60 * 24));
+          alerts.push({ type: 'risk-ranges', message: `Data is ${daysAgo} days old (last: ${latestDate})`, severity: 'error' });
+        } else {
+          alerts.push({ type: 'risk-ranges', message: 'No data found', severity: 'error' });
+        }
+      }
+    } catch (err) {
+      console.error('[API] Error querying HedgeyeRiskRanges:', err.message);
+      results['risk-ranges'] = { status: 'error', lastUpdated: null, itemCount: 0, error: err.message };
+      alerts.push({ type: 'risk-ranges', message: `Error: ${err.message}`, severity: 'error' });
+    }
+
+    // 2. Query other data types from HedgeyeDailySnapshot table
+    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions'];
+
+    for (const snapshotType of snapshotTypes) {
+      try {
+        // Query recent dates (last 7 days) to find the latest entry for this snapshot type
+        let latestSnapshot = null;
+
+        for (let i = 0; i < 7; i++) {
+          const queryDate = new Date();
+          queryDate.setDate(queryDate.getDate() - i);
+          const dateStr = queryDate.toISOString().split('T')[0];
+
+          const queryParams = {
+            TableName: 'HedgeyeDailySnapshot',
+            Key: {
+              date: dateStr,
+              snapshotType: snapshotType
+            }
+          };
+
+          const queryResult = await dynamodb.get(queryParams).promise();
+          if (queryResult.Item) {
+            latestSnapshot = queryResult.Item;
+            break;
+          }
+        }
+
+        if (latestSnapshot) {
+          // Calculate item count based on snapshot type - use explicit count fields first, then fallback to nested data
+          let itemCount = 0;
+
+          if (snapshotType === 'early-look') {
+            // early-look uses riskRangeCount or count data keys
+            itemCount = latestSnapshot.riskRangeCount || 0;
+            if (itemCount === 0 && latestSnapshot.data) {
+              itemCount = Object.keys(latestSnapshot.data).length;
+            }
+          } else if (snapshotType === 'bitcoin-trend-tracker') {
+            // bitcoin-trend-tracker has cryptoCount and stockCount
+            const cryptoCount = latestSnapshot.cryptoCount || 0;
+            const stockCount = latestSnapshot.stockCount || 0;
+            itemCount = cryptoCount + stockCount;
+            // Fallback to counting from nested data
+            if (itemCount === 0 && latestSnapshot.data) {
+              const cryptos = latestSnapshot.data.cryptos || {};
+              const stocks = latestSnapshot.data.stocks || {};
+              itemCount = Object.keys(cryptos).length + Object.keys(stocks).length;
+            }
+          } else if (snapshotType === 'momo-tracker') {
+            // momo-tracker has stockCount
+            itemCount = latestSnapshot.stockCount || 0;
+            if (itemCount === 0 && latestSnapshot.data) {
+              itemCount = Object.keys(latestSnapshot.data).length;
+            }
+          } else if (snapshotType === 'signal-strength') {
+            // signal-strength has stockCount for total stocks
+            itemCount = latestSnapshot.stockCount || 0;
+            // Fallback: count from data.stocks array
+            if (itemCount === 0 && latestSnapshot.data && latestSnapshot.data.stocks) {
+              itemCount = Array.isArray(latestSnapshot.data.stocks) ? latestSnapshot.data.stocks.length : 0;
+            }
+          } else if (snapshotType === 'portfolio-solutions') {
+            // portfolio-solutions has rankingCount
+            itemCount = latestSnapshot.rankingCount || 0;
+            // Fallback: count from data.rankings array
+            if (itemCount === 0 && latestSnapshot.data && latestSnapshot.data.rankings) {
+              itemCount = Array.isArray(latestSnapshot.data.rankings) ? latestSnapshot.data.rankings.length : 0;
+            }
+          } else if (latestSnapshot.data) {
+            // Generic fallback: count top-level keys in data
+            itemCount = typeof latestSnapshot.data === 'object' ? Object.keys(latestSnapshot.data).length : 0;
+          }
+
+          const lastUpdated = latestSnapshot.scrapedAt || latestSnapshot.updatedAt || latestSnapshot.date;
+
+          results[snapshotType] = {
+            status: getFreshnessStatus(lastUpdated),
+            lastUpdated: lastUpdated,
+            itemCount: itemCount,
+            date: latestSnapshot.date,
+            source: 'HedgeyeDailySnapshot'
+          };
+
+          if (results[snapshotType].status === 'stale') {
+            const hoursAgo = Math.round((now - new Date(lastUpdated)) / (1000 * 60 * 60));
+            alerts.push({ type: snapshotType, message: `Data is ${hoursAgo} hours old`, severity: 'warning' });
+          }
+        } else {
+          results[snapshotType] = {
+            status: 'missing',
+            lastUpdated: null,
+            itemCount: 0,
+            date: null,
+            source: 'HedgeyeDailySnapshot'
+          };
+          alerts.push({ type: snapshotType, message: 'No data found', severity: 'error' });
+        }
+      } catch (err) {
+        console.error(`[API] Error querying HedgeyeDailySnapshot for ${snapshotType}:`, err.message);
+        results[snapshotType] = { status: 'error', lastUpdated: null, itemCount: 0, error: err.message };
+        alerts.push({ type: snapshotType, message: `Error: ${err.message}`, severity: 'error' });
+      }
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/hedgeye/freshness completed in ${totalTime}ms`);
+
+    res.json({
+      date: today,
+      dataTypes: results,
+      alerts: alerts,
+      meta: {
+        queryTime: totalTime,
+        timestamp: now.toISOString()
+      }
+    });
+
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/hedgeye/freshness after ${totalTime}ms:`, error);
+    res.status(500).json({ error: 'Failed to fetch freshness data', details: error.message });
   }
 });
 

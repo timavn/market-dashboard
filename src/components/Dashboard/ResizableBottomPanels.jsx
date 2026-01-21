@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import VolatilityPanel from './VolatilityPanel';
 import VolumePanel from './VolumePanel';
 
-const MIN_HEIGHT = 30; // Minimum visible height (collapsed state - tab only, reduced by 33% from 45)
+const MIN_HEIGHT = 40; // Minimum visible height (collapsed state - tab only)
 const MAX_HEIGHT = 400; // Maximum panel height
 // Expanded panels take up 40% of screen height
 const getDefaultHeight = () => Math.round(window.innerHeight * 0.4);
@@ -73,7 +73,7 @@ const BottomPanel = ({
             justifyContent: 'center',
           }}
         >
-          <span className="text-gray-700 dark:text-gray-300" style={{ fontSize: '18px', fontWeight: 700 }}>
+          <span className="text-gray-700 dark:text-gray-300" style={{ fontSize: '18px', fontWeight: 400 }}>
             {label}
           </span>
         </button>

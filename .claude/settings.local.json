@@ -67,8 +67,28 @@
       "Bash(aws lambda invoke:*)",
       "Bash(aws dynamodb query:*)",
       "Bash(npm install:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(npm test:*)",
+      "Bash(wc:*)",
+      "Bash(/usr/bin/python3:*)",
+      "Bash(launchctl unload:*)",
+      "Bash(aws lambda get-function:*)",
+      "Bash(__NEW_LINE_241ba15ffa0d7b30__ echo -e \"\\\\n=== HedgeyeSignalStrength ===\")",
+      "Bash(__NEW_LINE_89013af64ef325d2__ echo -e \"\\\\n=== HedgeyeSignalStrength ===\")",
+      "Bash(__NEW_LINE_451003f0d590cc7a__ echo -e \"\\\\n=== Sample data from HedgeyeRiskRanges \\(formatted\\) ===\")",
+      "Bash(__NEW_LINE_25d853bfd93991f7__ echo -e \"\\\\n=== HedgeyeSignalStrength ===\")",
+      "Bash(__NEW_LINE_74ac140583237dbb__ echo -e \"\\\\n=== Sample data from HedgeyeRiskRanges \\(formatted\\) ===\")",
+      "Bash(brew list:*)",
+      "Bash(for file in parse_bitcoin_tracker parse_early_look parse_momo_tracker parse_signal_strength parse_portfolio_solutions)",
+      "Bash(do)",
+      "Bash(echo:*)",
+      "Bash(done)",
+      "Read(//Users/timsmith/Desktop/cursor/market-dashboard/aws/lambda/**)",
+      "Read(//Users/timsmith/Desktop/cursor/market-dashboard/**)"
     ],
-    "deny": []
+    "deny": [],
+    "additionalDirectories": [
+      "/Users/timsmith/Desktop/cursor/market-dashboard"
+    ]
   }
 }

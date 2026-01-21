@@ -2,61 +2,99 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sparklines, SparklinesLine } from 'react-sparklines';
 import { MarketDataService } from '../../services/api/marketDataService';
 import MarketChartCard, { prefetchChartData } from './MarketChartCard';
+import { US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, isMarketHoliday } from '../../constants/globalMarkets';
 import './MultiRegionMarketOverview.css';
 
-// Utility functions to check if markets are open
-const isMarketOpen = (region) => {
+// Helper to check if a date is a US market holiday
+const isUSHoliday = (date) => isMarketHoliday(date, US_MARKET_HOLIDAYS);
+const isUKHoliday = (date) => isMarketHoliday(date, UK_MARKET_HOLIDAYS);
+const isJPHoliday = (date) => isMarketHoliday(date, JP_MARKET_HOLIDAYS);
+
+// Market status types: 'open', 'extended', 'closed', 'holiday'
+// Extended hours = pre-market (4:00-9:30 AM ET) and post-market (4:00-8:00 PM ET) for US markets
+const getMarketStatus = (region) => {
   const now = new Date();
 
   switch(region) {
     case 'US': {
       const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
       const dayOfWeek = etTime.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+      if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+      // Check for US holidays
+      if (isUSHoliday(etTime)) return 'holiday';
       const currentTime = etTime.getHours() + etTime.getMinutes() / 60;
-      return currentTime >= 9.5 && currentTime < 16; // 9:30 AM - 4:00 PM ET
+      // Regular hours: 9:30 AM - 4:00 PM ET
+      if (currentTime >= 9.5 && currentTime < 16) return 'open';
+      // Pre-market: 4:00 AM - 9:30 AM ET
+      if (currentTime >= 4 && currentTime < 9.5) return 'extended';
+      // Post-market: 4:00 PM - 8:00 PM ET
+      if (currentTime >= 16 && currentTime < 20) return 'extended';
+      return 'closed';
     }
     case 'Europe': {
       const londonTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/London' }));
       const dayOfWeek = londonTime.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+      if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+      // Check for UK holidays
+      if (isUKHoliday(londonTime)) return 'holiday';
       const currentTime = londonTime.getHours() + londonTime.getMinutes() / 60;
-      return currentTime >= 8 && currentTime < 16.5; // 8:00 AM - 4:30 PM GMT
+      // Regular hours: 8:00 AM - 4:30 PM GMT
+      if (currentTime >= 8 && currentTime < 16.5) return 'open';
+      return 'closed';
     }
     case 'Asia': {
       const tokyoTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
       const dayOfWeek = tokyoTime.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+      if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+      // Check for Japanese holidays
+      if (isJPHoliday(tokyoTime)) return 'holiday';
       const currentTime = tokyoTime.getHours() + tokyoTime.getMinutes() / 60;
-      return currentTime >= 9 && currentTime < 15; // 9:00 AM - 3:00 PM JST
+      // Regular hours: 9:00 AM - 3:00 PM JST
+      if (currentTime >= 9 && currentTime < 15) return 'open';
+      return 'closed';
     }
     case 'Cryptocurrencies': {
-      return true; // Crypto markets are 24/7
+      return 'open'; // Crypto markets are 24/7
     }
     case 'Rates': {
-      // Bond markets follow US market hours
+      // Bond markets follow US market hours and holidays
       const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
       const dayOfWeek = etTime.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+      if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+      if (isUSHoliday(etTime)) return 'holiday';
       const currentTime = etTime.getHours() + etTime.getMinutes() / 60;
-      return currentTime >= 9.5 && currentTime < 16;
+      if (currentTime >= 9.5 && currentTime < 16) return 'open';
+      return 'closed';
     }
     case 'Commodities': {
-      // Commodities trade extended hours, but core hours are US market hours
+      // Commodities trade extended hours, follow US holidays
       const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
       const dayOfWeek = etTime.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+      if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+      if (isUSHoliday(etTime)) return 'holiday';
       const currentTime = etTime.getHours() + etTime.getMinutes() / 60;
-      return currentTime >= 9.5 && currentTime < 16;
+      // Core hours: 9:30 AM - 4:00 PM ET
+      if (currentTime >= 9.5 && currentTime < 16) return 'open';
+      // Extended hours for commodities (futures trade nearly 24 hours on weekdays)
+      if (currentTime >= 6 && currentTime < 9.5) return 'extended';
+      if (currentTime >= 16 && currentTime < 17) return 'extended';
+      return 'closed';
     }
     case 'Currencies': {
       // Forex is 24/5 (closed weekends)
       const dayOfWeek = now.getDay();
-      return !(dayOfWeek === 0 || dayOfWeek === 6);
+      if (dayOfWeek === 0 || dayOfWeek === 6) return 'closed';
+      return 'open';
     }
     default:
-      return false;
+      return 'closed';
   }
+};
+
+// Legacy helper for components that just need boolean
+const isMarketOpen = (region) => {
+  const status = getMarketStatus(region);
+  return status === 'open' || status === 'extended';
 };
 
 // Main market regions configuration (for 3x2 grid with full charts)
@@ -290,6 +328,34 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
   const currentIndex = indices[selectedIndex];
   const quote = data?.find(d => d.symbol === currentIndex.symbol);
 
+  // Track market status with updates
+  const [marketStatus, setMarketStatus] = React.useState('closed');
+
+  React.useEffect(() => {
+    const updateStatus = () => {
+      setMarketStatus(getMarketStatus(marketRegionKey));
+    };
+    updateStatus();
+    const interval = setInterval(updateStatus, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, [marketRegionKey]);
+
+  // Get status indicator emoji and title
+  const getStatusIndicator = () => {
+    switch (marketStatus) {
+      case 'open':
+        return { emoji: '🟢', title: 'Market open' };
+      case 'extended':
+        return { emoji: '🔵', title: 'Extended hours trading (pre/post market)' };
+      case 'holiday':
+        return { emoji: '🔴', title: 'Market closed - Holiday' };
+      default:
+        return { emoji: '🔴', title: 'Market closed' };
+    }
+  };
+
+  const statusIndicator = getStatusIndicator();
+
   // Helper to get change data for an index
   const getIndexChange = (symbol) => {
     const indexQuote = data?.find(d => d.symbol === symbol);
@@ -304,6 +370,7 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
   return (
     <div className="region-chart-panel">
       <div className="region-chart-header">
+        <span className="region-status-emoji" title={statusIndicator.title}>{statusIndicator.emoji}</span>
         <span className="region-label">{label}</span>
         <div className="index-tabs">
           {indices.map((idx, i) => {
@@ -334,7 +401,7 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
           change: quote?.change,
           changePercent: quote?.changePercent
         }}
-        isOpen={isMarketOpen(marketRegionKey)}
+        hideStatus={true}
       />
     </div>
   );

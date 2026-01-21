@@ -35,7 +35,7 @@ def extract_risk_ranges(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
         text = ""
         for page in pdf.pages:
-            text += page.extract_text()
+            text += page.extract_text() + "\n"
 
     print(f"✅ Extracted {len(text)} characters\n")
 
@@ -43,47 +43,42 @@ def extract_risk_ranges(pdf_path):
     data = {}
     ts = datetime.now(timezone.utc).isoformat()
 
-    # Pattern: TICKER (TREND) followed by numbers on next lines
-    # Example: "UST30Y (BULLISH)\n30-YEAR U.S. TREASURY YIELD\n4.92 4.82 4.84"
+    # New format pattern: "TICKER (TREND) BUY_TRADE SELL_TRADE PREV_CLOSE"
+    # Example: "UST30Y (BULLISH) 4.92 4.82 4.84"
+    # Example: "SPX (BULLISH) 6,861 6,984 6,921"
+
+    # Pattern matches: TICKER (TREND) followed by 3 numbers on same line
+    pattern = r'^([A-Z0-9/]+)\s+\((BULLISH|BEARISH|NEUTRAL)\)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)'
 
     lines = text.split('\n')
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
+    for line in lines:
+        line = line.strip()
 
-        # Look for ticker with trend: "TICKER (BULLISH/BEARISH/NEUTRAL)"
-        match = re.match(r'^([A-Z0-9/]+)\s+\((BULLISH|BEARISH|NEUTRAL)\)', line)
+        # Skip lines with URLs or page numbers
+        if 'http' in line.lower() or '/print' in line:
+            continue
+
+        match = re.match(pattern, line)
         if match:
             ticker = match.group(1)
             trend = match.group(2)
+            buy = match.group(3).replace(',', '')
+            sell = match.group(4).replace(',', '')
 
-            # Next line is description, skip it
-            # Line after that should have the numbers
-            if i + 2 < len(lines):
-                numbers_line = lines[i + 2].strip()
-                # Extract numbers: "4.92 4.82 4.84" or "6,861 6,984 6,921"
-                numbers = re.findall(r'[\d,]+\.?\d*', numbers_line)
+            mapped_ticker = TICKERS.get(ticker, ticker)
 
-                if len(numbers) >= 2:
-                    buy = numbers[0].replace(',', '')
-                    sell = numbers[1].replace(',', '')
-
-                    mapped_ticker = TICKERS.get(ticker, ticker)
-
-                    data[mapped_ticker] = {
-                        'lrr': float(buy),
-                        'hrr': float(sell),
-                        'trend': trend,
-                        'original_name': ticker,
-                        'ts': ts
-                    }
-                    print(f"   {mapped_ticker}: LRR={buy}, HRR={sell} ({trend})")
-
-        i += 1
+            data[mapped_ticker] = {
+                'lrr': float(buy),
+                'hrr': float(sell),
+                'trend': trend,
+                'original_name': ticker,
+                'ts': ts
+            }
+            print(f"   {mapped_ticker}: LRR={buy}, HRR={sell} ({trend})")
 
     return data
 
-def upload_pdf_to_s3(pdf_path):
+def upload_pdf_to_s3(pdf_path, pdf_date=None):
     """Upload original PDF to S3 for audit trail"""
     print("\n☁️  Uploading PDF to S3...")
 
@@ -175,6 +170,14 @@ if __name__ == '__main__':
     print("🚀 HEDGEYE PDF PARSER")
     print("="*70)
 
+    # Extract date from PDF
+    pdf_date = extract_date_from_pdf(str(pdf_path))
+    if pdf_date:
+        print(f"📅 Extracted date from PDF: {pdf_date}")
+    else:
+        pdf_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        print(f"📅 Using current date: {pdf_date}")
+
     data = extract_risk_ranges(pdf_path)
-    pdf_s3_key = upload_pdf_to_s3(pdf_path)
-    save_to_dynamodb(data, pdf_s3_key)
+    pdf_s3_key = upload_pdf_to_s3(pdf_path, pdf_date)
+    save_to_dynamodb(data, pdf_s3_key, pdf_date)

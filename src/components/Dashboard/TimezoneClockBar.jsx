@@ -150,6 +150,8 @@ export default function TimezoneClockBar() {
   const [times, setTimes] = useState({});
   const [times24, setTimes24] = useState({});
   const [timeIcons, setTimeIcons] = useState({});
+  const [dates, setDates] = useState({});
+  const [dateBoundaries, setDateBoundaries] = useState([]);
   const [gradientColors, setGradientColors] = useState({ start: '#1a1a3e', end: '#2d2d5f' });
 
   useEffect(() => {
@@ -157,6 +159,7 @@ export default function TimezoneClockBar() {
       const newTimes = {};
       const newTimes24 = {};
       const newTimeIcons = {};
+      const newDates = {};
       
       TIMEZONES.forEach(({ timezone, label }) => {
         // Get the current time in this timezone
@@ -171,6 +174,15 @@ export default function TimezoneClockBar() {
         
         // Extract hour from time string (format: "HH:MM:SS")
         const hour = parseInt(timeString.split(':')[0], 10);
+        
+        // Get date in this timezone
+        const dateStr = now.toLocaleString('en-US', {
+          timeZone: timezone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        });
+        newDates[label] = dateStr;
         
         // 12-hour format
         const time12 = now.toLocaleString('en-US', {
@@ -194,9 +206,28 @@ export default function TimezoneClockBar() {
         newTimeIcons[label] = getTimeIcon(hour);
       });
       
+      // Calculate date boundaries (where date changes between adjacent timezones)
+      const boundaries = [];
+      for (let i = 0; i < TIMEZONES.length - 1; i++) {
+        const currentLabel = TIMEZONES[i].label;
+        const nextLabel = TIMEZONES[i + 1].label;
+        const currentDate = newDates[currentLabel];
+        const nextDate = newDates[nextLabel];
+        
+        if (currentDate !== nextDate) {
+          // Date changed between these two timezones
+          boundaries.push({
+            position: i + 0.5, // Position between nodes (0.5 = halfway between)
+            date: nextDate // Use the later date
+          });
+        }
+      }
+      
       setTimes(newTimes);
       setTimes24(newTimes24);
       setTimeIcons(newTimeIcons);
+      setDates(newDates);
+      setDateBoundaries(boundaries);
       
       // Update gradient based on UTC hour
       const now = new Date();
@@ -226,49 +257,70 @@ export default function TimezoneClockBar() {
     }
   };
 
+  // Format date for display (MM/DD)
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    const [month, day, year] = dateStr.split('/');
+    return `${month}/${day}`;
+  };
+
   return (
     <div className="timezone-clock-bar" style={gradientStyle}>
       <div className="timeline-line"></div>
       <div className="timeline-cities">
-        {TIMEZONES.map(({ label, city, timezone }) => {
+        {TIMEZONES.map(({ label, city, timezone }, index) => {
           const isHome = label === 'LA';
           const iconType = timeIcons[label] || 'sun';
           return (
-            <div 
-              key={label} 
-              className={`timezone-timeline-node ${isHome ? 'home-timezone' : ''}`}
-              title={`${city} (${timezone})`}
-            >
-              {isHome && (
-                <svg 
-                  className="home-icon" 
-                  width="12" 
-                  height="12" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="white" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round"
+            <React.Fragment key={label}>
+              <div 
+                className={`timezone-timeline-node ${isHome ? 'home-timezone' : ''}`}
+                title={`${city} (${timezone})`}
+              >
+                {isHome && (
+                  <svg 
+                    className="home-icon" 
+                    width="12" 
+                    height="12" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="white" 
+                    strokeWidth="2" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                  >
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                  </svg>
+                )}
+                <span className="timezone-label">{label}</span>
+                <div className="timeline-marker-above">
+                  {renderTimeIcon(iconType, isHome ? 14 : 12)}
+                </div>
+                <div className="timeline-line-marker"></div>
+                <div className="timezone-time-container">
+                  <span className={`timezone-time ${isHome ? 'home-time' : ''}`}>
+                    {times[label] || '--:--'}
+                  </span>
+                  <span className="timezone-time-24">
+                    {times24[label] || '--:--'} UTC
+                  </span>
+                </div>
+              </div>
+              {/* Date boundary line between timezones */}
+              {index < TIMEZONES.length - 1 && dateBoundaries.some(b => Math.abs(b.position - (index + 0.5)) < 0.1) && (
+                <div 
+                  className="date-boundary-line"
+                  style={{ 
+                    left: `calc(${((index + 0.5) / TIMEZONES.length) * 100}% + ${(8 / TIMEZONES.length)}px)`
+                  }}
                 >
-                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                  <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                </svg>
+                  <div className="date-boundary-label">
+                    {formatDate(dateBoundaries.find(b => Math.abs(b.position - (index + 0.5)) < 0.1)?.date)}
+                  </div>
+                </div>
               )}
-              <span className="timezone-label">{label}</span>
-              <div className="timeline-marker-above">
-                {renderTimeIcon(iconType, isHome ? 14 : 12)}
-              </div>
-              <div className="timeline-line-marker"></div>
-              <div className="timezone-time-container">
-                <span className={`timezone-time ${isHome ? 'home-time' : ''}`}>
-                  {times[label] || '--:--'}
-                </span>
-                <span className="timezone-time-24">
-                  {times24[label] || '--:--'} UTC
-                </span>
-              </div>
-            </div>
+            </React.Fragment>
           );
         })}
       </div>
