@@ -29,7 +29,7 @@ async function validateAWSCredentials() {
     const result = await s3.listBuckets().promise();
     console.log('✅ AWS credentials validated successfully');
     console.log(`📦 Found ${result.Buckets.length} S3 buckets`);
-    
+
     // Check if our target bucket exists
     const targetBucket = 'market-dashboard-csv-data';
     const bucketExists = result.Buckets.some(bucket => bucket.Name === targetBucket);
@@ -38,7 +38,7 @@ async function validateAWSCredentials() {
     } else {
       console.log(`⚠️  Target bucket '${targetBucket}' not found in account`);
     }
-    
+
     return true;
   } catch (error) {
     console.error('❌ AWS credentials validation failed:', error.message);
@@ -50,7 +50,7 @@ async function validateAWSCredentials() {
 // Middleware
 // CORS: Allow React dev server (port 3000) in development, or same origin in production
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
+  origin: process.env.NODE_ENV === 'production'
     ? false // Same origin in production (Express serves static files)
     : ['http://localhost:3000', 'http://127.0.0.1:3000'], // React dev server in development
   credentials: true,
@@ -136,14 +136,14 @@ const YAHOO_TICKER_MAP = {
   'CNY=X': 'CNY=X',
   'USD': 'DX-Y.NYB',
   'DXY': 'DX-Y.NYB',
-  
+
   // Currency ETFs
   'UUP': 'UUP',
   'FXE': 'FXE',
   'FXY': 'FXY',
   'FXF': 'FXF',
   'FXB': 'FXB',
-  
+
   // Commodities
   'WTIC': 'CL=F',
   'WTI': 'CL=F',
@@ -164,7 +164,7 @@ const YAHOO_TICKER_MAP = {
   // ETFs for market breadth
   'QQQ': 'QQQ',
   'RSP': 'RSP',
-  
+
   // Crypto
   'BTC': 'BTC-USD',
   'BITCOIN': 'BTC-USD',
@@ -263,17 +263,17 @@ const MARKET_REGIONS = {
 // Helper to get ticker mapping (matches securitiesConfig.js logic)
 function getTickerMapping(symbol) {
   const upperSymbol = symbol.toUpperCase();
-  
+
   // Check FRED series first
   if (FRED_SERIES[upperSymbol]) {
     return { source: 'fred', ticker: FRED_SERIES[upperSymbol] };
   }
-  
+
   // Check Yahoo Finance special mappings
   if (YAHOO_TICKER_MAP[upperSymbol]) {
     return { source: 'yahoo', ticker: YAHOO_TICKER_MAP[upperSymbol] };
   }
-  
+
   // Default: use ticker as-is for Yahoo Finance
   return { source: 'yahoo', ticker: upperSymbol };
 }
@@ -287,9 +287,9 @@ async function fetchYahooQuote(yahooTicker) {
       interval: '1d',
       includePrePost: 'false'
     };
-    
+
     console.log(`[Yahoo Finance] Fetching quote for: ${yahooTicker}`);
-    
+
     const response = await axios.get(url, {
       params,
       headers: {
@@ -297,15 +297,15 @@ async function fetchYahooQuote(yahooTicker) {
       },
       timeout: 10000
     });
-    
+
     const data = response.data;
-    
+
     // Check for errors in Yahoo Finance response
     if (data.chart && data.chart.error) {
       console.warn(`[Yahoo Finance] API error for ${yahooTicker}:`, data.chart.error);
       return null;
     }
-    
+
     if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
       console.warn(`[Yahoo Finance] Invalid response structure for ${yahooTicker}`);
       console.warn(`[Yahoo Finance] Response keys:`, Object.keys(data));
@@ -314,28 +314,28 @@ async function fetchYahooQuote(yahooTicker) {
       }
       return null;
     }
-    
+
     const result = data.chart.result[0];
-    
+
     // Check if result has errors
     if (result.error) {
       console.warn(`[Yahoo Finance] Result error for ${yahooTicker}:`, result.error);
       return null;
     }
     const meta = result.meta || {};
-    
+
     // Log available price fields for debugging
-    const availablePriceFields = Object.keys(meta).filter(key => 
-      key.toLowerCase().includes('price') || 
+    const availablePriceFields = Object.keys(meta).filter(key =>
+      key.toLowerCase().includes('price') ||
       key.toLowerCase().includes('close') ||
       key.toLowerCase().includes('previous')
     );
     console.log(`[Yahoo Finance] ${yahooTicker} - Available price fields:`, availablePriceFields);
-    
+
     // Try multiple price fields in order of preference
     let currentPrice = null;
     let previousClose = null;
-    
+
     // Try regularMarketPrice first (most common)
     if (meta.regularMarketPrice !== undefined && meta.regularMarketPrice !== null) {
       currentPrice = meta.regularMarketPrice;
@@ -365,16 +365,16 @@ async function fetchYahooQuote(yahooTicker) {
         previousClose = closeValues.length > 1 ? closeValues[closeValues.length - 2] : currentPrice;
       }
     }
-    
+
     if (currentPrice !== null && currentPrice !== undefined) {
       // Ensure previousClose is set
       if (!previousClose) {
         previousClose = currentPrice;
       }
-      
+
       const change = currentPrice - previousClose;
       const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
-      
+
       console.log(`[Yahoo Finance] Successfully fetched ${yahooTicker}: price=${currentPrice}, change=${change}, source=${availablePriceFields.join(',')}`);
 
       return {
@@ -412,7 +412,7 @@ async function fetchFredQuote(seriesId) {
     if (!apiKey) {
       console.warn(`[FRED] Warning: FRED_API_KEY environment variable is not set. FRED API now requires an API key. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html`);
     }
-    
+
     const url = 'https://api.stlouisfed.org/fred/series/observations';
     const params = {
       series_id: seriesId,
@@ -421,16 +421,16 @@ async function fetchFredQuote(seriesId) {
       limit: '2', // Get 2 observations to calculate change
       sort_order: 'desc'
     };
-    
+
     console.log(`[FRED] Fetching quote for: ${seriesId}`);
-    
+
     const response = await axios.get(url, {
       params,
       timeout: 10000
     });
-    
+
     const data = response.data;
-    
+
     if (data.observations && data.observations.length > 0) {
       const obs = data.observations[0];
       if (obs.value && obs.value !== '.') {
@@ -440,9 +440,9 @@ async function fetchFredQuote(seriesId) {
         const previousPrice = previousObs && previousObs.value !== '.' ? parseFloat(previousObs.value) : price;
         const change = price - previousPrice;
         const changePercent = previousPrice > 0 ? (change / previousPrice) * 100 : 0;
-        
+
         console.log(`[FRED] Successfully fetched ${seriesId}: price=${price}, change=${change}`);
-        
+
         return {
           price: price.toFixed(2),
           change: change.toFixed(2),
@@ -455,14 +455,14 @@ async function fetchFredQuote(seriesId) {
     } else {
       console.warn(`[FRED] No observations returned for ${seriesId}`);
     }
-    
+
     return null;
   } catch (error) {
     console.error(`[FRED] Error fetching quote for ${seriesId}:`, error.message);
     if (error.response) {
       console.error(`[FRED] Response status: ${error.response.status}`);
       console.error(`[FRED] Response data:`, error.response.data);
-      
+
       // Check if error is related to missing API key
       if (error.response.data && error.response.data.error_message) {
         const errorMsg = error.response.data.error_message.toLowerCase();
@@ -479,27 +479,27 @@ async function fetchFredQuote(seriesId) {
 async function getQuote(symbol) {
   const now = Date.now();
   const cacheKey = symbol.toUpperCase();
-  
+
   // Check cache
   const cached = quotesCache.get(cacheKey);
   if (cached && (now - cached.timestamp) < CACHE_TTL) {
     console.log(`[Cache] Hit for ${cacheKey}`);
     return cached.data;
   }
-  
+
   console.log(`[Cache] Miss for ${cacheKey}, fetching...`);
-  
+
   // Fetch new data
   const mapping = getTickerMapping(symbol);
   let quoteData = null;
-  
+
   try {
     if (mapping.source === 'fred') {
       quoteData = await fetchFredQuote(mapping.ticker);
     } else {
       quoteData = await fetchYahooQuote(mapping.ticker);
     }
-    
+
     if (quoteData && quoteData.price) {
       const quoteResult = { symbol: symbol.toUpperCase(), ...quoteData };
       // Store in cache
@@ -521,13 +521,13 @@ async function getQuote(symbol) {
       console.error(`[Quote] Stack trace:`, error.stack.split('\n').slice(0, 3).join('\n'));
     }
   }
-  
+
   // Return cached data even if expired, or null
   if (cached && cached.data && cached.data.price) {
     console.log(`[Cache] Returning expired cache for ${cacheKey}`);
     return cached.data;
   }
-  
+
   return null;
 }
 
@@ -592,7 +592,7 @@ const generatePortfolioData = () => {
   const dayChangePercent = (dayChange / totalValue) * 100;
   const totalGainLoss = (Math.random() - 0.3) * 20000;
   const totalGainLossPercent = (totalGainLoss / totalValue) * 100;
-  
+
   return {
     summary: {
       totalValue: Math.floor(totalValue),
@@ -635,18 +635,18 @@ const fetchVIXData = async () => {
     // Using Yahoo Finance API (free, no API key required)
     const response = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d');
     const data = await response.json();
-    
+
     if (data.chart && data.chart.result && data.chart.result[0]) {
       const result = data.chart.result[0];
       const meta = result.meta;
       const quotes = result.indicators.quote[0];
-      
+
       // Get the latest price
       const latestPrice = meta.regularMarketPrice || meta.previousClose || 0;
       const previousClose = meta.previousClose || 0;
       const change = latestPrice - previousClose;
       const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
-      
+
       return {
         current: latestPrice.toFixed(2),
         change: change.toFixed(2),
@@ -658,7 +658,7 @@ const fetchVIXData = async () => {
         volume: meta.regularMarketVolume || 0
       };
     }
-    
+
     // Fallback to mock data if API fails
     return {
       current: '18.42',
@@ -695,7 +695,7 @@ async function batchProcess(items, batchSize, delayMs, processor) {
     const batchNum = Math.floor(i / batchSize) + 1;
     const totalBatches = Math.ceil(items.length / batchSize);
     console.log(`[API] Processing batch ${batchNum}/${totalBatches} (${batch.length} symbols)`);
-    
+
     // Process batch with small delay between each item to avoid rate limiting
     const batchResults = [];
     const itemStartTime = Date.now();
@@ -712,7 +712,7 @@ async function batchProcess(items, batchSize, delayMs, processor) {
     const batchTime = Date.now() - itemStartTime;
     console.log(`[API] Batch ${batchNum} completed in ${batchTime}ms (avg ${(batchTime / batch.length).toFixed(0)}ms per item)`);
     results.push(...batchResults);
-    
+
     // Add delay between batches to avoid rate limiting (except for last batch)
     if (i + batchSize < items.length) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -729,14 +729,14 @@ app.get('/api/quotes', async (req, res) => {
   try {
     const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ', 'AAPL'];
     console.log(`[API] /api/quotes called with ${symbols.length} symbols:`, symbols.slice(0, 5), '...');
-    
+
     const quotes = {};
-    
+
     // Process in batches to avoid rate limiting
     // Yahoo Finance can be sensitive to rate limiting, so we'll do smaller batches with longer delays
     const BATCH_SIZE = 5; // Reduced from 10 to avoid rate limiting
     const DELAY_MS = 200; // Increased from 100ms to 200ms between batches
-    
+
     const fetchStartTime = Date.now();
     const results = await batchProcess(
       symbols.map(s => s.trim()),
@@ -753,7 +753,7 @@ app.get('/api/quotes', async (req, res) => {
     );
     const fetchTime = Date.now() - fetchStartTime;
     console.log(`[API] Quote fetching completed in ${fetchTime}ms`);
-    
+
     // Map results back to symbols
     let successCount = 0;
     let failCount = 0;
@@ -769,7 +769,7 @@ app.get('/api/quotes', async (req, res) => {
         }
       }
     });
-    
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/quotes completed: ${successCount} quotes out of ${symbols.length} requested (${failCount} failed) in ${totalTime}ms`);
     res.json(quotes);
@@ -1104,10 +1104,10 @@ app.get('/api/risk-ranges', async (req, res) => {
     // Filter by tickers if provided
     const riskRanges = tickerList
       ? Object.fromEntries(
-          tickerList
-            .map(ticker => [ticker, allData[ticker] || null])
-            .filter(([_, data]) => data !== null)
-        )
+        tickerList
+          .map(ticker => [ticker, allData[ticker] || null])
+          .filter(([_, data]) => data !== null)
+      )
       : allData;
 
     // Store in cache
@@ -1133,94 +1133,64 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
   try {
     console.log('[API] /api/hedgeye/freshness called');
 
+    // Helper for date status
+    // Now uses the explicit content 'date' from the item, compared to 'today' (NY time)
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const today = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
 
-    // Define all 6 data types and their sources
-    const dataTypes = {
-      'risk-ranges': { name: 'Risk Ranges', source: 'HedgeyeRiskRanges', unit: 'items' },
-      'early-look': { name: 'Early Look', source: 'HedgeyeDailySnapshot', unit: 'themes' },
-      'bitcoin-trend-tracker': { name: 'Bitcoin Tracker', source: 'HedgeyeDailySnapshot', unit: 'cryptos' },
-      'momo-tracker': { name: 'MOMO Tracker', source: 'HedgeyeDailySnapshot', unit: 'signals' },
-      'signal-strength': { name: 'Signal Strength', source: 'HedgeyeDailySnapshot', unit: 'signals' },
-      'portfolio-solutions': { name: 'Portfolio Solutions', source: 'HedgeyeDailySnapshot', unit: 'recs' }
+    const getFreshnessStatus = (itemDate) => {
+      if (!itemDate) return 'missing';
+      return itemDate === today ? 'fresh' : 'stale';
     };
 
     const results = {};
     const alerts = [];
 
-    // Helper to calculate freshness status
-    const getFreshnessStatus = (lastUpdated) => {
-      if (!lastUpdated) return 'missing';
-      const hoursAgo = (now - new Date(lastUpdated)) / (1000 * 60 * 60);
-      if (hoursAgo < 24) return 'fresh';
-      if (hoursAgo < 48) return 'stale';
-      return 'missing';
-    };
-
-    // 1. Query Risk Ranges from HedgeyeRiskRanges table
+    // 1. Processing Risk Ranges (HedgeyeRiskRanges Table)
+    // Risk Ranges are stored as individual items per ticker per date
     try {
-      const scanParams = { TableName: 'HedgeyeRiskRanges' };
-      let allItems = [];
-      let lastKey = null;
+      const rrParams = { TableName: 'HedgeyeRiskRanges' };
+      const rrResult = await dynamodb.scan(rrParams).promise();
+      const items = rrResult.Items || [];
 
-      do {
-        if (lastKey) scanParams.ExclusiveStartKey = lastKey;
-        const scanResult = await dynamodb.scan(scanParams).promise();
-        allItems = allItems.concat(scanResult.Items || []);
-        lastKey = scanResult.LastEvaluatedKey;
-      } while (lastKey);
+      if (items.length > 0) {
+        // Sort by date descending to find the latest batch
+        // Assumption: date format is YYYY-MM-DD so string sort works
+        const latestItem = items.sort((a, b) => b.date.localeCompare(a.date))[0];
+        const latestDate = latestItem.date;
 
-      // Group by date to find the most recent
-      const byDate = {};
-      allItems.forEach(item => {
-        const d = item.date;
-        if (!byDate[d]) byDate[d] = [];
-        byDate[d].push(item);
-      });
+        // Count items for this latest date
+        const itemsOnDate = items.filter(i => i.date === latestDate);
 
-      const dates = Object.keys(byDate).sort().reverse();
-      const latestDate = dates[0];
-      const latestItems = byDate[latestDate] || [];
-      const latestUpdatedAt = latestItems.length > 0 ? latestItems[0].updatedAt : null;
-
-      results['risk-ranges'] = {
-        status: getFreshnessStatus(latestUpdatedAt),
-        lastUpdated: latestUpdatedAt || null,
-        itemCount: latestItems.length,
-        date: latestDate || null,
-        source: 'HedgeyeRiskRanges'
-      };
-
-      if (results['risk-ranges'].status === 'stale') {
-        const hoursAgo = Math.round((now - new Date(latestUpdatedAt)) / (1000 * 60 * 60));
-        alerts.push({ type: 'risk-ranges', message: `Data is ${hoursAgo} hours old`, severity: 'warning' });
-      } else if (results['risk-ranges'].status === 'missing') {
-        if (latestUpdatedAt) {
-          const daysAgo = Math.round((now - new Date(latestUpdatedAt)) / (1000 * 60 * 60 * 24));
-          alerts.push({ type: 'risk-ranges', message: `Data is ${daysAgo} days old (last: ${latestDate})`, severity: 'error' });
-        } else {
-          alerts.push({ type: 'risk-ranges', message: 'No data found', severity: 'error' });
-        }
+        results['risk-ranges'] = {
+          status: getFreshnessStatus(latestDate),
+          lastUpdated: latestDate, // Use content date as primary source for freshness
+          scrapedAt: latestItem.updatedAt, // Keep technical timestamp available
+          itemCount: itemsOnDate.length,
+          date: latestDate,
+          source: 'HedgeyeRiskRanges'
+        };
+      } else {
+        results['risk-ranges'] = { status: 'missing', itemCount: 0, date: null, source: 'HedgeyeRiskRanges' };
       }
     } catch (err) {
       console.error('[API] Error querying HedgeyeRiskRanges:', err.message);
-      results['risk-ranges'] = { status: 'error', lastUpdated: null, itemCount: 0, error: err.message };
-      alerts.push({ type: 'risk-ranges', message: `Error: ${err.message}`, severity: 'error' });
+      results['risk-ranges'] = { status: 'error', error: err.message };
     }
 
-    // 2. Query other data types from HedgeyeDailySnapshot table
+    // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
+    // Other types are stored as single snapshot items per day
     const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions'];
 
     for (const snapshotType of snapshotTypes) {
       try {
-        // Query recent dates (last 7 days) to find the latest entry for this snapshot type
         let latestSnapshot = null;
 
+        // Query recent dates (last 7 days) to find the latest entry
         for (let i = 0; i < 7; i++) {
-          const queryDate = new Date();
-          queryDate.setDate(queryDate.getDate() - i);
-          const dateStr = queryDate.toISOString().split('T')[0];
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
           const queryParams = {
             TableName: 'HedgeyeDailySnapshot',
@@ -1238,65 +1208,39 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
         }
 
         if (latestSnapshot) {
-          // Calculate item count based on snapshot type - use explicit count fields first, then fallback to nested data
+          // Calculate item count based on snapshot type
           let itemCount = 0;
 
-          if (snapshotType === 'early-look') {
-            // early-look uses riskRangeCount or count data keys
-            itemCount = latestSnapshot.riskRangeCount || 0;
-            if (itemCount === 0 && latestSnapshot.data) {
+          // Use explicit count fields if available
+          if (latestSnapshot.riskRangeCount) itemCount = latestSnapshot.riskRangeCount;
+          else if (latestSnapshot.stockCount) itemCount = latestSnapshot.stockCount;
+          else if (latestSnapshot.cryptoCount) itemCount = latestSnapshot.cryptoCount + (latestSnapshot.stockCount || 0);
+          else if (latestSnapshot.rankingCount) itemCount = latestSnapshot.rankingCount;
+
+          // Fallback to counting data keys if explicit counts are missing/zero
+          if (itemCount === 0 && latestSnapshot.data) {
+            if (snapshotType === 'bitcoin-trend-tracker' && latestSnapshot.data.cryptos) {
+              itemCount = Object.keys(latestSnapshot.data.cryptos).length + Object.keys(latestSnapshot.data.stocks || {}).length;
+            } else if (Array.isArray(latestSnapshot.data)) {
+              itemCount = latestSnapshot.data.length;
+            } else if (Array.isArray(latestSnapshot.data.stocks)) {
+              itemCount = latestSnapshot.data.stocks.length;
+            } else if (Array.isArray(latestSnapshot.data.rankings)) {
+              itemCount = latestSnapshot.data.rankings.length;
+            } else if (typeof latestSnapshot.data === 'object') {
               itemCount = Object.keys(latestSnapshot.data).length;
             }
-          } else if (snapshotType === 'bitcoin-trend-tracker') {
-            // bitcoin-trend-tracker has cryptoCount and stockCount
-            const cryptoCount = latestSnapshot.cryptoCount || 0;
-            const stockCount = latestSnapshot.stockCount || 0;
-            itemCount = cryptoCount + stockCount;
-            // Fallback to counting from nested data
-            if (itemCount === 0 && latestSnapshot.data) {
-              const cryptos = latestSnapshot.data.cryptos || {};
-              const stocks = latestSnapshot.data.stocks || {};
-              itemCount = Object.keys(cryptos).length + Object.keys(stocks).length;
-            }
-          } else if (snapshotType === 'momo-tracker') {
-            // momo-tracker has stockCount
-            itemCount = latestSnapshot.stockCount || 0;
-            if (itemCount === 0 && latestSnapshot.data) {
-              itemCount = Object.keys(latestSnapshot.data).length;
-            }
-          } else if (snapshotType === 'signal-strength') {
-            // signal-strength has stockCount for total stocks
-            itemCount = latestSnapshot.stockCount || 0;
-            // Fallback: count from data.stocks array
-            if (itemCount === 0 && latestSnapshot.data && latestSnapshot.data.stocks) {
-              itemCount = Array.isArray(latestSnapshot.data.stocks) ? latestSnapshot.data.stocks.length : 0;
-            }
-          } else if (snapshotType === 'portfolio-solutions') {
-            // portfolio-solutions has rankingCount
-            itemCount = latestSnapshot.rankingCount || 0;
-            // Fallback: count from data.rankings array
-            if (itemCount === 0 && latestSnapshot.data && latestSnapshot.data.rankings) {
-              itemCount = Array.isArray(latestSnapshot.data.rankings) ? latestSnapshot.data.rankings.length : 0;
-            }
-          } else if (latestSnapshot.data) {
-            // Generic fallback: count top-level keys in data
-            itemCount = typeof latestSnapshot.data === 'object' ? Object.keys(latestSnapshot.data).length : 0;
           }
 
-          const lastUpdated = latestSnapshot.scrapedAt || latestSnapshot.updatedAt || latestSnapshot.date;
-
           results[snapshotType] = {
-            status: getFreshnessStatus(lastUpdated),
-            lastUpdated: lastUpdated,
+            status: getFreshnessStatus(latestSnapshot.date),
+            lastUpdated: latestSnapshot.date, // Use content date as primary
+            scrapedAt: latestSnapshot.scrapedAt,
             itemCount: itemCount,
             date: latestSnapshot.date,
             source: 'HedgeyeDailySnapshot'
           };
 
-          if (results[snapshotType].status === 'stale') {
-            const hoursAgo = Math.round((now - new Date(lastUpdated)) / (1000 * 60 * 60));
-            alerts.push({ type: snapshotType, message: `Data is ${hoursAgo} hours old`, severity: 'warning' });
-          }
         } else {
           results[snapshotType] = {
             status: 'missing',
@@ -1305,12 +1249,10 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
             date: null,
             source: 'HedgeyeDailySnapshot'
           };
-          alerts.push({ type: snapshotType, message: 'No data found', severity: 'error' });
         }
       } catch (err) {
         console.error(`[API] Error querying HedgeyeDailySnapshot for ${snapshotType}:`, err.message);
-        results[snapshotType] = { status: 'error', lastUpdated: null, itemCount: 0, error: err.message };
-        alerts.push({ type: snapshotType, message: `Error: ${err.message}`, severity: 'error' });
+        results[snapshotType] = { status: 'error', error: err.message };
       }
     }
 
@@ -1323,7 +1265,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
       alerts: alerts,
       meta: {
         queryTime: totalTime,
-        timestamp: now.toISOString()
+        timestamp: new Date().toISOString()
       }
     });
 
@@ -1339,7 +1281,7 @@ app.get('/api/workflow-status', async (req, res) => {
   const startTime = Date.now();
   try {
     console.log('[API] /api/workflow-status called');
-    
+
     const today = new Date().toISOString().split('T')[0];
     const workflowStatus = {
       hedgeye: {
@@ -1370,7 +1312,7 @@ app.get('/api/workflow-status', async (req, res) => {
       const snapshotResult = await dynamodb.get(snapshotParams).promise();
       const hedgeyeGetTime = Date.now() - hedgeyeStartTime;
       console.log(`[API] Hedgeye get completed in ${hedgeyeGetTime}ms`);
-      
+
       if (snapshotResult.Item) {
         workflowStatus.hedgeye = {
           status: 'success',
@@ -1382,13 +1324,13 @@ app.get('/api/workflow-status', async (req, res) => {
         // Try to find most recent snapshot by querying recent dates (more efficient than scan)
         const queryStartTime = Date.now();
         let latest = null;
-        
+
         // Try querying recent dates (last 7 days) in descending order
         for (let i = 0; i < 7; i++) {
           const date = new Date();
           date.setDate(date.getDate() - i);
           const dateStr = date.toISOString().split('T')[0];
-          
+
           try {
             const queryParams = {
               TableName: 'HedgeyeDailySnapshot',
@@ -1398,7 +1340,7 @@ app.get('/api/workflow-status', async (req, res) => {
                 ':type': 'risk-ranges'
               }
             };
-            
+
             const queryResult = await dynamodb.query(queryParams).promise();
             if (queryResult.Items && queryResult.Items.length > 0) {
               latest = queryResult.Items[0];
@@ -1409,7 +1351,7 @@ app.get('/api/workflow-status', async (req, res) => {
             continue;
           }
         }
-        
+
         // Fallback to scan only if query didn't find anything
         if (!latest) {
           const scanStartTime = Date.now();
@@ -1421,12 +1363,12 @@ app.get('/api/workflow-status', async (req, res) => {
             },
             Limit: 10 // Get more items to find the latest
           };
-          
+
           // Note: Scan is not ideal for large tables, but works as fallback
           const recentSnapshot = await dynamodb.scan(scanParams).promise();
           const scanTime = Date.now() - scanStartTime;
           console.log(`[API] Hedgeye scan fallback completed in ${scanTime}ms`);
-          
+
           if (recentSnapshot.Items && recentSnapshot.Items.length > 0) {
             // Sort by date descending to get most recent
             latest = recentSnapshot.Items.sort((a, b) => {
@@ -1436,18 +1378,19 @@ app.get('/api/workflow-status', async (req, res) => {
             })[0];
           }
         }
-        
+
         const queryTime = Date.now() - queryStartTime;
         console.log(`[API] Hedgeye query/scan completed in ${queryTime}ms`);
-        
+
         if (latest) {
           const latestDate = latest.date;
           const isToday = latestDate === today;
           const isRecent = latestDate && new Date(latestDate) >= new Date(new Date(today).getTime() - 2 * 24 * 60 * 60 * 1000); // Within 2 days
-          
+
           workflowStatus.hedgeye = {
             status: isToday ? 'success' : (isRecent ? 'stale' : 'error'),
-            lastRun: latest.scrapedAt || latest.date,
+            lastRun: latest.date, // Use content date
+            scrapedAt: latest.scrapedAt,
             count: latest.riskRangeCount || 0,
             nextRun: '8:00 AM EST (market days)'
           };
@@ -1469,7 +1412,7 @@ app.get('/api/workflow-status', async (req, res) => {
       const portfolioResult = await dynamodb.scan(portfolioParams).promise();
       const portfolioTime = Date.now() - portfolioStartTime;
       console.log(`[API] Portfolio scan completed in ${portfolioTime}ms`);
-      
+
       if (portfolioResult.Items && portfolioResult.Items.length > 0) {
         // Sort by snapshotDate descending to get most recent
         const latest = portfolioResult.Items.sort((a, b) => {
@@ -1477,10 +1420,10 @@ app.get('/api/workflow-status', async (req, res) => {
           const dateB = new Date(b.snapshotDate || b.createdAt || 0);
           return dateB - dateA;
         })[0];
-        
+
         const latestDate = latest.snapshotDate || latest.createdAt;
         const isToday = latestDate && new Date(latestDate).toISOString().split('T')[0] === today;
-        
+
         workflowStatus.csvUpload = {
           status: isToday ? 'success' : 'stale',
           lastUpload: latestDate,
@@ -1509,7 +1452,7 @@ app.get('/api/hedgeye/screenshot/:date', async (req, res) => {
   try {
     const { date } = req.params;
     console.log(`[API] /api/hedgeye/screenshot/${date} called`);
-    
+
     // Get snapshot from DynamoDB
     const snapshotParams = {
       TableName: 'HedgeyeDailySnapshot',
@@ -1518,24 +1461,24 @@ app.get('/api/hedgeye/screenshot/:date', async (req, res) => {
         snapshotType: 'risk-ranges'
       }
     };
-    
+
     const snapshotResult = await dynamodb.get(snapshotParams).promise();
-    
+
     if (!snapshotResult.Item || !snapshotResult.Item.screenshotS3Key) {
       return res.status(404).json({ error: 'Screenshot not found for this date' });
     }
-    
+
     const s3Key = snapshotResult.Item.screenshotS3Key;
-    
+
     // Generate presigned URL (1 hour expiration)
     const params = {
       Bucket: 'market-dashboard-csv-data',
       Key: s3Key,
       Expires: 3600 // 1 hour
     };
-    
+
     const presignedUrl = s3.getSignedUrl('getObject', params);
-    
+
     console.log(`[API] Generated presigned URL for screenshot: ${s3Key}`);
     res.json({
       url: presignedUrl,
@@ -1543,7 +1486,7 @@ app.get('/api/hedgeye/screenshot/:date', async (req, res) => {
       date: date,
       scrapedAt: snapshotResult.Item.scrapedAt
     });
-    
+
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/screenshot:', error);
     res.status(500).json({ error: 'Failed to get screenshot URL', details: error.message });
@@ -1555,7 +1498,7 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
   try {
     const { date } = req.params;
     console.log(`[API] /api/hedgeye/csv/${date} called`);
-    
+
     // Get snapshot from DynamoDB
     const snapshotParams = {
       TableName: 'HedgeyeDailySnapshot',
@@ -1564,15 +1507,15 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
         snapshotType: 'risk-ranges'
       }
     };
-    
+
     const snapshotResult = await dynamodb.get(snapshotParams).promise();
-    
+
     if (!snapshotResult.Item || !snapshotResult.Item.csvS3Key) {
       return res.status(404).json({ error: 'CSV not found for this date' });
     }
-    
+
     const s3Key = snapshotResult.Item.csvS3Key;
-    
+
     // Generate presigned URL (1 hour expiration)
     const params = {
       Bucket: 'market-dashboard-csv-data',
@@ -1580,9 +1523,9 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
       Expires: 3600, // 1 hour
       ResponseContentDisposition: `attachment; filename="hedgeye_risk_ranges_${date}.csv"`
     };
-    
+
     const presignedUrl = s3.getSignedUrl('getObject', params);
-    
+
     console.log(`[API] Generated presigned URL for CSV: ${s3Key}`);
     res.json({
       url: presignedUrl,
@@ -1590,26 +1533,283 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
       date: date,
       scrapedAt: snapshotResult.Item.scrapedAt
     });
-    
+
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/csv:', error);
     res.status(500).json({ error: 'Failed to get CSV URL', details: error.message });
   }
 });
+// Hedgeye Changelog endpoint - returns added/removed items for each data type
+app.get('/api/hedgeye/changelog', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    console.log('[API] /api/hedgeye/changelog called');
 
-// Macro Indicators endpoint - fetches top row indicators
+    // First, fetch Risk Ranges for today (or latest) to use for cross-referencing
+    // Users often view "Early Look" and "Risk Ranges" as shared data, so if a ticker
+    // is missing from Early Look but present in Risk Ranges, we shouldn't mark it as "Removed".
+    let activeTickers = [];
+    try {
+      const rrParams = {
+        TableName: 'HedgeyeDailySnapshot',
+        KeyConditionExpression: 'snapshotType = :type',
+        ExpressionAttributeValues: { ':type': 'risk-ranges' },
+        Limit: 1,
+        ScanIndexForward: false
+      };
+      // We can't query by snapshotType easily without index, so we'll just rely on the main loop 
+      // to populate this if we process risk-ranges first, or just do a quick scan for today's RR.
+      const todayStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-');
+      // Format YYYY-MM-DD
+      const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+      const rrItem = await dynamodb.get({
+        TableName: 'HedgeyeDailySnapshot',
+        Key: { date: todayISO, snapshotType: 'risk-ranges' }
+      }).promise();
+
+      if (rrItem.Item && rrItem.Item.data) {
+        activeTickers = Object.keys(rrItem.Item.data);
+      }
+    } catch (e) {
+      console.warn('Failed to pre-fetch risk ranges for changelog xref:', e);
+    }
+
+    const snapshotTypes = [
+      'risk-ranges',
+      'early-look',
+      'bitcoin-trend-tracker',
+      'momo-tracker',
+      'signal-strength',
+      'portfolio-solutions'
+    ];
+
+    const results = {};
+
+    // Process each type in parallel
+    await Promise.all(snapshotTypes.map(async (type) => {
+      try {
+        // 1. Get recent snapshots for this type (last 7 days)
+        const recentSnapshots = [];
+        for (let i = 0; i < 7; i++) {
+          if (recentSnapshots.length >= 2) break;
+
+          const date = new Date();
+          date.setDate(date.getDate() - i);
+          const dateStr = date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD in EST
+
+          const item = await dynamodb.get({
+            TableName: 'HedgeyeDailySnapshot',
+            Key: { date: dateStr, snapshotType: type }
+          }).promise();
+
+          if (item.Item) {
+            recentSnapshots.push(item.Item);
+          }
+        }
+
+        if (recentSnapshots.length < 2) {
+          results[type] = { added: [], removed: [], available: recentSnapshots.length > 0 };
+          return;
+        }
+
+        const current = recentSnapshots[0];
+        const previous = recentSnapshots[1];
+
+        // Debug logging for risk-ranges
+        if (type === 'risk-ranges') {
+          console.log('[Changelog] risk-ranges current snapshot keys:', Object.keys(current));
+          console.log('[Changelog] Has trendChanges?', 'trendChanges' in current);
+          console.log('[Changelog] trendChanges value:', current.trendChanges);
+        }
+
+        // Extract items based on type
+        const getItems = (snapshot) => {
+          if (!snapshot || !snapshot.data) return [];
+
+          if (type === 'risk-ranges' || type === 'momo-tracker') {
+            return Object.keys(snapshot.data);
+          } else if (type === 'early-look') {
+            if (snapshot.data) return Object.keys(snapshot.data);
+            return [];
+          } else if (type === 'bitcoin-trend-tracker') {
+            const cryptos = snapshot.data.cryptos ? Object.keys(snapshot.data.cryptos) : [];
+            const stocks = snapshot.data.stocks ? Object.keys(snapshot.data.stocks) : [];
+            return [...cryptos, ...stocks];
+          } else if (type === 'signal-strength') {
+            return (snapshot.data.stocks || []).map(s => s.ticker);
+          } else if (type === 'portfolio-solutions') {
+            return (snapshot.data.rankings || []).map(r => r.ticker);
+          }
+          return [];
+        };
+
+        const currentItems = getItems(current);
+        const previousItems = getItems(previous);
+
+        const added = currentItems.filter(item => !previousItems.includes(item));
+        let removed = previousItems.filter(item => !currentItems.includes(item));
+
+        // Updates logic (Trend Changes)
+        let updates = [];
+        if (current.data && previous.data) {
+          // Trend Changes: Risk Ranges, Momo, Bitcoin
+          if (type === 'risk-ranges' || type === 'momo-tracker' || type === 'bitcoin-trend-tracker') {
+            const commonItems = currentItems.filter(item => previousItems.includes(item));
+
+            commonItems.forEach(item => {
+              let currData, prevData;
+
+              if (type === 'bitcoin-trend-tracker') {
+                // Check cryptos
+                if (current.data.cryptos && current.data.cryptos[item]) currData = current.data.cryptos[item];
+                else if (current.data.stocks && current.data.stocks[item]) currData = current.data.stocks[item];
+
+                if (previous.data.cryptos && previous.data.cryptos[item]) prevData = previous.data.cryptos[item];
+                else if (previous.data.stocks && previous.data.stocks[item]) prevData = previous.data.stocks[item];
+              } else {
+                currData = current.data[item];
+                prevData = previous.data[item];
+              }
+
+              if (currData && prevData && currData.trend && prevData.trend) {
+                if (currData.trend !== prevData.trend) {
+                  updates.push({
+                    ticker: item,
+                    field: 'trend',
+                    oldValue: prevData.trend,
+                    newValue: currData.trend
+                  });
+                }
+              }
+            });
+          }
+
+          // Rank Changes: Portfolio Solutions
+          if (type === 'portfolio-solutions') {
+            const getRank = (snapshot, ticker) => {
+              if (!snapshot.data || !snapshot.data.rankings) return null;
+              const entry = snapshot.data.rankings.find(r => r.ticker === ticker);
+              return entry ? entry.rank : null;
+            };
+
+            const commonItems = currentItems.filter(item => previousItems.includes(item));
+            commonItems.forEach(ticker => {
+              const currRank = getRank(current, ticker);
+              const prevRank = getRank(previous, ticker);
+
+              if (currRank && prevRank && currRank !== prevRank) {
+                updates.push({
+                  ticker: ticker,
+                  field: 'rank',
+                  oldValue: prevRank,
+                  newValue: currRank
+                });
+              }
+            });
+          }
+
+          // Explicit Added/Removed for Signal Strength (if available)
+          if (type === 'signal-strength') {
+            if (current.data.added && Array.isArray(current.data.added) && current.data.added.length > 0) {
+              // Since the PDF explicitly lists "Added", we trust that as the definitive source for additions
+              // The diff method might pick up noise or re-ordering
+              // Note: We need to manipulate 'added' and 'removed' variables which are in scope
+              // We empty the calculated arrays and push the explicit ones
+              added.length = 0;
+              current.data.added.forEach(t => { if (t) added.push(t) });
+            }
+
+            if (current.data.removed && Array.isArray(current.data.removed) && current.data.removed.length > 0) {
+              removed.length = 0;
+              current.data.removed.forEach(t => { if (t) removed.push(t) });
+            }
+          }
+        }
+
+        // SPECIAL LOGIC: For 'early-look', if a removed item exists in today's 'risk-ranges', 
+        // ignore the removal. This handles cases where a partial file (like Geopolitical Risk) 
+        // was uploaded instead of the full Early Look, but the data exists elsewhere.
+        if (type === 'early-look' && activeTickers.length > 0) {
+          removed = removed.filter(item => !activeTickers.includes(item));
+        }
+
+        results[type] = {
+          added: added,
+          removed: removed,
+          updates: updates || [],
+          currentDate: current.date,
+          previousDate: previous.date,
+          available: true
+        };
+
+        // Add trendChanges and outbucket from snapshot for risk-ranges
+        if (type === 'risk-ranges') {
+          if (current.trendChanges) {
+            console.log('[Changelog] Adding trendChanges to risk-ranges:', current.trendChanges.length, 'items');
+            results[type].trendChanges = current.trendChanges;
+          } else {
+            console.log('[Changelog] No trendChanges found for risk-ranges');
+          }
+
+          if (current.outbucket) {
+            console.log('[Changelog] Adding outbucket to risk-ranges:', current.outbucket.length, 'items');
+            results[type].outbucket = current.outbucket;
+          }
+        }
+
+        // Calculate trendChanges for early-look by comparing trends
+        if (type === 'early-look') {
+          const trendChanges = [];
+
+          if (current.data && previous.data) {
+            Object.keys(current.data).forEach(ticker => {
+              const currData = current.data[ticker];
+              const prevData = previous.data[ticker];
+
+              if (prevData && currData.trend !== prevData.trend) {
+                trendChanges.push({
+                  ticker,
+                  oldTrend: prevData.trend,
+                  newTrend: currData.trend
+                });
+              }
+            });
+          }
+
+          console.log('[Changelog] Calculated trendChanges for early-look:', trendChanges.length, 'items');
+          results[type].trendChanges = trendChanges;
+        }
+
+      } catch (err) {
+        console.error(`Error processing changelog for ${type}:`, err);
+        results[type] = { error: err.message, available: false };
+      }
+    }));
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/hedgeye/changelog completed in ${totalTime}ms`);
+    res.json(results);
+
+  } catch (error) {
+    console.error('[API] Error in /api/hedgeye/changelog:', error);
+    res.status(500).json({ error: 'Failed to fetch changelog', details: error.message });
+  }
+});
+
+
 app.get('/api/macro-indicators', async (req, res) => {
   const startTime = Date.now();
   try {
     const macroIndicators = ['DXY', 'GLD', 'UST10Y', 'CRB', 'WTI', 'SPY', 'QQQ', 'IWM'];
     console.log(`[API] /api/macro-indicators called for ${macroIndicators.length} indicators`);
-    
+
     const indicators = {};
-    
+
     // Process in batches to avoid rate limiting
     const BATCH_SIZE = 5;
     const DELAY_MS = 200;
-    
+
     const fetchStartTime = Date.now();
     const results = await batchProcess(
       macroIndicators,
@@ -1626,7 +1826,7 @@ app.get('/api/macro-indicators', async (req, res) => {
     );
     const fetchTime = Date.now() - fetchStartTime;
     console.log(`[API] Macro indicators fetching completed in ${fetchTime}ms`);
-    
+
     // Map results back to indicators
     let successCount = 0;
     macroIndicators.forEach((symbol, index) => {
@@ -1648,7 +1848,7 @@ app.get('/api/macro-indicators', async (req, res) => {
         };
       }
     });
-    
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/macro-indicators completed: ${successCount} indicators out of ${macroIndicators.length} requested in ${totalTime}ms`);
     res.json(indicators);
@@ -1737,12 +1937,12 @@ async function fetchFredHistoricalData(seriesId, months = 7) {
       console.warn(`[FRED] Warning: FRED_API_KEY environment variable is not set.`);
       return null;
     }
-    
+
     // Calculate date range (need extra month for safety)
     const endDate = new Date();
     const startDate = new Date();
     startDate.setMonth(startDate.getMonth() - months);
-    
+
     const url = 'https://api.stlouisfed.org/fred/series/observations';
     const params = {
       series_id: seriesId,
@@ -1752,16 +1952,16 @@ async function fetchFredHistoricalData(seriesId, months = 7) {
       observation_end: endDate.toISOString().split('T')[0],
       sort_order: 'asc'
     };
-    
+
     console.log(`[FRED] Fetching historical data for: ${seriesId} (${months} months)`);
-    
+
     const response = await axios.get(url, {
       params,
       timeout: 15000
     });
-    
+
     const data = response.data;
-    
+
     if (data.observations && data.observations.length > 0) {
       // Filter out missing values and convert to numbers
       const validObservations = data.observations
@@ -1770,11 +1970,11 @@ async function fetchFredHistoricalData(seriesId, months = 7) {
           date: obs.date,
           value: parseFloat(obs.value)
         }));
-      
+
       console.log(`[FRED] Successfully fetched ${validObservations.length} observations for ${seriesId}`);
       return validObservations;
     }
-    
+
     return null;
   } catch (error) {
     console.error(`[FRED] Error fetching historical data for ${seriesId}:`, error.message);
@@ -1787,11 +1987,11 @@ function calculateAnnualizedROC(currentValue, pastValue, months) {
   if (!currentValue || !pastValue || pastValue <= 0) {
     return null;
   }
-  
+
   const ratio = currentValue / pastValue;
   const periodsPerYear = 12 / months;
   const annualizedROC = (Math.pow(ratio, periodsPerYear) - 1) * 100;
-  
+
   return annualizedROC;
 }
 
@@ -1800,38 +2000,38 @@ function getValueMonthsAgo(observations, months) {
   if (!observations || observations.length === 0) {
     return null;
   }
-  
+
   // Sort by date descending (most recent first)
   const sorted = [...observations].sort((a, b) => new Date(b.date) - new Date(a.date));
-  
+
   if (sorted.length === 0) {
     return null;
   }
-  
+
   // Get the most recent value
   const currentDate = new Date(sorted[0].date);
   const targetDate = new Date(currentDate);
   targetDate.setMonth(targetDate.getMonth() - months);
-  
+
   // Find the closest observation to target date
   let closest = null;
   let minDiff = Infinity;
-  
+
   for (const obs of sorted) {
     const obsDate = new Date(obs.date);
     const diff = Math.abs(obsDate - targetDate);
-    
+
     if (diff < minDiff && obsDate <= targetDate) {
       minDiff = diff;
       closest = obs.value;
     }
   }
-  
+
   // If no observation before target date, use the oldest available
   if (closest === null && sorted.length > 0) {
     closest = sorted[sorted.length - 1].value;
   }
-  
+
   return closest;
 }
 
@@ -1840,7 +2040,7 @@ app.get('/api/liquidity-indicators', async (req, res) => {
   const startTime = Date.now();
   try {
     console.log('[API] /api/liquidity-indicators called');
-    
+
     // Fetch MZM (Money Zero Maturity) and GDP data
     const fredStartTime = Date.now();
     const [mzmData, gdpData] = await Promise.all([
@@ -1849,64 +2049,64 @@ app.get('/api/liquidity-indicators', async (req, res) => {
     ]);
     const fredTime = Date.now() - fredStartTime;
     console.log(`[API] FRED data fetching completed in ${fredTime}ms`);
-    
+
     if (!mzmData || mzmData.length === 0) {
       return res.status(500).json({ error: 'Failed to fetch MZM data from FRED' });
     }
-    
+
     // Get current and historical values for MZM
     const sortedMzm = [...mzmData].sort((a, b) => new Date(b.date) - new Date(a.date));
     const currentMzm = sortedMzm[0].value;
     const mzm1m = getValueMonthsAgo(mzmData, 1);
     const mzm3m = getValueMonthsAgo(mzmData, 3);
     const mzm6m = getValueMonthsAgo(mzmData, 6);
-    
+
     // Calculate M3 Proxy (MZM) 1m annualized growth
     const m3Proxy1m = calculateAnnualizedROC(currentMzm, mzm1m, 1);
-    
+
     // Calculate Money Supply ROC for different periods
     const moneySupplyROC1m = calculateAnnualizedROC(currentMzm, mzm1m, 1);
     const moneySupplyROC3m = calculateAnnualizedROC(currentMzm, mzm3m, 3);
     const moneySupplyROC6m = calculateAnnualizedROC(currentMzm, mzm6m, 6);
-    
+
     // Handle GDP (quarterly data)
     let gdpROC1m = null;
     let gdpROC3m = null;
     let gdpROC6m = null;
-    
+
     if (gdpData && gdpData.length > 0) {
       const sortedGdp = [...gdpData].sort((a, b) => new Date(b.date) - new Date(a.date));
       const currentGdp = sortedGdp[0].value;
-      
+
       // For GDP, we'll use the last available quarterly value for all periods
       // since it's quarterly data, we approximate monthly changes
       // Get the most recent quarter and the quarter from ~3 months ago
       const gdp3m = getValueMonthsAgo(gdpData, 3);
       const gdp6m = getValueMonthsAgo(gdpData, 6);
-      
+
       // For 1m, we'll use the same value as 3m (since GDP is quarterly)
       // Or calculate based on 3m if we have it
       if (gdp3m) {
         gdpROC1m = calculateAnnualizedROC(currentGdp, gdp3m, 3); // Use 3m for 1m approximation
         gdpROC3m = calculateAnnualizedROC(currentGdp, gdp3m, 3);
       }
-      
+
       if (gdp6m) {
         gdpROC6m = calculateAnnualizedROC(currentGdp, gdp6m, 6);
       }
     }
-    
+
     // Calculate spreads (Money Supply ROC - GDP ROC)
-    const spread1m = moneySupplyROC1m !== null && gdpROC1m !== null 
-      ? moneySupplyROC1m - gdpROC1m 
+    const spread1m = moneySupplyROC1m !== null && gdpROC1m !== null
+      ? moneySupplyROC1m - gdpROC1m
       : null;
-    const spread3m = moneySupplyROC3m !== null && gdpROC3m !== null 
-      ? moneySupplyROC3m - gdpROC3m 
+    const spread3m = moneySupplyROC3m !== null && gdpROC3m !== null
+      ? moneySupplyROC3m - gdpROC3m
       : null;
-    const spread6m = moneySupplyROC6m !== null && gdpROC6m !== null 
-      ? moneySupplyROC6m - gdpROC6m 
+    const spread6m = moneySupplyROC6m !== null && gdpROC6m !== null
+      ? moneySupplyROC6m - gdpROC6m
       : null;
-    
+
     const result = {
       m3Proxy: {
         value: m3Proxy1m !== null ? parseFloat(m3Proxy1m.toFixed(1)) : null,
@@ -1932,7 +2132,7 @@ app.get('/api/liquidity-indicators', async (req, res) => {
       },
       timestamp: new Date().toISOString()
     };
-    
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/liquidity-indicators completed in ${totalTime}ms (FRED: ${fredTime}ms)`);
     res.json(result);
@@ -1954,21 +2154,21 @@ app.get('/api/securities/signal-strength', async (req, res) => {
       TableName: 'MarketPriceHistory',
       ProjectionExpression: 'symbol'
     };
-    
+
     const scanResult = await dynamodb.scan(scanParams).promise();
     const scanTime = Date.now() - scanStartTime;
     console.log(`[API] Signal strength scan completed in ${scanTime}ms, found ${scanResult.Items.length} items`);
     const uniqueSymbols = [...new Set(scanResult.Items.map(item => item.symbol))];
-    
+
     // If no data in DynamoDB, return empty array (frontend will use fallback)
     if (uniqueSymbols.length === 0) {
       return res.json([]);
     }
-    
+
     // Fetch latest market data from DynamoDB for all securities
     const today = new Date().toISOString().split('T')[0];
     const securitiesData = [];
-    
+
     // For each symbol, get latest market data
     const queryStartTime = Date.now();
     for (const symbol of uniqueSymbols) {
@@ -1983,9 +2183,9 @@ app.get('/api/securities/signal-strength', async (req, res) => {
           ScanIndexForward: false,
           Limit: 1
         };
-        
+
         const result = await dynamodb.query(params).promise();
-        
+
         let marketData = {
           ticker: symbol,
           name: symbol,
@@ -2001,44 +2201,44 @@ app.get('/api/securities/signal-strength', async (req, res) => {
           downside: null,
           trendSignal: 'NEUTRAL'
         };
-        
+
         if (result.Items && result.Items.length > 0) {
           const latest = result.Items[0];
           marketData.price = latest.close;
           marketData.closingPrice = latest.close;
         }
-        
+
         securitiesData.push(marketData);
       } catch (error) {
         console.error(`Error fetching data for ${symbol}:`, error);
       }
     }
-    
+
     // Calculate signal strength for each security
     // Simple calculation based on bias for now (can be enhanced with real data)
     const rankedSecurities = securitiesData.map(security => {
       let score = 0;
-      
+
       // Base score from trend signal
       if (security.trendSignal === 'BULLISH') score += 50;
       else if (security.trendSignal === 'BEARISH') score -= 50;
-      
+
       // If we have price vs trend level data, add momentum
       if (security.trendStatus === 'Above') score += 20;
       else if (security.trendStatus === 'Below') score -= 20;
-      
+
       // If we have tail level data, add support/resistance
       if (security.tailStatus === 'Above') score += 10;
       else if (security.tailStatus === 'Below') score -= 10;
-      
+
       // Risk/reward from upside/downside
       if (security.upside && security.downside) {
         const riskReward = security.upside - Math.abs(security.downside);
         score += Math.max(-20, Math.min(20, riskReward * 0.8));
       }
-      
+
       score = Math.max(-100, Math.min(100, Math.round(score)));
-      
+
       // Determine level and color
       let level = 'Neutral';
       let color = 'gray';
@@ -2049,7 +2249,7 @@ app.get('/api/securities/signal-strength', async (req, res) => {
       else if (score >= -40) { level = 'Weak'; color = 'amber'; }
       else if (score >= -70) { level = 'Very Weak'; color = 'red'; }
       else { level = 'Extremely Weak'; color = 'red'; }
-      
+
       return {
         ...security,
         signalStrength: score,
@@ -2057,7 +2257,7 @@ app.get('/api/securities/signal-strength', async (req, res) => {
         signalColor: color
       };
     }).sort((a, b) => b.signalStrength - a.signalStrength);
-    
+
     const queryTime = Date.now() - queryStartTime;
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/securities/signal-strength completed: ${rankedSecurities.length} securities (scan: ${scanTime}ms, queries: ${queryTime}ms, total: ${totalTime}ms)`);
@@ -2078,16 +2278,16 @@ app.get('/api/portfolio', async (req, res) => {
     const snapshotParams = {
       TableName: 'PortfolioSnapshots'
     };
-    
+
     const snapshotResult = await dynamodb.scan(snapshotParams).promise();
     const snapshotTime = Date.now() - snapshotStartTime;
     console.log(`[API] Portfolio snapshot scan completed in ${snapshotTime}ms, found ${snapshotResult.Items.length} items`);
-    
+
     // Sort by timestamp descending to get the latest record
-    const sortedItems = snapshotResult.Items.sort((a, b) => 
+    const sortedItems = snapshotResult.Items.sort((a, b) =>
       new Date(b.timestamp) - new Date(a.timestamp)
     );
-    
+
     if (!sortedItems || sortedItems.length === 0) {
       const totalTime = Date.now() - startTime;
       console.log(`[API] /api/portfolio completed (no data) in ${totalTime}ms`);
@@ -2106,10 +2306,10 @@ app.get('/api/portfolio', async (req, res) => {
         lastUpdated: 'No portfolio data - upload a Schwab CSV to get started'
       });
     }
-    
+
     const latestSnapshot = sortedItems[0];
     const snapshotId = latestSnapshot.snapshotId;
-    
+
     // Get holdings for this snapshot
     const holdingsStartTime = Date.now();
     const holdingsParams = {
@@ -2119,17 +2319,17 @@ app.get('/api/portfolio', async (req, res) => {
         ':snapshotId': snapshotId
       }
     };
-    
+
     const holdingsResult = await dynamodb.scan(holdingsParams).promise();
     const holdingsTime = Date.now() - holdingsStartTime;
     console.log(`[API] Holdings scan completed in ${holdingsTime}ms, found ${holdingsResult.Items.length} holdings`);
     const holdings = holdingsResult.Items || [];
-    
+
     // Fetch real-time quotes for all holdings to get intraday G/L
     const quotesStartTime = Date.now();
     const symbols = holdings.map(h => h.symbol).filter(Boolean);
     let quotes = {};
-    
+
     if (symbols.length > 0) {
       try {
         const BATCH_SIZE = 5;
@@ -2147,14 +2347,14 @@ app.get('/api/portfolio', async (req, res) => {
             }
           }
         );
-        
+
         symbols.forEach((symbol, index) => {
           const quote = quoteResults[index];
           if (quote && quote.changePercent) {
             quotes[symbol.toUpperCase()] = quote;
           }
         });
-        
+
         const quotesTime = Date.now() - quotesStartTime;
         console.log(`[API] Quotes fetched for ${Object.keys(quotes).length} holdings in ${quotesTime}ms`);
       } catch (error) {
@@ -2162,7 +2362,7 @@ app.get('/api/portfolio', async (req, res) => {
         // Continue without quotes - holdings will have null dayChangePercent
       }
     }
-    
+
     // Transform to frontend format
     const portfolioData = {
       summary: {
@@ -2180,7 +2380,7 @@ app.get('/api/portfolio', async (req, res) => {
         const quote = quotes[symbolUpper] || null;
         // dayChangePercent comes from real-time quotes API (intraday change)
         const dayChangePercent = quote?.changePercent ? parseFloat(quote.changePercent) : null;
-        
+
         return {
           symbol: holding.symbol,
           description: holding.description || '',
@@ -2235,17 +2435,17 @@ app.get('/api/portfolio', async (req, res) => {
         return `${datePart}, ${pstTime} PST / ${estTime} EST`;
       })()
     };
-    
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/portfolio completed in ${totalTime}ms (snapshot: ${snapshotTime}ms, holdings: ${holdingsTime}ms)`);
     res.json(portfolioData);
-    
+
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/portfolio after ${totalTime}ms:`, error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to fetch portfolio data',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -2268,7 +2468,7 @@ app.get('/api/indicators/volume', (req, res) => {
   const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ'];
   const data = generateMockData();
   const volumeData = {};
-  
+
   symbols.forEach(symbol => {
     if (data[symbol]) {
       volumeData[symbol] = {
@@ -2279,7 +2479,7 @@ app.get('/api/indicators/volume', (req, res) => {
       };
     }
   });
-  
+
   res.json(volumeData);
 });
 
@@ -2297,33 +2497,33 @@ app.get('/api/usd/dxy', async (req, res) => {
       ScanIndexForward: false, // Sort by date descending
       Limit: 2 // Get latest and previous for change calculation
     };
-    
+
     const result = await dynamodb.query(params).promise();
-    
+
     if (!result.Items || result.Items.length === 0) {
-      return res.json({ 
-        value: null, 
-        change: null, 
-        changePercent: null, 
+      return res.json({
+        value: null,
+        change: null,
+        changePercent: null,
         timestamp: null,
-        message: 'No DXY data available' 
+        message: 'No DXY data available'
       });
     }
-    
+
     const latest = result.Items[0];
     const previous = result.Items[1];
-    
+
     const value = parseFloat(latest.close);
     const change = previous ? value - parseFloat(previous.close) : 0;
     const changePercent = previous ? ((change / parseFloat(previous.close)) * 100).toFixed(2) : '0.00';
-    
+
     res.json({
       value: value,
       change: change.toFixed(2),
       changePercent: changePercent,
       timestamp: latest.timestamp
     });
-    
+
   } catch (error) {
     console.error('Error fetching DXY data:', error);
     res.status(500).json({ error: 'Failed to fetch DXY data' });
@@ -2343,9 +2543,9 @@ app.get('/api/usd/currency-pairs', async (req, res) => {
       { pair: 'USDCNY', name: 'USD/CNY', rate: '7.2345', change: '0.0123', changePercent: '0.17%', timestamp: new Date().toISOString() },
       { pair: 'USDAUD', name: 'USD/AUD', rate: '1.5234', change: '-0.0023', changePercent: '-0.15%', timestamp: new Date().toISOString() }
     ];
-    
+
     res.json(currencyPairs);
-    
+
   } catch (error) {
     console.error('Error fetching currency pairs:', error);
     res.status(500).json({ error: 'Failed to fetch currency pairs' });
@@ -2357,18 +2557,18 @@ app.get('/api/usd/correlations', async (req, res) => {
   const startTime = Date.now();
   try {
     const dbStartTime = Date.now();
-    
+
     // Try query by calculationDate first (more efficient than scan)
     // Get today's date and try recent dates in descending order
     const today = new Date().toISOString().split('T')[0];
     let latest = null;
-    
+
     // Try today, yesterday, and up to 7 days ago
     for (let i = 0; i < 7; i++) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
-      
+
       try {
         const params = {
           TableName: 'USDCorrelations',
@@ -2376,7 +2576,7 @@ app.get('/api/usd/correlations', async (req, res) => {
             calculationDate: dateStr
           }
         };
-        
+
         const result = await dynamodb.get(params).promise();
         if (result.Item) {
           latest = result.Item;
@@ -2387,14 +2587,14 @@ app.get('/api/usd/correlations', async (req, res) => {
         continue;
       }
     }
-    
+
     // Fallback to scan if query didn't find anything
     if (!latest) {
       const scanParams = {
         TableName: 'USDCorrelations',
         Limit: 1
       };
-      
+
       const scanResult = await dynamodb.scan(scanParams).promise();
       if (scanResult.Items && scanResult.Items.length > 0) {
         // Sort by calculationDate descending
@@ -2405,21 +2605,21 @@ app.get('/api/usd/correlations', async (req, res) => {
         })[0];
       }
     }
-    
+
     const dbTime = Date.now() - dbStartTime;
     console.log(`[API] USD correlations query completed in ${dbTime}ms`);
-    
+
     if (!latest) {
       const totalTime = Date.now() - startTime;
       console.log(`[API] /api/usd/correlations completed (no data) in ${totalTime}ms`);
-      return res.json({ 
-        correlations: null, 
-        rollingStats: null, 
+      return res.json({
+        correlations: null,
+        rollingStats: null,
         timestamp: null,
-        message: 'No correlation data available' 
+        message: 'No correlation data available'
       });
     }
-    
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/usd/correlations completed in ${totalTime}ms (DB: ${dbTime}ms)`);
     res.json({
@@ -2428,7 +2628,7 @@ app.get('/api/usd/correlations', async (req, res) => {
       timestamp: latest.timestamp,
       calculationDate: latest.calculationDate
     });
-    
+
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/usd/correlations after ${totalTime}ms:`, error);
@@ -2466,26 +2666,26 @@ app.get('/api/usd/historical', async (req, res) => {
   const startTime = Date.now();
   try {
     const { symbol, days = 30 } = req.query;
-    
+
     if (!symbol) {
       return res.status(400).json({ error: 'Symbol query parameter is required' });
     }
-    
+
     // Decode URL-encoded symbols
     let decodedSymbol = decodeURIComponent(symbol);
-    
+
     // Normalize currency pair formats
     const normalizedSymbol = normalizeCurrencySymbol(decodedSymbol);
-    
+
     // Calculate date range
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
-    
+
     // Format dates as YYYY-MM-DD for DynamoDB
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
-    
+
     const dbStartTime = Date.now();
     const params = {
       TableName: 'MarketPriceHistory',
@@ -2500,15 +2700,15 @@ app.get('/api/usd/historical', async (req, res) => {
       },
       ScanIndexForward: true
     };
-    
+
     const result = await dynamodb.query(params).promise();
     const dbTime = Date.now() - dbStartTime;
     console.log(`[API] Historical data query for ${normalizedSymbol} completed in ${dbTime}ms, found ${result.Items.length} items`);
-    
+
     // If no data in database, try fetching from Yahoo Finance as fallback
     if (!result.Items || result.Items.length === 0) {
       console.log(`No historical data found in database for ${normalizedSymbol} (original: ${decodedSymbol}), trying Yahoo Finance fallback...`);
-      
+
       const yahooTickerMap = {
         'DXY': 'DX-Y.NYB',
         'USDEUR': 'USDEUR=X',
@@ -2545,9 +2745,9 @@ app.get('/api/usd/historical', async (req, res) => {
         'NZD/USD': 'USDNZD=X',
         'USD/NZD': 'USDNZD=X'
       };
-      
+
       const yahooTicker = yahooTickerMap[normalizedSymbol] || yahooTickerMap[decodedSymbol.toUpperCase()] || decodedSymbol;
-      
+
       try {
         const range = days <= 7 ? '5d' : days <= 30 ? '1mo' : days <= 90 ? '3mo' : days <= 180 ? '6mo' : '1y';
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}`;
@@ -2562,23 +2762,23 @@ app.get('/api/usd/historical', async (req, res) => {
           },
           timeout: 10000
         });
-        
+
         const data = response.data;
         if (data.chart && data.chart.result && data.chart.result.length > 0) {
           const result = data.chart.result[0];
           const timestamps = result.timestamp || [];
           const quotes = result.indicators?.quote?.[0];
-          
+
           if (quotes && quotes.close && quotes.close.length > 0) {
             const historicalData = [];
             for (let i = 0; i < timestamps.length; i++) {
               const closePrice = quotes.close[i];
               // Skip null/undefined close prices
               if (closePrice === null || closePrice === undefined) continue;
-              
+
               const date = new Date(timestamps[i] * 1000);
               const dateStr = date.toISOString().split('T')[0];
-              
+
               historicalData.push({
                 date: dateStr,
                 close: closePrice,
@@ -2588,26 +2788,26 @@ app.get('/api/usd/historical', async (req, res) => {
                 volume: quotes.volume?.[i] || null
               });
             }
-            
+
             // For small day ranges, just return the most recent data points
             // This ensures charts always have enough data to render
             const requestedDays = parseInt(days);
             const minDataPoints = Math.max(requestedDays, 5); // At least 5 points for a decent chart
             const trimmedData = historicalData.slice(-minDataPoints);
-            
+
             if (trimmedData.length > 0) {
               const responseData = {
                 symbol: decodedSymbol,
                 data: trimmedData,
                 count: trimmedData.length
               };
-              
+
               // Store in cache (even for Yahoo Finance fallback)
               historicalCache.set(cacheKey, {
                 data: responseData,
                 timestamp: now
               });
-              
+
               console.log(`Fetched ${trimmedData.length} data points from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol})`);
               return res.json(responseData);
             }
@@ -2616,15 +2816,15 @@ app.get('/api/usd/historical', async (req, res) => {
       } catch (yahooError) {
         console.error(`Error fetching from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol}):`, yahooError.message);
       }
-      
+
       console.log(`No historical data available for ${normalizedSymbol} (original: ${decodedSymbol}) from any source`);
-      return res.json({ 
+      return res.json({
         symbol: decodedSymbol,
         data: [],
-        message: `No historical data available for ${decodedSymbol} in the requested date range` 
+        message: `No historical data available for ${decodedSymbol} in the requested date range`
       });
     }
-    
+
     const historicalData = result.Items.map(item => ({
       date: item.date,
       close: parseFloat(item.close),
@@ -2633,24 +2833,24 @@ app.get('/api/usd/historical', async (req, res) => {
       low: item.low ? parseFloat(item.low) : null,
       volume: item.volume || null
     }));
-    
+
     const responseData = {
       symbol: decodedSymbol,
       data: historicalData,
       count: historicalData.length
     };
-    
+
     // Store in cache
     historicalCache.set(cacheKey, {
       data: responseData,
       timestamp: now
     });
-    
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/usd/historical completed: ${historicalData.length} data points for ${normalizedSymbol} (original: ${decodedSymbol}, requested ${days} days) in ${totalTime}ms (DB: ${dbTime}ms)`);
-    
+
     res.json(responseData);
-    
+
   } catch (error) {
     const totalTime = Date.now() - startTime;
     const symbolParam = req.query.symbol || 'unknown';
@@ -2676,26 +2876,26 @@ app.get('/api/notes', async (req, res) => {
         '#dt': 'date'
       }
     };
-    
+
     const result = await dynamodb.scan(params).promise();
-    
+
     // Extract dates and sort descending (newest first)
     const dates = result.Items
       .map(item => item.date)
       .filter(date => date) // Filter out any null/undefined dates
       .sort()
       .reverse(); // Sort descending (newest first)
-    
+
     res.json({
       dates: dates,
       count: dates.length
     });
-    
+
   } catch (error) {
     console.error('Error listing note dates:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to list note dates',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -2704,17 +2904,17 @@ app.get('/api/notes', async (req, res) => {
 app.post('/api/notes', async (req, res) => {
   try {
     const { date, content } = req.body;
-    
+
     if (!date) {
       return res.status(400).json({ error: 'Date is required' });
     }
-    
+
     // Validate date format (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(date)) {
       return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
     }
-    
+
     const params = {
       TableName: 'DailyNotes',
       Item: {
@@ -2723,20 +2923,20 @@ app.post('/api/notes', async (req, res) => {
         timestamp: new Date().toISOString(),
       }
     };
-    
+
     await dynamodb.put(params).promise();
-    
+
     res.json({
       success: true,
       date: date,
       timestamp: params.Item.timestamp
     });
-    
+
   } catch (error) {
     console.error('Error saving note:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to save note',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -2745,40 +2945,40 @@ app.post('/api/notes', async (req, res) => {
 app.get('/api/notes/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    
+
     // Validate date format
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(date)) {
       return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
     }
-    
+
     const params = {
       TableName: 'DailyNotes',
       Key: {
         date: date
       }
     };
-    
+
     const result = await dynamodb.get(params).promise();
-    
+
     if (!result.Item) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         error: 'Note not found',
-        date: date 
+        date: date
       });
     }
-    
+
     res.json({
       date: result.Item.date,
       content: result.Item.content,
       timestamp: result.Item.timestamp
     });
-    
+
   } catch (error) {
     console.error('Error loading note:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to load note',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -2789,17 +2989,17 @@ app.get('/api/notes/:date', async (req, res) => {
 app.post('/api/notes/calendar', async (req, res) => {
   try {
     const { date, content } = req.body;
-    
+
     if (!date) {
       return res.status(400).json({ error: 'Date is required' });
     }
-    
+
     // Validate date format (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(date)) {
       return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
     }
-    
+
     const params = {
       TableName: 'CalendarNotes',
       Item: {
@@ -2808,20 +3008,20 @@ app.post('/api/notes/calendar', async (req, res) => {
         timestamp: new Date().toISOString(),
       }
     };
-    
+
     await dynamodb.put(params).promise();
-    
+
     res.json({
       success: true,
       date: date,
       timestamp: params.Item.timestamp
     });
-    
+
   } catch (error) {
     console.error('Error saving calendar note:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to save calendar note',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -2830,40 +3030,40 @@ app.post('/api/notes/calendar', async (req, res) => {
 app.get('/api/notes/calendar/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    
+
     // Validate date format
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(date)) {
       return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
     }
-    
+
     const params = {
       TableName: 'CalendarNotes',
       Key: {
         date: date
       }
     };
-    
+
     const result = await dynamodb.get(params).promise();
-    
+
     if (!result.Item) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         error: 'Calendar note not found',
-        date: date 
+        date: date
       });
     }
-    
+
     res.json({
       date: result.Item.date,
       content: result.Item.content,
       timestamp: result.Item.timestamp
     });
-    
+
   } catch (error) {
     console.error('Error loading calendar note:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to load calendar note',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -2873,17 +3073,17 @@ app.get('/api/aws-status', async (req, res) => {
   try {
     const credentials = AWS.config.credentials;
     const region = AWS.config.region;
-    
+
     // Test S3 access
     let s3Status = 'unknown';
     let bucketStatus = 'unknown';
     let bucketList = [];
-    
+
     try {
       const result = await s3.listBuckets().promise();
       s3Status = 'accessible';
       bucketList = result.Buckets.map(b => b.Name);
-      
+
       // Check if target bucket exists
       const targetBucket = 'market-dashboard-csv-data';
       bucketStatus = bucketList.includes(targetBucket) ? 'exists' : 'missing';
@@ -2891,7 +3091,7 @@ app.get('/api/aws-status', async (req, res) => {
       s3Status = 'error';
       bucketStatus = 'error';
     }
-    
+
     res.json({
       aws: {
         region: region,
@@ -2904,7 +3104,7 @@ app.get('/api/aws-status', async (req, res) => {
       },
       timestamp: new Date().toISOString()
     });
-    
+
   } catch (error) {
     res.status(500).json({
       error: 'Failed to check AWS status',
@@ -2918,7 +3118,7 @@ app.get('/api/aws-status', async (req, res) => {
 app.post('/api/presigned-url', async (req, res) => {
   try {
     const { filename, contentType } = req.body;
-    
+
     if (!filename) {
       return res.status(400).json({ error: 'Filename is required' });
     }
@@ -2945,13 +3145,13 @@ app.post('/api/presigned-url', async (req, res) => {
         }
       });
     });
-    
+
     res.json({
       presignedUrl,
       key: filename,
       bucket: 'market-dashboard-csv-data'
     });
-    
+
   } catch (error) {
     console.error('❌ Error generating presigned URL:', error);
     console.error('Error details:', {
@@ -2959,8 +3159,8 @@ app.post('/api/presigned-url', async (req, res) => {
       code: error.code,
       statusCode: error.statusCode
     });
-    
-    res.status(500).json({ 
+
+    res.status(500).json({
       error: 'Failed to generate presigned URL',
       details: error.message,
       code: error.code || 'UNKNOWN_ERROR'
@@ -2989,7 +3189,7 @@ const server = app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Market data API available at http://localhost:${PORT}/api`);
   console.log(`💼 Portfolio data available at http://localhost:${PORT}/api/portfolio`);
-  
+
   // Validate AWS credentials after server starts
   await validateAWSCredentials();
 });

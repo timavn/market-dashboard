@@ -13,6 +13,8 @@ const WorkflowStatus = () => {
   const [workflowStatus, setWorkflowStatus] = useState(null);
   const [riskRanges, setRiskRanges] = useState({});
   const [freshnessData, setFreshnessData] = useState(null);
+  const [changelogData, setChangelogData] = useState(null);
+  const [changelogLoading, setChangelogLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [activeTab, setActiveTab] = useState('freshness'); // 'freshness', 'preview', 'services'
   const [serviceTotals, setServiceTotals] = useState(null);
@@ -47,6 +49,17 @@ const WorkflowStatus = () => {
         setFreshnessData(freshness);
       } catch (freshnessError) {
         console.error('Error fetching Hedgeye freshness:', freshnessError);
+      }
+
+      // Fetch Changelog data
+      try {
+        setChangelogLoading(true);
+        const changelog = await axios.get(`${backendUrl}/api/hedgeye/changelog`);
+        setChangelogData(changelog.data);
+      } catch (changelogError) {
+        console.error('Error fetching Hedgeye changelog:', changelogError);
+      } finally {
+        setChangelogLoading(false);
       }
 
       setLastRefresh(new Date());
@@ -103,11 +116,11 @@ const WorkflowStatus = () => {
 
   useEffect(() => {
     fetchData();
-    
+
     // Calculate service totals
     const totals = calculateTotals();
     setServiceTotals(totals);
-    
+
     // Auto-refresh every 5 minutes
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
@@ -117,7 +130,7 @@ const WorkflowStatus = () => {
   const fetchScreenshotUrl = async () => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
     if (!currentHedgeyeStatus.lastRun) return;
-    
+
     try {
       setScreenshotLoading(true);
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
@@ -136,7 +149,7 @@ const WorkflowStatus = () => {
   const fetchCsvUrl = async () => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
     if (!currentHedgeyeStatus.lastRun) return;
-    
+
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
       const date = new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
@@ -149,31 +162,67 @@ const WorkflowStatus = () => {
   };
 
   // Calculate data freshness
-  const getDataFreshness = (timestamp) => {
-    if (!timestamp) return { status: 'error', hours: null, label: 'No data' };
-    
-    const now = new Date();
-    const dataTime = new Date(timestamp);
-    const hoursAgo = (now - dataTime) / (1000 * 60 * 60);
-    
-    if (hoursAgo < 24) {
-      return { status: 'success', hours: hoursAgo, label: `${Math.round(hoursAgo)}h ago` };
-    } else if (hoursAgo < 48) {
-      return { status: 'warning', hours: hoursAgo, label: `${Math.round(hoursAgo)}h ago` };
+  const getDataFreshness = (timestamp, dataType) => {
+    if (!timestamp) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never' };
+
+    // Current date in YYYY-MM-DD format (EST)
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+    let dataDate;
+    let dateObj;
+
+    // Check if timestamp is already YYYY-MM-DD (Content Date from backend)
+    const isSimpleDate = typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(timestamp);
+
+    if (isSimpleDate) {
+      dataDate = timestamp;
+      // create date object for display (Timezone agnostic - append noon to avoid shifts)
+      dateObj = new Date(timestamp + 'T12:00:00');
     } else {
-      return { status: 'error', hours: hoursAgo, label: `${Math.round(hoursAgo)}h ago` };
+      dateObj = new Date(timestamp);
+      if (isNaN(dateObj.getTime())) return { status: 'error', hours: null, label: 'Invalid Date', dateStr: 'Invalid' };
+      dataDate = dateObj.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    }
+
+    // Display string (e.g. "Jan 21")
+    const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    // Calculate age in hours (approximation for simple dates)
+    const daysDiff = (new Date(today) - new Date(dataDate)) / (1000 * 60 * 60 * 24);
+    const hoursAgo = daysDiff * 24;
+
+    // Green only if SAME DAY
+    if (dataDate === today) {
+      return { status: 'success', hours: hoursAgo, label: dateStr, dateStr };
+    }
+
+    // Custom threshold for bi-weekly products (Signal Strength, Portfolio Solutions)
+    // Allow up to 4 days (96 hours) to be "Yellow" instead of "Red"
+    const isBiWeekly = dataType === 'signal-strength' || dataType === 'portfolio-solutions';
+    const warningThreshold = isBiWeekly ? 96 : 48;
+
+    if (hoursAgo < warningThreshold) {
+      // Yellow (Warning) - valid but not today
+      const daysAgo = Math.round(hoursAgo / 24);
+      return { status: 'warning', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr };
+    } else {
+      // Red (Error) - too old
+      const daysAgo = Math.round(hoursAgo / 24);
+      return { status: 'error', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr };
     }
   };
 
   // Format timestamp
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return 'Never';
-    const date = new Date(timestamp);
+    const isSimpleDate = typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(timestamp);
+    const date = isSimpleDate ? new Date(timestamp + 'T12:00:00') : new Date(timestamp);
+
     return date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+      hour: isSimpleDate ? undefined : '2-digit',
+      minute: isSimpleDate ? undefined : '2-digit'
     });
   };
 
@@ -248,38 +297,7 @@ const WorkflowStatus = () => {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Header */}
-      <div
-        style={{
-          padding: '12px 16px',
-          borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          background: isDark 
-            ? 'linear-gradient(to bottom, rgba(31, 41, 55, 0.8), rgba(55, 65, 81, 0.5))' 
-            : 'linear-gradient(to bottom, rgba(249, 250, 251, 0.8), rgba(243, 244, 246, 0.5))',
-          backdropFilter: 'blur(4px)',
-        }}
-        className="dark:border-gray-700"
-      >
-        <Title style={{ fontSize: '16px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
-          Service Tracking & Status
-        </Title>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-            Updated: {lastRefresh.toLocaleTimeString()}
-          </Text>
-          <Button
-            size="xs"
-            variant="secondary"
-            onClick={fetchData}
-            disabled={loading}
-          >
-            {loading ? '...' : '↻'}
-          </Button>
-        </div>
-      </div>
+
 
       {/* Tabs */}
       <div
@@ -294,11 +312,11 @@ const WorkflowStatus = () => {
       >
         {['freshness', 'preview', 'services'].map((tab) => {
           const tabLabels = {
-            freshness: 'Daily Freshness',
+            freshness: 'Data Upload',
             preview: 'Data Preview',
             services: 'Services & Costs'
           };
-          
+
           return (
             <button
               key={tab}
@@ -335,10 +353,9 @@ const WorkflowStatus = () => {
         ) : activeTab === 'freshness' ? (
           /* Daily Freshness - New Primary View */
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Date Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Title style={{ fontSize: '18px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
-                Daily Freshness Check
+                Data Upload
               </Title>
               <Text style={{ fontSize: '14px', color: isDark ? '#9ca3af' : '#6b7280' }}>
                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
@@ -364,23 +381,23 @@ const WorkflowStatus = () => {
 
                 return Object.entries(dataTypeConfig).map(([key, config]) => {
                   const data = freshnessData?.dataTypes?.[key] || { status: 'missing', itemCount: 0 };
+
+                  // Use backend status ('fresh', 'stale', 'missing') for emoji
                   const getEmoji = (status) => {
                     if (status === 'fresh') return '🟢';
                     if (status === 'stale') return '🟡';
                     return '🔴';
                   };
+
+                  // Use backend status for color  
                   const getColor = (status) => {
                     if (status === 'fresh') return 'emerald';
                     if (status === 'stale') return 'yellow';
                     return 'red';
                   };
-                  const getFreshnessLabel = (lastUpdated) => {
-                    if (!lastUpdated) return 'No data';
-                    const hoursAgo = Math.round((new Date() - new Date(lastUpdated)) / (1000 * 60 * 60));
-                    if (hoursAgo < 1) return 'Just now';
-                    if (hoursAgo === 1) return '1h ago';
-                    return `${hoursAgo}h ago`;
-                  };
+
+                  // Frontend freshness is still used for the date label
+                  const freshness = getDataFreshness(data.lastUpdated || data.date, key);
 
                   return (
                     <Card
@@ -408,7 +425,7 @@ const WorkflowStatus = () => {
                           {data.itemCount} {config.unit}
                         </Text>
                         <Badge color={getColor(data.status)} size="xs">
-                          {getFreshnessLabel(data.lastUpdated)}
+                          {freshness.dateStr}
                         </Badge>
                       </div>
                     </Card>
@@ -485,6 +502,253 @@ const WorkflowStatus = () => {
                   {lastRefresh.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                 </Text>
               </Card>
+            </div>
+
+            {/* Changelog Section */}
+            <div style={{ marginTop: '16px' }}>
+              <Title style={{ fontSize: '16px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '12px' }}>
+                Changes
+              </Title>
+              {changelogLoading ? (
+                <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>Loading changelog...</Text>
+              ) : !changelogData || Object.keys(changelogData).length === 0 ? (
+                <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>No changelog data available.</Text>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                  {[
+                    { key: 'risk-ranges', label: 'Risk Ranges' },
+                    { key: 'early-look', label: 'Early Look' },
+                    { key: 'bitcoin-trend-tracker', label: 'Bitcoin Tracker' },
+                    { key: 'portfolio-solutions', label: 'Portfolio Solutions' },
+                    { key: 'signal-strength', label: 'Signal Strength' },
+                    { key: 'momo-tracker', label: 'MOMO Tracker' }
+                  ].map(({ key, label }) => {
+                    const diff = changelogData[key];
+
+                    // Always show bitcoin-trend-tracker and portfolio-solutions cards
+                    const alwaysShow = key === 'bitcoin-trend-tracker' || key === 'portfolio-solutions';
+
+                    if (!alwaysShow) {
+                      if (!diff || !diff.available) return null;
+                      if (diff.added.length === 0 && diff.removed.length === 0 && (!diff.updates || diff.updates.length === 0)) return null;
+                    }
+
+                    // Check if there's any data to display
+                    const hasData = diff && diff.available && (
+                      diff.added.length > 0 ||
+                      diff.removed.length > 0 ||
+                      (diff.updates && diff.updates.length > 0)
+                    );
+
+                    return (
+                      <Card key={key} className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
+                        {/* Enhanced title for Risk Ranges with separator */}
+                        {key === 'risk-ranges' ? (
+                          <div style={{ marginBottom: '16px' }}>
+                            <Text style={{ fontSize: '16px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', marginBottom: '8px' }}>
+                              {label}
+                            </Text>
+                            <div style={{ height: '1px', background: isDark ? '#374151' : '#e5e7eb', marginBottom: '8px' }} />
+                          </div>
+                        ) : (
+                          <Text style={{ fontSize: '14px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '16px' }}>
+                            {label}
+                          </Text>
+                        )}
+
+                        {!hasData && alwaysShow && (
+                          <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                            No changes detected
+                          </Text>
+                        )}
+
+                        {/* TREND Changes section (from PDF) - only for risk-ranges */}
+                        {key === 'risk-ranges' && (
+                          <div style={{ marginBottom: '16px' }}>
+                            <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#fbbf24' : '#d97706', marginBottom: '8px' }}>
+                              TREND Changes:
+                            </Text>
+                            {diff && diff.trendChanges && diff.trendChanges.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {diff.trendChanges.map((change, idx) => (
+                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
+                                    <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{change.ticker}</span>:
+                                    <span style={{
+                                      color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                    }}>
+                                      {change.oldTrend}
+                                    </span>
+                                    <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
+                                    <span style={{
+                                      color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                    }}>
+                                      {change.newTrend}
+                                    </span>
+                                    {change.note && (
+                                      <span style={{ fontSize: '10px', fontStyle: 'italic', color: isDark ? '#9ca3af' : '#6b7280' }}>
+                                        ({change.note})
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                                No changes
+                              </Text>
+                            )}
+                          </div>
+                        )}
+
+                        {/* OutBucket section (from PDF) - only for risk-ranges */}
+                        {key === 'risk-ranges' && (
+                          <div style={{ marginBottom: '12px' }}>
+                            <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#ef4444' : '#dc2626', marginBottom: '8px' }}>
+                              OutBucket:
+                            </Text>
+                            {diff && diff.outbucket && diff.outbucket.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {diff.outbucket.map((item, idx) => (
+                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
+                                    <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{item.name} ({item.ticker})</span>
+                                    <span>-</span>
+                                    <span style={{
+                                      color: item.trend === 'BULLISH' ? '#10b981' : item.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                    }}>
+                                      {item.trend}
+                                    </span>
+                                    <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280' }}>({item.dateRemoved})</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                                No changes
+                              </Text>
+                            )}
+                          </div>
+                        )}
+
+                        {/* TREND Changes section for early-look - HIDDEN per user request */}
+                        {/* User wants Added/Removed (coverage changes) not TREND Changes */}
+                        {false && key === 'early-look' && (
+                          <div style={{ marginBottom: '16px' }}>
+                            <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#fbbf24' : '#d97706', marginBottom: '8px' }}>
+                              TREND Changes:
+                            </Text>
+                            {diff && diff.trendChanges && diff.trendChanges.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {diff.trendChanges.map((change, idx) => (
+                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
+                                    <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{change.ticker}</span>:
+                                    <span style={{
+                                      color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                    }}>
+                                      {change.oldTrend}
+                                    </span>
+                                    <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
+                                    <span style={{
+                                      color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                    }}>
+                                      {change.newTrend}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                                No changes
+                              </Text>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Updates section (calculated diff) - HIDE for risk-ranges and early-look since we have trendChanges */}
+                        {key !== 'risk-ranges' && key !== 'early-look' && diff && diff.updates && diff.updates.length > 0 && (
+                          <div style={{ marginBottom: '12px' }}>
+                            <Text style={{ fontSize: '12px', fontWeight: 600, color: isDark ? '#fbbf24' : '#d97706', marginBottom: '4px' }}>
+                              {diff.updates[0].field === 'rank' ? 'Rank Changes:' : 'TREND Changes:'}
+                            </Text>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {diff.updates.map((update, idx) => (
+                                <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
+                                  <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{update.ticker}</span>:
+
+                                  {update.field === 'trend' ? (
+                                    <>
+                                      <span style={{
+                                        color: update.oldValue === 'BULLISH' ? '#10b981' : update.oldValue === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                      }}>
+                                        {update.oldValue}
+                                      </span>
+                                      <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
+                                      <span style={{
+                                        fontWeight: 600,
+                                        color: update.newValue === 'BULLISH' ? '#10b981' : update.newValue === 'BEARISH' ? '#ef4444' : '#6b7280',
+                                        padding: '0 4px',
+                                      }}>
+                                        {update.newValue}
+                                      </span>
+                                    </>
+                                  ) : update.field === 'rank' ? (
+                                    <>
+                                      <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>#{update.oldValue}</span>
+                                      <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
+                                      <span style={{
+                                        fontWeight: 600,
+                                        color: update.newValue < update.oldValue ? '#10b981' : '#ef4444', // Lower rank # is better (Green)
+                                        padding: '0 4px',
+                                      }}>
+                                        #{update.newValue}
+                                      </span>
+                                    </>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Added section - HIDE for risk-ranges only */}
+                        {key !== 'risk-ranges' && diff && diff.added.length > 0 && (
+                          <div style={{ marginBottom: '8px' }}>
+                            <Text style={{ fontSize: '12px', fontWeight: 600, color: '#10b981', marginBottom: '4px' }}>Added:</Text>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {diff.added.map(item => (
+                                <span key={item} style={{
+                                  fontSize: '11px',
+                                  padding: '0 4px',
+                                  color: '#10b981'
+                                }}>
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Removed section - HIDE for risk-ranges only */}
+                        {key !== 'risk-ranges' && diff && diff.removed.length > 0 && (
+                          <div>
+                            <Text style={{ fontSize: '12px', fontWeight: 600, color: '#ef4444', marginBottom: '4px' }}>Removed:</Text>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {diff.removed.map(item => (
+                                <span key={item} style={{
+                                  fontSize: '11px',
+                                  padding: '0 4px',
+                                  color: '#ef4444'
+                                }}>
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         ) : activeTab === 'preview_old_status' ? (
@@ -789,9 +1053,9 @@ const WorkflowStatus = () => {
                           {service.description}
                         </TableCell>
                         <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {service.tables ? `${service.tables.length} tables` : 
-                           service.estimatedInvocationsPerMonth ? `${service.estimatedInvocationsPerMonth} invocations` :
-                           service.estimatedStorageGB ? `${service.estimatedStorageGB} GB` : 'N/A'}
+                          {service.tables ? `${service.tables.length} tables` :
+                            service.estimatedInvocationsPerMonth ? `${service.estimatedInvocationsPerMonth} invocations` :
+                              service.estimatedStorageGB ? `${service.estimatedStorageGB} GB` : 'N/A'}
                         </TableCell>
                         <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
                           ${service.estimatedCostPerMonth.toFixed(2)}
@@ -916,24 +1180,24 @@ const WorkflowStatus = () => {
                   </Button>
                 )}
               </div>
-              
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: '1fr 1fr', 
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
                 gap: '16px',
                 minHeight: '500px'
               }}>
                 {/* Left Side - Screenshot */}
-                <div style={{ 
-                  display: 'flex', 
+                <div style={{
+                  display: 'flex',
                   flexDirection: 'column',
                   border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                   borderRadius: '8px',
                   overflow: 'hidden',
                   backgroundColor: isDark ? '#1f2937' : '#ffffff'
                 }}>
-                  <div style={{ 
-                    padding: '12px', 
+                  <div style={{
+                    padding: '12px',
                     borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                     backgroundColor: isDark ? '#111827' : '#f9fafb'
                   }}>
@@ -946,10 +1210,10 @@ const WorkflowStatus = () => {
                       </Text>
                     )}
                   </div>
-                  <div style={{ 
-                    flex: 1, 
-                    display: 'flex', 
-                    alignItems: 'center', 
+                  <div style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
                     justifyContent: 'center',
                     padding: '16px',
                     overflow: 'auto',
@@ -958,12 +1222,12 @@ const WorkflowStatus = () => {
                     {screenshotLoading ? (
                       <Text style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>Loading screenshot...</Text>
                     ) : screenshotUrl ? (
-                      <img 
-                        src={screenshotUrl} 
-                        alt="Hedgeye Risk Range Screenshot" 
-                        style={{ 
-                          maxWidth: '100%', 
-                          maxHeight: '100%', 
+                      <img
+                        src={screenshotUrl}
+                        alt="Hedgeye Risk Range Screenshot"
+                        style={{
+                          maxWidth: '100%',
+                          maxHeight: '100%',
                           objectFit: 'contain',
                           borderRadius: '4px',
                           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
@@ -987,16 +1251,16 @@ const WorkflowStatus = () => {
                 </div>
 
                 {/* Right Side - Extracted Data */}
-                <div style={{ 
-                  display: 'flex', 
+                <div style={{
+                  display: 'flex',
                   flexDirection: 'column',
                   border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                   borderRadius: '8px',
                   overflow: 'hidden',
                   backgroundColor: isDark ? '#1f2937' : '#ffffff'
                 }}>
-                  <div style={{ 
-                    padding: '12px', 
+                  <div style={{
+                    padding: '12px',
                     borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                     backgroundColor: isDark ? '#111827' : '#f9fafb'
                   }}>
@@ -1009,8 +1273,8 @@ const WorkflowStatus = () => {
                       </Text>
                     )}
                   </div>
-                  <div style={{ 
-                    flex: 1, 
+                  <div style={{
+                    flex: 1,
                     overflow: 'auto',
                     padding: '16px'
                   }}>

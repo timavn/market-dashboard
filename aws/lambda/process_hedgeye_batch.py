@@ -64,9 +64,28 @@ PDF_TYPES = {
     }
 }
 
-def detect_pdf_type(pdf_path):
-    """Detect PDF type by scanning first page content"""
+# Folder mapping for explicit type enforcement
+FOLDER_MAPPING = {
+    'riskranges': 'risk-ranges',
+    'earlylook': 'early-look',
+    'bitcointracker': 'bitcoin-trend-tracker',
+    'momotracker': 'momo-tracker',
+    'signalstrength': 'signal-strength',
+    'portfoliosolutions': 'portfolio-solutions'
+}
+
+def detect_pdf_type(pdf_path, forced_type=None):
+    """Detect PDF type by scanning first page content, or use forced type"""
     print(f"🔍 Detecting type for: {pdf_path.name}")
+
+    # If forced type (from folder) is provided, use it
+    if forced_type:
+        config = PDF_TYPES.get(forced_type)
+        if config:
+            print(f"   ✅ Using forced type: {forced_type} (from folder)")
+            return forced_type, config
+        else:
+            print(f"   ⚠️  Unknown forced type: {forced_type}")
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -93,6 +112,9 @@ def detect_pdf_type(pdf_path):
                 print(f"   ✅ Detected: {best_match[0]} (pattern match: {best_score} hits)")
                 return best_match
 
+            # If inside a subfolder but detection failed, still default to forced_type if available?
+            # We already handled forced_type above.
+            
             print(f"   ⚠️  Unknown PDF type, defaulting to 'signal-strength'")
             return 'signal-strength', PDF_TYPES['signal-strength']
 
@@ -122,14 +144,14 @@ def upload_pdf_to_s3(pdf_path, pdf_type_folder):
         print(f"   ❌ Upload failed: {e}")
         return None
 
-def process_pdf(pdf_path):
+def process_pdf(pdf_path, forced_type=None):
     """Process a single PDF file"""
     print(f"\n{'='*70}")
     print(f"📄 Processing: {pdf_path.name}")
     print('='*70)
 
     # Detect type
-    pdf_type, config = detect_pdf_type(pdf_path)
+    pdf_type, config = detect_pdf_type(pdf_path, forced_type)
     if not pdf_type:
         return False
 
@@ -188,18 +210,29 @@ def process_pdf(pdf_path):
     return False
 
 def find_new_hedgeye_pdfs():
-    """Find all PDFs in Downloads folder from today (will detect type by content)"""
+    """Find all PDFs in Downloads/hedgeye folder and subfolders from today"""
     today = datetime.now().date()
-    pdfs = []
+    pdfs = [] # List of tuples (path, forced_type)
 
-    # Look for all PDFs, not just "Hedgeye*" prefix
+    # 1. Check root folder (Auto-detect)
+    print(f"Scanning root: {DOWNLOADS_DIR}")
     for pdf_file in DOWNLOADS_DIR.glob("*.pdf"):
-        # Check if modified today
         mtime = datetime.fromtimestamp(pdf_file.stat().st_mtime).date()
         if mtime == today:
-            pdfs.append(pdf_file)
+            pdfs.append((pdf_file, None))
 
-    return sorted(pdfs, key=lambda p: p.stat().st_mtime)
+    # 2. Check subfolders (Forced type)
+    for folder_name, pdf_type in FOLDER_MAPPING.items():
+        subfolder = DOWNLOADS_DIR / folder_name
+        if subfolder.exists():
+            print(f"Scanning subfolder: {subfolder}")
+            for pdf_file in subfolder.glob("*.pdf"):
+                mtime = datetime.fromtimestamp(pdf_file.stat().st_mtime).date()
+                if mtime == today:
+                    pdfs.append((pdf_file, pdf_type))
+
+    # Sort by time
+    return sorted(pdfs, key=lambda p: p[0].stat().st_mtime)
 
 def main():
     print("\n" + "="*70)
@@ -212,28 +245,40 @@ def main():
         if not pdf_path.exists():
             print(f"\n❌ File not found: {pdf_path}")
             return
+        
+        # Check if file is in a mapped folder to infer forced_type
+        forced_type = None
+        for folder_name, type_key in FOLDER_MAPPING.items():
+            if folder_name in str(pdf_path):
+                forced_type = type_key
+                break
 
-        pdfs = [pdf_path]
+        pdfs = [(pdf_path, forced_type)]
         print(f"\n📋 Processing 1 file: {pdf_path.name}")
     else:
         # Find all Hedgeye PDFs from today
         pdfs = find_new_hedgeye_pdfs()
         if not pdfs:
-            print(f"\n❌ No PDFs found in {DOWNLOADS_DIR} from today")
-            print(f"   Place your Hedgeye PDFs in: ~/Desktop/hedgeye/")
+            print(f"\n❌ No PDFs found in {DOWNLOADS_DIR} (or subfolders) from today")
+            print(f"   Place files in:")
+            print(f"   - {DOWNLOADS_DIR}")
+            print(f"   - {DOWNLOADS_DIR}/earlylook")
+            print(f"   - {DOWNLOADS_DIR}/riskranges")
+            print(f"   - etc...")
             return
 
         print(f"\n📋 Found {len(pdfs)} Hedgeye PDF(s) from today:")
-        for pdf in pdfs:
-            print(f"   • {pdf.name}")
+        for pdf, ftype in pdfs:
+            type_label = f" (Type: {ftype})" if ftype else " (Auto-detect)"
+            print(f"   • {pdf.name}{type_label}")
 
     # Process each PDF
     print(f"\n{'='*70}\n")
     processed = 0
     failed = 0
 
-    for pdf in pdfs:
-        success = process_pdf(pdf)
+    for pdf, forced_type in pdfs:
+        success = process_pdf(pdf, forced_type)
         if success:
             processed += 1
         else:

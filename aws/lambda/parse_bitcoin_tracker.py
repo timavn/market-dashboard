@@ -233,7 +233,12 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
 
     print(f"\n💾 Saving to DynamoDB...")
     db = boto3.resource('dynamodb', region_name='us-west-1')
-    date = pdf_date if pdf_date else datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    
+    if not pdf_date:
+        print("❌ valid pdf_date is required to save to DynamoDB")
+        return
+        
+    date = pdf_date
     ts = datetime.now(timezone.utc).isoformat()
 
     # Save to HedgeyeDailySnapshot

@@ -15,14 +15,18 @@ from date_utils import extract_date_from_pdf
 TICKER_MAP = {
     'UST 10YR YIELD': 'UST10Y',
     'HIGH YIELD (HYG)': 'HYG',
+    'INVESTMENT GRADE (LQD)': 'LQD',
     'SPX': 'SPX',
     'NASDAQ': 'COMPQ',
     'RUT': 'RUT',
     'TECH (XLK)': 'XLK',
+    'HEALTHCARE (XLV)': 'XLV',
     'INDUSTRIALS (XLI)': 'XLI',
+    'SHANGHAI COMP': 'SSEC',
     'VIX': 'VIX',
     'USD': 'DXY',
     'OIL (WTI)': 'USO',
+    'NAT GAS': 'NATGAS',
     'GOLD': 'GLD',
     'COPPER': 'COPPER',
     'SILVER (SLV)': 'SILVER'
@@ -30,27 +34,38 @@ TICKER_MAP = {
 
 
 def extract_early_look(pdf_path):
-    """Extract risk range data from Early Look PDF (last page - OUR LEVELS section)"""
+    """Extract risk range data from Early Look PDF (OUR LEVELS section)"""
     print(f"\n📄 Reading Early Look PDF: {pdf_path}")
 
     data = {}
     ts = datetime.now(timezone.utc).isoformat()
 
     with pdfplumber.open(pdf_path) as pdf:
-        # Get last page (OUR LEVELS section)
         if len(pdf.pages) < 1:
             print("❌ PDF has no pages")
             return data
 
-        page_idx = len(pdf.pages) - 1
-        page_text = pdf.pages[page_idx].extract_text()
-        lines = page_text.split('\n')
+        # Search for OUR LEVELS section across all pages
+        target_text = None
+        target_page_num = None
+        
+        for page_idx, page in enumerate(pdf.pages):
+            page_text = page.extract_text()
+            if 'OUR LEVELS' in page_text:
+                target_text = page_text
+                target_page_num = page_idx + 1
+                print(f"   Found OUR LEVELS on page {target_page_num} of {len(pdf.pages)}\n")
+                break
+        
+        if not target_text:
+            print("   ❌ Could not find OUR LEVELS section in PDF")
+            return data
 
-        print(f"   Reading page {page_idx + 1} of {len(pdf.pages)}\n")
+        lines = target_text.split('\n')
 
         for line in lines:
             # Pattern: "UST 10yr Yield 4.10-4.22% (bearish)"
-            match = re.match(r'^(.+?)\s+([\d,\.]+)-([\d,\.]+)%?\s*\((bullish|bearish|neutral)\)', line, re.IGNORECASE)
+            match = re.match(r'^(.+?)\s+([\d,\.]+)-?([\d,\.]+)%?\s*\((bullish|bearish|neutral)\)', line, re.IGNORECASE)
             if match:
                 name = match.group(1).strip()
                 lrr = match.group(2).replace(',', '')
@@ -80,9 +95,13 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
 
     import boto3
 
+    if not pdf_date:
+        print("❌ valid pdf_date is required to save to DynamoDB")
+        return
+
     print(f"\n💾 Saving {len(data)} records to DynamoDB...")
     db = boto3.resource('dynamodb', region_name='us-west-1')
-    date = pdf_date if pdf_date else datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    date = pdf_date
     ts = datetime.now(timezone.utc).isoformat()
 
     # Save to HedgeyeDailySnapshot
