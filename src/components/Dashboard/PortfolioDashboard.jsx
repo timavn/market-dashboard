@@ -38,6 +38,7 @@ const PortfolioDashboard = () => {
   const bookMenuRef = useRef(null);
   const bookPopoverRef = useRef(null);
   const [showWorkflowStatus, setShowWorkflowStatus] = useState(false);
+  const [analyticsRefreshKey, setAnalyticsRefreshKey] = useState(0);
   const [workflowStatusImageError, setWorkflowStatusImageError] = useState(false);
   const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(false);
   const [showPerformanceTracking, setShowPerformanceTracking] = useState(false);
@@ -45,11 +46,11 @@ const PortfolioDashboard = () => {
   const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
   const [performanceImageError, setPerformanceImageError] = useState(false);
   const [portfolioBreakdownImageError, setPortfolioBreakdownImageError] = useState(false);
-  
+
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
   const bookContentRef = useRef(null);
-  
+
   // The Pods search state
   const [podsSearchQuery, setPodsSearchQuery] = useState('');
   const [podsShowSearchResults, setPodsShowSearchResults] = useState(false);
@@ -64,7 +65,7 @@ const PortfolioDashboard = () => {
     }
     const query = podsSearchQuery.toLowerCase().trim();
     // Search across ALL securities in the universe
-    return SECURITIES_LIST.filter(security => 
+    return SECURITIES_LIST.filter(security =>
       security.ticker.toLowerCase().includes(query) ||
       security.name.toLowerCase().includes(query)
     ).slice(0, 15); // Limit to 15 results
@@ -106,12 +107,12 @@ const PortfolioDashboard = () => {
   useEffect(() => {
     let isMounted = true;
     fetchPortfolio();
-    
+
     // Listen for portfolio refresh events (after CSV upload)
     const handlePortfolioRefresh = () => {
       if (isMounted) {
         console.log('Refreshing portfolio data after CSV upload...');
-        
+
         // Store the current portfolio timestamp to detect when new data arrives
         // Capture from ref to get current value
         const currentData = portfolioDataRef.current;
@@ -122,11 +123,11 @@ const PortfolioDashboard = () => {
         const maxPolls = 10; // Poll for up to 30 seconds (10 polls × 3 seconds)
         const pollInterval = 3000; // Poll every 3 seconds
         let pollIntervalId = null;
-        
+
         // Initial fetch (silent mode - no blank screen)
         fetchPortfolio(true).then(initialData => {
           if (!isMounted) return;
-          
+
           // Update captured values after initial fetch
           if (initialData) {
             currentTimestamp = initialData.lastUpdated;
@@ -138,38 +139,38 @@ const PortfolioDashboard = () => {
               totalValue: currentTotalValue
             });
           }
-          
+
           // Start polling for new data
           pollIntervalId = setInterval(() => {
             pollCount++;
-            
+
             if (pollCount >= maxPolls) {
               console.log('Polling timeout reached, stopping...');
               if (pollIntervalId) clearInterval(pollIntervalId);
               return;
             }
-            
+
             if (!isMounted) {
               if (pollIntervalId) clearInterval(pollIntervalId);
               return;
             }
-            
+
             // Fetch portfolio and check if timestamp changed
             MarketDataService.getPortfolio()
               .then(newData => {
                 if (!isMounted) return;
-                
+
                 const newTimestamp = newData?.lastUpdated;
                 const newHoldingsCount = newData?.holdings?.length || 0;
                 const newTotalValue = newData?.summary?.totalValue || 0;
-                
+
                 // Check if we have NEW data (not just same empty state)
                 const hasNewData = (
                   (newTimestamp && newTimestamp !== currentTimestamp) ||
                   (newHoldingsCount > 0 && newHoldingsCount !== currentHoldingsCount) ||
                   (newTotalValue > 0 && newTotalValue !== currentTotalValue)
                 );
-                
+
                 if (hasNewData) {
                   console.log('New portfolio data detected:', {
                     timestamp: newTimestamp,
@@ -181,18 +182,18 @@ const PortfolioDashboard = () => {
                   });
                   setPortfolioData(newData);
                   portfolioDataRef.current = newData;
-                  
+
                   // Show optimistic update notification
                   setDataUpdatedNotification({
                     message: 'Portfolio data updated',
                     timestamp: new Date()
                   });
-                  
+
                   // Clear notification after 3 seconds
                   setTimeout(() => {
                     setDataUpdatedNotification(null);
                   }, 3000);
-                  
+
                   if (pollIntervalId) clearInterval(pollIntervalId);
                 } else {
                   console.log(`Polling for new data... (${pollCount}/${maxPolls})`, {
@@ -211,10 +212,10 @@ const PortfolioDashboard = () => {
         });
       }
     };
-    
+
     window.addEventListener('portfolioRefresh', handlePortfolioRefresh);
-    
-    return () => { 
+
+    return () => {
       isMounted = false;
       window.removeEventListener('portfolioRefresh', handlePortfolioRefresh);
     };
@@ -279,25 +280,25 @@ const PortfolioDashboard = () => {
   // Parse content into sections and map tags to sections
   const parseContentSections = (content) => {
     if (!content) return { sections: [], tagMap: {} };
-    
+
     const lines = content.split('\n');
     const sections = [];
     const tagMap = {};
     let currentSection = null;
     let currentSectionIndex = 0;
-    
+
     lines.forEach((line, index) => {
       // Check if line is a heading
       const h2Match = line.match(/^## (.+)$/);
       const h3Match = line.match(/^### (.+)$/);
       const h4Match = line.match(/^#### (.+)$/);
-      
+
       if (h2Match || h3Match || h4Match) {
         // Save previous section if exists
         if (currentSection) {
           sections.push(currentSection);
         }
-        
+
         // Start new section
         const title = h2Match ? h2Match[1] : (h3Match ? h3Match[1] : h4Match[1]);
         const sectionId = `section-${currentSectionIndex}`;
@@ -313,7 +314,7 @@ const PortfolioDashboard = () => {
       } else if (currentSection) {
         // Add line to current section
         currentSection.content += line + '\n';
-        
+
         // Extract tags from this line
         const tagRegex = /#(\w+)/g;
         const matches = line.match(tagRegex);
@@ -338,12 +339,12 @@ const PortfolioDashboard = () => {
         }
       }
     });
-    
+
     // Add last section
     if (currentSection) {
       sections.push(currentSection);
     }
-    
+
     return { sections, tagMap };
   };
 
@@ -362,13 +363,13 @@ const PortfolioDashboard = () => {
     }
     const extractedTags = extractTags(selectedBookContent);
     const { sections: parsedSections, tagMap } = parseContentSections(selectedBookContent);
-    
+
     // Count total occurrences for each tag
     const counts = {};
     extractedTags.forEach(tag => {
       counts[tag] = countTagOccurrences(selectedBookContent, tag);
     });
-    
+
     return {
       tags: extractedTags,
       sections: parsedSections,
@@ -422,10 +423,10 @@ const PortfolioDashboard = () => {
       <Text className="text-xs text-gray-500 dark:text-gray-400 mb-4">
         Updated: {displayData.lastUpdated}
       </Text>
-      
+
       {/* CSV Upload Section */}
       <div className="mb-6 pb-6 border-b">
-        <CSVUpload 
+        <CSVUpload
           onUploadSuccess={(result) => {
             console.log('CSV uploaded successfully:', result);
           }}
@@ -434,7 +435,7 @@ const PortfolioDashboard = () => {
           }}
         />
       </div>
-      
+
       {/* Total Portfolio */}
       <div className="mb-6">
         <Title className="text-sm mb-3 dark:text-white">Total Portfolio</Title>
@@ -442,7 +443,7 @@ const PortfolioDashboard = () => {
           <Metric className="dark:text-white">
             ${displayData.summary.totalValue.toLocaleString()}
           </Metric>
-          
+
           {/* Position Sizing Legend */}
           <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1 pt-2 border-t dark:border-gray-700">
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
@@ -473,7 +474,7 @@ const PortfolioDashboard = () => {
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
             <Text className="text-sm dark:text-white">P&L MTD</Text>
             <Badge color={parseFloat(displayData.summary.totalDayChange) >= 0 ? 'emerald' : 'rose'}>
@@ -563,8 +564,8 @@ const PortfolioDashboard = () => {
                   <Text className="text-xs font-semibold dark:text-white">{parseFloat(percentage || 0).toFixed(2)}%</Text>
                 </div>
                 <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full" 
+                  <div
+                    className="bg-blue-600 h-2 rounded-full"
                     style={{ width: `${Math.min(parseFloat(percentage), 100)}%` }}
                   ></div>
                 </div>
@@ -643,10 +644,22 @@ const PortfolioDashboard = () => {
   if (loading) {
     return (
       <div className="min-h-screen p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <Card className="text-center max-w-md rounded-lg">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-          <Text className="dark:text-gray-300">Loading market data...</Text>
-        </Card>
+        <div
+          style={{
+            width: '40px',
+            height: '40px',
+            border: '4px solid',
+            borderColor: theme === 'dark' ? '#374151' : '#e5e7eb',
+            borderTopColor: theme === 'dark' ? '#3b82f6' : '#2563eb',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite'
+          }}
+        />
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -667,9 +680,9 @@ const PortfolioDashboard = () => {
   }
 
   return (
-    <div 
-      className="min-h-screen p-4 bg-gray-50 dark:bg-gray-900" 
-      style={{ 
+    <div
+      className="min-h-screen p-4 bg-gray-50 dark:bg-gray-900"
+      style={{
         paddingBottom: `${maxPanelHeight + 20}px`, // Panel height + extra padding
         paddingRight: showPortfolioMetrics ? '0px' : '40px', // No padding when open to extend content closer, matches collapsed width
         transition: 'padding-right 0.3s ease-in-out, padding-bottom 0.3s ease-in-out',
@@ -677,7 +690,7 @@ const PortfolioDashboard = () => {
     >
       {/* Data Updated Notification (Optimistic Update) */}
       {dataUpdatedNotification && (
-        <div 
+        <div
           className="fixed top-4 right-4 z-50 animate-fade-in"
           style={{
             animation: 'fadeIn 0.3s ease-in'
@@ -692,13 +705,13 @@ const PortfolioDashboard = () => {
           </Card>
         </div>
       )}
-      
+
       <Grid numItems={12} className="gap-4">
-        
+
         {/* Left Sidebar - Securities List */}
-        <div 
-          className={signalStrengthExpanded 
-            ? 'col-span-12 md:col-span-3' 
+        <div
+          className={signalStrengthExpanded
+            ? 'col-span-12 md:col-span-3'
             : 'col-span-12 md:col-span-2'}
           style={{
             zIndex: showPortfolioMetrics ? (signalStrengthExpanded ? 1200 : 100) : 'auto',
@@ -706,7 +719,7 @@ const PortfolioDashboard = () => {
             transition: 'all 0.3s ease-in-out',
           }}
         >
-          <SecuritiesList 
+          <SecuritiesList
             onTickerClick={(ticker) => {
               setSelectedSecurityTicker(ticker);
               setSecuritiesExpanded(true);
@@ -718,8 +731,8 @@ const PortfolioDashboard = () => {
         </div>
 
         {/* Center Panel - USD Macro Dashboard */}
-        <div 
-          className={showPortfolioMetrics 
+        <div
+          className={showPortfolioMetrics
             ? (signalStrengthExpanded ? 'col-span-12 md:col-span-6' : 'col-span-12 md:col-span-7')
             : (signalStrengthExpanded ? 'col-span-12 md:col-span-9' : 'col-span-12 md:col-span-10')}
           style={{
@@ -739,7 +752,7 @@ const PortfolioDashboard = () => {
           position: 'fixed',
           top: 0,
           right: 0, // Always anchored to right
-          width: showPortfolioMetrics 
+          width: showPortfolioMetrics
             ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Securities width (col-span-2) + gap + Portfolio Metrics content (reduced by another 20%)
             : '40px', // Matches collapsed height of bottom tabs
           height: '100vh',
@@ -750,8 +763,8 @@ const PortfolioDashboard = () => {
           borderTop: 'none',
           borderBottom: 'none',
           borderRadius: showPortfolioMetrics ? '1rem 0 0 1rem' : '0.75rem 0 0 0.75rem', // Rounded left corners (top and bottom)
-          boxShadow: showPortfolioMetrics 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+          boxShadow: showPortfolioMetrics
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
             : '-2px 0 8px rgba(0, 0, 0, 0.1)',
           transition: 'width 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: 'flex',
@@ -780,7 +793,7 @@ const PortfolioDashboard = () => {
           >
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
-          
+
           {/* X/Twitter Logo Button */}
           <button
             onClick={() => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer')}
@@ -789,10 +802,10 @@ const PortfolioDashboard = () => {
             title="Open X (Twitter) List"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
             </svg>
           </button>
-          
+
           {/* The Pods Button */}
           <button
             onClick={() => setShowPeaPodWindow(!showPeaPodWindow)}
@@ -802,12 +815,12 @@ const PortfolioDashboard = () => {
           >
             {peaPodImageError ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-                <path d="M7 4C5.5 4 4 5.5 4 7.5c0 1.5.8 2.5 2 3v8c0 1.1.9 2 2 2s2-.9 2-2v-8c1.2-.5 2-1.5 2-3 0-2-1.5-3.5-3-3.5zm-1 4.5c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S4.5 10.8 4.5 10s.7-1.5 1.5-1.5zm3 0c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S7.5 10.8 7.5 10s.7-1.5 1.5-1.5z"/>
+                <path d="M7 4C5.5 4 4 5.5 4 7.5c0 1.5.8 2.5 2 3v8c0 1.1.9 2 2 2s2-.9 2-2v-8c1.2-.5 2-1.5 2-3 0-2-1.5-3.5-3-3.5zm-1 4.5c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S4.5 10.8 4.5 10s.7-1.5 1.5-1.5zm3 0c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S7.5 10.8 7.5 10s.7-1.5 1.5-1.5z" />
               </svg>
             ) : (
-              <img 
-                src="/images/icons/pea-pod.png" 
-                alt="The Pods" 
+              <img
+                src="/images/icons/pea-pod.png"
+                alt="The Pods"
                 style={{ width: '20px', height: '20px', objectFit: 'contain' }}
                 onError={() => setPeaPodImageError(true)}
               />
@@ -824,18 +837,18 @@ const PortfolioDashboard = () => {
           >
             {bookImageError ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-                <path d="M4 6 L12 4 L12 20 L4 18 Z M12 4 L20 6 L20 18 L12 20 Z"/>
+                <path d="M4 6 L12 4 L12 20 L4 18 Z M12 4 L20 6 L20 18 L12 20 Z" />
               </svg>
             ) : (
-              <img 
-                src="/images/icons/book.png" 
-                alt="Open Notes" 
+              <img
+                src="/images/icons/book.png"
+                alt="Open Notes"
                 style={{ width: '20px', height: '20px', objectFit: 'contain' }}
                 onError={() => setBookImageError(true)}
               />
             )}
           </button>
-          
+
           {/* Popover Menu */}
           {showBookMenu && (
             <div
@@ -882,28 +895,27 @@ const PortfolioDashboard = () => {
           )}
 
           {/* Separator for Main Navigation Buttons */}
-          <div style={{ 
-            width: '100%', 
-            height: '1px', 
-            backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb', 
-            margin: '12px 0 8px 0' 
+          <div style={{
+            width: '100%',
+            height: '1px',
+            backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb',
+            margin: '12px 0 8px 0'
           }} />
 
           {/* Securities Universe Button */}
           <button
             onClick={() => setShowSecuritiesUniverse(!showSecuritiesUniverse)}
-            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${
-              showSecuritiesUniverse 
-                ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white' 
-                : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-            style={{ 
-              minWidth: '32px', 
-              height: '32px', 
-              padding: '0', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
+            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showSecuritiesUniverse
+              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
+              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               overflow: 'hidden',
               marginTop: '4px'
             }}
@@ -913,29 +925,29 @@ const PortfolioDashboard = () => {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showSecuritiesUniverse ? "text-white" : "text-gray-700 dark:text-gray-300"}>
                 <defs>
                   <radialGradient id="planetGradient" cx="0.4" cy="0.3">
-                    <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9"/>
-                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95"/>
-                    <stop offset="100%" stopColor="#663399" stopOpacity="1"/>
+                    <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9" />
+                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95" />
+                    <stop offset="100%" stopColor="#663399" stopOpacity="1" />
                   </radialGradient>
                   <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8"/>
-                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9"/>
-                    <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8"/>
+                    <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8" />
+                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9" />
+                    <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8" />
                   </linearGradient>
                 </defs>
-                <circle cx="12" cy="12" r="7" fill="url(#planetGradient)"/>
-                <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4"/>
-                <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3"/>
-                <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9"/>
-                <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7"/>
-                <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8"/>
-                <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6"/>
-                <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7"/>
+                <circle cx="12" cy="12" r="7" fill="url(#planetGradient)" />
+                <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4" />
+                <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3" />
+                <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9" />
+                <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7" />
+                <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8" />
+                <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6" />
+                <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7" />
               </svg>
             ) : (
-              <img 
-                src="/images/icons/securities-universe.png" 
-                alt="Securities Universe" 
+              <img
+                src="/images/icons/securities-universe.png"
+                alt="Securities Universe"
                 style={{ width: '24px', height: '24px', objectFit: 'contain' }}
                 onError={() => setSecuritiesUniverseImageError(true)}
               />
@@ -945,18 +957,17 @@ const PortfolioDashboard = () => {
           {/* Performance Tracking Button */}
           <button
             onClick={() => setShowPerformanceTracking(!showPerformanceTracking)}
-            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${
-              showPerformanceTracking 
-                ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white' 
-                : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-            style={{ 
-              minWidth: '32px', 
-              height: '32px', 
-              padding: '0', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
+            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showPerformanceTracking
+              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
+              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               overflow: 'hidden',
               marginTop: '4px'
             }}
@@ -968,9 +979,9 @@ const PortfolioDashboard = () => {
                 <polyline points="16 6 22 6 22 12" />
               </svg>
             ) : (
-              <img 
-                src="/images/icons/performance.png" 
-                alt="Performance Tracking" 
+              <img
+                src="/images/icons/performance.png"
+                alt="Performance Tracking"
                 style={{ width: '20px', height: '20px', objectFit: 'contain' }}
                 onError={() => setPerformanceImageError(true)}
               />
@@ -980,18 +991,17 @@ const PortfolioDashboard = () => {
           {/* Portfolio Breakdown Button */}
           <button
             onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
-            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${
-              showPortfolioBreakdown 
-                ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white' 
-                : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-            style={{ 
-              minWidth: '32px', 
-              height: '32px', 
-              padding: '0', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
+            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showPortfolioBreakdown
+              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
+              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               overflow: 'hidden',
               marginTop: '4px'
             }}
@@ -999,15 +1009,15 @@ const PortfolioDashboard = () => {
           >
             {portfolioBreakdownImageError ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-white" : "text-gray-700 dark:text-gray-300"}>
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8"/>
-                <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4"/>
-                <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2"/>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8" />
+                <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4" />
+                <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2" />
               </svg>
             ) : (
-              <img 
-                src="/images/icons/portfolio-construction.png" 
-                alt="Portfolio Breakdown" 
+              <img
+                src="/images/icons/portfolio-construction.png"
+                alt="Portfolio Breakdown"
                 style={{ width: '20px', height: '20px', objectFit: 'contain' }}
                 onError={() => setPortfolioBreakdownImageError(true)}
               />
@@ -1019,28 +1029,28 @@ const PortfolioDashboard = () => {
             onClick={() => setShowPortfolioMetrics(!showPortfolioMetrics)}
             className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors mt-2 w-full"
             title={showPortfolioMetrics ? "Collapse Portfolio" : "Expand Portfolio"}
-            style={{ 
+            style={{
               minWidth: '32px',
-              height: '30px', 
-              padding: '0', 
-              display: 'flex', 
-              alignItems: 'center', 
+              height: '30px',
+              padding: '0',
+              display: 'flex',
+              alignItems: 'center',
               justifyContent: 'center'
             }}
           >
-            <svg 
-              width="16" 
-              height="16" 
-              viewBox="0 0 16 16" 
-              fill="none" 
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
               xmlns="http://www.w3.org/2000/svg"
               className="text-gray-700 dark:text-gray-300"
             >
-              <path 
+              <path
                 d={showPortfolioMetrics ? "M6 12L10 8L6 4" : "M10 12L6 8L10 4"}
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
                 strokeLinejoin="round"
               />
             </svg>
@@ -1066,10 +1076,10 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics 
+          right: showPortfolioMetrics
             ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
             : '40px', // Position to the left of collapsed portfolio bar
-          width: showPeaPodWindow 
+          width: showPeaPodWindow
             ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Same width as portfolio window
             : '0px',
           height: '100vh',
@@ -1078,8 +1088,8 @@ const PortfolioDashboard = () => {
           borderLeft: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
           borderRight: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
           borderRadius: showPeaPodWindow ? '0.75rem 0 0 0' : '0',
-          boxShadow: showPeaPodWindow 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+          boxShadow: showPeaPodWindow
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPeaPodWindow ? 'flex' : 'none',
@@ -1103,10 +1113,10 @@ const PortfolioDashboard = () => {
               className="dark:border-gray-700"
               onClick={() => setShowPeaPodWindow(false)}
             >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
+              <Title
+                className="dark:text-white"
+                style={{
+                  fontSize: '18px',
                   fontWeight: 700,
                   color: '#374151',
                   margin: 0,
@@ -1152,7 +1162,7 @@ const PortfolioDashboard = () => {
                   onKeyDown={(e) => {
                     if (e.key === 'ArrowDown') {
                       e.preventDefault();
-                      setPodsHighlightedIndex(prev => 
+                      setPodsHighlightedIndex(prev =>
                         prev < podsFilteredSecurities.length - 1 ? prev + 1 : prev
                       );
                       setPodsShowSearchResults(true);
@@ -1182,11 +1192,10 @@ const PortfolioDashboard = () => {
                       <div
                         key={security.ticker}
                         onClick={() => handlePodsSecuritySelect(security)}
-                        className={`px-3 py-2 cursor-pointer text-sm ${
-                          index === podsHighlightedIndex
-                            ? 'bg-blue-100 dark:bg-blue-900/30'
-                            : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                        }`}
+                        className={`px-3 py-2 cursor-pointer text-sm ${index === podsHighlightedIndex
+                          ? 'bg-blue-100 dark:bg-blue-900/30'
+                          : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
                         onMouseEnter={() => setPodsHighlightedIndex(index)}
                       >
                         <div className="flex items-center justify-between">
@@ -1205,14 +1214,14 @@ const PortfolioDashboard = () => {
               </div>
 
               {/* POD Calculations */}
-              <div 
+              <div
                 className="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
                 style={{ width: '100%', maxWidth: '400px' }}
               >
                 <Text className="text-sm font-semibold dark:text-white mb-4">
                   POD Calculations
                 </Text>
-                
+
                 <div className="space-y-4">
                   {/* POD1 */}
                   <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
@@ -1377,7 +1386,7 @@ const PortfolioDashboard = () => {
                     ✕
                   </Button>
                 </div>
-                
+
                 {/* Sections List */}
                 <div
                   style={{
@@ -1502,10 +1511,10 @@ const PortfolioDashboard = () => {
                           fontSize: '12px',
                           fontWeight: 500,
                           borderRadius: '0.375rem',
-                          border: `1px solid ${isActive 
+                          border: `1px solid ${isActive
                             ? (theme === 'dark' ? '#3b82f6' : '#2563eb')
                             : (theme === 'dark' ? '#374151' : '#d1d5db')
-                          }`,
+                            }`,
                           backgroundColor: isActive
                             ? (theme === 'dark' ? '#1e3a8a' : '#dbeafe')
                             : (theme === 'dark' ? '#1f2937' : '#ffffff'),
@@ -1727,7 +1736,7 @@ const PortfolioDashboard = () => {
                     Table of Contents
                   </Text>
                 </div>
-                
+
                 {/* TOC List */}
                 <div
                   style={{
@@ -1753,7 +1762,7 @@ const PortfolioDashboard = () => {
                           fontSize: section.level === 2 ? '13px' : section.level === 3 ? '12px' : '11px',
                           fontWeight: section.level === 2 ? 600 : section.level === 3 ? 500 : 400,
                           color: theme === 'dark' ? '#f3f4f6' : '#111827',
-                          borderLeft: section.level === 2 
+                          borderLeft: section.level === 2
                             ? `2px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`
                             : 'none',
                         }}
@@ -1776,7 +1785,7 @@ const PortfolioDashboard = () => {
       )}
 
       {/* Resizable Bottom Panels */}
-      <ResizableBottomPanels 
+      <ResizableBottomPanels
         volatilityExpanded={volatilityExpanded}
         securitiesExpanded={securitiesExpanded}
         onVolatilityToggle={setVolatilityExpanded}
@@ -1796,13 +1805,13 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics 
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' 
+          right: showPortfolioMetrics
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
             : '40px',
-          width: showSecuritiesUniverse 
-            ? (showPortfolioMetrics 
-                ? 'calc((100vw - 16px) * (10/12) - 128px)' 
-                : 'calc((100vw - 16px) * (9/12) - 40px)')
+          width: showSecuritiesUniverse
+            ? (showPortfolioMetrics
+              ? 'calc((100vw - 16px) * (10/12) - 128px)'
+              : 'calc((100vw - 16px) * (9/12) - 40px)')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
@@ -1810,8 +1819,8 @@ const PortfolioDashboard = () => {
           borderLeft: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
           borderRight: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
           borderRadius: showSecuritiesUniverse ? '0.75rem 0 0 0' : '0',
-          boxShadow: showSecuritiesUniverse 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+          boxShadow: showSecuritiesUniverse
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showSecuritiesUniverse ? 'flex' : 'none',
@@ -1834,10 +1843,10 @@ const PortfolioDashboard = () => {
               className="dark:border-gray-700"
               onClick={() => setShowSecuritiesUniverse(false)}
             >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
+              <Title
+                className="dark:text-white"
+                style={{
+                  fontSize: '18px',
                   fontWeight: 700,
                   color: '#374151',
                   margin: 0,
@@ -1865,13 +1874,13 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics 
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' 
+          right: showPortfolioMetrics
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
             : '40px',
-          width: showPerformanceTracking 
-            ? (showPortfolioMetrics 
-                ? 'calc((100vw - 16px) * (10/12) - 128px)' 
-                : 'calc((100vw - 16px) * (9/12) - 40px)')
+          width: showPerformanceTracking
+            ? (showPortfolioMetrics
+              ? 'calc((100vw - 16px) * (10/12) - 128px)'
+              : 'calc((100vw - 16px) * (9/12) - 40px)')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
@@ -1879,8 +1888,8 @@ const PortfolioDashboard = () => {
           borderLeft: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
           borderRight: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
           borderRadius: showPerformanceTracking ? '0.75rem 0 0 0' : '0',
-          boxShadow: showPerformanceTracking 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+          boxShadow: showPerformanceTracking
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPerformanceTracking ? 'flex' : 'none',
@@ -1903,10 +1912,10 @@ const PortfolioDashboard = () => {
               className="dark:border-gray-700"
               onClick={() => setShowPerformanceTracking(false)}
             >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
+              <Title
+                className="dark:text-white"
+                style={{
+                  fontSize: '18px',
                   fontWeight: 700,
                   color: '#374151',
                   margin: 0,
@@ -1934,13 +1943,13 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics 
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' 
+          right: showPortfolioMetrics
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
             : '40px',
-          width: showPortfolioBreakdown 
-            ? (showPortfolioMetrics 
-                ? 'calc((100vw - 16px) * (10/12) - 128px)' 
-                : 'calc((100vw - 16px) * (9/12) - 40px)')
+          width: showPortfolioBreakdown
+            ? (showPortfolioMetrics
+              ? 'calc((100vw - 16px) * (10/12) - 128px)'
+              : 'calc((100vw - 16px) * (9/12) - 40px)')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
@@ -1948,8 +1957,8 @@ const PortfolioDashboard = () => {
           borderLeft: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
           borderRight: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
           borderRadius: showPortfolioBreakdown ? '0.75rem 0 0 0' : '0',
-          boxShadow: showPortfolioBreakdown 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)' 
+          boxShadow: showPortfolioBreakdown
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPortfolioBreakdown ? 'flex' : 'none',
@@ -1972,10 +1981,10 @@ const PortfolioDashboard = () => {
               className="dark:border-gray-700"
               onClick={() => setShowPortfolioBreakdown(false)}
             >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
+              <Title
+                className="dark:text-white"
+                style={{
+                  fontSize: '18px',
                   fontWeight: 700,
                   color: '#374151',
                   margin: 0,
@@ -2004,8 +2013,8 @@ const PortfolioDashboard = () => {
           position: 'fixed',
           top: 0,
           right: 0, // Always anchored to right edge
-          width: showWorkflowStatus 
-            ? 'calc((100vw - 16px) * (4/12))' // Fixed width, independent of portfolio bar
+          width: showWorkflowStatus
+            ? 'calc((100vw - 16px) * (5/12))' // Fixed width, independent of portfolio bar
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
@@ -2013,8 +2022,8 @@ const PortfolioDashboard = () => {
           borderLeft: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
           borderTop: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
           borderBottom: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
-          boxShadow: showWorkflowStatus 
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1)' 
+          boxShadow: showWorkflowStatus
+            ? '-2px 0 8px rgba(0, 0, 0, 0.1)'
             : 'none',
           transition: 'width 0.3s ease-in-out',
           display: showWorkflowStatus ? 'flex' : 'none',
@@ -2029,29 +2038,65 @@ const PortfolioDashboard = () => {
             {/* Header with Centered Title (Clickable to Close) */}
             <div
               style={{
-                padding: '12px 16px',
+                padding: '8px 12px',
                 display: 'flex',
-                justifyContent: 'center',
+                justifyContent: 'space-between',
                 alignItems: 'center',
                 borderBottom: '1px solid #e5e7eb',
-                cursor: 'pointer',
                 background: 'linear-gradient(to bottom, rgba(249, 250, 251, 0.8), rgba(243, 244, 246, 0.5))',
               }}
               className="dark:border-gray-700 dark:bg-gradient-to-b dark:from-gray-800/80 dark:to-gray-700/50"
-              onClick={() => setShowWorkflowStatus(false)}
             >
-              <Title 
-                className="dark:text-white" 
-                style={{ 
-                  fontSize: '18px', 
+              {/* Empty spacer for centering */}
+              <div style={{ width: '28px' }} />
+
+              <Title
+                className="dark:text-white"
+                style={{
+                  fontSize: '14px',
                   fontWeight: 700,
                   color: '#374151',
                   margin: 0,
                   userSelect: 'none',
+                  cursor: 'pointer',
                 }}
+                onClick={() => setShowWorkflowStatus(false)}
               >
                 Analytics
               </Title>
+
+              {/* Refresh Button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAnalyticsRefreshKey(prev => prev + 1);
+                }}
+                style={{
+                  width: '28px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  color: theme === 'dark' ? '#9ca3af' : '#6b7280',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
+                  e.currentTarget.style.color = theme === 'dark' ? '#f3f4f6' : '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = theme === 'dark' ? '#9ca3af' : '#6b7280';
+                }}
+                title="Refresh Analytics"
+              >
+                ↻
+              </button>
             </div>
 
             {/* Scrollable Content */}
@@ -2062,7 +2107,7 @@ const PortfolioDashboard = () => {
                 padding: 0,
               }}
             >
-              <WorkflowStatus />
+              <WorkflowStatus key={analyticsRefreshKey} />
             </div>
           </>
         )}
@@ -2096,12 +2141,12 @@ const PortfolioDashboard = () => {
           }}
           title="Analytics"
         >
-          <img 
-            src="/images/icons/analytics.png" 
-            alt="Analytics" 
-            style={{ 
-              width: '24px', 
-              height: '24px', 
+          <img
+            src="/images/icons/analytics.png"
+            alt="Analytics"
+            style={{
+              width: '24px',
+              height: '24px',
               objectFit: 'contain',
             }}
           />

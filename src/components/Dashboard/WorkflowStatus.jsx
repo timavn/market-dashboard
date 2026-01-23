@@ -10,6 +10,7 @@ import axios from 'axios';
 const WorkflowStatus = () => {
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
+  const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const [workflowStatus, setWorkflowStatus] = useState(null);
   const [riskRanges, setRiskRanges] = useState({});
   const [freshnessData, setFreshnessData] = useState(null);
@@ -18,10 +19,21 @@ const WorkflowStatus = () => {
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [activeTab, setActiveTab] = useState('freshness'); // 'freshness', 'preview', 'services'
   const [serviceTotals, setServiceTotals] = useState(null);
-  const [screenshotUrl, setScreenshotUrl] = useState(null);
   const [csvUrl, setCsvUrl] = useState(null);
-  const [screenshotLoading, setScreenshotLoading] = useState(false);
-  const [selectedDataType, setSelectedDataType] = useState('risk-ranges'); // For preview tab
+  const [previewViewMode, setPreviewViewMode] = useState('table'); // 'table' or 'json'
+
+  // All 6 data types with their PDF loading states
+  const DATA_TYPES = [
+    { key: 'risk-ranges', label: 'Risk Ranges' },
+    { key: 'early-look', label: 'Early Look' },
+    { key: 'bitcoin-trend-tracker', label: 'Bitcoin Tracker' },
+    { key: 'momo-tracker', label: 'Momo Tracker' },
+    { key: 'signal-strength', label: 'Signal Strength' },
+    { key: 'portfolio-solutions', label: 'Portfolio Solutions' }
+  ];
+
+  // Track PDF URLs and loading states for each data type
+  const [allPdfData, setAllPdfData] = useState({});
 
   const isDark = theme === 'dark';
 
@@ -33,83 +45,89 @@ const WorkflowStatus = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-
-      // Fetch workflow status
+      setLoadingStatus('Loading data...');
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-      const statusResponse = await axios.get(`${backendUrl}${ENDPOINTS.WORKFLOW_STATUS || '/api/workflow-status'}`);
-      setWorkflowStatus(statusResponse.data);
 
-      // Fetch today's risk ranges
-      const riskRangesData = await MarketDataService.getRiskRanges();
-      setRiskRanges(riskRangesData || {});
+      // Helper for individual timeouts
+      const withTimeout = (promise, ms) => Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms))
+      ]);
 
-      // Fetch Hedgeye freshness data for all 6 data types
-      try {
-        const freshness = await MarketDataService.getHedgeyeFreshness();
-        setFreshnessData(freshness);
-      } catch (freshnessError) {
-        console.error('Error fetching Hedgeye freshness:', freshnessError);
+      const TIMEOUT_MS = 15000; // 15s individual timeout
+
+      // Execute all fetches in parallel using Promise.allSettled
+      // This ensures that if one request fails/hangs, others are still processed
+      const results = await Promise.allSettled([
+        withTimeout(axios.get(`${backendUrl}${ENDPOINTS.WORKFLOW_STATUS || '/api/workflow-status'}`), TIMEOUT_MS),
+        withTimeout(MarketDataService.getRiskRanges(), TIMEOUT_MS),
+        withTimeout(MarketDataService.getHedgeyeFreshness(), TIMEOUT_MS),
+        withTimeout(axios.get(`${backendUrl}/api/hedgeye/changelog`), TIMEOUT_MS)
+      ]);
+
+      // Process workflow status
+      if (results[0].status === 'fulfilled') {
+        setWorkflowStatus(results[0].value.data);
+      } else {
+        console.error('Error fetching workflow status:', results[0].reason);
+        setWorkflowStatus({
+          hedgeye: {
+            status: 'unknown',
+            lastRun: null,
+            count: 0,
+            nextRun: '8:00 AM EST (market days)'
+          },
+          csvUpload: {
+            status: 'unknown',
+            lastUpload: null,
+            records: 0,
+            fileName: null
+          }
+        });
       }
 
-      // Fetch Changelog data
-      try {
-        setChangelogLoading(true);
-        const changelog = await axios.get(`${backendUrl}/api/hedgeye/changelog`);
-        setChangelogData(changelog.data);
-      } catch (changelogError) {
-        console.error('Error fetching Hedgeye changelog:', changelogError);
-      } finally {
-        setChangelogLoading(false);
+      // Process risk ranges
+      if (results[1].status === 'fulfilled') {
+        setRiskRanges(results[1].value || {});
+      } else {
+        console.error('Error fetching risk ranges:', results[1].reason);
+        setRiskRanges({});
+      }
+
+      // Process freshness data
+      if (results[2].status === 'fulfilled') {
+        setFreshnessData(results[2].value);
+      } else {
+        console.error('Error fetching Hedgeye freshness:', results[2].reason);
+        setFreshnessData(null);
+      }
+
+      // Process changelog data
+      if (results[3].status === 'fulfilled') {
+        setChangelogData(results[3].value.data);
+      } else {
+        console.error('Error fetching Hedgeye changelog:', results[3].reason);
+        setChangelogData(null);
       }
 
       setLastRefresh(new Date());
     } catch (error) {
-      console.error('Error fetching workflow status:', error);
-      // Set default status if endpoint doesn't exist yet or server is down
-      setWorkflowStatus({
-        hedgeye: {
-          status: 'unknown',
-          lastRun: null,
-          count: 0,
-          nextRun: '8:00 AM EST (market days)'
-        },
-        csvUpload: {
-          status: 'unknown',
-          lastUpload: null,
-          records: 0,
-          fileName: null
-        }
-      });
-
-      // Also try to fetch risk ranges directly even if workflow-status fails
-      try {
-        const riskRangesData = await MarketDataService.getRiskRanges();
-        setRiskRanges(riskRangesData || {});
-      } catch (riskError) {
-        console.error('Error fetching risk ranges:', riskError);
-      }
-
-      // Also try to fetch freshness data
-      try {
-        const freshness = await MarketDataService.getHedgeyeFreshness();
-        setFreshnessData(freshness);
-      } catch (freshnessError) {
-        console.error('Error fetching Hedgeye freshness:', freshnessError);
-      }
+      console.error('Error in fetchData:', error);
     } finally {
       setLoading(false);
+      setLoadingStatus('');
     }
   };
 
-  // Fetch screenshot URL when preview tab is active
+  // Fetch all PDFs sequentially when preview tab is active
   useEffect(() => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
     if (activeTab === 'preview' && currentHedgeyeStatus.lastRun) {
-      fetchScreenshotUrl();
+      fetchAllPdfsSequentially();
       fetchCsvUrl();
     } else {
-      // Clear URLs when leaving preview tab
-      setScreenshotUrl(null);
+      // Clear all PDF data when leaving preview tab
+      setAllPdfData({});
       setCsvUrl(null);
     }
   }, [activeTab, workflowStatus?.hedgeye?.lastRun]);
@@ -126,22 +144,45 @@ const WorkflowStatus = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch screenshot presigned URL
-  const fetchScreenshotUrl = async () => {
+  // Fetch all PDFs sequentially (top to bottom) so user can start verifying while others load
+  const fetchAllPdfsSequentially = async () => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
     if (!currentHedgeyeStatus.lastRun) return;
 
-    try {
-      setScreenshotLoading(true);
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-      const date = new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
-      const response = await axios.get(`${backendUrl}/api/hedgeye/screenshot/${date}`);
-      setScreenshotUrl(response.data.url);
-    } catch (error) {
-      console.error('Error fetching screenshot URL:', error);
-      setScreenshotUrl(null);
-    } finally {
-      setScreenshotLoading(false);
+    const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+    const date = new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
+
+    // Load each data type sequentially
+    for (const { key } of DATA_TYPES) {
+      // Mark as loading
+      setAllPdfData(prev => ({
+        ...prev,
+        [key]: { loading: true, url: null, type: null, error: null }
+      }));
+
+      try {
+        const response = await axios.get(`${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`);
+        setAllPdfData(prev => ({
+          ...prev,
+          [key]: {
+            loading: false,
+            url: response.data.url,
+            type: response.data.type || 'screenshot',
+            error: null
+          }
+        }));
+      } catch (error) {
+        console.error(`Error fetching PDF for ${key}:`, error);
+        setAllPdfData(prev => ({
+          ...prev,
+          [key]: {
+            loading: false,
+            url: null,
+            type: null,
+            error: 'Not available'
+          }
+        }));
+      }
     }
   };
 
@@ -163,7 +204,7 @@ const WorkflowStatus = () => {
 
   // Calculate data freshness
   const getDataFreshness = (timestamp, dataType) => {
-    if (!timestamp) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never' };
+    if (!timestamp) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never', timestampStr: 'Never' };
 
     // Current date in YYYY-MM-DD format (EST)
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -180,12 +221,26 @@ const WorkflowStatus = () => {
       dateObj = new Date(timestamp + 'T12:00:00');
     } else {
       dateObj = new Date(timestamp);
-      if (isNaN(dateObj.getTime())) return { status: 'error', hours: null, label: 'Invalid Date', dateStr: 'Invalid' };
+      if (isNaN(dateObj.getTime())) return { status: 'error', hours: null, label: 'Invalid Date', dateStr: 'Invalid', timestampStr: 'Invalid' };
       dataDate = dateObj.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     }
 
     // Display string (e.g. "Jan 21")
     const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    // Professional timestamp format (e.g. "2026-01-21 14:30:45")
+    const timestampStr = isSimpleDate
+      ? `${dataDate} 00:00:00`
+      : dateObj.toLocaleString('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).replace(',', '');
 
     // Calculate age in hours (approximation for simple dates)
     const daysDiff = (new Date(today) - new Date(dataDate)) / (1000 * 60 * 60 * 24);
@@ -193,7 +248,7 @@ const WorkflowStatus = () => {
 
     // Green only if SAME DAY
     if (dataDate === today) {
-      return { status: 'success', hours: hoursAgo, label: dateStr, dateStr };
+      return { status: 'success', hours: hoursAgo, label: dateStr, dateStr, timestampStr };
     }
 
     // Custom threshold for bi-weekly products (Signal Strength, Portfolio Solutions)
@@ -204,25 +259,24 @@ const WorkflowStatus = () => {
     if (hoursAgo < warningThreshold) {
       // Yellow (Warning) - valid but not today
       const daysAgo = Math.round(hoursAgo / 24);
-      return { status: 'warning', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr };
+      return { status: 'warning', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr, timestampStr };
     } else {
       // Red (Error) - too old
       const daysAgo = Math.round(hoursAgo / 24);
-      return { status: 'error', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr };
+      return { status: 'error', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr, timestampStr };
     }
   };
 
-  // Format timestamp
+  // Format timestamp - professional format like "January 21, 2026"
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return 'Never';
     const isSimpleDate = typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(timestamp);
     const date = isSimpleDate ? new Date(timestamp + 'T12:00:00') : new Date(timestamp);
 
     return date.toLocaleString('en-US', {
-      month: 'short',
+      month: 'long',
       day: 'numeric',
-      hour: isSimpleDate ? undefined : '2-digit',
-      minute: isSimpleDate ? undefined : '2-digit'
+      year: 'numeric'
     });
   };
 
@@ -255,6 +309,7 @@ const WorkflowStatus = () => {
   };
 
   // Convert risk ranges to table data with validation status
+  // Preserves original extraction order for easy side-by-side comparison with PDF
   const riskRangesTableData = Object.entries(riskRanges).map(([ticker, data]) => {
     const lrr = data.lrr || 0;
     const hrr = data.hrr || 0;
@@ -269,7 +324,7 @@ const WorkflowStatus = () => {
       statusIcon: validation.icon,
       statusMessage: validation.message
     };
-  }).sort((a, b) => a.ticker.localeCompare(b.ticker));
+  }); // No sorting - preserves extraction order to match PDF
 
   // Calculate health metrics for the health bar
   const extractedCount = riskRangesTableData.length;
@@ -323,19 +378,16 @@ const WorkflowStatus = () => {
               onClick={() => setActiveTab(tab)}
               style={{
                 flex: '0 0 auto',
-                padding: '12px 16px',
+                padding: '8px 12px',
                 border: 'none',
-                borderBottom: activeTab === tab ? `2px solid ${isDark ? '#3b82f6' : '#2563eb'}` : '2px solid transparent',
                 backgroundColor: 'transparent',
                 color: activeTab === tab
                   ? (isDark ? '#60a5fa' : '#2563eb')
                   : (isDark ? '#9ca3af' : '#6b7280'),
                 cursor: 'pointer',
                 fontWeight: activeTab === tab ? 600 : 400,
-                fontSize: '13px',
-                whiteSpace: 'nowrap',
-                borderBottomLeftRadius: activeTab === tab ? '6px' : '0',
-                borderBottomRightRadius: activeTab === tab ? '6px' : '0'
+                fontSize: '12px',
+                whiteSpace: 'nowrap'
               }}
             >
               {tabLabels[tab]}
@@ -345,94 +397,187 @@ const WorkflowStatus = () => {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '6px' }}>
         {loading && !workflowStatus && !freshnessData ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-            Loading data freshness...
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '400px',
+            gap: '16px'
+          }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                border: '3px solid',
+                borderColor: isDark ? '#374151' : '#e5e7eb',
+                borderTopColor: isDark ? '#3b82f6' : '#2563eb',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite'
+              }}
+            />
+            <Text style={{
+              fontSize: '12px',
+              color: isDark ? '#9ca3af' : '#6b7280',
+              fontWeight: 500,
+              letterSpacing: '0.01em'
+            }}>
+              {loadingStatus}
+            </Text>
+            <style>{`
+              @keyframes spin {
+                to { transform: rotate(360deg); }
+              }
+            `}</style>
           </div>
         ) : activeTab === 'freshness' ? (
           /* Daily Freshness - New Primary View */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Title style={{ fontSize: '18px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div>
+              <Title style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
                 Data Upload
               </Title>
-              <Text style={{ fontSize: '14px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-              </Text>
             </div>
 
-            {/* Freshness Cards Grid - 6 data types */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: '12px'
-            }}>
-              {(() => {
-                // Define the 6 data types with their display info
-                const dataTypeConfig = {
-                  'risk-ranges': { name: 'Risk Ranges', unit: 'items' },
-                  'early-look': { name: 'Early Look', unit: 'themes' },
-                  'bitcoin-trend-tracker': { name: 'Bitcoin Tracker', unit: 'cryptos' },
-                  'momo-tracker': { name: 'MOMO Tracker', unit: 'signals' },
-                  'signal-strength': { name: 'Signal Strength', unit: 'signals' },
-                  'portfolio-solutions': { name: 'Portfolio Solutions', unit: 'recs' }
-                };
+            {/* Data Upload Table */}
+            <Card
+              className={isDark ? 'dark:bg-gray-800' : ''}
+              style={{
+                border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                borderRadius: '0.5rem',
+                padding: '0',
+                overflow: 'hidden'
+              }}
+            >
+              <div style={{
+                backgroundColor: isDark ? '#374151' : '#f3f4f6',
+                borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`,
+                padding: '3px 5px'
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 1fr 2fr',
+                  gap: '4px'
+                }}>
+                  <Text style={{
+                    fontSize: '5px',
+                    fontWeight: 600,
+                    color: isDark ? '#9ca3af' : '#6b7280'
+                  }}>
+                    Source
+                  </Text>
+                  <Text style={{
+                    fontSize: '5px',
+                    fontWeight: 600,
+                    color: isDark ? '#9ca3af' : '#6b7280'
+                  }}>
+                    Items
+                  </Text>
+                  <Text style={{
+                    fontSize: '5px',
+                    fontWeight: 600,
+                    color: isDark ? '#9ca3af' : '#6b7280'
+                  }}>
+                    Last Upload
+                  </Text>
+                </div>
+              </div>
 
-                return Object.entries(dataTypeConfig).map(([key, config]) => {
-                  const data = freshnessData?.dataTypes?.[key] || { status: 'missing', itemCount: 0 };
-
-                  // Use backend status ('fresh', 'stale', 'missing') for emoji
-                  const getEmoji = (status) => {
-                    if (status === 'fresh') return '🟢';
-                    if (status === 'stale') return '🟡';
-                    return '🔴';
+              <div>
+                {(() => {
+                  // Define the 6 data types with their display info
+                  const dataTypeConfig = {
+                    'risk-ranges': { name: 'Risk Ranges', unit: 'items' },
+                    'early-look': { name: 'Early Look', unit: 'items' },
+                    'bitcoin-trend-tracker': { name: 'Bitcoin Tracker', unit: 'items' },
+                    'momo-tracker': { name: 'MOMO Tracker', unit: 'items' },
+                    'signal-strength': { name: 'Signal Strength', unit: 'items' },
+                    'portfolio-solutions': { name: 'Portfolio Solutions', unit: 'items' }
                   };
 
-                  // Use backend status for color  
-                  const getColor = (status) => {
-                    if (status === 'fresh') return 'emerald';
-                    if (status === 'stale') return 'yellow';
-                    return 'red';
-                  };
+                  return Object.entries(dataTypeConfig).map(([key, config], index) => {
+                    const data = freshnessData?.dataTypes?.[key] || { status: 'missing', itemCount: 0 };
 
-                  // Frontend freshness is still used for the date label
-                  const freshness = getDataFreshness(data.lastUpdated || data.date, key);
+                    // Get background color based on status
+                    const getBackgroundColor = (status) => {
+                      if (status === 'fresh') return isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)'; // light green
+                      if (status === 'stale') return isDark ? 'rgba(234, 179, 8, 0.15)' : 'rgba(234, 179, 8, 0.1)'; // light yellow
+                      return isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)'; // light red
+                    };
 
-                  return (
-                    <Card
-                      key={key}
-                      className={isDark ? 'dark:bg-gray-800' : ''}
-                      style={{
-                        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                        borderRadius: '0.5rem',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onClick={() => {
-                        setSelectedDataType(key);
-                        setActiveTab('preview');
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '16px' }}>{getEmoji(data.status)}</span>
-                        <Text style={{ fontSize: '14px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
-                          {config.name}
-                        </Text>
+                    // Get hover background color based on status
+                    const getHoverBackgroundColor = (status) => {
+                      if (status === 'fresh') return isDark ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.15)';
+                      if (status === 'stale') return isDark ? 'rgba(234, 179, 8, 0.25)' : 'rgba(234, 179, 8, 0.15)';
+                      return isDark ? 'rgba(239, 68, 68, 0.25)' : 'rgba(239, 68, 68, 0.15)';
+                    };
+
+                    // Frontend freshness is still used for the timestamp
+                    const freshness = getDataFreshness(data.lastUpdated || data.date, key);
+
+                    return (
+                      <div
+                        key={key}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '2fr 1fr 2fr',
+                          gap: '4px',
+                          padding: '4px 5px',
+                          borderBottom: index < 5 ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}` : 'none',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.15s ease',
+                          backgroundColor: getBackgroundColor(data.status)
+                        }}
+                        onClick={() => {
+                          setActiveTab('preview');
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = getHoverBackgroundColor(data.status);
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = getBackgroundColor(data.status);
+                        }}
+                      >
+                        {/* Source Column */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <Text style={{
+                            fontSize: '5px',
+                            fontWeight: 500,
+                            color: isDark ? '#f9fafb' : '#111827'
+                          }}>
+                            {config.name}
+                          </Text>
+                        </div>
+
+                        {/* Items Column */}
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <Text style={{
+                            fontSize: '5px',
+                            color: isDark ? '#e5e7eb' : '#374151',
+                            fontWeight: 500
+                          }}>
+                            {data.itemCount}
+                          </Text>
+                        </div>
+
+                        {/* Last Upload Column */}
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <Text style={{
+                            fontSize: '5px',
+                            color: isDark ? '#9ca3af' : '#6b7280',
+                            fontFamily: 'monospace'
+                          }}>
+                            {freshness.timestampStr}
+                          </Text>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                          {data.itemCount} {config.unit}
-                        </Text>
-                        <Badge color={getColor(data.status)} size="xs">
-                          {freshness.dateStr}
-                        </Badge>
-                      </div>
-                    </Card>
-                  );
-                });
-              })()}
-            </div>
+                    );
+                  });
+                })()}
+              </div>
+            </Card>
 
             {/* Alerts Section */}
             {freshnessData?.alerts && freshnessData.alerts.length > 0 && (
@@ -466,55 +611,19 @@ const WorkflowStatus = () => {
               </Card>
             )}
 
-            {/* No Alerts - All Good */}
-            {freshnessData && (!freshnessData.alerts || freshnessData.alerts.length === 0) && (
-              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{
-                border: `1px solid rgba(16, 185, 129, 0.3)`,
-                borderRadius: '0.5rem',
-                backgroundColor: isDark ? 'rgba(16, 185, 129, 0.05)' : 'rgba(16, 185, 129, 0.02)'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '16px' }}>✅</span>
-                  <Text style={{ fontSize: '14px', color: '#10b981', fontWeight: 500 }}>
-                    All Hedgeye data feeds are fresh and up to date
-                  </Text>
-                </div>
-              </Card>
-            )}
-
-            {/* Quick Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Fresh Data</Text>
-                <Metric style={{ color: '#10b981', fontSize: '24px' }}>
-                  {freshnessData?.dataTypes ? Object.values(freshnessData.dataTypes).filter(d => d.status === 'fresh').length : 0}/6
-                </Metric>
-              </Card>
-              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Total Items</Text>
-                <Metric style={{ color: isDark ? '#f9fafb' : '#111827', fontSize: '24px' }}>
-                  {freshnessData?.dataTypes ? Object.values(freshnessData.dataTypes).reduce((sum, d) => sum + (d.itemCount || 0), 0) : 0}
-                </Metric>
-              </Card>
-              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Last Checked</Text>
-                <Text style={{ fontSize: '14px', fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>
-                  {lastRefresh.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-              </Card>
-            </div>
+            {/* No Alerts - All Good - Section removed per user request */}
 
             {/* Changelog Section */}
-            <div style={{ marginTop: '16px' }}>
-              <Title style={{ fontSize: '16px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '12px' }}>
+            <div style={{ marginTop: '12px' }}>
+              <Title style={{ fontSize: '14px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '8px' }}>
                 Changes
               </Title>
               {changelogLoading ? (
-                <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>Loading changelog...</Text>
+                <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>Loading changelog...</Text>
               ) : !changelogData || Object.keys(changelogData).length === 0 ? (
-                <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>No changelog data available.</Text>
+                <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>No changelog data available.</Text>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
                   {[
                     { key: 'risk-ranges', label: 'Risk Ranges' },
                     { key: 'early-look', label: 'Early Look' },
@@ -530,31 +639,25 @@ const WorkflowStatus = () => {
 
                     if (!alwaysShow) {
                       if (!diff || !diff.available) return null;
-                      if (diff.added.length === 0 && diff.removed.length === 0 && (!diff.updates || diff.updates.length === 0)) return null;
+                      if (diff.added.length === 0 && diff.removed.length === 0 && (!diff.updates || diff.updates.length === 0) && (!diff.trendChanges || diff.trendChanges.length === 0)) return null;
                     }
 
                     // Check if there's any data to display
                     const hasData = diff && diff.available && (
                       diff.added.length > 0 ||
                       diff.removed.length > 0 ||
-                      (diff.updates && diff.updates.length > 0)
+                      (diff.updates && diff.updates.length > 0) ||
+                      (diff.trendChanges && diff.trendChanges.length > 0)
                     );
 
                     return (
-                      <Card key={key} className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                        {/* Enhanced title for Risk Ranges with separator */}
-                        {key === 'risk-ranges' ? (
-                          <div style={{ marginBottom: '16px' }}>
-                            <Text style={{ fontSize: '16px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', marginBottom: '8px' }}>
-                              {label}
-                            </Text>
-                            <div style={{ height: '1px', background: isDark ? '#374151' : '#e5e7eb', marginBottom: '8px' }} />
-                          </div>
-                        ) : (
-                          <Text style={{ fontSize: '14px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '16px' }}>
-                            {label}
+                      <Card key={key} className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem', padding: '10px' }}>
+                        {/* Card Title - Centered for all cards */}
+                        <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                          <Text style={{ fontSize: '10px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            {key === 'risk-ranges' ? 'Risk Ranges (TREND)' : label}
                           </Text>
-                        )}
+                        </div>
 
                         {!hasData && alwaysShow && (
                           <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
@@ -562,186 +665,112 @@ const WorkflowStatus = () => {
                           </Text>
                         )}
 
-                        {/* TREND Changes section (from PDF) - only for risk-ranges */}
-                        {key === 'risk-ranges' && (
-                          <div style={{ marginBottom: '16px' }}>
-                            <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#fbbf24' : '#d97706', marginBottom: '8px' }}>
-                              TREND Changes:
-                            </Text>
-                            {diff && diff.trendChanges && diff.trendChanges.length > 0 ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {diff.trendChanges.map((change, idx) => (
-                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
-                                    <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{change.ticker}</span>:
-                                    <span style={{
-                                      color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                    }}>
-                                      {change.oldTrend}
-                                    </span>
-                                    <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
-                                    <span style={{
-                                      color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                    }}>
-                                      {change.newTrend}
-                                    </span>
-                                    {change.note && (
-                                      <span style={{ fontSize: '10px', fontStyle: 'italic', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                                        ({change.note})
-                                      </span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                                No changes
-                              </Text>
-                            )}
-                          </div>
-                        )}
-
-                        {/* OutBucket section (from PDF) - only for risk-ranges */}
-                        {key === 'risk-ranges' && (
-                          <div style={{ marginBottom: '12px' }}>
-                            <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#ef4444' : '#dc2626', marginBottom: '8px' }}>
-                              OutBucket:
-                            </Text>
-                            {diff && diff.outbucket && diff.outbucket.length > 0 ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {diff.outbucket.map((item, idx) => (
-                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
-                                    <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{item.name} ({item.ticker})</span>
-                                    <span>-</span>
-                                    <span style={{
-                                      color: item.trend === 'BULLISH' ? '#10b981' : item.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                    }}>
-                                      {item.trend}
-                                    </span>
-                                    <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280' }}>({item.dateRemoved})</span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                                No changes
-                              </Text>
-                            )}
-                          </div>
-                        )}
-
-                        {/* TREND Changes section for early-look - HIDDEN per user request */}
-                        {/* User wants Added/Removed (coverage changes) not TREND Changes */}
-                        {false && key === 'early-look' && (
-                          <div style={{ marginBottom: '16px' }}>
-                            <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#fbbf24' : '#d97706', marginBottom: '8px' }}>
-                              TREND Changes:
-                            </Text>
-                            {diff && diff.trendChanges && diff.trendChanges.length > 0 ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {diff.trendChanges.map((change, idx) => (
-                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
-                                    <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{change.ticker}</span>:
-                                    <span style={{
-                                      color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                    }}>
-                                      {change.oldTrend}
-                                    </span>
-                                    <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
-                                    <span style={{
-                                      color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                    }}>
-                                      {change.newTrend}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                                No changes
-                              </Text>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Updates section (calculated diff) - HIDE for risk-ranges and early-look since we have trendChanges */}
-                        {key !== 'risk-ranges' && key !== 'early-look' && diff && diff.updates && diff.updates.length > 0 && (
-                          <div style={{ marginBottom: '12px' }}>
-                            <Text style={{ fontSize: '12px', fontWeight: 600, color: isDark ? '#fbbf24' : '#d97706', marginBottom: '4px' }}>
-                              {diff.updates[0].field === 'rank' ? 'Rank Changes:' : 'TREND Changes:'}
-                            </Text>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                              {diff.updates.map((update, idx) => (
-                                <div key={idx} style={{ display: 'flex', alignItems: 'center', fontSize: '11px', gap: '6px' }}>
-                                  <span style={{ fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{update.ticker}</span>:
-
-                                  {update.field === 'trend' ? (
-                                    <>
-                                      <span style={{
-                                        color: update.oldValue === 'BULLISH' ? '#10b981' : update.oldValue === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                      }}>
-                                        {update.oldValue}
-                                      </span>
-                                      <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
-                                      <span style={{
-                                        fontWeight: 600,
-                                        color: update.newValue === 'BULLISH' ? '#10b981' : update.newValue === 'BEARISH' ? '#ef4444' : '#6b7280',
-                                        padding: '0 4px',
-                                      }}>
-                                        {update.newValue}
-                                      </span>
-                                    </>
-                                  ) : update.field === 'rank' ? (
-                                    <>
-                                      <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>#{update.oldValue}</span>
-                                      <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
-                                      <span style={{
-                                        fontWeight: 600,
-                                        color: update.newValue < update.oldValue ? '#10b981' : '#ef4444', // Lower rank # is better (Green)
-                                        padding: '0 4px',
-                                      }}>
-                                        #{update.newValue}
-                                      </span>
-                                    </>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Added section - HIDE for risk-ranges only */}
-                        {key !== 'risk-ranges' && diff && diff.added.length > 0 && (
-                          <div style={{ marginBottom: '8px' }}>
-                            <Text style={{ fontSize: '12px', fontWeight: 600, color: '#10b981', marginBottom: '4px' }}>Added:</Text>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                              {diff.added.map(item => (
-                                <span key={item} style={{
-                                  fontSize: '11px',
-                                  padding: '0 4px',
-                                  color: '#10b981'
-                                }}>
-                                  {item}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Removed section - HIDE for risk-ranges only */}
-                        {key !== 'risk-ranges' && diff && diff.removed.length > 0 && (
+                        {/* RISK RANGES: Asset/Previous/Current Table */}
+                        {key === 'risk-ranges' && diff && diff.trendChanges && diff.trendChanges.length > 0 && (
                           <div>
-                            <Text style={{ fontSize: '12px', fontWeight: 600, color: '#ef4444', marginBottom: '4px' }}>Removed:</Text>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                              {diff.removed.map(item => (
-                                <span key={item} style={{
-                                  fontSize: '11px',
-                                  padding: '0 4px',
-                                  color: '#ef4444'
-                                }}>
-                                  {item}
-                                </span>
-                              ))}
+                            {/* Table Header */}
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 1fr 1fr',
+                              gap: '8px',
+                              padding: '6px 8px',
+                              backgroundColor: isDark ? '#374151' : '#f3f4f6',
+                              borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`
+                            }}>
+                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Asset</Text>
+                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Previous</Text>
+                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Current</Text>
                             </div>
+                            {/* Table Rows */}
+                            {diff.trendChanges.map((change, idx) => (
+                              <div key={idx} style={{
+                                display: 'grid',
+                                gridTemplateColumns: '1fr 1fr 1fr',
+                                gap: '8px',
+                                padding: '6px 8px',
+                                borderBottom: idx < diff.trendChanges.length - 1 ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}` : 'none'
+                              }}>
+                                <span style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontWeight: 500 }}>{change.ticker}</span>
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: 500,
+                                  color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827')
+                                }}>
+                                  {change.oldTrend === 'BULLISH' ? 'Bullish' : change.oldTrend === 'BEARISH' ? 'Bearish' : 'Neutral'}
+                                </span>
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: 500,
+                                  color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827')
+                                }}>
+                                  {change.newTrend === 'BULLISH' ? 'Bullish' : change.newTrend === 'BEARISH' ? 'Bearish' : 'Neutral'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* EARLY LOOK, SIGNAL STRENGTH, etc: Added/Removed Table */}
+                        {key !== 'risk-ranges' && hasData && (
+                          <div>
+                            {/* Table Header */}
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 1fr',
+                              gap: '8px',
+                              padding: '6px 8px',
+                              backgroundColor: isDark ? '#374151' : '#f3f4f6',
+                              borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`
+                            }}>
+                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Added</Text>
+                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Removed</Text>
+                            </div>
+
+                            {/* Table Rows - Display items side by side */}
+                            {(() => {
+                              const addedItems = diff.added || [];
+                              const removedItems = diff.removed || [];
+                              const maxLength = Math.max(addedItems.length, removedItems.length);
+
+                              if (maxLength === 0) {
+                                return (
+                                  <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '1fr 1fr',
+                                    gap: '8px',
+                                    padding: '6px 8px'
+                                  }}>
+                                    <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>—</span>
+                                    <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>—</span>
+                                  </div>
+                                );
+                              }
+
+                              return Array.from({ length: maxLength }).map((_, idx) => (
+                                <div key={idx} style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: '1fr 1fr',
+                                  gap: '8px',
+                                  padding: '6px 8px',
+                                  borderBottom: idx < maxLength - 1 ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}` : 'none'
+                                }}>
+                                  <span style={{
+                                    fontSize: '10px',
+                                    fontWeight: 500,
+                                    color: addedItems[idx] ? '#10b981' : 'transparent'
+                                  }}>
+                                    {addedItems[idx] || ''}
+                                  </span>
+                                  <span style={{
+                                    fontSize: '10px',
+                                    fontWeight: 500,
+                                    color: removedItems[idx] ? '#ef4444' : 'transparent'
+                                  }}>
+                                    {removedItems[idx] || ''}
+                                  </span>
+                                </div>
+                              ));
+                            })()}
                           </div>
                         )}
                       </Card>
@@ -1101,303 +1130,246 @@ const WorkflowStatus = () => {
             </Card>
           </div>
         ) : activeTab === 'preview' ? (
-          /* Preview - Side-by-side Screenshot and Data */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Health Summary Bar */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-              padding: '12px 16px',
-              backgroundColor: isDark ? '#1f2937' : '#f9fafb',
-              borderRadius: '8px',
-              border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-              flexWrap: 'wrap'
-            }}>
-              {/* Status Dot and Label */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '12px', lineHeight: 1 }}>
-                  {healthStatus.color === 'emerald' ? '🟢' : healthStatus.color === 'yellow' ? '🟡' : '🔴'}
-                </span>
-                <Badge color={healthStatus.color} size="sm">
-                  {healthStatus.label}
-                </Badge>
-              </div>
+          /* Preview - Vertical Scrolling List of All Data Types */
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            height: 'calc(100vh - 180px)',
+            overflow: 'auto',
+            gap: '16px',
+            padding: '4px'
+          }}>
+            {DATA_TYPES.map(({ key, label }) => {
+              const pdfData = allPdfData[key] || {};
+              // Determine data for this type
+              const hasData = key === 'risk-ranges' && riskRangesTableData.length > 0;
+              const jsonData = key === 'risk-ranges' ? riskRanges : (freshnessData?.dataTypes?.[key] || {});
 
-              <div style={{ width: '1px', height: '24px', backgroundColor: isDark ? '#374151' : '#e5e7eb' }} />
-
-              {/* Ticker Count */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>Extracted:</Text>
-                <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
-                  {extractedCount}/{expectedCount}
-                </Text>
-                <Text style={{ fontSize: '11px', color: isDark ? '#6b7280' : '#9ca3af' }}>
-                  ({coveragePercent}%)
-                </Text>
-              </div>
-
-              <div style={{ width: '1px', height: '24px', backgroundColor: isDark ? '#374151' : '#e5e7eb' }} />
-
-              {/* Error Count */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>Errors:</Text>
-                <Text style={{
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: errorCount > 0 ? '#ef4444' : (isDark ? '#10b981' : '#059669')
-                }}>
-                  {errorCount}
-                </Text>
-              </div>
-
-              {/* Freshness - only show if we have data */}
-              {extractedCount > 0 && (
-                <>
-                  <div style={{ width: '1px', height: '24px', backgroundColor: isDark ? '#374151' : '#e5e7eb' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>Updated:</Text>
-                    <Badge color={getStatusColor(hedgeyeFreshness.status)} size="sm">
-                      {hedgeyeFreshness.label}
-                    </Badge>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <Title style={{ fontSize: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                  Screenshot vs Extracted Data
-                </Title>
-                {csvUrl && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => window.open(csvUrl, '_blank')}
-                  >
-                    Download CSV
-                  </Button>
-                )}
-              </div>
-
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '16px',
-                minHeight: '500px'
-              }}>
-                {/* Left Side - Screenshot */}
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  backgroundColor: isDark ? '#1f2937' : '#ffffff'
-                }}>
-                  <div style={{
-                    padding: '12px',
-                    borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                    backgroundColor: isDark ? '#111827' : '#f9fafb'
-                  }}>
-                    <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
-                      Screenshot
-                    </Text>
-                    {hedgeyeStatus.lastRun && (
-                      <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
-                        Captured: {formatTimestamp(hedgeyeStatus.lastRun)}
-                      </Text>
-                    )}
-                  </div>
-                  <div style={{
-                    flex: 1,
+              return (
+                <div
+                  key={key}
+                  style={{
+                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                    backgroundColor: isDark ? '#1f2937' : '#ffffff',
+                    flexShrink: 0,
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '16px',
-                    overflow: 'auto',
-                    backgroundColor: isDark ? '#111827' : '#ffffff'
-                  }}>
-                    {screenshotLoading ? (
-                      <Text style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>Loading screenshot...</Text>
-                    ) : screenshotUrl ? (
-                      <img
-                        src={screenshotUrl}
-                        alt="Hedgeye Risk Range Screenshot"
-                        style={{
-                          maxWidth: '100%',
-                          maxHeight: '100%',
-                          objectFit: 'contain',
-                          borderRadius: '4px',
-                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
-                        }}
-                        onError={() => {
-                          console.error('Failed to load screenshot');
-                          setScreenshotUrl(null);
-                        }}
-                      />
-                    ) : (
-                      <div style={{ textAlign: 'center', padding: '40px' }}>
-                        <Text style={{ color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '8px', display: 'block' }}>
-                          No screenshot available
-                        </Text>
-                        <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: '12px', display: 'block' }}>
-                          Screenshot will appear here after the scraper runs
-                        </Text>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right Side - Extracted Data */}
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  backgroundColor: isDark ? '#1f2937' : '#ffffff'
-                }}>
+                    flexDirection: 'column'
+                  }}
+                >
+                  {/* Card Header */}
                   <div style={{
-                    padding: '12px',
+                    padding: '8px 12px',
                     borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                    backgroundColor: isDark ? '#111827' : '#f9fafb'
+                    backgroundColor: isDark ? '#111827' : '#f9fafb',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
                   }}>
-                    <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
-                      Extracted Data
+                    <Text style={{
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: isDark ? '#f9fafb' : '#111827'
+                    }}>
+                      {label}
                     </Text>
-                    {hedgeyeStatus.lastRun && (
-                      <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
-                        Extracted: {formatTimestamp(hedgeyeStatus.lastRun)}
-                      </Text>
-                    )}
+                    {/* View Toggle for Data */}
+                    <div style={{ display: 'flex', backgroundColor: isDark ? '#374151' : '#e5e7eb', borderRadius: '4px', padding: '2px' }}>
+                      <button
+                        onClick={() => setPreviewViewMode('table')}
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          borderRadius: '3px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: previewViewMode === 'table' ? (isDark ? '#1f2937' : 'white') : 'transparent',
+                          color: previewViewMode === 'table' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
+                          boxShadow: previewViewMode === 'table' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                      >
+                        Table
+                      </button>
+                      <button
+                        onClick={() => setPreviewViewMode('json')}
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          borderRadius: '3px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: previewViewMode === 'json' ? (isDark ? '#1f2937' : 'white') : 'transparent',
+                          color: previewViewMode === 'json' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
+                          boxShadow: previewViewMode === 'json' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                      >
+                        JSON
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Split Content */}
                   <div style={{
-                    flex: 1,
-                    overflow: 'auto',
-                    padding: '16px'
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    height: '600px',
+                    backgroundColor: isDark ? '#111827' : '#f3f4f6'
                   }}>
-                    {riskRangesTableData.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '40px' }}>
-                        <Text style={{ color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '8px', display: 'block' }}>
-                          No data extracted yet
+                    {/* Left Side: PDF/Screenshot */}
+                    <div style={{
+                      borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      position: 'relative'
+                    }}>
+                      {pdfData.loading ? (
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <div
+                            style={{
+                              width: '24px',
+                              height: '24px',
+                              border: '2px solid',
+                              borderColor: isDark ? '#374151' : '#e5e7eb',
+                              borderTopColor: isDark ? '#3b82f6' : '#2563eb',
+                              borderRadius: '50%',
+                              animation: 'spin 0.8s linear infinite'
+                            }}
+                          />
+                          <Text style={{
+                            color: isDark ? '#9ca3af' : '#6b7280',
+                            fontSize: '11px'
+                          }}>
+                            Loading {label}...
+                          </Text>
+                        </div>
+                      ) : pdfData.url && pdfData.type === 'pdf' ? (
+                        <iframe
+                          src={`${pdfData.url}#toolbar=0&navpanes=0&scrollbar=1`}
+                          title={label}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            border: 'none'
+                          }}
+                        />
+                      ) : pdfData.url ? (
+                        <img
+                          src={pdfData.url}
+                          alt={label}
+                          style={{
+                            maxWidth: '100%',
+                            height: 'auto',
+                            maxHeight: '100%',
+                            objectFit: 'contain'
+                          }}
+                        />
+                      ) : (
+                        <Text style={{
+                          color: isDark ? '#6b7280' : '#9ca3af',
+                          fontSize: '12px'
+                        }}>
+                          {pdfData.error || 'Waiting...'}
                         </Text>
-                        <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: '12px', display: 'block' }}>
-                          Data will appear here after the scraper runs successfully
-                        </Text>
-                      </div>
-                    ) : (
-                      <div style={{ overflowX: 'auto' }}>
+                      )}
+                    </div>
+
+                    {/* Right Side: Extracted Data */}
+                    <div style={{
+                      overflow: 'auto',
+                      backgroundColor: isDark ? '#1f2937' : '#ffffff',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      {previewViewMode === 'json' ? (
+                        <div style={{ padding: '12px' }}>
+                          <pre style={{
+                            fontSize: '10px',
+                            fontFamily: 'monospace',
+                            margin: 0,
+                            whiteSpace: 'pre-wrap',
+                            color: isDark ? '#d1d5db' : '#374151'
+                          }}>
+                            {JSON.stringify(jsonData, null, 2)}
+                          </pre>
+                        </div>
+                      ) : key === 'risk-ranges' && hasData ? (
                         <Table>
                           <TableHead>
                             <TableRow>
-                              <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827', padding: '8px 12px' }}>Ticker</TableHeaderCell>
-                              <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827', padding: '8px 12px' }}>LRR</TableHeaderCell>
-                              <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827', padding: '8px 12px' }}>HRR</TableHeaderCell>
-                              <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827', padding: '8px 12px' }}>Trend</TableHeaderCell>
-                              <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827', padding: '8px 12px' }}>Status</TableHeaderCell>
+                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
+                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
+                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
+                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Sts</TableHeaderCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
                             {riskRangesTableData.map((row) => (
                               <TableRow key={row.ticker}>
-                                <TableCell style={{ color: isDark ? '#f9fafb' : '#111827', fontWeight: 500, padding: '8px 12px' }}>
+                                <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>
                                   {row.ticker}
                                 </TableCell>
-                                <TableCell style={{ color: isDark ? '#f9fafb' : '#111827', padding: '8px 12px' }}>
-                                  {row.lrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>
+                                  {row.lrr.toFixed(2)}
                                 </TableCell>
-                                <TableCell style={{ color: isDark ? '#f9fafb' : '#111827', padding: '8px 12px' }}>
-                                  {row.hrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>
+                                  {row.hrr.toFixed(2)}
                                 </TableCell>
-                                <TableCell style={{ padding: '8px 12px' }}>
-                                  <Badge
-                                    color={row.trend === 'BULLISH' ? 'emerald' : row.trend === 'BEARISH' ? 'red' : 'gray'}
-                                    size="sm"
-                                  >
+                                <TableCell style={{ padding: '4px 8px' }}>
+                                  <span style={{
+                                    fontSize: '10px',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
+                                      row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
+                                    color: row.trend === 'BULLISH' ? '#10b981' :
+                                      row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                  }}>
                                     {row.trend}
-                                  </Badge>
+                                  </span>
                                 </TableCell>
-                                <TableCell style={{ padding: '8px 12px' }}>
-                                  <span
-                                    title={row.statusMessage}
-                                    style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      color: row.status === 'valid' ? '#10b981' : '#ef4444',
-                                      fontWeight: 500,
-                                      fontSize: '14px'
-                                    }}
-                                  >
+                                <TableCell style={{ padding: '4px 8px' }}>
+                                  <span title={row.statusMessage} style={{ fontSize: '12px' }}>
                                     {row.statusIcon}
-                                    {row.status === 'error' && (
-                                      <span style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                                        {row.statusMessage}
-                                      </span>
-                                    )}
                                   </span>
                                 </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
                         </Table>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            {/* Coverage Summary */}
-            {riskRangesTableData.length > 0 && (
-              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <Title style={{ fontSize: '14px', color: isDark ? '#f9fafb' : '#111827' }}>
-                    Coverage Summary
-                  </Title>
-                  <Text style={{ fontSize: '13px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    {extractedCount}/{expectedCount} securities ({coveragePercent}%)
-                  </Text>
-                </div>
-
-                {missingTickers.length > 0 && (
-                  <div style={{
-                    backgroundColor: isDark ? '#1f2937' : '#f9fafb',
-                    borderRadius: '6px',
-                    padding: '12px',
-                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
-                  }}>
-                    <Text style={{ fontSize: '12px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '8px', display: 'block' }}>
-                      Missing from Hedgeye ({missingTickers.length}):
-                    </Text>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {missingTickers.slice(0, 20).map(ticker => (
-                        <Badge key={ticker} color="gray" size="xs" style={{ fontSize: '11px' }}>
-                          {ticker}
-                        </Badge>
-                      ))}
-                      {missingTickers.length > 20 && (
-                        <Badge color="gray" size="xs" style={{ fontSize: '11px' }}>
-                          +{missingTickers.length - 20} more
-                        </Badge>
+                      ) : (
+                        <div style={{
+                          flex: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '20px',
+                          color: isDark ? '#9ca3af' : '#6b7280',
+                          fontSize: '12px'
+                        }}>
+                          No extracted data view available for {label}
+                        </div>
                       )}
                     </div>
                   </div>
-                )}
-
-                {missingTickers.length === 0 && (
-                  <Text style={{ fontSize: '13px', color: '#10b981' }}>
-                    All securities in your universe have Hedgeye coverage.
-                  </Text>
-                )}
-              </Card>
-            )}
+                </div>
+              );
+            })}
           </div>
         ) : null}
-      </div>
-    </div>
+
+      </div >
+    </div >
   );
 };
 

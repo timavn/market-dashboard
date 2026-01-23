@@ -1448,48 +1448,133 @@ app.get('/api/workflow-status', async (req, res) => {
 });
 
 // Hedgeye Screenshot endpoint - returns presigned S3 URL for screenshot
+// UPDATED: Falls back to local files in aws/lambda if S3/DynamoDB fails
+// Now supports ?type= query param for different data types
 app.get('/api/hedgeye/screenshot/:date', async (req, res) => {
-  try {
-    const { date } = req.params;
-    console.log(`[API] /api/hedgeye/screenshot/${date} called`);
+  const { date } = req.params;
+  const snapshotType = req.query.type || 'risk-ranges'; // Default to risk-ranges
+  console.log(`[API] /api/hedgeye/screenshot/${date}?type=${snapshotType} called`);
 
-    // Get snapshot from DynamoDB
+  try {
+    // 1. Try DynamoDB + S3 first
     const snapshotParams = {
       TableName: 'HedgeyeDailySnapshot',
       Key: {
         date: date,
-        snapshotType: 'risk-ranges'
+        snapshotType: snapshotType
       }
     };
 
     const snapshotResult = await dynamodb.get(snapshotParams).promise();
 
-    if (!snapshotResult.Item || !snapshotResult.Item.screenshotS3Key) {
-      return res.status(404).json({ error: 'Screenshot not found for this date' });
+    if (snapshotResult.Item && snapshotResult.Item.screenshotS3Key) {
+      const s3Key = snapshotResult.Item.screenshotS3Key;
+
+      // Generate presigned URL
+      const params = {
+        Bucket: 'market-dashboard-csv-data',
+        Key: s3Key,
+        Expires: 3600 // 1 hour
+      };
+
+      try {
+        const presignedUrl = s3.getSignedUrl('getObject', params);
+        console.log(`[API] Generated presigned URL for screenshot: ${s3Key}`);
+        return res.json({
+          url: presignedUrl,
+          s3Key: s3Key,
+          date: date,
+          type: 'screenshot',
+          scrapedAt: snapshotResult.Item.scrapedAt
+        });
+      } catch (s3Error) {
+        console.warn(`[API] S3 signing failed, trying fallback: ${s3Error.message}`);
+        // Fall through to PDF check
+      }
+    } else if (snapshotResult.Item && snapshotResult.Item.pdfSource) {
+      // Fallback to PDF when no screenshot exists
+      const pdfS3Key = snapshotResult.Item.pdfSource;
+      console.log(`[API] No screenshot found, falling back to PDF: ${pdfS3Key}`);
+
+      const params = {
+        Bucket: 'market-dashboard-csv-data',
+        Key: pdfS3Key,
+        Expires: 3600 // 1 hour
+      };
+
+      try {
+        const presignedUrl = s3.getSignedUrl('getObject', params);
+        console.log(`[API] Generated presigned URL for PDF: ${pdfS3Key}`);
+        return res.json({
+          url: presignedUrl,
+          s3Key: pdfS3Key,
+          date: date,
+          type: 'pdf',
+          scrapedAt: snapshotResult.Item.scrapedAt
+        });
+      } catch (s3Error) {
+        console.warn(`[API] PDF S3 signing failed: ${s3Error.message}`);
+        // Fall through to local check
+      }
+    } else {
+      console.log(`[API] No S3 key found in DynamoDB for ${date}, checking local files...`);
     }
 
-    const s3Key = snapshotResult.Item.screenshotS3Key;
-
-    // Generate presigned URL (1 hour expiration)
-    const params = {
-      Bucket: 'market-dashboard-csv-data',
-      Key: s3Key,
-      Expires: 3600 // 1 hour
-    };
-
-    const presignedUrl = s3.getSignedUrl('getObject', params);
-
-    console.log(`[API] Generated presigned URL for screenshot: ${s3Key}`);
-    res.json({
-      url: presignedUrl,
-      s3Key: s3Key,
-      date: date,
-      scrapedAt: snapshotResult.Item.scrapedAt
-    });
-
   } catch (error) {
-    console.error('[API] Error in /api/hedgeye/screenshot:', error);
-    res.status(500).json({ error: 'Failed to get screenshot URL', details: error.message });
+    console.warn(`[API] DynamoDB/S3 error for screenshot: ${error.message}`);
+    // Fall through to local check
+  }
+
+  // 2. Fallback: Check local aws/lambda directory for matching screenshot
+  try {
+    const fs = require('fs');
+    const lambdaDir = path.join(__dirname, 'aws', 'lambda');
+
+    if (fs.existsSync(lambdaDir)) {
+      const files = fs.readdirSync(lambdaDir);
+      // Look for hedgeye_screenshot_YYYY-MM-DD_HHMMSS.png
+      const matchingFile = files.find(f =>
+        f.startsWith(`hedgeye_screenshot_${date}`) && f.endsWith('.png')
+      );
+
+      if (matchingFile) {
+        console.log(`[API] Found local screenshot: ${matchingFile}`);
+        // Return a URL pointing to our local file server endpoint
+        // Use full URL for robustness if needed, or relative
+        const protocol = req.protocol;
+        const host = req.get('host');
+        const localUrl = `${protocol}://${host}/api/local-screenshots/${matchingFile}`;
+
+        return res.json({
+          url: localUrl,
+          source: 'local',
+          date: date
+        });
+      }
+    }
+  } catch (localError) {
+    console.error(`[API] Error searching for local screenshot: ${localError.message}`);
+  }
+
+  return res.status(404).json({ error: 'Screenshot not found for this date (checked S3 and local)' });
+});
+
+// New Endpoint: Serve local screenshots from aws/lambda
+app.get('/api/local-screenshots/:filename', (req, res) => {
+  const { filename } = req.params;
+  const fs = require('fs');
+
+  // Basic security: ensure filename is safe and strictly what we expect
+  if (!filename.match(/^hedgeye_screenshot_[\d-]{10}_[\d]{6}\.png$/)) {
+    return res.status(400).send('Invalid filename format');
+  }
+
+  const filePath = path.join(__dirname, 'aws', 'lambda', filename);
+
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send('File not found');
   }
 });
 
