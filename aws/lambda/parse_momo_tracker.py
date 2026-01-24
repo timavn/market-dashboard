@@ -31,6 +31,68 @@ def extract_specific_pages_as_pdf(pdf_path, page_numbers):
     return pdf_bytes.getvalue()
 
 
+def upload_pdf_to_s3(pdf_path, pdf_date=None):
+    """Upload original PDF to S3 for audit trail"""
+    print("\n☁️  Uploading PDF to S3...")
+
+    s3 = boto3.client('s3', region_name='us-west-1')
+    date = pdf_date if pdf_date else datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    time = datetime.now(timezone.utc).strftime('%H%M%S')
+
+    s3_key = f"hedgeye-pdfs/{date}/momo-tracker-{date}-{time}.pdf"
+
+    try:
+        s3.upload_file(
+            str(pdf_path),
+            'market-dashboard-csv-data',
+            s3_key,
+            ExtraArgs={'ContentType': 'application/pdf'}
+        )
+        print(f"   ✅ PDF uploaded: {s3_key}")
+        return s3_key
+    except Exception as e:
+        print(f"   ⚠️  Upload failed: {e}")
+        return None
+
+
+def generate_screenshot(pdf_path, pdf_date=None):
+    """Generate screenshot from first page of PDF and upload to S3"""
+    print("\n📸 Generating screenshot from PDF...")
+    
+    try:
+        from pdf2image import convert_from_path
+        # Convert first page to image
+        images = convert_from_path(str(pdf_path), first_page=1, last_page=1)
+        if not images:
+            print("   ❌ Failed to convert PDF to image")
+            return None
+            
+        # Save to bytes
+        img_bytes = io.BytesIO()
+        images[0].save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        # Upload to S3
+        s3 = boto3.client('s3', region_name='us-west-1')
+        date = pdf_date if pdf_date else datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        time = datetime.now(timezone.utc).strftime('%H%M%S')
+        
+        s3_key = f"hedgeye-screenshots/{date}/momo-tracker-{date}-{time}.png"
+        
+        s3.upload_fileobj(
+            img_bytes,
+            'market-dashboard-csv-data',
+            s3_key,
+            ExtraArgs={'ContentType': 'image/png'}
+        )
+        print(f"   ✅ Screenshot uploaded: {s3_key}")
+        return s3_key
+        
+    except Exception as e:
+        print(f"   ⚠️  Screenshot generation failed: {e}")
+        return None
+
+
 def extract_momo_tracker(pdf_path, s3_key=None):
     """Extract stock data from Momo Tracker PDF using AWS Textract"""
     print(f"\n📄 Reading Momo Tracker PDF: {pdf_path}")
@@ -58,6 +120,12 @@ def extract_momo_tracker(pdf_path, s3_key=None):
     tables = [block for block in blocks if block['BlockType'] == 'TABLE']
 
     print(f"   Found {len(tables)} tables in PDF")
+
+    # Sort tables by vertical position (Top) to ensure we process them in visual order
+    # Textract main return blocks in arbitrary order, which messes up our indexing
+    if tables:
+        tables.sort(key=lambda x: x['Geometry']['BoundingBox']['Top'])
+        print("   ✅ Sorted tables by vertical position")
 
     # Helper function to extract table data
     def get_table_data(table_block, blocks):
@@ -102,24 +170,35 @@ def extract_momo_tracker(pdf_path, s3_key=None):
 
         return rows
 
-    # Expected Momo Tracker stocks
-    EXPECTED_TICKERS = ['MSFT', 'AAPL', 'AMZN', 'META', 'GOOGL', 'NFLX', 'TSLA', 'NVDA', 'ORCL']
-
     # Process each table to find Momo Tracker table
+    global_index = 0
+
     for table in tables:
         table_data = get_table_data(table, blocks)
 
         if not table_data or len(table_data) < 2:
             continue
 
-        # Detect Momo Tracker table by presence of expected tickers
+        # Detect Momo Tracker table by structure (look for Buy/Sell Trade columns)
+        # Or checking if row contains typical tickers (but not strictly limiting to them)
         is_momo_table = False
-        for row in table_data[1:]:
-            if len(row) > 0:
-                first_cell = row[0].strip().upper()
-                if first_cell in EXPECTED_TICKERS:
-                    is_momo_table = True
-                    break
+        
+        # Heuristic: check if header has "Buy Trade" or similar, or check first few rows
+        # The Momo table usually has: Ticker, Buy Trade, Sell Trade, Upside, Downside, Trend
+        for row in table_data:
+             if len(row) > 1:
+                  if 'BUY TRADE' in str(row).upper() and 'SELL TRADE' in str(row).upper():
+                       is_momo_table = True
+                       break
+
+        # Fallback: Check if first col is a known ticker
+        if not is_momo_table:
+            for row in table_data[1:]:
+                if len(row) > 0:
+                     first_cell = row[0].strip().upper()
+                     if first_cell in ['MSFT', 'AAPL', 'AMZN', 'NVDA', 'TSLA']:
+                          is_momo_table = True
+                          break
 
         # Parse Momo Tracker table
         if is_momo_table:
@@ -128,30 +207,47 @@ def extract_momo_tracker(pdf_path, s3_key=None):
                 if len(row) >= 6:
                     try:
                         ticker = row[0].strip().upper()
-                        if ticker in EXPECTED_TICKERS:
-                            buy_trade = float(row[1].replace(',', '').replace('$', ''))
-                            sell_trade = float(row[2].replace(',', '').replace('$', ''))
-                            upside = float(row[3].replace('%', ''))
-                            downside = float(row[4].replace('%', ''))
-                            trend = row[5].strip().upper()
+                        # Skip headers
+                        if ticker == 'TICKER' or ticker == 'SYMBOL' or not ticker:
+                            continue
 
-                            data[ticker] = {
-                                'buyTrade': buy_trade,
-                                'sellTrade': sell_trade,
-                                'upside': upside,
-                                'downside': downside,
-                                'trend': trend,
-                                'timestamp': ts
-                            }
-                            print(f"      {ticker}: Buy ${buy_trade:.0f}, Sell ${sell_trade:.0f} (↑{upside}% ↓{downside}%, {trend})")
+                        # Clean numbers
+                        buy_str = row[1].replace(',', '').replace('$', '').strip()
+                        sell_str = row[2].replace(',', '').replace('$', '').strip()
+                        
+                        if not buy_str or not sell_str:
+                            continue
+
+                        buy_trade = float(buy_str)
+                        sell_trade = float(sell_str)
+                        upside_val = row[3].replace('%', '').strip()
+                        downside_val = row[4].replace('%', '').strip()
+                        
+                        upside = float(upside_val) if upside_val else 0.0
+                        downside = float(downside_val) if downside_val else 0.0
+                        
+                        trend = row[5].strip().upper()
+
+                        data[ticker] = {
+                            'buyTrade': buy_trade,
+                            'sellTrade': sell_trade,
+                            'upside': upside,
+                            'downside': downside,
+                            'trend': trend,
+                            'timestamp': ts,
+                            'index': global_index
+                        }
+                        global_index += 1
+                        print(f"      [{global_index}] {ticker}: Buy ${buy_trade:.0f}, Sell ${sell_trade:.0f} (↑{upside}% ↓{downside}%, {trend})")
                     except (ValueError, IndexError) as e:
-                        print(f"      ⚠️  Skipping row: {row} (error: {e})")
+                        # print(f"      ⚠️  Skipping row: {row} (error: {e})")
+                        pass
 
     print(f"\n   ✅ Extracted {len(data)} stocks")
     return data
 
 
-def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
+def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=None):
     """Save Momo Tracker data to DynamoDB"""
     if not data:
         print("\n❌ No data to save")
@@ -180,7 +276,8 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
             'upside': Decimal(str(d['upside'])),
             'downside': Decimal(str(d['downside'])),
             'trend': d['trend'],
-            'timestamp': d['timestamp']
+            'timestamp': d['timestamp'],
+            'index': d.get('index', 999)
         } for t, d in data.items()},
         'scrapedAt': ts,
         'source': 'textract',
@@ -189,6 +286,8 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
 
     if pdf_s3_key:
         snapshot_item['pdfSource'] = pdf_s3_key
+    if screenshot_s3_key:
+        snapshot_item['screenshotS3Key'] = screenshot_s3_key
 
     snap_table.put_item(Item=snapshot_item)
     print(f"   ✅ Saved {len(data)} stocks")
@@ -219,6 +318,10 @@ if __name__ == '__main__':
     data = extract_momo_tracker(pdf_path)
 
     if data:
-        save_to_dynamodb(data, pdf_date=pdf_date)
+        # Upload files
+        pdf_s3_key = upload_pdf_to_s3(pdf_path, pdf_date)
+        screenshot_s3_key = generate_screenshot(pdf_path, pdf_date)
+        
+        save_to_dynamodb(data, pdf_s3_key, pdf_date, screenshot_s3_key)
     else:
         print("\n❌ No data extracted from PDF")

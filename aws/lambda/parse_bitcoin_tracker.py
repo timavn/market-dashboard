@@ -55,6 +55,73 @@ def convert_page_to_image_bytes(pdf_path, page_number):
     return None
 
 
+
+# Expected columns count for validation
+# Crypto: Symbol, Price, Buy, Sell, Trend (5)
+# Stock: Ticker, Price, Buy, Sell, Upside, Downside, Trend (7)
+
+
+def upload_pdf_to_s3(pdf_path, pdf_date=None):
+    """Upload original PDF to S3 for audit trail"""
+    print("\n☁️  Uploading PDF to S3...")
+
+    s3 = boto3.client('s3', region_name='us-west-1')
+    date = pdf_date if pdf_date else datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    time = datetime.now(timezone.utc).strftime('%H%M%S')
+
+    s3_key = f"hedgeye-pdfs/{date}/bitcoin-tracker-{date}-{time}.pdf"
+
+    try:
+        s3.upload_file(
+            str(pdf_path),
+            'market-dashboard-csv-data',
+            s3_key,
+            ExtraArgs={'ContentType': 'application/pdf'}
+        )
+        print(f"   ✅ PDF uploaded: {s3_key}")
+        return s3_key
+    except Exception as e:
+        print(f"   ⚠️  Upload failed: {e}")
+        return None
+
+
+def generate_screenshot(pdf_path, pdf_date=None):
+    """Generate screenshot from first page of PDF and upload to S3"""
+    print("\n📸 Generating screenshot from PDF...")
+    
+    try:
+        # Convert first page to image
+        images = convert_from_path(str(pdf_path), first_page=1, last_page=1)
+        if not images:
+            print("   ❌ Failed to convert PDF to image")
+            return None
+            
+        # Save to bytes
+        img_bytes = io.BytesIO()
+        images[0].save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        # Upload to S3
+        s3 = boto3.client('s3', region_name='us-west-1')
+        date = pdf_date if pdf_date else datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        time = datetime.now(timezone.utc).strftime('%H%M%S')
+        
+        s3_key = f"hedgeye-screenshots/{date}/bitcoin-tracker-{date}-{time}.png"
+        
+        s3.upload_fileobj(
+            img_bytes,
+            'market-dashboard-csv-data',
+            s3_key,
+            ExtraArgs={'ContentType': 'image/png'}
+        )
+        print(f"   ✅ Screenshot uploaded: {s3_key}")
+        return s3_key
+        
+    except Exception as e:
+        print(f"   ⚠️  Screenshot generation failed: {e}")
+        return None
+
+
 def extract_bitcoin_tracker(pdf_path, s3_key=None):
     """Extract crypto data from Bitcoin Trend Tracker PDF using AWS Textract"""
     print(f"\n📄 Reading Bitcoin Tracker PDF: {pdf_path}")
@@ -91,6 +158,10 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
             blocks = response['Blocks']
             tables = [block for block in blocks if block['BlockType'] == 'TABLE']
             print(f"   Found {len(tables)} tables on page {page_num}")
+
+            # Sort tables by vertical position (Top) to ensure correct order within the page
+            if tables:
+                tables.sort(key=lambda x: x['Geometry']['BoundingBox']['Top'])
 
             # Store tables with their blocks for processing
             for table in tables:
@@ -145,6 +216,9 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
 
         return rows
 
+    # Global index counter to preserve PDF order across tables
+    global_index = 0
+
     # Process each table to find crypto and stock tables
     for table_info in all_tables:
         table_data = get_table_data(table_info['table'], table_info['blocks'])
@@ -173,25 +247,41 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
         if is_crypto_table:
             print("   📊 Found crypto table")
             for row in table_data[1:]:
+                # Check for valid data row (must have proper numeric price/trades)
                 if len(row) >= 5:
                     try:
                         symbol = row[0].strip().upper()
-                        if symbol in ['BTC', 'ETH', 'SOL', 'AVAX', 'XRP', 'ZEC']:
-                            price = float(row[1].replace(',', '').replace('$', ''))
-                            buy_trade = float(row[2].replace(',', '').replace('$', ''))
-                            sell_trade = float(row[3].replace(',', '').replace('$', ''))
-                            trend = row[4].strip().upper()
+                        # Skip header repeats or empty rows
+                        if symbol == 'SYMBOL' or symbol == 'TICKER' or not symbol:
+                            continue
 
-                            data['cryptos'][symbol] = {
-                                'price': price,
-                                'buyTrade': buy_trade,
-                                'sellTrade': sell_trade,
-                                'trend': trend,
-                                'timestamp': ts
-                            }
-                            print(f"      {symbol}: ${price:,.0f} (Buy: ${buy_trade:,.0f}, Sell: ${sell_trade:,.0f}, {trend})")
+                        # Clean currency strings
+                        price_str = row[1].replace(',', '').replace('$', '').strip()
+                        buy_str = row[2].replace(',', '').replace('$', '').strip()
+                        sell_str = row[3].replace(',', '').replace('$', '').strip()
+                        
+                        # Validate they are numbers
+                        if not price_str or not buy_str or not sell_str:
+                            continue
+                            
+                        price = float(price_str)
+                        buy_trade = float(buy_str)
+                        sell_trade = float(sell_str)
+                        trend = row[4].strip().upper()
+
+                        data['cryptos'][symbol] = {
+                            'price': price,
+                            'buyTrade': buy_trade,
+                            'sellTrade': sell_trade,
+                            'trend': trend,
+                            'timestamp': ts,
+                            'index': global_index
+                        }
+                        global_index += 1
+                        print(f"      [{global_index}] {symbol}: ${price:,.0f} (Buy: ${buy_trade:,.0f}, Sell: ${sell_trade:,.0f}, {trend})")
                     except (ValueError, IndexError) as e:
-                        print(f"      ⚠️  Skipping row: {row} (error: {e})")
+                        # print(f"      ⚠️  Skipping row: {row} (error: {e})")
+                        pass
 
         # Parse stock table
         elif is_stock_table:
@@ -200,32 +290,46 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
                 if len(row) >= 7:
                     try:
                         ticker = row[0].strip().upper()
-                        if ticker in ['IBIT', 'MSTR', 'MARA', 'ETHA', 'BLOK', 'COIN', 'CRCL', 'BMNR']:
-                            price = float(row[1].replace(',', '').replace('$', ''))
-                            buy_trade = float(row[2].replace(',', '').replace('$', ''))
-                            sell_trade = float(row[3].replace(',', '').replace('$', ''))
-                            upside = float(row[4].replace('%', ''))
-                            downside = float(row[5].replace('%', ''))
-                            trend = row[6].strip().upper()
+                         # Skip header repeats
+                        if ticker == 'TICKER' or ticker == 'SYMBOL' or not ticker:
+                            continue
 
-                            data['stocks'][ticker] = {
-                                'price': price,
-                                'buyTrade': buy_trade,
-                                'sellTrade': sell_trade,
-                                'upside': upside,
-                                'downside': downside,
-                                'trend': trend,
-                                'timestamp': ts
-                            }
-                            print(f"      {ticker}: ${price:.2f} (↑{upside}% ↓{downside}%, {trend})")
+                        # Clean numbers
+                        price_str = row[1].replace(',', '').replace('$', '').strip()
+                        buy_str = row[2].replace(',', '').replace('$', '').strip()
+                        sell_str = row[3].replace(',', '').replace('$', '').strip()
+                        
+                        if not price_str or not buy_str or not sell_str:
+                            continue
+
+                        price = float(price_str)
+                        buy_trade = float(buy_str)
+                        sell_trade = float(sell_str)
+                        upside = float(row[4].replace('%', '').strip())
+                        downside = float(row[5].replace('%', '').strip())
+                        trend = row[6].strip().upper()
+
+                        data['stocks'][ticker] = {
+                            'price': price,
+                            'buyTrade': buy_trade,
+                            'sellTrade': sell_trade,
+                            'upside': upside,
+                            'downside': downside,
+                            'trend': trend,
+                            'timestamp': ts,
+                            'index': global_index
+                        }
+                        global_index += 1
+                        print(f"      [{global_index}] {ticker}: ${price:.2f} (↑{upside}% ↓{downside}%, {trend})")
                     except (ValueError, IndexError) as e:
-                        print(f"      ⚠️  Skipping row: {row} (error: {e})")
+                        # print(f"      ⚠️  Skipping row: {row} (error: {e})")
+                        pass
 
     print(f"\n   ✅ Extracted {len(data['cryptos'])} cryptos and {len(data['stocks'])} stocks")
     return data
 
 
-def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
+def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=None):
     """Save Bitcoin Tracker data to DynamoDB"""
     if not data or (not data.get('cryptos') and not data.get('stocks')):
         print("\n❌ No data to save")
@@ -271,8 +375,17 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
         'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
     }
 
+    # Add index data to internal objects for frontend sorting
+    for cat in ['cryptos', 'stocks']:
+        for tick, val in snapshot_item['data'][cat].items():
+             # Get original index
+             orig_idx = data.get(cat, {}).get(tick, {}).get('index', 999)
+             snapshot_item['data'][cat][tick]['index'] = orig_idx
+
     if pdf_s3_key:
         snapshot_item['pdfSource'] = pdf_s3_key
+    if screenshot_s3_key:
+        snapshot_item['screenshotS3Key'] = screenshot_s3_key
 
     snap_table.put_item(Item=snapshot_item)
     print(f"   ✅ Saved {len(data.get('cryptos', {}))} cryptos and {len(data.get('stocks', {}))} stocks")
@@ -301,6 +414,10 @@ if __name__ == '__main__':
     data = extract_bitcoin_tracker(pdf_path)
 
     if data and (data.get('cryptos') or data.get('stocks')):
-        save_to_dynamodb(data, pdf_date=pdf_date)
+        # Upload files
+        pdf_s3_key = upload_pdf_to_s3(pdf_path, pdf_date)
+        screenshot_s3_key = generate_screenshot(pdf_path, pdf_date)
+        
+        save_to_dynamodb(data, pdf_s3_key, pdf_date, screenshot_s3_key)
     else:
         print("\n❌ No data extracted from PDF")

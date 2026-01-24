@@ -1316,7 +1316,8 @@ app.get('/api/workflow-status', async (req, res) => {
       if (snapshotResult.Item) {
         workflowStatus.hedgeye = {
           status: 'success',
-          lastRun: snapshotResult.Item.scrapedAt || snapshotResult.Item.date,
+          lastRun: snapshotResult.Item.date,
+          scrapedAt: snapshotResult.Item.scrapedAt,
           count: snapshotResult.Item.riskRangeCount || 0,
           nextRun: '8:00 AM EST (market days)'
         };
@@ -1467,58 +1468,96 @@ app.get('/api/hedgeye/screenshot/:date', async (req, res) => {
 
     const snapshotResult = await dynamodb.get(snapshotParams).promise();
 
-    if (snapshotResult.Item && snapshotResult.Item.screenshotS3Key) {
-      const s3Key = snapshotResult.Item.screenshotS3Key;
+    // Always prefer PDF if available (for verification purposes)
+    const preferPdf = true;
 
-      // Generate presigned URL
-      const params = {
-        Bucket: 'market-dashboard-csv-data',
-        Key: s3Key,
-        Expires: 3600 // 1 hour
-      };
+    if (snapshotResult.Item) {
+      const hasPdf = snapshotResult.Item.pdfSource;
+      const hasScreenshot = snapshotResult.Item.screenshotS3Key;
 
-      try {
-        const presignedUrl = s3.getSignedUrl('getObject', params);
-        console.log(`[API] Generated presigned URL for screenshot: ${s3Key}`);
-        return res.json({
-          url: presignedUrl,
-          s3Key: s3Key,
-          date: date,
-          type: 'screenshot',
-          scrapedAt: snapshotResult.Item.scrapedAt
-        });
-      } catch (s3Error) {
-        console.warn(`[API] S3 signing failed, trying fallback: ${s3Error.message}`);
-        // Fall through to PDF check
+      // If we prefer PDF and have it, use it
+      if (preferPdf && hasPdf) {
+        const pdfS3Key = snapshotResult.Item.pdfSource;
+        console.log(`[API] Using PDF (preferred) for ${snapshotType}: ${pdfS3Key}`);
+
+        const params = {
+          Bucket: 'market-dashboard-csv-data',
+          Key: pdfS3Key,
+          Expires: 3600 // 1 hour
+        };
+
+        try {
+          const presignedUrl = s3.getSignedUrl('getObject', params);
+          console.log(`[API] Generated presigned URL for PDF: ${pdfS3Key}`);
+          return res.json({
+            url: presignedUrl,
+            s3Key: pdfS3Key,
+            date: date,
+            type: 'pdf',
+            scrapedAt: snapshotResult.Item.scrapedAt
+          });
+        } catch (s3Error) {
+          console.warn(`[API] PDF S3 signing failed, trying screenshot: ${s3Error.message}`);
+          // Fall through to screenshot
+        }
       }
-    } else if (snapshotResult.Item && snapshotResult.Item.pdfSource) {
-      // Fallback to PDF when no screenshot exists
-      const pdfS3Key = snapshotResult.Item.pdfSource;
-      console.log(`[API] No screenshot found, falling back to PDF: ${pdfS3Key}`);
 
-      const params = {
-        Bucket: 'market-dashboard-csv-data',
-        Key: pdfS3Key,
-        Expires: 3600 // 1 hour
-      };
+      // Use screenshot if available
+      if (hasScreenshot) {
+        const s3Key = snapshotResult.Item.screenshotS3Key;
 
-      try {
-        const presignedUrl = s3.getSignedUrl('getObject', params);
-        console.log(`[API] Generated presigned URL for PDF: ${pdfS3Key}`);
-        return res.json({
-          url: presignedUrl,
-          s3Key: pdfS3Key,
-          date: date,
-          type: 'pdf',
-          scrapedAt: snapshotResult.Item.scrapedAt
-        });
-      } catch (s3Error) {
-        console.warn(`[API] PDF S3 signing failed: ${s3Error.message}`);
-        // Fall through to local check
+        // Generate presigned URL
+        const params = {
+          Bucket: 'market-dashboard-csv-data',
+          Key: s3Key,
+          Expires: 3600 // 1 hour
+        };
+
+        try {
+          const presignedUrl = s3.getSignedUrl('getObject', params);
+          console.log(`[API] Generated presigned URL for screenshot: ${s3Key}`);
+          return res.json({
+            url: presignedUrl,
+            s3Key: s3Key,
+            date: date,
+            type: 'screenshot',
+            scrapedAt: snapshotResult.Item.scrapedAt
+          });
+        } catch (s3Error) {
+          console.warn(`[API] S3 signing failed, trying PDF fallback: ${s3Error.message}`);
+          // Fall through to PDF check
+        }
       }
-    } else {
-      console.log(`[API] No S3 key found in DynamoDB for ${date}, checking local files...`);
+
+      // Fallback to PDF if no screenshot or screenshot failed
+      if (hasPdf) {
+        const pdfS3Key = snapshotResult.Item.pdfSource;
+        console.log(`[API] Fallback to PDF: ${pdfS3Key}`);
+
+        const params = {
+          Bucket: 'market-dashboard-csv-data',
+          Key: pdfS3Key,
+          Expires: 3600 // 1 hour
+        };
+
+        try {
+          const presignedUrl = s3.getSignedUrl('getObject', params);
+          console.log(`[API] Generated presigned URL for PDF: ${pdfS3Key}`);
+          return res.json({
+            url: presignedUrl,
+            s3Key: pdfS3Key,
+            date: date,
+            type: 'pdf',
+            scrapedAt: snapshotResult.Item.scrapedAt
+          });
+        } catch (s3Error) {
+          console.warn(`[API] PDF S3 signing failed: ${s3Error.message}`);
+          // Fall through to local check
+        }
+      }
     }
+
+    console.log(`[API] No S3 key found in DynamoDB for ${date}/${snapshotType}, checking local files...`);
 
   } catch (error) {
     console.warn(`[API] DynamoDB/S3 error for screenshot: ${error.message}`);
@@ -1624,6 +1663,76 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
     res.status(500).json({ error: 'Failed to get CSV URL', details: error.message });
   }
 });
+
+// Hedgeye Snapshot Data endpoint - returns full extracted data for any snapshot type
+app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
+  const startTime = Date.now();
+  const { snapshotType } = req.params;
+  const date = req.query.date; // Optional date, defaults to latest
+
+  console.log(`[API] /api/hedgeye/snapshot/${snapshotType}?date=${date} called`);
+
+  try {
+    let item = null;
+
+    if (date) {
+      // Fetch specific date
+      const params = {
+        TableName: 'HedgeyeDailySnapshot',
+        Key: { date: date, snapshotType: snapshotType }
+      };
+      const result = await dynamodb.get(params).promise();
+      item = result.Item;
+    } else {
+      // Find latest by scanning last 7 days
+      for (let i = 0; i < 7; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+        const params = {
+          TableName: 'HedgeyeDailySnapshot',
+          Key: { date: dateStr, snapshotType: snapshotType }
+        };
+        const result = await dynamodb.get(params).promise();
+        if (result.Item) {
+          item = result.Item;
+          break;
+        }
+      }
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Snapshot not found', snapshotType, date });
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/hedgeye/snapshot/${snapshotType} completed in ${totalTime}ms`);
+
+    res.json({
+      date: item.date,
+      snapshotType: snapshotType,
+      scrapedAt: item.scrapedAt,
+      data: item.data,
+      trendChanges: item.trendChanges,
+      outbucket: item.outbucket,
+      meta: {
+        riskRangeCount: item.riskRangeCount,
+        stockCount: item.stockCount,
+        cryptoCount: item.cryptoCount,
+        rankingCount: item.rankingCount
+      },
+      pdfSource: item.pdfSource,
+      screenshotS3Key: item.screenshotS3Key
+    });
+
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/hedgeye/snapshot/${snapshotType} after ${totalTime}ms:`, error);
+    res.status(500).json({ error: 'Failed to fetch snapshot', details: error.message });
+  }
+});
+
 // Hedgeye Changelog endpoint - returns added/removed items for each data type
 app.get('/api/hedgeye/changelog', async (req, res) => {
   const startTime = Date.now();

@@ -13,7 +13,7 @@ from pathlib import Path
 import pdfplumber
 
 # Import individual processors
-from parse_hedgeye_pdf import extract_risk_ranges, save_to_dynamodb as save_risk_ranges
+from parse_hedgeye_pdf import extract_all_risk_range_data as extract_risk_ranges, save_to_dynamodb as save_risk_ranges
 from parse_bitcoin_tracker import extract_bitcoin_tracker, save_to_dynamodb as save_bitcoin_tracker
 from parse_early_look import extract_early_look, save_to_dynamodb as save_early_look
 from parse_momo_tracker import extract_momo_tracker, save_to_dynamodb as save_momo_tracker
@@ -169,7 +169,11 @@ def process_pdf(pdf_path, forced_type=None):
         print("\n📊 Extracting risk range data...")
         data = extract_risk_ranges(pdf_path)
         if data:
-            save_risk_ranges(data, s3_key, pdf_date)
+            # Generate screenshot
+            from parse_hedgeye_pdf import generate_screenshot
+            screenshot_s3_key = generate_screenshot(pdf_path, pdf_date)
+            
+            save_risk_ranges(data, s3_key, pdf_date, screenshot_s3_key)
             return True
 
     elif config['processor'] == 'bitcoin_tracker':
@@ -210,16 +214,24 @@ def process_pdf(pdf_path, forced_type=None):
     return False
 
 def find_new_hedgeye_pdfs():
-    """Find all PDFs in Downloads/hedgeye folder and subfolders from today"""
+    """Find all PDFs in Downloads/hedgeye folder and subfolders from the last 7 days"""
     today = datetime.now().date()
     pdfs = [] # List of tuples (path, forced_type)
 
+    print(f"Scanning for PDFs from the last 7 days...")
+
+    # Helper to check if file is recent
+    def is_recent(file_path):
+        mtime = datetime.fromtimestamp(file_path.stat().st_mtime).date()
+        days_diff = (today - mtime).days
+        return 0 <= days_diff <= 7
+
     # 1. Check root folder (Auto-detect)
     print(f"Scanning root: {DOWNLOADS_DIR}")
-    for pdf_file in DOWNLOADS_DIR.glob("*.pdf"):
-        mtime = datetime.fromtimestamp(pdf_file.stat().st_mtime).date()
-        if mtime == today:
-            pdfs.append((pdf_file, None))
+    if DOWNLOADS_DIR.exists():
+        for pdf_file in DOWNLOADS_DIR.glob("*.pdf"):
+            if is_recent(pdf_file):
+                pdfs.append((pdf_file, None))
 
     # 2. Check subfolders (Forced type)
     for folder_name, pdf_type in FOLDER_MAPPING.items():
@@ -227,8 +239,7 @@ def find_new_hedgeye_pdfs():
         if subfolder.exists():
             print(f"Scanning subfolder: {subfolder}")
             for pdf_file in subfolder.glob("*.pdf"):
-                mtime = datetime.fromtimestamp(pdf_file.stat().st_mtime).date()
-                if mtime == today:
+                if is_recent(pdf_file):
                     pdfs.append((pdf_file, pdf_type))
 
     # Sort by time

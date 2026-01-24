@@ -24,6 +24,13 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from bs4 import BeautifulSoup
+import requests
+import shutil
+from parse_bitcoin_tracker import extract_bitcoin_tracker, save_to_dynamodb as save_bitcoin
+from parse_early_look import extract_early_look, save_to_dynamodb as save_early_look
+from parse_portfolio_solutions import extract_portfolio_solutions, save_to_dynamodb as save_portfolio
+from parse_momo_tracker import extract_momo_tracker, save_to_dynamodb as save_momo
+from parse_signal_strength import extract_signal_strength, save_to_dynamodb as save_signal
 
 # Try undetected-chromedriver first (better Cloudflare bypass)
 try:
@@ -92,6 +99,100 @@ def load_cookies() -> Optional[list]:
         except Exception as e:
             print(f"Warning: Could not load cookies: {e}")
     return None
+
+
+def detect_pdf_type(filename):
+    """Detect PDF type from filename"""
+    filename_lower = filename.lower()
+
+    if 'bitcoin' in filename_lower or 'btc' in filename_lower:
+        return 'bitcoin-trend-tracker'
+    elif 'early' in filename_lower or 'look' in filename_lower:
+        return 'early-look'
+    elif 'portfolio' in filename_lower or 'solution' in filename_lower:
+        return 'portfolio-solutions'
+    elif 'momo' in filename_lower or 'momentum' in filename_lower:
+        return 'momo-tracker'
+    elif 'signal' in filename_lower or 'strength' in filename_lower:
+        return 'signal-strength'
+    else:
+        return None
+
+def process_pdf_url(driver, pdf_url, cookies, s3_client=None):
+    """Download and process a PDF found on the page"""
+    try:
+        print(f"   Found PDF: {pdf_url}")
+        
+        # Prepare cookies for requests
+        req_cookies = {}
+        for c in cookies:
+            req_cookies[c['name']] = c['value']
+            
+        # Download PDF
+        response = requests.get(pdf_url, cookies=req_cookies, stream=True)
+        if response.status_code != 200:
+            print(f"   ⚠️ Failed to download PDF: Status {response.status_code}")
+            return
+
+        filename = pdf_url.split('/')[-1].split('?')[0]
+        if not filename.endswith('.pdf'):
+            filename += '.pdf'
+            
+        temp_path = SCRIPT_DIR / filename
+        with open(temp_path, 'wb') as f:
+            response.raw.decode_content = True
+            shutil.copyfileobj(response.raw, f)
+            
+        print(f"   ✓ Downloaded to: {temp_path}")
+        
+        # Detect type
+        pdf_type = detect_pdf_type(filename)
+        if not pdf_type:
+            print(f"   ⚠️ Unknown PDF type for {filename}, skipping parsing")
+            return
+
+        print(f"   Processing as {pdf_type}...")
+        
+        # Upload to S3 if available
+        pdf_s3_key = None
+        if s3_client:
+            try:
+                date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                pdf_s3_key = f"hedgeye/{pdf_type}-{date_str}.pdf"
+                s3_client.upload_file(str(temp_path), 'market-dashboard-csv-data', pdf_s3_key,
+                                    ExtraArgs={'ContentType': 'application/pdf'})
+                print(f"   ✓ PDF uploaded to S3: {pdf_s3_key}")
+            except Exception as e:
+                print(f"   ⚠️ S3 upload failed: {e}")
+
+        # Parse and Save
+        from date_utils import extract_date_from_pdf
+        pdf_date = extract_date_from_pdf(temp_path)
+        
+        if pdf_type == 'bitcoin-trend-tracker':
+            data = extract_bitcoin_tracker(temp_path, s3_key=pdf_s3_key)
+            if data: save_bitcoin(data, pdf_s3_key=pdf_s3_key, pdf_date=pdf_date)
+            
+        elif pdf_type == 'early-look':
+            data = extract_early_look(temp_path)
+            if data: save_early_look(data, pdf_s3_key=pdf_s3_key, pdf_date=pdf_date)
+            
+        elif pdf_type == 'portfolio-solutions':
+            data = extract_portfolio_solutions(temp_path, s3_key=pdf_s3_key)
+            if data: save_portfolio(data, pdf_s3_key=pdf_s3_key, pdf_date=pdf_date)
+
+        elif pdf_type == 'momo-tracker':
+            data = extract_momo_tracker(temp_path, s3_key=pdf_s3_key)
+            if data: save_momo(data, pdf_s3_key=pdf_s3_key, pdf_date=pdf_date)
+
+        elif pdf_type == 'signal-strength':
+            data = extract_signal_strength(temp_path, s3_key=pdf_s3_key)
+            if data: save_signal(data, pdf_s3_key=pdf_s3_key, pdf_date=pdf_date)
+            
+    except Exception as e:
+        print(f"   ⚠️ Error processing PDF {pdf_url}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def run_scrape_mode(store_to_dynamodb: bool = True, headless: bool = True) -> Optional[Dict]:
@@ -211,10 +312,13 @@ def _scrape_with_undetected(cookies: list, store_to_dynamodb: bool, headless: bo
         
         # Try to find table
         try:
-            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
-            print("✓ Found table on page")
+            # Wait for either table or feed items
+            WebDriverWait(driver, 30).until(
+                lambda d: d.find_elements(By.TAG_NAME, "table") or d.find_elements(By.CLASS_NAME, "feed-item")
+            )
+            print("✓ Page content loaded (table or feed items)")
         except TimeoutException:
-            print("⚠ No table found after 15 seconds - will parse HTML anyway")
+            print("⚠ No table or feed items found after 30 seconds - will parse HTML anyway")
         
         # Get page HTML
         print("\nExtracting page HTML...")
@@ -253,6 +357,28 @@ def _scrape_with_undetected(cookies: list, store_to_dynamodb: bool, headless: bo
         except Exception as e:
             print(f"⚠ Screenshot failed: {e}")
         
+        # Scan for PDF links (Auxiliary Products)
+        print("\nScanning for PDF links (Auxiliary Products)...")
+        try:
+            pdf_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='.pdf']")
+            print(f"Found {len(pdf_links)} PDF links")
+            
+            s3_client_obj = None
+            if BOTO3_AVAILABLE:
+                s3_client_obj = boto3.client('s3', region_name='us-west-1')
+
+            processed_urls = set()
+            for link in pdf_links:
+                try:
+                    url = link.get_attribute('href')
+                    if url and url not in processed_urls:
+                        processed_urls.add(url)
+                        process_pdf_url(driver, url, cookies, s3_client=s3_client_obj)
+                except Exception as e:
+                    print(f"Error extracting link: {e}")
+        except Exception as e:
+            print(f"Error scanning PDF links: {e}")
+
         # Process results
         if risk_range_data:
             print(f"\n✓ Successfully scraped {len(risk_range_data)} securities")
@@ -275,6 +401,10 @@ def _scrape_with_undetected(cookies: list, store_to_dynamodb: bool, headless: bo
                 store_to_dynamodb_table(risk_range_data, screenshot_s3_key, csv_s3_key)
         else:
             print("\n✗ No data scraped. Check hedgeye_debug.html")
+            # Fallback: Store screenshot in DynamoDB even if data extraction failed
+            if screenshot_s3_key and store_to_dynamodb and BOTO3_AVAILABLE:
+                print("  Saving screenshot reference to DynamoDB despite extraction failure...")
+                store_to_dynamodb_table({}, screenshot_s3_key, None)
         
     except Exception as e:
         print(f"\n✗ Error during scrape: {e}")

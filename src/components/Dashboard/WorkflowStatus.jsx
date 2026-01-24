@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Title, Text, Badge, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Button, Metric } from '@tremor/react';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { ENDPOINTS } from '../../constants/apiEndpoints';
@@ -34,6 +34,11 @@ const WorkflowStatus = () => {
 
   // Track PDF URLs and loading states for each data type
   const [allPdfData, setAllPdfData] = useState({});
+  // Track snapshot data for each data type (for table views)
+  const [allSnapshotData, setAllSnapshotData] = useState({});
+
+  // Track last fetched run date to prevent re-fetching on tab switch
+  const lastFetchedRunDate = useRef(null);
 
   const isDark = theme === 'dark';
 
@@ -43,18 +48,21 @@ const WorkflowStatus = () => {
 
   // Fetch workflow status and data
   const fetchData = async () => {
+    console.log('[WorkflowStatus] fetchData called');
     try {
       setLoading(true);
       setLoadingStatus('Loading data...');
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+      console.log('[WorkflowStatus] Backend URL:', backendUrl);
 
       // Helper for individual timeouts
+      // Increased to 60s because server can be busy with price fetches
       const withTimeout = (promise, ms) => Promise.race([
         promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out - server may be busy')), ms))
       ]);
 
-      const TIMEOUT_MS = 15000; // 15s individual timeout
+      const TIMEOUT_MS = 60000; // 60s individual timeout (server can be busy with price fetches)
 
       // Execute all fetches in parallel using Promise.allSettled
       // This ensures that if one request fails/hangs, others are still processed
@@ -65,8 +73,12 @@ const WorkflowStatus = () => {
         withTimeout(axios.get(`${backendUrl}/api/hedgeye/changelog`), TIMEOUT_MS)
       ]);
 
+      console.log('[WorkflowStatus] All promises settled, processing results...');
+      console.log('[WorkflowStatus] Results:', results.map(r => r.status));
+
       // Process workflow status
       if (results[0].status === 'fulfilled') {
+        console.log('[WorkflowStatus] Workflow status fulfilled:', results[0].value.data?.hedgeye?.lastRun);
         setWorkflowStatus(results[0].value.data);
       } else {
         console.error('Error fetching workflow status:', results[0].reason);
@@ -96,6 +108,7 @@ const WorkflowStatus = () => {
 
       // Process freshness data
       if (results[2].status === 'fulfilled') {
+        console.log('[WorkflowStatus] Freshness fulfilled, risk-ranges itemCount:', results[2].value?.dataTypes?.['risk-ranges']?.itemCount);
         setFreshnessData(results[2].value);
       } else {
         console.error('Error fetching Hedgeye freshness:', results[2].reason);
@@ -120,17 +133,18 @@ const WorkflowStatus = () => {
   };
 
   // Fetch all PDFs sequentially when preview tab is active
+  // Fetch all PDFs sequentially when preview tab is active
   useEffect(() => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
     if (activeTab === 'preview' && currentHedgeyeStatus.lastRun) {
-      fetchAllPdfsSequentially();
-      fetchCsvUrl();
-    } else {
-      // Clear all PDF data when leaving preview tab
-      setAllPdfData({});
-      setCsvUrl(null);
+      // Only fetch if we haven't fetched for this date yet
+      if (lastFetchedRunDate.current !== currentHedgeyeStatus.lastRun) {
+        fetchAllPdfsSequentially();
+        fetchCsvUrl();
+        lastFetchedRunDate.current = currentHedgeyeStatus.lastRun;
+      }
     }
-  }, [activeTab, workflowStatus?.hedgeye?.lastRun]);
+  }, [activeTab, workflowStatus]);
 
   useEffect(() => {
     fetchData();
@@ -144,7 +158,7 @@ const WorkflowStatus = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch all PDFs sequentially (top to bottom) so user can start verifying while others load
+  // Fetch all PDFs and snapshot data sequentially (top to bottom)
   const fetchAllPdfsSequentially = async () => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
     if (!currentHedgeyeStatus.lastRun) return;
@@ -161,13 +175,14 @@ const WorkflowStatus = () => {
       }));
 
       try {
-        const response = await axios.get(`${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`);
+        // Fetch screenshot/PDF
+        const pdfResponse = await axios.get(`${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`);
         setAllPdfData(prev => ({
           ...prev,
           [key]: {
             loading: false,
-            url: response.data.url,
-            type: response.data.type || 'screenshot',
+            url: pdfResponse.data.url,
+            type: pdfResponse.data.type || 'screenshot',
             error: null
           }
         }));
@@ -181,6 +196,21 @@ const WorkflowStatus = () => {
             type: null,
             error: 'Not available'
           }
+        }));
+      }
+
+      // Also fetch snapshot data for table view
+      try {
+        const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/snapshot/${key}`);
+        setAllSnapshotData(prev => ({
+          ...prev,
+          [key]: snapshotResponse.data
+        }));
+      } catch (error) {
+        console.error(`Error fetching snapshot data for ${key}:`, error);
+        setAllSnapshotData(prev => ({
+          ...prev,
+          [key]: null
         }));
       }
     }
@@ -203,34 +233,43 @@ const WorkflowStatus = () => {
   };
 
   // Calculate data freshness
-  const getDataFreshness = (timestamp, dataType) => {
-    if (!timestamp) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never', timestampStr: 'Never' };
+  const getDataFreshness = (contentDate, uploadTimestamp, dataType) => {
+    if (!contentDate) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never', timestampStr: 'Never' };
 
     // Current date in YYYY-MM-DD format (EST)
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
     let dataDate;
-    let dateObj;
+    // Check if contentDate is already YYYY-MM-DD (Content Date from backend)
+    const isSimpleContentDate = typeof contentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(contentDate);
 
-    // Check if timestamp is already YYYY-MM-DD (Content Date from backend)
-    const isSimpleDate = typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(timestamp);
-
-    if (isSimpleDate) {
-      dataDate = timestamp;
-      // create date object for display (Timezone agnostic - append noon to avoid shifts)
-      dateObj = new Date(timestamp + 'T12:00:00');
+    if (isSimpleContentDate) {
+      dataDate = contentDate;
     } else {
-      dateObj = new Date(timestamp);
-      if (isNaN(dateObj.getTime())) return { status: 'error', hours: null, label: 'Invalid Date', dateStr: 'Invalid', timestampStr: 'Invalid' };
-      dataDate = dateObj.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const co = new Date(contentDate);
+      if (isNaN(co.getTime())) return { status: 'error', hours: null, label: 'Invalid Date', dateStr: 'Invalid', timestampStr: 'Invalid' };
+      dataDate = co.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     }
 
-    // Display string (e.g. "Jan 21")
-    const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    // Determine the display timestamp string
+    // Use uploadTimestamp if provided, otherwise fallback to contentDate
+    const displayTime = uploadTimestamp || contentDate;
+    const isSimpleDisplayDate = typeof displayTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(displayTime);
+
+    let dateObj;
+    if (isSimpleDisplayDate) {
+      dateObj = new Date(displayTime + 'T12:00:00');
+    } else {
+      dateObj = new Date(displayTime);
+    }
+
+    if (isNaN(dateObj.getTime())) {
+      return { status: 'error', hours: null, label: 'Invalid Display Date', dateStr: 'Invalid', timestampStr: 'Invalid' };
+    }
 
     // Professional timestamp format (e.g. "2026-01-21 14:30:45")
-    const timestampStr = isSimpleDate
-      ? `${dataDate} 00:00:00`
+    const timestampStr = isSimpleDisplayDate
+      ? displayTime // Just show the date if we don't have time
       : dateObj.toLocaleString('en-CA', {
         timeZone: 'America/New_York',
         year: 'numeric',
@@ -241,6 +280,9 @@ const WorkflowStatus = () => {
         second: '2-digit',
         hour12: false
       }).replace(',', '');
+
+    // Display string (e.g. "Jan 21")
+    const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
     // Calculate age in hours (approximation for simple dates)
     const daysDiff = (new Date(today) - new Date(dataDate)) / (1000 * 60 * 60 * 24);
@@ -297,8 +339,8 @@ const WorkflowStatus = () => {
     }
   };
 
-  const hedgeyeFreshness = getDataFreshness(hedgeyeStatus.lastRun);
-  const csvFreshness = getDataFreshness(csvStatus.lastUpload);
+  const hedgeyeFreshness = getDataFreshness(hedgeyeStatus.lastRun, hedgeyeStatus.scrapedAt);
+  const csvFreshness = getDataFreshness(csvStatus.lastUpload, csvStatus.scrapedAt);
 
   // Validation helper: check if a row has valid data
   const getRowStatus = (ticker, lrr, hrr) => {
@@ -515,7 +557,7 @@ const WorkflowStatus = () => {
                     };
 
                     // Frontend freshness is still used for the timestamp
-                    const freshness = getDataFreshness(data.lastUpdated || data.date, key);
+                    const freshness = getDataFreshness(data.lastUpdated || data.date, data.scrapedAt, key);
 
                     return (
                       <div
@@ -1221,10 +1263,10 @@ const WorkflowStatus = () => {
                     {/* Left Side: PDF/Screenshot */}
                     <div style={{
                       borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                      overflow: 'hidden',
+                      overflow: 'auto',
                       display: 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
-                      justifyContent: 'center',
                       position: 'relative'
                     }}>
                       {pdfData.loading ? (
@@ -1232,7 +1274,9 @@ const WorkflowStatus = () => {
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
-                          gap: '8px'
+                          gap: '8px',
+                          height: '100%',
+                          justifyContent: 'center'
                         }}>
                           <div
                             style={{
@@ -1267,19 +1311,25 @@ const WorkflowStatus = () => {
                           src={pdfData.url}
                           alt={label}
                           style={{
-                            maxWidth: '100%',
+                            width: '100%',
                             height: 'auto',
-                            maxHeight: '100%',
                             objectFit: 'contain'
                           }}
                         />
                       ) : (
-                        <Text style={{
-                          color: isDark ? '#6b7280' : '#9ca3af',
-                          fontSize: '12px'
+                        <div style={{
+                          height: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
                         }}>
-                          {pdfData.error || 'Waiting...'}
-                        </Text>
+                          <Text style={{
+                            color: isDark ? '#6b7280' : '#9ca3af',
+                            fontSize: '12px'
+                          }}>
+                            {pdfData.error || 'Waiting...'}
+                          </Text>
+                        </div>
                       )}
                     </div>
 
@@ -1290,76 +1340,447 @@ const WorkflowStatus = () => {
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
-                      {previewViewMode === 'json' ? (
-                        <div style={{ padding: '12px' }}>
-                          <pre style={{
-                            fontSize: '10px',
-                            fontFamily: 'monospace',
-                            margin: 0,
-                            whiteSpace: 'pre-wrap',
-                            color: isDark ? '#d1d5db' : '#374151'
-                          }}>
-                            {JSON.stringify(jsonData, null, 2)}
-                          </pre>
-                        </div>
-                      ) : key === 'risk-ranges' && hasData ? (
-                        <Table>
-                          <TableHead>
-                            <TableRow>
-                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
-                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
-                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
-                              <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Sts</TableHeaderCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {riskRangesTableData.map((row) => (
-                              <TableRow key={row.ticker}>
-                                <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>
-                                  {row.ticker}
-                                </TableCell>
-                                <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>
-                                  {row.lrr.toFixed(2)}
-                                </TableCell>
-                                <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>
-                                  {row.hrr.toFixed(2)}
-                                </TableCell>
-                                <TableCell style={{ padding: '4px 8px' }}>
-                                  <span style={{
-                                    fontSize: '10px',
-                                    padding: '2px 6px',
-                                    borderRadius: '4px',
-                                    backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
-                                      row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
-                                    color: row.trend === 'BULLISH' ? '#10b981' :
-                                      row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                      {(() => {
+                        const snapshotData = allSnapshotData[key];
+                        const data = snapshotData?.data;
+
+                        // JSON view
+                        if (previewViewMode === 'json') {
+                          return (
+                            <div style={{ padding: '12px' }}>
+                              <pre style={{
+                                fontSize: '10px',
+                                fontFamily: 'monospace',
+                                margin: 0,
+                                whiteSpace: 'pre-wrap',
+                                color: isDark ? '#d1d5db' : '#374151'
+                              }}>
+                                {JSON.stringify(snapshotData || {}, null, 2)}
+                              </pre>
+                            </div>
+                          );
+                        }
+
+                        // No data available
+                        if (!data) {
+                          return (
+                            <div style={{
+                              flex: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: '20px',
+                              color: isDark ? '#9ca3af' : '#6b7280',
+                              fontSize: '12px'
+                            }}>
+                              Loading data...
+                            </div>
+                          );
+                        }
+
+
+                        // Risk Ranges - Special format with 3 sections
+                        if (key === 'risk-ranges') {
+                          const items = Object.entries(data)
+                            .map(([ticker, info]) => ({
+                              ticker,
+                              lrr: info.lrr || 0,
+                              close: info.prevClose || 0,
+                              hrr: info.hrr || 0,
+                              trend: info.trend || 'N/A',
+                              index: info.index ?? 9999
+                            }))
+                            .sort((a, b) => a.index - b.index);
+
+                          const trendChanges = snapshotData.trendChanges || [];
+                          const outbucket = snapshotData.outbucket || [];
+
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', padding: '16px 4px' }}>
+
+                              {/* 1. Trend Changes Section */}
+                              {trendChanges.length > 0 && (
+                                <div>
+                                  <Text style={{
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    color: isDark ? '#f3f4f6' : '#111827',
+                                    paddingLeft: '8px',
+                                    marginBottom: '8px',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.05em'
                                   }}>
-                                    {row.trend}
-                                  </span>
-                                </TableCell>
-                                <TableCell style={{ padding: '4px 8px' }}>
-                                  <span title={row.statusMessage} style={{ fontSize: '12px' }}>
-                                    {row.statusIcon}
-                                  </span>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      ) : (
-                        <div style={{
-                          flex: 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '20px',
-                          color: isDark ? '#9ca3af' : '#6b7280',
-                          fontSize: '12px'
-                        }}>
-                          No extracted data view available for {label}
-                        </div>
-                      )}
+                                    Trend Changes ({trendChanges.length})
+                                  </Text>
+                                  <Table>
+                                    <TableHead>
+                                      <TableRow>
+                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Change</TableHeaderCell>
+                                      </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                      {trendChanges.map((tc, idx) => (
+                                        <TableRow key={idx}>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{tc.ticker}</TableCell>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                              <span style={{ color: tc.oldTrend === 'BULLISH' ? '#10b981' : tc.oldTrend === 'BEARISH' ? '#ef4444' : '#6b7280' }}>{tc.oldTrend}</span>
+                                              <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
+                                              <span style={{ fontWeight: 600, color: tc.newTrend === 'BULLISH' ? '#10b981' : tc.newTrend === 'BEARISH' ? '#ef4444' : '#6b7280' }}>{tc.newTrend}</span>
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              )}
+
+                              {/* 2. Risk Ranges Table (The standard one) */}
+                              <div>
+                                <Text style={{
+                                  fontSize: '12px',
+                                  fontWeight: 700,
+                                  color: isDark ? '#f3f4f6' : '#111827',
+                                  paddingLeft: '8px',
+                                  marginBottom: '8px',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.05em'
+                                }}>
+                                  Risk Ranges ({items.length})
+                                </Text>
+                                <Table>
+                                  <TableHead>
+                                    <TableRow>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Close</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
+                                    </TableRow>
+                                  </TableHead>
+                                  <TableBody>
+                                    {items.map((row) => (
+                                      <TableRow key={row.ticker}>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.lrr).toFixed(2)}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 600 }}>{Number(row.close).toFixed(2)}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.hrr).toFixed(2)}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px' }}>
+                                          <span style={{
+                                            fontSize: '10px',
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
+                                              row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
+                                            color: row.trend === 'BULLISH' ? '#10b981' :
+                                              row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                          }}>
+                                            {row.trend}
+                                          </span>
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+
+                              {/* 3. OutBucket Section */}
+                              {outbucket.length > 0 && (
+                                <div>
+                                  <Text style={{
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    color: isDark ? '#f3f4f6' : '#111827',
+                                    paddingLeft: '8px',
+                                    marginBottom: '8px',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.05em'
+                                  }}>
+                                    #OutBucket ({outbucket.length})
+                                  </Text>
+                                  <Table>
+                                    <TableHead>
+                                      <TableRow>
+                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Removed At</TableHeaderCell>
+                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Final Trend</TableHeaderCell>
+                                      </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                      {outbucket.map((item, idx) => (
+                                        <TableRow key={idx}>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.ticker}</TableCell>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>{item.dateRemoved}</TableCell>
+                                          <TableCell style={{ padding: '4px 8px' }}>
+                                            <span style={{
+                                              fontSize: '10px',
+                                              color: item.trend === 'BULLISH' ? '#10b981' :
+                                                item.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                            }}>
+                                              {item.trend}
+                                            </span>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              )}
+
+                            </div>
+                          );
+                        }
+
+                        // Early Look - simple format with LRR/HRR
+                        if (key === 'early-look') {
+                          const items = Object.entries(data)
+                            .map(([ticker, info]) => ({
+                              ticker,
+                              lrr: info.lrr || 0,
+                              hrr: info.hrr || 0,
+                              trend: info.trend || 'N/A',
+                              index: info.index ?? 9999
+                            }))
+                            .sort((a, b) => a.index - b.index);
+
+                          return (
+                            <Table>
+                              <TableHead>
+                                <TableRow>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {items.map((row) => (
+                                  <TableRow key={row.ticker}>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.lrr).toFixed(2)}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.hrr).toFixed(2)}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px' }}>
+                                      <span style={{
+                                        fontSize: '10px',
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
+                                          row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
+                                        color: row.trend === 'BULLISH' ? '#10b981' :
+                                          row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                      }}>
+                                        {row.trend}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          );
+                        }
+
+                        // Momo Tracker - Buy/Sell columns
+                        if (key === 'momo-tracker') {
+                          const items = Object.entries(data)
+                            .map(([ticker, info]) => ({
+                              ticker,
+                              buyTrade: info.buyTrade || 0,
+                              sellTrade: info.sellTrade || 0,
+                              upside: info.upside || 0,
+                              downside: info.downside || 0,
+                              trend: info.trend || 'N/A',
+                              index: info.index ?? 9999
+                            }))
+                            .sort((a, b) => a.index - b.index);
+
+                          return (
+                            <Table>
+                              <TableHead>
+                                <TableRow>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Buy Trade</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Sell Trade</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Upside</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Downside</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {items.map((row) => (
+                                  <TableRow key={row.ticker}>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.buyTrade).toFixed(0)}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.sellTrade).toFixed(0)}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: '#10b981' }}>{Number(row.upside).toFixed(2)}%</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: '#ef4444' }}>{Number(row.downside).toFixed(2)}%</TableCell>
+                                    <TableCell style={{ padding: '4px 8px' }}>
+                                      <span style={{
+                                        fontSize: '10px',
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
+                                          row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
+                                        color: row.trend === 'BULLISH' ? '#10b981' :
+                                          row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                      }}>
+                                        {row.trend}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          );
+                        }
+
+                        // Bitcoin Tracker - has cryptos and stocks
+                        if (key === 'bitcoin-trend-tracker') {
+                          const cryptos = data.cryptos ? Object.entries(data.cryptos) : [];
+                          const stocks = data.stocks ? Object.entries(data.stocks) : [];
+                          const allItems = [...cryptos, ...stocks]
+                            .map(([ticker, info]) => ({
+                              ticker,
+                              buyTrade: info.buyTrade || 0,
+                              sellTrade: info.sellTrade || 0,
+                              trend: info.trend || 'N/A',
+                              index: info.index ?? 9999
+                            }))
+                            .sort((a, b) => a.index - b.index);
+
+                          return (
+                            <Table>
+                              <TableHead>
+                                <TableRow>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Buy Trade</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Sell Trade</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {allItems.map((row) => (
+                                  <TableRow key={row.ticker}>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.buyTrade).toLocaleString()}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.sellTrade).toLocaleString()}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px' }}>
+                                      <span style={{
+                                        fontSize: '10px',
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
+                                          row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
+                                        color: row.trend === 'BULLISH' ? '#10b981' :
+                                          row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
+                                      }}>
+                                        {row.trend}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          );
+                        }
+
+                        // Signal Strength - has stocks array + added/removed
+                        if (key === 'signal-strength') {
+                          const stocks = data.stocks || [];
+                          const added = data.added || [];
+                          const removed = data.removed || [];
+
+                          return (
+                            <div style={{ padding: '12px' }}>
+                              {added.length > 0 && (
+                                <div style={{ marginBottom: '12px' }}>
+                                  <Text style={{ fontSize: '11px', fontWeight: 600, color: '#10b981', marginBottom: '4px', display: 'block' }}>
+                                    Added ({added.length})
+                                  </Text>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    {added.map(ticker => (
+                                      <span key={ticker} style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7', borderRadius: '4px', color: '#10b981' }}>{ticker}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {removed.length > 0 && (
+                                <div style={{ marginBottom: '12px' }}>
+                                  <Text style={{ fontSize: '11px', fontWeight: 600, color: '#ef4444', marginBottom: '4px', display: 'block' }}>
+                                    Removed ({removed.length})
+                                  </Text>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    {removed.map(ticker => (
+                                      <span key={ticker} style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2', borderRadius: '4px', color: '#ef4444' }}>{ticker}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <Text style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px', display: 'block' }}>
+                                Stocks ({stocks.length})
+                              </Text>
+                              <Table>
+                                <TableHead>
+                                  <TableRow>
+                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Strength</TableHeaderCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {stocks.slice(0, 50).map((stock, idx) => (
+                                    <TableRow key={stock.ticker || idx}>
+                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{stock.ticker || stock}</TableCell>
+                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{stock.strength || '-'}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          );
+                        }
+
+                        // Portfolio Solutions - has rankings
+                        if (key === 'portfolio-solutions') {
+                          const rankings = data.rankings || [];
+
+                          return (
+                            <Table>
+                              <TableHead>
+                                <TableRow>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Rank</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Weight</TableHeaderCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {rankings.map((item, idx) => (
+                                  <TableRow key={item.ticker || idx}>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.rank || idx + 1}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.ticker}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{item.weight ? `${item.weight}%` : '-'}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          );
+                        }
+
+                        // Fallback
+                        return (
+                          <div style={{
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '20px',
+                            color: isDark ? '#9ca3af' : '#6b7280',
+                            fontSize: '12px'
+                          }}>
+                            No table view defined for {label}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

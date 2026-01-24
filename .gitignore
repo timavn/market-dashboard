@@ -45,3 +45,8 @@ aws/lambda/test_output/
 # Large Lambda deployment packages
 aws/lambda/*.zip
 aws/lambda/package/
+# Local debug logs and state
+server.log
+.antigravity
+server.js.bak
+aws/lambda/*.png

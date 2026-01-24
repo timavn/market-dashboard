@@ -13,7 +13,10 @@ from pathlib import Path
 from date_utils import extract_date_from_pdf
 
 import boto3
+import boto3
 import pdfplumber
+from pdf2image import convert_from_path
+import io
 
 TICKERS = {
     'UST30Y': 'UST30Y', 'UST10Y': 'UST10Y', 'UST2Y': 'UST2Y',
@@ -83,9 +86,9 @@ def extract_outbucket(text):
     
     outbucket_section = text[outbucket_start:]
     
-    # Pattern: • Name (TICKER) - TREND (DATE)
-    # Example: • Aerospace & Defense ETF (ITA) - BULLISH (8/22/2024)
-    pattern = r'•\s+(.+?)\s+\(([A-Z]+)\)\s+-\s+(BULLISH|BEARISH|NEUTRAL)\s+\((\d{1,2}/\d{1,2}/\d{4})\)'
+    # Pattern: [•] Name (TICKER) - TREND (DATE)
+    # Example: Aerospace & Defense ETF (ITA) = BULLISH (8/22/2024)
+    pattern = r'(?:•\s+)?(.+?)\s+\(([A-Z]+)\)\s+[=\-]\s+(BULLISH|BEARISH|NEUTRAL)\s+\((\d{1,2}/\d{1,2}/\d{4})\)'
     
     for match in re.finditer(pattern, outbucket_section):
         name = match.group(1).strip()
@@ -163,7 +166,8 @@ def extract_risk_ranges_enhanced(text):
                 'sellTrade': float(sell),
                 'prevClose': float(prev),
                 'originalName': ticker,
-                'ts': ts
+                'ts': ts,
+                'index': len(data)  # Track order from PDF
             }
             
             name_display = f" - {name}" if name else ""
@@ -229,9 +233,48 @@ def upload_pdf_to_s3(pdf_path, pdf_date=None):
     except Exception as e:
         print(f"   ⚠️  Upload failed: {e}")
         return None
+    except Exception as e:
+        print(f"   ⚠️  Upload failed: {e}")
+        return None
 
 
-def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
+def generate_screenshot(pdf_path, pdf_date=None):
+    """Generate screenshot from first page of PDF and upload to S3"""
+    print("\n📸 Generating screenshot from PDF...")
+    
+    try:
+        # Convert first page to image
+        images = convert_from_path(str(pdf_path), first_page=1, last_page=1)
+        if not images:
+            print("   ❌ Failed to convert PDF to image")
+            return None
+            
+        # Save to bytes
+        img_bytes = io.BytesIO()
+        images[0].save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        # Upload to S3
+        s3 = boto3.client('s3', region_name='us-west-1')
+        date = pdf_date if pdf_date else datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        time = datetime.now(timezone.utc).strftime('%H%M%S')
+        
+        s3_key = f"hedgeye-screenshots/{date}/risk-ranges-{date}-{time}.png"
+        
+        s3.upload_fileobj(
+            img_bytes,
+            'market-dashboard-csv-data',
+            s3_key,
+            ExtraArgs={'ContentType': 'image/png'}
+        )
+        print(f"   ✅ Screenshot uploaded: {s3_key}")
+        return s3_key
+        
+    except Exception as e:
+        print(f"   ⚠️  Screenshot generation failed: {e}")
+        return None
+
+def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=None):
     """Save enhanced data to DynamoDB"""
     if not data or not data.get('riskRanges'):
         print("\n❌ No data to save")
@@ -286,7 +329,8 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
             'hrr': Decimal(str(d['sellTrade'])),
             'prevClose': Decimal(str(d.get('prevClose', 0))),
             'trend': d['trend'],
-            'timestamp': d['ts']
+            'timestamp': d['ts'],
+            'index': d.get('index', 0)
         } for t, d in data['riskRanges'].items()},
         
         # OutBucket section
@@ -303,6 +347,8 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
     }
     if pdf_s3_key:
         snapshot_item['pdfSource'] = pdf_s3_key
+    if screenshot_s3_key:
+        snapshot_item['screenshotS3Key'] = screenshot_s3_key
     snap_table.put_item(Item=snapshot_item)
     print(f"   ✅ Snapshot saved ({len(data['trendChanges'])} changes, {len(data['outbucket'])} outbucket)")
 
@@ -337,4 +383,5 @@ if __name__ == '__main__':
     
     # Upload and save
     pdf_s3_key = upload_pdf_to_s3(pdf_path, pdf_date)
-    save_to_dynamodb(data, pdf_s3_key, pdf_date)
+    screenshot_s3_key = generate_screenshot(pdf_path, pdf_date)
+    save_to_dynamodb(data, pdf_s3_key, pdf_date, screenshot_s3_key)
