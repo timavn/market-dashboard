@@ -140,6 +140,15 @@ aws dynamodb create-table \
   --key-schema \
     AttributeName=holdingId,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
+  --global-secondary-indexes \
+    '[{
+      "IndexName": "snapshotId-index",
+      "KeySchema": [
+        {"AttributeName": "snapshotId", "KeyType": "HASH"},
+        {"AttributeName": "symbol", "KeyType": "RANGE"}
+      ],
+      "Projection": {"ProjectionType": "ALL"}
+    }]' \
   --region us-west-1
 ```
 

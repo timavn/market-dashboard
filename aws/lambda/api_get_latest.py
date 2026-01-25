@@ -32,21 +32,19 @@ def get_latest_snapshot():
 
 
 def get_holdings_for_snapshot(snapshot_id: str):
-    """Return all holdings for a given snapshotId via scan filter."""
+    """Return all holdings for a given snapshotId via GSI query."""
     table = dynamodb.Table(HOLDINGS_TABLE)
-
-    holdings = []
-    scan_kwargs = {}
-    while True:
-        resp = table.scan(**scan_kwargs)
-        for item in resp.get('Items', []):
-            if item.get('snapshotId') == snapshot_id:
-                holdings.append(item)
-        if 'LastEvaluatedKey' not in resp:
-            break
-        scan_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
-
-    return holdings
+    
+    try:
+        response = table.query(
+            IndexName='snapshotId-index',
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('snapshotId').eq(snapshot_id)
+        )
+        return response.get('Items', [])
+    except Exception as e:
+        print(f"Error querying holdings: {e}")
+        # Fallback (optional, but good for safety during index creation) or return empty
+        return []
 
 
 def lambda_handler(event, context):

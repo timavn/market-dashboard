@@ -139,7 +139,7 @@ const WorkflowStatus = () => {
     if (activeTab === 'preview' && currentHedgeyeStatus.lastRun) {
       // Only fetch if we haven't fetched for this date yet
       if (lastFetchedRunDate.current !== currentHedgeyeStatus.lastRun) {
-        fetchAllPdfsSequentially();
+        fetchAllPdfs();
         fetchCsvUrl();
         lastFetchedRunDate.current = currentHedgeyeStatus.lastRun;
       }
@@ -158,34 +158,92 @@ const WorkflowStatus = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch all PDFs and snapshot data sequentially (top to bottom)
-  const fetchAllPdfsSequentially = async () => {
+  // Helper: Get data from local storage cache
+  const getFromCache = (key, date) => {
+    try {
+      const cacheKey = `hedgeye_pdf_${key}_${date}`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (e) {
+      console.warn('Error reading from cache:', e);
+    }
+    return null;
+  };
+
+  // Helper: Save data to local storage cache
+  const saveToCache = (key, date, data) => {
+    try {
+      const cacheKey = `hedgeye_pdf_${key}_${date}`;
+      localStorage.setItem(cacheKey, JSON.stringify(data));
+    } catch (e) {
+      console.warn('Error saving to cache:', e);
+    }
+  };
+
+
+
+  // Improved parallel fetcher
+  const fetchAllPdfs = async () => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
     if (!currentHedgeyeStatus.lastRun) return;
 
     const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
     const date = new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
 
-    // Load each data type sequentially
-    for (const { key } of DATA_TYPES) {
-      // Mark as loading
+    // Helper to fetch single item
+    const fetchItem = async (key) => {
+      // Set loading state for this item
       setAllPdfData(prev => ({
         ...prev,
-        [key]: { loading: true, url: null, type: null, error: null }
+        [key]: { ...prev[key], loading: true, error: null }
       }));
 
       try {
-        // Fetch screenshot/PDF
-        const pdfResponse = await axios.get(`${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`);
+        // --- PDF / Screenshot Handling ---
+        let pdfResult = null;
+        const cachedPdf = getFromCache(key, date);
+
+        if (cachedPdf) {
+          console.log(`[Cache Hit] ${key}`);
+          pdfResult = cachedPdf;
+        } else {
+          // Fetch from network
+          const response = await axios.get(`${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`);
+          pdfResult = {
+            url: response.data.url,
+            type: response.data.type || 'screenshot',
+            error: null
+          };
+          // Cache it
+          saveToCache(key, date, pdfResult);
+        }
+
+        // Update PDF state immediately
         setAllPdfData(prev => ({
           ...prev,
-          [key]: {
-            loading: false,
-            url: pdfResponse.data.url,
-            type: pdfResponse.data.type || 'screenshot',
-            error: null
-          }
+          [key]: { loading: false, ...pdfResult }
         }));
+
+        // --- Snapshot Handling (Parallel with PDF fetch? No, let's do it here to keep related data sync'd or parallelize within item) ---
+        // Let's fetch snapshot in parallel with PDF check to max speed
+        // But for code clarity, sequential inside this item is fine, or Promise.all for this item.
+
+        try {
+          const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/snapshot/${key}`);
+          setAllSnapshotData(prev => ({
+            ...prev,
+            [key]: snapshotResponse.data
+          }));
+        } catch (err) {
+          console.warn(`Snapshot failed for ${key}`, err);
+          setAllSnapshotData(prev => ({
+            ...prev,
+            [key]: null
+          }));
+        }
+
       } catch (error) {
         console.error(`Error fetching PDF for ${key}:`, error);
         setAllPdfData(prev => ({
@@ -198,22 +256,10 @@ const WorkflowStatus = () => {
           }
         }));
       }
+    };
 
-      // Also fetch snapshot data for table view
-      try {
-        const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/snapshot/${key}`);
-        setAllSnapshotData(prev => ({
-          ...prev,
-          [key]: snapshotResponse.data
-        }));
-      } catch (error) {
-        console.error(`Error fetching snapshot data for ${key}:`, error);
-        setAllSnapshotData(prev => ({
-          ...prev,
-          [key]: null
-        }));
-      }
-    }
+    // Fire all requests in parallel
+    await Promise.all(DATA_TYPES.map(item => fetchItem(item.key)));
   };
 
   // Fetch CSV presigned URL
@@ -1591,7 +1637,7 @@ const WorkflowStatus = () => {
                               upside: info.upside || 0,
                               downside: info.downside || 0,
                               trend: info.trend || 'N/A',
-                              index: info.index ?? 9999
+                              index: (typeof info.index === 'number') ? info.index : 9999
                             }))
                             .sort((a, b) => a.index - b.index);
 
@@ -1600,8 +1646,8 @@ const WorkflowStatus = () => {
                               <TableHead>
                                 <TableRow>
                                   <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Buy Trade</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Sell Trade</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
                                   <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Upside</TableHeaderCell>
                                   <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Downside</TableHeaderCell>
                                   <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
@@ -1634,7 +1680,6 @@ const WorkflowStatus = () => {
                             </Table>
                           );
                         }
-
                         // Bitcoin Tracker - has cryptos and stocks
                         if (key === 'bitcoin-trend-tracker') {
                           const cryptos = data.cryptos ? Object.entries(data.cryptos) : [];
@@ -1654,8 +1699,8 @@ const WorkflowStatus = () => {
                               <TableHead>
                                 <TableRow>
                                   <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Buy Trade</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Sell Trade</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
                                   <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
                                 </TableRow>
                               </TableHead>
@@ -1743,26 +1788,81 @@ const WorkflowStatus = () => {
                         // Portfolio Solutions - has rankings
                         if (key === 'portfolio-solutions') {
                           const rankings = data.rankings || [];
+                          const topMovers = data.topMovers || { weekly: [], monthly: [] };
+                          const bottomMovers = data.bottomMovers || { weekly: [], monthly: [] };
+
+                          const renderMoverSection = (title, top, bottom) => (
+                            <div style={{ marginBottom: '16px' }}>
+                              <Text style={{ fontSize: '11px', fontWeight: 700, color: isDark ? '#f3f4f6' : '#111827', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                {title}
+                              </Text>
+
+                              {/* Top Movers */}
+                              <div style={{ marginBottom: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontSize: '10px', fontWeight: 600, color: '#10b981' }}>Top Movers:</span>
+                                  {top && top.length > 0 ? top.map((mover, i) => (
+                                    <span key={i} style={{ fontSize: '10px', color: isDark ? '#d1d5db' : '#374151' }}>
+                                      <span style={{ fontWeight: 600 }}>{mover.ticker}</span>
+                                      <span style={{ color: '#10b981', marginLeft: '1px' }}>(+{mover.change})</span>
+                                      {i < top.length - 1 && ','}
+                                    </span>
+                                  )) : <span style={{ fontSize: '10px', fontStyle: 'italic', color: '#9ca3af' }}>None</span>}
+                                </div>
+                              </div>
+
+                              {/* Bottom Movers */}
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontSize: '10px', fontWeight: 600, color: '#ef4444' }}>Bottom Movers:</span>
+                                  {bottom && bottom.length > 0 ? bottom.map((mover, i) => (
+                                    <span key={i} style={{ fontSize: '10px', color: isDark ? '#d1d5db' : '#374151' }}>
+                                      <span style={{ fontWeight: 600 }}>{mover.ticker}</span>
+                                      <span style={{ color: '#ef4444', marginLeft: '1px' }}>({mover.change})</span>
+                                      {i < bottom.length - 1 && ','}
+                                    </span>
+                                  )) : <span style={{ fontSize: '10px', fontStyle: 'italic', color: '#9ca3af' }}>None</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
 
                           return (
-                            <Table>
-                              <TableHead>
-                                <TableRow>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Rank</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Weight</TableHeaderCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {rankings.map((item, idx) => (
-                                  <TableRow key={item.ticker || idx}>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.rank || idx + 1}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.ticker}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{item.weight ? `${item.weight}%` : '-'}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+                            <div style={{ padding: '12px' }}>
+                              {/* 1-WEEK RE-RANK HISTORY */}
+                              {renderMoverSection('1-Week Re-Rank History', topMovers.weekly, bottomMovers.weekly)}
+
+                              {/* 1-MONTH RE-RANK HISTORY */}
+                              {renderMoverSection('1-Month Re-Rank History', topMovers.monthly, bottomMovers.monthly)}
+
+                              <div style={{ marginTop: '12px', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, paddingTop: '12px' }}>
+                                <Text style={{ fontSize: '11px', fontWeight: 700, color: isDark ? '#f3f4f6' : '#111827', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                  Ranked List ({rankings.length})
+                                </Text>
+                                <Table>
+                                  <TableHead>
+                                    <TableRow>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Rank</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>1 Week Ago</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>1 Month Ago</TableHeaderCell>
+                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Asset Class</TableHeaderCell>
+                                    </TableRow>
+                                  </TableHead>
+                                  <TableBody>
+                                    {rankings.map((item, idx) => (
+                                      <TableRow key={item.ticker || idx}>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.rank || idx + 1}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.ticker}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{item.weekAgo || '-'}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{item.monthAgo || '-'}</TableCell>
+                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>{item.assetClass || '-'}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
                           );
                         }
 
@@ -1786,7 +1886,7 @@ const WorkflowStatus = () => {
                 </div>
               );
             })}
-          </div>
+          </div >
         ) : null}
 
       </div >

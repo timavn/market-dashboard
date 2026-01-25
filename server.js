@@ -1621,23 +1621,85 @@ app.get('/api/local-screenshots/:filename', (req, res) => {
 app.get('/api/hedgeye/csv/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    console.log(`[API] /api/hedgeye/csv/${date} called`);
+    const type = req.query.type || 'risk-ranges'; // Default to risk-ranges for backward compatibility
+    console.log(`[API] /api/hedgeye/csv/${date}?type=${type} called`);
 
     // Get snapshot from DynamoDB
     const snapshotParams = {
       TableName: 'HedgeyeDailySnapshot',
       Key: {
         date: date,
-        snapshotType: 'risk-ranges'
+        snapshotType: type
       }
     };
 
     const snapshotResult = await dynamodb.get(snapshotParams).promise();
 
-    if (!snapshotResult.Item || !snapshotResult.Item.csvS3Key) {
-      return res.status(404).json({ error: 'CSV not found for this date' });
+    if (!snapshotResult.Item) {
+      return res.status(404).json({ error: 'Snapshot not found for this date and type' });
     }
 
+    // LIST OF COLUMNS FOR EACH TYPE
+    const COLUMNS = {
+      'risk-ranges': ['ticker', 'lrr', 'close', 'hrr', 'trend'],
+      'momo-tracker': ['ticker', 'buyTrade', 'sellTrade', 'upside', 'downside', 'trend', 'index']
+    };
+
+    // If we have data but no pre-generated CSV in S3 (or if we want to enforce sorting),
+    // convert JSON to CSV on the fly.
+    // For Momo Tracker, we enforce on-the-fly generation to ensure correct sorting by 'index'.
+    if (type === 'momo-tracker' || !snapshotResult.Item.csvS3Key) {
+      console.log(`[API] Generating CSV on-the-fly for ${type}`);
+      const data = snapshotResult.Item.data || {};
+
+      let items = [];
+      if (type === 'momo-tracker') {
+        items = Object.entries(data).map(([ticker, info]) => ({
+          ticker,
+          ...info,
+          // Ensure numbers are formatted nicely
+          buyTrade: parseFloat(info.buyTrade || 0).toFixed(2),
+          sellTrade: parseFloat(info.sellTrade || 0).toFixed(2),
+          upside: parseFloat(info.upside || 0).toFixed(2) + '%',
+          downside: parseFloat(info.downside || 0).toFixed(2) + '%',
+          index: info.index ?? 999
+        }));
+
+        // Sort by index
+        items.sort((a, b) => a.index - b.index);
+      } else if (type === 'risk-ranges') {
+        // Fallback logic for risk-ranges if needed
+        items = Object.entries(data).map(([ticker, info]) => ({
+          ticker,
+          ...info
+        }));
+      }
+
+      if (items.length === 0) {
+        return res.status(404).json({ error: 'No data available to generate CSV' });
+      }
+
+      // Generate CSV string
+      const headers = COLUMNS[type] || Object.keys(items[0]);
+      const csvHeader = headers.join(',');
+      const csvRows = items.map(item => {
+        return headers.map(header => {
+          // Handle special cases or generic string
+          let val = item[header];
+          if (val === undefined || val === null) val = '';
+          return `"${val}"`;
+        }).join(',');
+      });
+
+      const csvContent = [csvHeader, ...csvRows].join('\n');
+
+      // Send as file download
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="hedgeye_${type}_${date}.csv"`);
+      return res.send(csvContent);
+    }
+
+    // Default behavior: Redirect to S3 presigned URL (for existing risk-ranges files)
     const s3Key = snapshotResult.Item.csvS3Key;
 
     // Generate presigned URL (1 hour expiration)
@@ -1645,7 +1707,7 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
       Bucket: 'market-dashboard-csv-data',
       Key: s3Key,
       Expires: 3600, // 1 hour
-      ResponseContentDisposition: `attachment; filename="hedgeye_risk_ranges_${date}.csv"`
+      ResponseContentDisposition: `attachment; filename="hedgeye_${type}_${date}.csv"`
     };
 
     const presignedUrl = s3.getSignedUrl('getObject', params);

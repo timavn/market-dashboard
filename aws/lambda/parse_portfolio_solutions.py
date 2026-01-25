@@ -48,38 +48,68 @@ def extract_portfolio_solutions(pdf_path, s3_key=None):
         if len(pdf.pages) >= 1:
             page1_text = pdf.pages[0].extract_text()
 
-            # Extract Top/Bottom Movers using text patterns
-            week_top_match = re.search(r'Top Movers:\s*([A-Z]{3,5})\s*\(\+(\d+)\),\s*([A-Z]{3,5})\s*\(\+(\d+)\),\s*([A-Z]{3,5})\s*\(\+(\d+)\)', page1_text)
+            # Extract Movers using more robust logic to handle variable number of items
+            # Strategy: Find the start of the section and capture until the next section start
+            
+            # 1. Weekly Top Movers
+            week_top_match = re.search(r'Top Movers:(.*?)(Bottom Movers:|$)', page1_text, re.DOTALL | re.IGNORECASE)
             if week_top_match:
-                for i in range(0, 6, 2):
-                    ticker = week_top_match.group(i + 1)
-                    change = int(week_top_match.group(i + 2))
-                    data['topMovers']['weekly'].append({'ticker': ticker, 'change': change})
-                    print(f"   1-Week Top: {ticker} (+{change})")
+                section_text = week_top_match.group(1)
+                print(f"   [DEBUG] Weekly Top Section (first 100 chars): {section_text.strip()[:100]}...")
+                
+                # Robust regex: 2-6 chars ticker, optional space, (+, optional space, digits)
+                items = re.findall(r'([A-Z]{2,6})\s*\(\+\s*(\d+)\)', section_text)
+                for ticker, change in items:
+                    data['topMovers']['weekly'].append({'ticker': ticker, 'change': int(change)})
+                if items:
+                    print(f"   1-Week Top: {', '.join([f'{t} (+{c})' for t, c in items])}")
+                else:
+                    print("   [WARN] No items found in Weekly Top Movers section")
 
-            week_bottom_match = re.search(r'Bottom Movers:\s*([A-Z]{3,5})\s*\((-\d+)\),\s*([A-Z]{3,5})\s*\((-\d+)\),\s*([A-Z]{3,5})\s*\((-\d+)\)', page1_text)
+            # 2. Weekly Bottom Movers
+            week_bottom_match = re.search(r'Bottom Movers:(.*?)(1-MONTH|$)', page1_text, re.DOTALL | re.IGNORECASE)
             if week_bottom_match:
-                for i in range(0, 6, 2):
-                    ticker = week_bottom_match.group(i + 1)
-                    change = int(week_bottom_match.group(i + 2))
-                    data['bottomMovers']['weekly'].append({'ticker': ticker, 'change': change})
-                    print(f"   1-Week Bottom: {ticker} ({change})")
+                section_text = week_bottom_match.group(1)
+                print(f"   [DEBUG] Weekly Bottom Section (first 100 chars): {section_text.strip()[:100]}...")
+                
+                # Robust regex: Handle minus sign, en-dash, em-dash, hyphen, optional spaces
+                # Captures the number as group 2
+                # \u2013 is en-dash, \u2014 is em-dash, \u2212 is minus sign
+                items = re.findall(r'([A-Z]{2,6})\s*\([−–—-]?\s*(\d+)\)', section_text)
+                for ticker, change in items:
+                    # Make negative since it's bottom movers
+                    data['bottomMovers']['weekly'].append({'ticker': ticker, 'change': -int(change)})
+                if items:
+                    print(f"   1-Week Bottom: {', '.join([f'{t} (-{c})' for t, c in items])}")
+                else:
+                    print("   [WARN] No items found in Weekly Bottom Movers section")
 
-            month_top_match = re.search(r'1-MONTH.*?Top Movers:\s*([A-Z]{3,5})\s*\(\+(\d+)\),\s*([A-Z]{3,5})\s*\(\+(\d+)\),\s*([A-Z]{3,5})\s*\(\+(\d+)\)', page1_text, re.DOTALL)
+            # 3. Monthly Top Movers
+            month_top_match = re.search(r'1-MONTH RE-RANK.*?Top Movers:(.*?)(Bottom Movers:|$)', page1_text, re.DOTALL | re.IGNORECASE)
             if month_top_match:
-                for i in range(0, 6, 2):
-                    ticker = month_top_match.group(i + 1)
-                    change = int(month_top_match.group(i + 2))
-                    data['topMovers']['monthly'].append({'ticker': ticker, 'change': change})
-                    print(f"   1-Month Top: {ticker} (+{change})")
+                section_text = month_top_match.group(1)
+                print(f"   [DEBUG] Monthly Top Section (first 100 chars): {section_text.strip()[:100]}...")
+                
+                items = re.findall(r'([A-Z]{2,6})\s*\(\+\s*(\d+)\)', section_text)
+                for ticker, change in items:
+                    data['topMovers']['monthly'].append({'ticker': ticker, 'change': int(change)})
+                if items:
+                    print(f"   1-Month Top: {', '.join([f'{t} (+{c})' for t, c in items])}")
 
-            month_bottom_match = re.search(r'1-MONTH.*?Bottom Movers:\s*([A-Z]{3,5})\s*\((-\d+)\),\s*([A-Z]{3,5})\s*\((-\d+)\),\s*([A-Z]{3,5})\s*\((-\d+)\)', page1_text, re.DOTALL)
+            # 4. Monthly Bottom Movers
+            # Terminator could be "Below are" or end of string, or sometimes next section header if any
+            month_bottom_match = re.search(r'1-MONTH RE-RANK.*?Bottom Movers:(.*?)(Below are|$)', page1_text, re.DOTALL | re.IGNORECASE)
             if month_bottom_match:
-                for i in range(0, 6, 2):
-                    ticker = month_bottom_match.group(i + 1)
-                    change = int(month_bottom_match.group(i + 2))
-                    data['bottomMovers']['monthly'].append({'ticker': ticker, 'change': change})
-                    print(f"   1-Month Bottom: {ticker} ({change})")
+                section_text = month_bottom_match.group(1)
+                print(f"   [DEBUG] Monthly Bottom Section (first 100 chars): {section_text.strip()[:100]}...")
+                
+                # Robust regex: Handle minus sign, en-dash, em-dash, hyphen, optional spaces
+                # \u2013 is en-dash, \u2014 is em-dash, \u2212 is minus sign
+                items = re.findall(r'([A-Z]{2,6})\s*\([−–—-]?\s*(\d+)\)', section_text)
+                for ticker, change in items:
+                    data['bottomMovers']['monthly'].append({'ticker': ticker, 'change': -int(change)})
+                if items:
+                    print(f"   1-Month Bottom: {', '.join([f'{t} (-{c})' for t, c in items])}")
 
     # Use Textract for table extraction (rankings on page 2)
     textract = boto3.client('textract', region_name='us-west-1')
@@ -159,15 +189,35 @@ def extract_portfolio_solutions(pdf_path, s3_key=None):
                     try:
                         rank = int(row[0])
                         ticker = row[1].strip().upper()
-                        # Row structure: [rank, ticker, 1w-change, 1m-change, date_added, asset_class, min%, max%]
+                        # Row structure: [rank, ticker, 1w-rank, 1m-rank, date_added, asset_class, min%, max%]
+                        # Note: Indices might shift depending on empty calls or textract grouping
+                        # Typically:
+                        # 0: Rank
+                        # 1: Ticker
+                        # 2: 1-Week Ago Rank/Change
+                        # 3: 1-Month Ago Rank/Change
+                        # 4: Date Added
+                        # 5: Asset Class
+                        # 6: Min Size
+                        # 7: Max Size
+
+                        rank = int(row[0])
+                        ticker = row[1].strip().upper()
+                        
+                        week_ago = row[2] if len(row) > 2 else '-'
+                        month_ago = row[3] if len(row) > 3 else '-'
                         date_added = row[4] if len(row) > 4 and row[4] != '-' else None
                         asset_class = row[5] if len(row) > 5 else None
+                        
+                        # We are replacing weights with history columns in the UI, but we still parse them if available
                         min_size = int(row[6].replace('%', '')) if len(row) > 6 else 0
                         max_size = int(row[7].replace('%', '')) if len(row) > 7 else 0
 
                         data['rankings'].append({
                             'rank': rank,
                             'ticker': ticker,
+                            'weekAgo': week_ago,
+                            'monthAgo': month_ago,
                             'dateAdded': date_added,
                             'assetClass': asset_class,
                             'minSize': min_size,
@@ -210,6 +260,8 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
             'rankings': [{
                 'rank': r['rank'],
                 'ticker': r['ticker'],
+                'weekAgo': r.get('weekAgo'),
+                'monthAgo': r.get('monthAgo'),
                 'dateAdded': r['dateAdded'],
                 'assetClass': r['assetClass'],
                 'minSize': r['minSize'],
