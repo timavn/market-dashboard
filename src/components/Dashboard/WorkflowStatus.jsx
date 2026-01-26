@@ -1773,7 +1773,7 @@ const WorkflowStatus = () => {
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                  {stocks.slice(0, 50).map((stock, idx) => (
+                                  {stocks.map((stock, idx) => (
                                     <TableRow key={stock.ticker || idx}>
                                       <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{stock.ticker || stock}</TableCell>
                                       <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{stock.strength || '-'}</TableCell>

@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, Title, Text } from '@tremor/react';
+import { Badge } from '@tremor/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import {
   separateLongsAndShorts,
@@ -9,6 +10,8 @@ import {
 } from '../../utils/portfolioBreakdownUtils';
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
 import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
+import FactorExposureChart from './FactorExposureChart';
+import PortfolioAnalytics from './PortfolioAnalytics';
 
 // Asset class colors - 5 core asset classes
 const ASSET_CLASS_COLORS = {
@@ -69,12 +72,12 @@ const getAssetClassForTicker = (ticker, holding = null) => {
     const category = mapping.category;
     return CATEGORY_DISPLAY_NAMES[category] || category;
   }
-  
+
   // Fallback: Use holding's assetClass or assetType if available
   if (holding) {
     const assetClass = holding.assetClass || holding.assetType || '';
     const lower = assetClass.toLowerCase();
-    
+
     // Map common asset class strings to display categories
     if (lower.includes('equity') || lower.includes('stock') || lower.includes('etf') || lower.includes('equities')) {
       return 'Equities';
@@ -92,7 +95,7 @@ const getAssetClassForTicker = (ticker, holding = null) => {
       return 'Cryptocurrency';
     }
   }
-  
+
   // Final fallback: Infer from ticker symbol patterns
   const tickerUpper = (ticker || '').toUpperCase();
   if (tickerUpper.includes('USD') || tickerUpper.includes('EUR') || tickerUpper.includes('GBP') || tickerUpper.includes('JPY') || tickerUpper.includes('FX')) {
@@ -102,10 +105,10 @@ const getAssetClassForTicker = (ticker, holding = null) => {
     return 'Currencies'; // Gold/Silver mapped to Currencies per existing logic
   }
   // Check for crypto ETFs and tokens - common crypto ticker patterns
-  if (tickerUpper.includes('BTC') || tickerUpper.includes('ETH') || tickerUpper.includes('CRYPTO') || 
-      tickerUpper.includes('BITCOIN') || tickerUpper.includes('IBIT') || tickerUpper.includes('BLOK') ||
-      tickerUpper.includes('SOL') || tickerUpper.includes('AVAX') || tickerUpper.includes('XRP') ||
-      tickerUpper.includes('ETHA') || tickerUpper.includes('CRCL') || tickerUpper.includes('BMNR')) {
+  if (tickerUpper.includes('BTC') || tickerUpper.includes('ETH') || tickerUpper.includes('CRYPTO') ||
+    tickerUpper.includes('BITCOIN') || tickerUpper.includes('IBIT') || tickerUpper.includes('BLOK') ||
+    tickerUpper.includes('SOL') || tickerUpper.includes('AVAX') || tickerUpper.includes('XRP') ||
+    tickerUpper.includes('ETHA') || tickerUpper.includes('CRCL') || tickerUpper.includes('BMNR')) {
     return 'Cryptocurrency';
   }
   if (tickerUpper.includes('TLT') || tickerUpper.includes('HYG') || tickerUpper.includes('LQD') || tickerUpper.includes('BOND')) {
@@ -114,7 +117,7 @@ const getAssetClassForTicker = (ticker, holding = null) => {
   if (tickerUpper.includes('OIL') || tickerUpper.includes('GAS') || tickerUpper.includes('CORN') || tickerUpper.includes('WHEAT')) {
     return 'Commodities';
   }
-  
+
   // If we still can't determine, default to Equities (most common) instead of "Other"
   // This ensures we never show "Other" in the pie chart
   return 'Equities';
@@ -127,7 +130,7 @@ const getAssetClassForTicker = (ticker, holding = null) => {
 const calculateAssetClassAllocationFromUniverse = (holdings) => {
   // Define all 5 core asset classes
   const allAssetClasses = ['Equities', 'Fixed Income', 'Commodities', 'Currencies', 'Cryptocurrency'];
-  
+
   const allocation = {};
   let totalValue = 0;
 
@@ -141,10 +144,10 @@ const calculateAssetClassAllocationFromUniverse = (holdings) => {
     holdings.forEach(holding => {
       const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
       const assetClass = getAssetClassForTicker(holding.symbol, holding);
-      
+
       // Ensure the asset class is one of the 5 core classes
       const normalizedAssetClass = allAssetClasses.includes(assetClass) ? assetClass : 'Equities';
-      
+
       if (!allocation[normalizedAssetClass]) {
         allocation[normalizedAssetClass] = 0;
       }
@@ -173,7 +176,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const holdings = portfolioData?.holdings || [];
   const totalValue = portfolioData?.summary?.totalValue || 0;
   const factorExposures = portfolioData?.factorExposures || {};
-  
+
   // Column visibility state (shared for both tables)
   // Default selection: % Acct, % Portfolio, Buy/Sell, Intraday G/L
   const [columnVisibility, setColumnVisibility] = useState({
@@ -204,7 +207,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         shortsInputRef.current.style.width = `${shortsButtonRowRef.current.offsetWidth}px`;
       }
     };
-    
+
     updateWidths();
     window.addEventListener('resize', updateWidths);
     return () => window.removeEventListener('resize', updateWidths);
@@ -308,7 +311,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const renderColumnHeader = (columnKey, isLongs) => {
     const sortConfig = isLongs ? longsSortConfig : shortsSortConfig;
     const handleSortClick = (field) => handleSort(field, isLongs);
-    
+
     // Map column keys to sort fields
     const columnToSortField = {
       'qty': null,
@@ -321,12 +324,12 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
       'qtyNeeded': null,
       'gainLoss': 'gainLoss'
     };
-    
+
     const sortField = columnToSortField[columnKey];
     const isSorted = sortField && sortConfig.field === sortField;
     const isDragged = draggedColumn === columnKey;
     const isDragTarget = dragOverColumn === columnKey && !isDragged;
-    
+
     // Base styles with conditional styling
     const getBaseStyles = (defaultStyles) => ({
       ...defaultStyles,
@@ -346,7 +349,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         borderRadius: '4px'
       })
     });
-    
+
     // Get className with dark mode support
     const getClassName = () => {
       let className = 'dark:text-white';
@@ -361,7 +364,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     switch (columnKey) {
       case 'qty':
         return (
-          <th 
+          <th
             key={columnKey}
             draggable
             onDragStart={(e) => handleDragStart(e, columnKey)}
@@ -369,7 +372,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             onDragOver={(e) => handleDragOver(e, columnKey)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, columnKey)}
-            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '8%', cursor: 'move' })} 
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '8%', cursor: 'move' })}
             className={getClassName()}
           >
             Qty
@@ -377,7 +380,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         );
       case 'price':
         return (
-          <th 
+          <th
             key={columnKey}
             draggable
             onDragStart={(e) => handleDragStart(e, columnKey)}
@@ -385,7 +388,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             onDragOver={(e) => handleDragOver(e, columnKey)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, columnKey)}
-            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })} 
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })}
             className={getClassName()}
           >
             Price
@@ -456,7 +459,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         );
       case 'basisPts':
         return (
-          <th 
+          <th
             key={columnKey}
             draggable
             onDragStart={(e) => handleDragStart(e, columnKey)}
@@ -464,7 +467,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             onDragOver={(e) => handleDragOver(e, columnKey)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, columnKey)}
-            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '9%', cursor: 'move' })} 
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '9%', cursor: 'move' })}
             className={getClassName()}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -475,7 +478,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         );
       case 'percentPortfolio':
         return (
-          <th 
+          <th
             key={columnKey}
             draggable
             onDragStart={(e) => handleDragStart(e, columnKey)}
@@ -483,7 +486,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             onDragOver={(e) => handleDragOver(e, columnKey)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, columnKey)}
-            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })} 
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })}
             className={getClassName()}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -494,7 +497,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         );
       case 'qtyNeeded':
         return (
-          <th 
+          <th
             key={columnKey}
             draggable
             onDragStart={(e) => handleDragStart(e, columnKey)}
@@ -502,7 +505,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             onDragOver={(e) => handleDragOver(e, columnKey)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, columnKey)}
-            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })} 
+            style={getBaseStyles({ padding: '6px', textAlign: 'center', fontWeight: 600, width: '10%', cursor: 'move' })}
             className={getClassName()}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -557,7 +560,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
       case 'marketValue':
         return (
           <td key={columnKey} style={{ padding: '6px', textAlign: 'center' }} className="dark:text-gray-300">
-            ${Math.abs(holding.marketValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            ${Math.abs(holding.marketValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </td>
         );
       case 'intradayGainLoss':
@@ -897,22 +900,22 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         const percentPortfolioStateForQty = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
         const targetPercentForQty = percentPortfolioStateForQty[holding.symbol];
         const basisPointsForQty = basisPointsState[holding.symbol];
-        
+
         return (
           <td key={columnKey} style={{ padding: '6px', textAlign: 'center', fontWeight: '600' }}>
             {(() => {
               let shares = null;
-              
+
               // Prioritize target % portfolio over basis points
               if (targetPercentForQty !== undefined) {
                 shares = calculateSharesFromPercent(holding, targetPercentForQty, totalValue, !isLongs);
               } else if (basisPointsForQty) {
                 shares = calculateSharesFromBasisPoints(holding, basisPointsForQty, totalValue, !isLongs);
               }
-              
+
               if (shares === null) return <span className="dark:text-gray-400">--</span>;
               if (shares === 0) return <span className="dark:text-gray-300">0</span>;
-              
+
               // Format with color: negative (red) = sell, positive (green) = buy
               if (shares < 0) {
                 return <span className="text-red-500 dark:text-red-400">{shares}</span>;
@@ -1094,14 +1097,14 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   // Calculate net long/short percentage
   const netLongShortPercentage = useMemo(() => {
     if (!totalValue || totalValue === 0) return 0;
-    
+
     // Calculate total long and short values
     const totalLongValue = longs.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
     const totalShortValue = shorts.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
-    
+
     // Net long percentage = (total long - total short) / total value * 100
     const netLong = ((totalLongValue - totalShortValue) / totalValue) * 100;
-    
+
     return netLong;
   }, [longs, shorts, totalValue]);
 
@@ -1135,33 +1138,33 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const calculateSliceAngles = (allocationData, targetName) => {
     const total = allocationData.reduce((sum, entry) => sum + entry.value, 0);
     if (total === 0) return { startAngle: 0, endAngle: 0 };
-    
+
     const targetIndex = allocationData.findIndex(entry => entry.name === targetName);
     if (targetIndex === -1) return { startAngle: 0, endAngle: 0 };
-    
+
     // Safety check: if the target slice has 0% value, return early to prevent rendering
     const targetValue = allocationData[targetIndex].value;
     if (targetValue === 0 || !(typeof targetValue === 'number' && targetValue > 0)) {
       return { startAngle: 0, endAngle: 0 };
     }
-    
+
     // Calculate cumulative percentage before this slice
     const startPercent = allocationData
       .slice(0, targetIndex)
       .reduce((sum, entry) => sum + entry.value, 0) / total;
-    
+
     // Calculate this slice's percentage
     const slicePercent = targetValue / total;
-    
+
     // Safety check: if slicePercent is 0, return early
     if (slicePercent === 0) {
       return { startAngle: 0, endAngle: 0 };
     }
-    
+
     // Convert to angles (start from -90 degrees, going clockwise)
     const startAngle = -90 + startPercent * 360;
     const endAngle = -90 + (startPercent + slicePercent) * 360;
-    
+
     return { startAngle, endAngle };
   };
 
@@ -1194,17 +1197,17 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     if (!holding || !basisPoints || !totalValue || !holding.price) return null;
     const price = parseFloat(holding.price);
     if (price === 0) return null;
-    
+
     // Basis points to dollar amount: (basisPoints / 10000) * totalValue
     const dollarAmount = (parseFloat(basisPoints) / 10000) * totalValue;
     let shares = dollarAmount / price;
-    
+
     // For shorts: positive basis points means increase short (sell more = negative shares)
     // Negative basis points means reduce short (buy back = positive shares)
     if (isShort) {
       shares = -shares; // Flip sign for shorts
     }
-    
+
     return Math.round(shares);
   };
 
@@ -1284,8 +1287,8 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const sortedLongs = useMemo(() => {
     const filtered = longsSearchFilter
       ? longs.filter(holding =>
-          holding.symbol?.toUpperCase().includes(longsSearchFilter.toUpperCase())
-        )
+        holding.symbol?.toUpperCase().includes(longsSearchFilter.toUpperCase())
+      )
       : longs;
     return sortHoldings(filtered, longsSortConfig);
   }, [longs, longsSortConfig, longsSearchFilter, totalValue]);
@@ -1293,8 +1296,8 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const sortedShorts = useMemo(() => {
     const filtered = shortsSearchFilter
       ? shorts.filter(holding =>
-          holding.symbol?.toUpperCase().includes(shortsSearchFilter.toUpperCase())
-        )
+        holding.symbol?.toUpperCase().includes(shortsSearchFilter.toUpperCase())
+      )
       : shorts;
     return sortHoldings(filtered, shortsSortConfig);
   }, [shorts, shortsSortConfig, shortsSearchFilter, totalValue]);
@@ -1317,7 +1320,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
       </div>
     );
   }
-  
+
   // Show loading state if we're actively fetching
   if (isLoading && (!holdings || holdings.length === 0)) {
     return (
@@ -1471,7 +1474,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   // Render performance cell without color coding
   const renderPerformanceCell = (value) => {
     const formatted = formatPerformance(value);
-    
+
     // Determine color based on value
     let colorClass = 'text-gray-500';
     if (value !== null && value !== undefined && !isNaN(value)) {
@@ -1499,7 +1502,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Sticky Header - Portfolio Construction Guide */}
+      {/* Sticky Header - Top 5 Factors */}
       <div
         style={{
           position: 'sticky',
@@ -1512,10 +1515,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        <div className="font-semibold" style={{ fontSize: '11px', marginBottom: '4px', color: '#374151' }}>
-          Portfolio Construction
-        </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '10px' }}>
           {/* Left Column - Top 5 Factor Exposures */}
           <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-blue-50 dark:bg-blue-900/10 rounded border border-blue-200 dark:border-blue-700 relative">
@@ -1525,10 +1524,10 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                 onClick={() => setShowFactorExposureInfo(!showFactorExposureInfo)}
                 className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-300"
                 title="Factor Exposure Information"
-                style={{ 
-                  width: '12px', 
-                  height: '12px', 
-                  borderRadius: '50%', 
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
                   border: '1px solid currentColor',
                   display: 'flex',
                   alignItems: 'center',
@@ -1542,11 +1541,11 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
               </button>
             </div>
             {showFactorExposureInfo && (
-              <div 
+              <div
                 className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg"
-                style={{ 
-                  maxWidth: '400px', 
-                  maxHeight: '500px', 
+                style={{
+                  maxWidth: '400px',
+                  maxHeight: '500px',
                   overflowY: 'auto',
                   left: '0',
                   top: '100%',
@@ -1636,9 +1635,9 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         {/* Longs/Shorts Breakdown Section */}
         <div style={{ marginBottom: '32px' }}>
           {/* Shared Header with Long/Short counts and net percentage */}
-          <div 
-            className="mb-4 rounded-lg p-4 bg-white dark:bg-gray-800" 
-            style={{ 
+          <div
+            className="mb-4 rounded-lg p-4 bg-white dark:bg-gray-800"
+            style={{
               border: `1px solid ${netLongShortPercentage >= 0 ? '#10B981' : '#EF4444'}`,
               boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
             }}
@@ -1673,578 +1672,506 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
             {/* Longs Section */}
             <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0 }}>
-            {/* Longs Banner */}
-            <div style={{ 
-              textAlign: 'center', 
-              marginBottom: '16px',
-              padding: '8px',
-              backgroundColor: '#10B981',
-              color: 'white',
-              fontWeight: 700,
-              fontSize: '14px',
-              borderRadius: '4px',
-              margin: '16px 16px 16px 16px'
-            }}>
-              LONG
-            </div>
-            
-            {/* Longs Pie Chart */}
-            {longsAssetAllocation.length > 0 ? (
-              <div style={{ marginBottom: '24px', padding: '0 16px' }}>
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Legend 
-                      payload={generateLegendPayload(longsAssetAllocation, highlightedLongsAssetClasses, toggleLongsAssetClass)}
-                      layout="vertical"
-                      verticalAlign="middle"
-                      align="left"
-                      wrapperStyle={{ 
-                        fontSize: '16px',
-                        paddingLeft: '10px',
-                        width: '240px'
-                      }}
-                      iconSize={16}
-                      formatter={(value, entry) => {
-                        const isHighlighted = highlightedLongsAssetClasses.has(value);
+              {/* Longs Banner */}
+              <div style={{
+                textAlign: 'center',
+                marginBottom: '16px',
+                padding: '8px',
+                backgroundColor: '#10B981',
+                color: 'white',
+                fontWeight: 700,
+                fontSize: '14px',
+                borderRadius: '4px',
+                margin: '16px 16px 16px 16px'
+              }}>
+                LONG
+              </div>
+
+              {/* Longs Pie Chart */}
+              {longsAssetAllocation.length > 0 ? (
+                <div style={{ marginBottom: '24px', padding: '0 16px', display: 'flex', alignItems: 'center', height: '250px' }}>
+                  {/* Custom Legend (Left Side) */}
+                  <div style={{ width: '240px', flexShrink: 0 }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {['Equities', 'Fixed Income', 'Commodities', 'Currencies', 'Cryptocurrency'].map((name, index) => {
+                        // Find data for this asset class
+                        const dataItem = longsAssetAllocation ? longsAssetAllocation.find(item => item.name === name) : null;
+                        const isHighlighted = highlightedLongsAssetClasses.has(name);
+                        const color = ASSET_CLASS_COLORS[name] || ASSET_CLASS_COLORS['Equities'];
+
                         return (
-                          <span 
-                            onClick={() => toggleLongsAssetClass(value)}
-                            style={{ 
-                              fontSize: '16px',
+                          <li
+                            key={`item-${index}`}
+                            onClick={() => toggleLongsAssetClass(name)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              marginBottom: '8px',
+                              cursor: 'pointer',
                               fontWeight: isHighlighted ? 'bold' : 'normal',
                               opacity: isHighlighted ? 1 : 0.5,
-                              cursor: 'pointer',
                               transition: 'all 0.2s ease'
                             }}
                           >
-                            {value}
-                          </span>
-                        );
-                      }}
-                      content={(props) => {
-                        const { payload } = props;
-                        return (
-                          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                            {payload.map((entry, index) => {
-                              const isHighlighted = highlightedLongsAssetClasses.has(entry.value);
-                              return (
-                                <li
-                                  key={`item-${index}`}
-                                  onClick={() => toggleLongsAssetClass(entry.value)}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    marginBottom: '8px',
-                                    cursor: 'pointer',
-                                    fontWeight: isHighlighted ? 'bold' : 'normal',
-                                    opacity: isHighlighted ? 1 : 0.5,
-                                    transition: 'all 0.2s ease'
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      display: 'inline-block',
-                                      width: '16px',
-                                      height: '16px',
-                                      backgroundColor: entry.color,
-                                      marginRight: '8px',
-                                      borderRadius: '2px'
-                                    }}
-                                  />
-                                  <span style={{ fontSize: '16px' }}>{entry.value}</span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        );
-                      }}
-                    />
-                    {/* Base pie chart - all slices at normal size (filter out 0% slices) */}
-                    <Pie
-                      data={longsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                      cx="60%"
-                      cy="50%"
-                      labelLine={false}
-                      label={renderBasePieLabelLongs}
-                      outerRadius={96}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {longsAssetAllocation
-                        .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                        .map((entry, index) => {
-                          const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                          return (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={baseColor}
+                            <span
                               style={{
-                                opacity: 0.6
+                                display: 'inline-block',
+                                width: '16px',
+                                height: '16px',
+                                backgroundColor: color,
+                                marginRight: '8px',
+                                borderRadius: '2px'
                               }}
                             />
-                          );
-                        })}
-                    </Pie>
-                    {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
-                    {highlightedLongsAssetClasses.size > 0 && (
-                      <Pie
-                        data={longsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                        cx="60%"
-                        cy="50%"
-                        labelLine={false}
-                        label={renderHighlightedPieLabelLongs}
-                        outerRadius={longsHighlightRadius}
-                        fill="#8884d8"
-                        dataKey="value"
-                        isAnimationActive={false}
-                      >
-                        {longsAssetAllocation
-                          .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                          .map((entry, index) => {
-                            const isHighlighted = highlightedLongsAssetClasses.has(entry.name);
-                            const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                            return (
-                              <Cell
-                                key={`cell-highlight-${index}`}
-                                fill={baseColor}
-                                style={{
-                                  opacity: isHighlighted ? 1 : 0,
-                                  filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
-                                  transition: 'opacity 0.5s ease, filter 0.5s ease'
-                                }}
-                              />
-                            );
-                          })}
-                      </Pie>
-                    )}
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <Text className="text-sm text-gray-500 dark:text-gray-400">No long positions</Text>
-            )}
+                            <span style={{ fontSize: '16px' }}>{name}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
 
-            {/* Longs Data Table */}
-            {longs.length > 0 && (
-              <div style={{ overflowX: 'auto' }}>
-                {/* Search Box and Filter Buttons Container */}
-                <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <input
-                    ref={longsInputRef}
-                    type="text"
-                    placeholder="Search ticker..."
-                    value={longsSearchFilter}
-                    onChange={(e) => setLongsSearchFilter(e.target.value)}
-                    style={{
-                      padding: '6px 10px',
-                      fontSize: '12px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '4px',
-                      outline: 'none',
-                      marginBottom: '6px'
-                    }}
-                    className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  />
-                  {/* Column Toggle Buttons */}
-                  <div ref={longsButtonRowRef} style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center', width: 'fit-content' }}>
-                    {columnDefinitions.map(col => (
-                      <button
-                        key={col.key}
-                        onClick={() => toggleColumn(col.key)}
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '10px',
-                          border: '1px solid #d1d5db',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
-                          color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
-                          fontWeight: columnVisibility[col.key] ? '600' : '400',
-                          transition: 'all 0.2s',
-                          outline: 'none'
-                        }}
-                        className="dark:border-gray-600 hover:opacity-80"
-                        onMouseEnter={(e) => {
-                          if (!columnVisibility[col.key]) {
-                            e.target.style.backgroundColor = '#e5e7eb';
-                            e.target.style.color = '#374151';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!columnVisibility[col.key]) {
-                            e.target.style.backgroundColor = '#f3f4f6';
-                            e.target.style.color = '#6b7280';
-                          }
-                        }}
-                      >
-                        {col.label}
-                      </button>
-                    ))}
+                  {/* Pie Chart (Right Side) */}
+                  <div style={{ flex: 1, height: '100%' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        {/* Base pie chart - all slices at normal size (filter out 0% slices) */}
+                        <Pie
+                          data={longsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={renderBasePieLabelLongs}
+                          outerRadius={96}
+                          fill="#8884d8"
+                          dataKey="value"
+                          isAnimationActive={false}
+                        >
+                          {longsAssetAllocation
+                            .filter(entry => entry.value > 0 && typeof entry.value === 'number')
+                            .map((entry, index) => {
+                              const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
+                              return (
+                                <Cell
+                                  key={`cell-${index}`}
+                                  fill={baseColor}
+                                  style={{
+                                    opacity: 0.6
+                                  }}
+                                />
+                              );
+                            })}
+                        </Pie>
+                        {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
+                        {highlightedLongsAssetClasses.size > 0 && (
+                          <Pie
+                            data={longsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={renderHighlightedPieLabelLongs}
+                            outerRadius={longsHighlightRadius}
+                            fill="#8884d8"
+                            dataKey="value"
+                            isAnimationActive={false}
+                          >
+                            {longsAssetAllocation
+                              .filter(entry => entry.value > 0 && typeof entry.value === 'number')
+                              .map((entry, index) => {
+                                const isHighlighted = highlightedLongsAssetClasses.has(entry.name);
+                                const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
+                                return (
+                                  <Cell
+                                    key={`cell-highlight-${index}`}
+                                    fill={baseColor}
+                                    style={{
+                                      opacity: isHighlighted ? 1 : 0,
+                                      filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
+                                      transition: 'opacity 0.5s ease, filter 0.5s ease'
+                                    }}
+                                  />
+                                );
+                              })}
+                          </Pie>
+                        )}
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
-                      <th
-                        style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('ticker', true)}
-                      >
-                        Ticker
-                        <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('ticker', longsSortConfig)}</span>
-                      </th>
-                      {columnOrder.map(columnKey => 
-                        columnVisibility[columnKey] && renderColumnHeader(columnKey, true)
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedLongs.map((holding, index) => {
-                      const assetClass = getAssetClassForTicker(holding.symbol);
-                      const bgColor = ASSET_CLASS_COLORS[assetClass] || ASSET_CLASS_COLORS['Equities'];
-                      const pctOfAccount = totalValue > 0 ? ((Math.abs(holding.marketValue) / totalValue) * 100).toFixed(2) : '0.00';
+              ) : (
+                <Text className="text-sm text-gray-500 dark:text-gray-400">No long positions</Text>
+              )}
 
-                      return (
-                        <tr
-                          key={index}
-                          style={{
-                            borderBottom: '1px solid #e5e7eb'
-                          }}
-                          className="dark:border-gray-700"
-                        >
-                          <td style={{ padding: '0', fontWeight: '600', position: 'relative' }} className="dark:text-white">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 4px 6px 6px' }}>
-                              <div style={{ 
-                                position: 'absolute',
-                                left: 0,
-                                top: 0,
-                                bottom: 0,
-                                width: '12px', 
-                                backgroundColor: bgColor,
-                                flexShrink: 0
-                              }}></div>
-                              <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
-                            </div>
-                          </td>
-                          {columnOrder.map(columnKey => 
-                            columnVisibility[columnKey] && renderColumnCell(columnKey, holding, pctOfAccount, true)
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
-          {/* Shorts Section */}
-          <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0 }}>
-            {/* Shorts Banner */}
-            <div style={{ 
-              textAlign: 'center', 
-              marginBottom: '16px',
-              padding: '8px',
-              backgroundColor: '#EF4444',
-              color: 'white',
-              fontWeight: 700,
-              fontSize: '14px',
-              borderRadius: '4px',
-              margin: '16px 16px 16px 16px'
-            }}>
-              SHORT
-            </div>
-
-            {/* Shorts Pie Chart */}
-            {shortsAssetAllocation.length > 0 ? (
-              <div style={{ marginBottom: '24px', padding: '0 16px' }}>
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Legend 
-                      payload={generateLegendPayload(shortsAssetAllocation, highlightedShortsAssetClasses, toggleShortsAssetClass)}
-                      layout="vertical"
-                      verticalAlign="middle"
-                      align="left"
-                      wrapperStyle={{ 
-                        fontSize: '16px',
-                        paddingLeft: '10px',
-                        width: '240px'
+              {/* Longs Data Table */}
+              {longs.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  {/* Search Box and Filter Buttons Container */}
+                  <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <input
+                      ref={longsInputRef}
+                      type="text"
+                      placeholder="Search ticker..."
+                      value={longsSearchFilter}
+                      onChange={(e) => setLongsSearchFilter(e.target.value)}
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: '12px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '4px',
+                        outline: 'none',
+                        marginBottom: '6px'
                       }}
-                      iconSize={16}
-                      formatter={(value, entry) => {
-                        const isHighlighted = highlightedShortsAssetClasses.has(value);
+                      className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    />
+                    {/* Column Toggle Buttons */}
+                    <div ref={longsButtonRowRef} style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center', width: 'fit-content' }}>
+                      {columnDefinitions.map(col => (
+                        <button
+                          key={col.key}
+                          onClick={() => toggleColumn(col.key)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '10px',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
+                            color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
+                            fontWeight: columnVisibility[col.key] ? '600' : '400',
+                            transition: 'all 0.2s',
+                            outline: 'none'
+                          }}
+                          className="dark:border-gray-600 hover:opacity-80"
+                          onMouseEnter={(e) => {
+                            if (!columnVisibility[col.key]) {
+                              e.target.style.backgroundColor = '#e5e7eb';
+                              e.target.style.color = '#374151';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!columnVisibility[col.key]) {
+                              e.target.style.backgroundColor = '#f3f4f6';
+                              e.target.style.color = '#6b7280';
+                            }
+                          }}
+                        >
+                          {col.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
+                        <th
+                          style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
+                          className="dark:text-white"
+                          onClick={() => handleSort('ticker', true)}
+                        >
+                          Ticker
+                          <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('ticker', longsSortConfig)}</span>
+                        </th>
+                        {columnOrder.map(columnKey =>
+                          columnVisibility[columnKey] && renderColumnHeader(columnKey, true)
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedLongs.map((holding, index) => {
+                        const assetClass = getAssetClassForTicker(holding.symbol);
+                        const bgColor = ASSET_CLASS_COLORS[assetClass] || ASSET_CLASS_COLORS['Equities'];
+                        const pctOfAccount = totalValue > 0 ? ((Math.abs(holding.marketValue) / totalValue) * 100).toFixed(2) : '0.00';
+
                         return (
-                          <span 
-                            onClick={() => toggleShortsAssetClass(value)}
-                            style={{ 
-                              fontSize: '16px',
+                          <tr
+                            key={index}
+                            style={{
+                              borderBottom: '1px solid #e5e7eb'
+                            }}
+                            className="dark:border-gray-700"
+                          >
+                            <td style={{ padding: '0', fontWeight: '600', position: 'relative' }} className="dark:text-white">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 4px 6px 6px' }}>
+                                <div style={{
+                                  position: 'absolute',
+                                  left: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  width: '12px',
+                                  backgroundColor: bgColor,
+                                  flexShrink: 0
+                                }}></div>
+                                <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
+                              </div>
+                            </td>
+                            {columnOrder.map(columnKey =>
+                              columnVisibility[columnKey] && renderColumnCell(columnKey, holding, pctOfAccount, true)
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+
+            {/* Shorts Section */}
+            <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0 }}>
+              {/* Shorts Banner */}
+              <div style={{
+                textAlign: 'center',
+                marginBottom: '16px',
+                padding: '8px',
+                backgroundColor: '#EF4444',
+                color: 'white',
+                fontWeight: 700,
+                fontSize: '14px',
+                borderRadius: '4px',
+                margin: '16px 16px 16px 16px'
+              }}>
+                SHORT
+              </div>
+
+              {/* Shorts Pie Chart */}
+              {shortsAssetAllocation.length > 0 ? (
+                <div style={{ marginBottom: '24px', padding: '0 16px', display: 'flex', alignItems: 'center', height: '250px' }}>
+                  {/* Custom Legend (Left Side) */}
+                  <div style={{ width: '240px', flexShrink: 0 }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {['Equities', 'Fixed Income', 'Commodities', 'Currencies', 'Cryptocurrency'].map((name, index) => {
+                        const isHighlighted = highlightedShortsAssetClasses.has(name);
+                        const color = ASSET_CLASS_COLORS[name] || ASSET_CLASS_COLORS['Equities'];
+
+                        return (
+                          <li
+                            key={`item-${index}`}
+                            onClick={() => toggleShortsAssetClass(name)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              marginBottom: '8px',
+                              cursor: 'pointer',
                               fontWeight: isHighlighted ? 'bold' : 'normal',
                               opacity: isHighlighted ? 1 : 0.5,
-                              cursor: 'pointer',
                               transition: 'all 0.2s ease'
                             }}
                           >
-                            {value}
-                          </span>
-                        );
-                      }}
-                      content={(props) => {
-                        const { payload } = props;
-                        return (
-                          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                            {payload.map((entry, index) => {
-                              const isHighlighted = highlightedShortsAssetClasses.has(entry.value);
-                              return (
-                                <li
-                                  key={`item-${index}`}
-                                  onClick={() => toggleShortsAssetClass(entry.value)}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    marginBottom: '8px',
-                                    cursor: 'pointer',
-                                    fontWeight: isHighlighted ? 'bold' : 'normal',
-                                    opacity: isHighlighted ? 1 : 0.5,
-                                    transition: 'all 0.2s ease'
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      display: 'inline-block',
-                                      width: '16px',
-                                      height: '16px',
-                                      backgroundColor: entry.color,
-                                      marginRight: '8px',
-                                      borderRadius: '2px'
-                                    }}
-                                  />
-                                  <span style={{ fontSize: '16px' }}>{entry.value}</span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        );
-                      }}
-                    />
-                    {/* Base pie chart - all slices at normal size (filter out 0% slices) */}
-                    <Pie
-                      data={shortsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                      cx="60%"
-                      cy="50%"
-                      labelLine={false}
-                      label={renderBasePieLabelShorts}
-                      outerRadius={96}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {shortsAssetAllocation
-                        .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                        .map((entry, index) => {
-                          const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                          return (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={baseColor}
+                            <span
                               style={{
-                                opacity: 0.6
+                                display: 'inline-block',
+                                width: '16px',
+                                height: '16px',
+                                backgroundColor: color,
+                                marginRight: '8px',
+                                borderRadius: '2px'
                               }}
                             />
-                          );
-                        })}
-                    </Pie>
-                    {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
-                    {highlightedShortsAssetClasses.size > 0 && (
-                      <Pie
-                        data={shortsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                        cx="60%"
-                        cy="50%"
-                        labelLine={false}
-                        label={renderHighlightedPieLabelShorts}
-                        outerRadius={shortsHighlightRadius}
-                        fill="#8884d8"
-                        dataKey="value"
-                        isAnimationActive={false}
-                      >
-                        {shortsAssetAllocation
-                          .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                          .map((entry, index) => {
-                            const isHighlighted = highlightedShortsAssetClasses.has(entry.name);
-                            const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                            return (
-                              <Cell
-                                key={`cell-highlight-${index}`}
-                                fill={baseColor}
-                                style={{
-                                  opacity: isHighlighted ? 1 : 0,
-                                  filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
-                                  transition: 'opacity 0.5s ease, filter 0.5s ease'
-                                }}
-                              />
-                            );
-                          })}
-                      </Pie>
-                    )}
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <Text className="text-sm text-gray-500 dark:text-gray-400">No short positions</Text>
-            )}
+                            <span style={{ fontSize: '16px' }}>{name}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
 
-            {/* Shorts Data Table */}
-            {shorts.length > 0 && (
-              <div style={{ overflowX: 'auto' }}>
-                {/* Search Box and Filter Buttons Container */}
-                <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <input
-                    ref={shortsInputRef}
-                    type="text"
-                    placeholder="Search ticker..."
-                    value={shortsSearchFilter}
-                    onChange={(e) => setShortsSearchFilter(e.target.value)}
-                    style={{
-                      padding: '6px 10px',
-                      fontSize: '12px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '4px',
-                      outline: 'none',
-                      marginBottom: '6px'
-                    }}
-                    className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  />
-                  {/* Column Toggle Buttons */}
-                  <div ref={shortsButtonRowRef} style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center', width: 'fit-content' }}>
-                    {columnDefinitions.map(col => (
-                      <button
-                        key={col.key}
-                        onClick={() => toggleColumn(col.key)}
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '10px',
-                          border: '1px solid #d1d5db',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
-                          color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
-                          fontWeight: columnVisibility[col.key] ? '600' : '400',
-                          transition: 'all 0.2s',
-                          outline: 'none'
-                        }}
-                        className="dark:border-gray-600 hover:opacity-80"
-                        onMouseEnter={(e) => {
-                          if (!columnVisibility[col.key]) {
-                            e.target.style.backgroundColor = '#e5e7eb';
-                            e.target.style.color = '#374151';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!columnVisibility[col.key]) {
-                            e.target.style.backgroundColor = '#f3f4f6';
-                            e.target.style.color = '#6b7280';
-                          }
-                        }}
-                      >
-                        {col.label}
-                      </button>
-                    ))}
+                  {/* Pie Chart (Right Side) */}
+                  <div style={{ flex: 1, height: '100%' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        {/* Base pie chart - all slices at normal size (filter out 0% slices) */}
+                        <Pie
+                          data={shortsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={renderBasePieLabelShorts}
+                          outerRadius={96}
+                          fill="#8884d8"
+                          dataKey="value"
+                          isAnimationActive={false}
+                        >
+                          {shortsAssetAllocation
+                            .filter(entry => entry.value > 0 && typeof entry.value === 'number')
+                            .map((entry, index) => {
+                              const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
+                              return (
+                                <Cell
+                                  key={`cell-${index}`}
+                                  fill={baseColor}
+                                  style={{
+                                    opacity: 0.6
+                                  }}
+                                />
+                              );
+                            })}
+                        </Pie>
+                        {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
+                        {highlightedShortsAssetClasses.size > 0 && (
+                          <Pie
+                            data={shortsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={renderHighlightedPieLabelShorts}
+                            outerRadius={shortsHighlightRadius}
+                            fill="#8884d8"
+                            dataKey="value"
+                            isAnimationActive={false}
+                          >
+                            {shortsAssetAllocation
+                              .filter(entry => entry.value > 0 && typeof entry.value === 'number')
+                              .map((entry, index) => {
+                                const isHighlighted = highlightedShortsAssetClasses.has(entry.name);
+                                const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
+                                return (
+                                  <Cell
+                                    key={`cell-highlight-${index}`}
+                                    fill={baseColor}
+                                    style={{
+                                      opacity: isHighlighted ? 1 : 0,
+                                      filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
+                                      transition: 'opacity 0.5s ease, filter 0.5s ease'
+                                    }}
+                                  />
+                                );
+                              })}
+                          </Pie>
+                        )}
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
-                      <th
-                        style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
-                        className="dark:text-white"
-                        onClick={() => handleSort('ticker', false)}
-                      >
-                        Ticker
-                        <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('ticker', shortsSortConfig)}</span>
-                      </th>
-                      {columnOrder.map(columnKey => 
-                        columnVisibility[columnKey] && renderColumnHeader(columnKey, false)
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedShorts.map((holding, index) => {
-                      const assetClass = getAssetClassForTicker(holding.symbol);
-                      const bgColor = ASSET_CLASS_COLORS[assetClass] || ASSET_CLASS_COLORS['Equities'];
-                      const pctOfAccount = totalValue > 0 ? ((Math.abs(holding.marketValue) / totalValue) * 100).toFixed(2) : '0.00';
+              ) : (
+                <Text className="text-sm text-gray-500 dark:text-gray-400">No short positions</Text>
+              )}
 
-                      return (
-                        <tr
-                          key={index}
+              {/* Shorts Data Table */}
+              {shorts.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  {/* Search Box and Filter Buttons Container */}
+                  <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <input
+                      ref={shortsInputRef}
+                      type="text"
+                      placeholder="Search ticker..."
+                      value={shortsSearchFilter}
+                      onChange={(e) => setShortsSearchFilter(e.target.value)}
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: '12px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '4px',
+                        outline: 'none',
+                        marginBottom: '6px'
+                      }}
+                      className="dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    />
+                    {/* Column Toggle Buttons */}
+                    <div ref={shortsButtonRowRef} style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', justifyContent: 'center', width: 'fit-content' }}>
+                      {columnDefinitions.map(col => (
+                        <button
+                          key={col.key}
+                          onClick={() => toggleColumn(col.key)}
                           style={{
-                            borderBottom: '1px solid #e5e7eb'
+                            padding: '4px 8px',
+                            fontSize: '10px',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
+                            color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
+                            fontWeight: columnVisibility[col.key] ? '600' : '400',
+                            transition: 'all 0.2s',
+                            outline: 'none'
                           }}
-                          className="dark:border-gray-700"
+                          className="dark:border-gray-600 hover:opacity-80"
+                          onMouseEnter={(e) => {
+                            if (!columnVisibility[col.key]) {
+                              e.target.style.backgroundColor = '#e5e7eb';
+                              e.target.style.color = '#374151';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!columnVisibility[col.key]) {
+                              e.target.style.backgroundColor = '#f3f4f6';
+                              e.target.style.color = '#6b7280';
+                            }
+                          }}
                         >
-                          <td style={{ padding: '0', fontWeight: '600', position: 'relative' }} className="dark:text-white">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px' }}>
-                              <div style={{ 
-                                position: 'absolute',
-                                left: 0,
-                                top: 0,
-                                bottom: 0,
-                                width: '12px', 
-                                backgroundColor: bgColor,
-                                flexShrink: 0
-                              }}></div>
-                              <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
-                            </div>
-                          </td>
-                          {columnOrder.map(columnKey => 
-                            columnVisibility[columnKey] && renderColumnCell(columnKey, holding, pctOfAccount, false)
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                          {col.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
+                        <th
+                          style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
+                          className="dark:text-white"
+                          onClick={() => handleSort('ticker', false)}
+                        >
+                          Ticker
+                          <span style={{ position: 'absolute', bottom: '2px', right: '2px', fontSize: '10px', opacity: 0.5 }}>{renderSortIndicator('ticker', shortsSortConfig)}</span>
+                        </th>
+                        {columnOrder.map(columnKey =>
+                          columnVisibility[columnKey] && renderColumnHeader(columnKey, false)
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedShorts.map((holding, index) => {
+                        const assetClass = getAssetClassForTicker(holding.symbol);
+                        const bgColor = ASSET_CLASS_COLORS[assetClass] || ASSET_CLASS_COLORS['Equities'];
+                        const pctOfAccount = totalValue > 0 ? ((Math.abs(holding.marketValue) / totalValue) * 100).toFixed(2) : '0.00';
+
+                        return (
+                          <tr
+                            key={index}
+                            style={{
+                              borderBottom: '1px solid #e5e7eb'
+                            }}
+                            className="dark:border-gray-700"
+                          >
+                            <td style={{ padding: '0', fontWeight: '600', position: 'relative' }} className="dark:text-white">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px' }}>
+                                <div style={{
+                                  position: 'absolute',
+                                  left: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  width: '12px',
+                                  backgroundColor: bgColor,
+                                  flexShrink: 0
+                                }}></div>
+                                <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
+                              </div>
+                            </td>
+                            {columnOrder.map(columnKey =>
+                              columnVisibility[columnKey] && renderColumnCell(columnKey, holding, pctOfAccount, false)
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
+        </div>
+
+
+        {/* Factor Exposure Section */}
+        <div style={{ marginTop: '32px' }}>
+          <Title className="text-lg mb-4 dark:text-white">Factor Exposure</Title>
+          <Card className="dark:bg-gray-800 rounded-lg p-4">
+            <FactorExposureChart data={factorExposures} />
           </Card>
         </div>
-      </div>
 
-        {/* Total Asset Allocation Section */}
+        {/* Portfolio Analysis Section */}
         <div style={{ marginTop: '32px' }}>
-          <Title className="text-lg mb-4 dark:text-white">Total Asset Allocation</Title>
-          <Card className="dark:bg-gray-800 rounded-lg">
-            {innerData.length > 0 && outerData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={400}>
-                <PieChart>
-                  {/* Asset Class Allocation */}
-                  <Pie
-                    data={innerData}
-                    dataKey="value"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={120}
-                    fill="#8884d8"
-                    label={renderCustomLabel}
-                  >
-                    {innerData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill="#9CA3AF" />
-                    ))}
-                  </Pie>
-                  <Legend
-                    wrapperStyle={{ paddingTop: '20px' }}
-                    payload={innerData.map((entry) => ({
-                      value: entry.name,
-                      type: 'square',
-                      color: '#9CA3AF',
-                      id: entry.name
-                    }))}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <Text className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
-                No portfolio data available for factor exposure analysis
-              </Text>
-            )}
-          </Card>
+          <PortfolioAnalytics portfolioData={portfolioData} />
         </div>
       </div>
     </div>

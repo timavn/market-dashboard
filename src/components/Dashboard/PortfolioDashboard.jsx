@@ -417,15 +417,11 @@ const PortfolioDashboard = () => {
   const securitiesHeight = securitiesExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
   const maxPanelHeight = Math.max(volatilityHeight, securitiesHeight);
 
-  // Portfolio Metrics Content Component
+  // Portfolio Metrics Content Component (Refactored to Snapshot)
   const PortfolioMetricsContent = () => (
-    <Card className="dark:bg-gray-800" style={{ height: '100%', overflowY: 'auto', border: 'none', boxShadow: 'none', backgroundColor: 'transparent' }}>
-      <Text className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-        Updated: {displayData.lastUpdated}
-      </Text>
-
-      {/* CSV Upload Section */}
-      <div className="mb-6 pb-6 border-b">
+    <div className="h-full flex flex-col p-4">
+      {/* Upload Section - Primary Hero */}
+      <div className="mb-6">
         <CSVUpload
           onUploadSuccess={(result) => {
             console.log('CSV uploaded successfully:', result);
@@ -434,210 +430,70 @@ const PortfolioDashboard = () => {
             console.error('CSV upload failed:', error);
           }}
         />
+        <Text className="text-xs text-center text-gray-400 mt-2">
+          Last updated: {displayData.lastUpdated}
+        </Text>
       </div>
 
-      {/* Total Portfolio */}
-      <div className="mb-6">
-        <Title className="text-sm mb-3 dark:text-white">Total Portfolio</Title>
-        <div className="space-y-3">
-          <Metric className="dark:text-white">
-            ${displayData.summary.totalValue.toLocaleString()}
-          </Metric>
+      {/* Snapshot Metrics - Single Compact Row */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <Card className="p-3 bg-white dark:bg-gray-800 border-none shadow-sm flex flex-col items-center justify-center">
+          <Text className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total Value</Text>
+          <Text className="text-sm font-bold mt-0.5 dark:text-white">
+            ${(displayData.summary.totalValue / 1000).toFixed(1)}k
+          </Text>
+        </Card>
 
-          {/* Position Sizing Legend */}
-          <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1 pt-2 border-t dark:border-gray-700">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-              <div>
-                <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Long:</div>
-                <div>FX : 4-12%</div>
-                <div>Fixed Income : 4-10%</div>
-                <div>Equities : 2-6%</div>
-                <div>Commodities : 2-4%</div>
-                <div>Crypto : 2-4%</div>
-              </div>
-              <div>
-                <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Short:</div>
-                <div>FX : 2-6%</div>
-                <div>Fixed Income : 2-5%</div>
-                <div>Equities : 1-3%</div>
-                <div>Commodities : 1-2%</div>
-                <div>Crypto : 1-2%</div>
-              </div>
-            </div>
-            <div className="pt-1 border-t dark:border-gray-700 mt-1">
-              <div className="text-gray-600 dark:text-gray-500 font-medium mb-0.5">Basis Points:</div>
-              <div className="grid grid-cols-4 gap-x-2">
-                <div>25 bps: ${Math.floor(displayData.summary.totalValue * 0.0025).toLocaleString()}</div>
-                <div>50 bps: ${Math.floor(displayData.summary.totalValue * 0.005).toLocaleString()}</div>
-                <div>100 bps: ${Math.floor(displayData.summary.totalValue * 0.01).toLocaleString()}</div>
-                <div>500 bps: ${Math.floor(displayData.summary.totalValue * 0.05).toLocaleString()}</div>
-              </div>
-            </div>
-          </div>
+        <Card className="p-3 bg-white dark:bg-gray-800 border-none shadow-sm flex flex-col items-center justify-center">
+          <Text className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Net Exposure</Text>
+          <Text className="text-sm font-bold mt-0.5 dark:text-white">
+            {parseFloat(displayData.exposureMetrics?.netExposure || 0).toFixed(1)}%
+          </Text>
+        </Card>
 
-          <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-            <Text className="text-sm dark:text-white">P&L MTD</Text>
-            <Badge color={parseFloat(displayData.summary.totalDayChange) >= 0 ? 'emerald' : 'rose'}>
-              {displayData.summary.totalDayChange >= 0 ? '+' : ''}${displayData.summary.totalDayChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalDayChangePercent).toFixed(2)}%)
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-            <Text className="text-xs dark:text-white">P&L YTD</Text>
-            <Badge color={parseFloat(displayData.summary.totalGainLoss) >= 0 ? 'emerald' : 'rose'}>
-              {displayData.summary.totalGainLoss >= 0 ? '+' : ''}${displayData.summary.totalGainLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({parseFloat(displayData.summary.totalGainLossPercent).toFixed(2)}%)
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-            <Text className="text-sm dark:text-white">Positions</Text>
-            <Text className="font-semibold dark:text-white">{displayData.summary.positionCount}</Text>
-          </div>
+        <Card className="p-3 bg-white dark:bg-gray-800 border-none shadow-sm flex flex-col items-center justify-center">
+          <Text className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Cash</Text>
+          <Text className="text-sm font-bold mt-0.5 dark:text-white">
+            {/* Simple cash calculation approximation if not explicitly provided */}
+            {displayData.assetAllocation?.['Cash'] ? parseFloat(displayData.assetAllocation['Cash']).toFixed(1) : '—'}%
+          </Text>
+        </Card>
+      </div>
+
+      {/* Secondary Info - Text Row */}
+      <div className="flex justify-between items-center px-2 py-2 border-t border-gray-100 dark:border-gray-800">
+        <Text className="text-xs text-gray-500">
+          Positions: <span className="font-medium text-gray-700 dark:text-gray-300">{displayData.summary.positionCount}</span>
+        </Text>
+        <Text className="text-xs text-gray-500">
+          <span className="text-green-600 font-medium">{displayData.summary.longCount || 0} Long</span> / <span className="text-red-600 font-medium">{displayData.summary.shortCount || 0} Short</span>
+        </Text>
+      </div>
+
+      {/* Optional: Simple Net Exposure Bar */}
+      <div className="mt-4 px-2">
+        <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5 overflow-hidden flex">
+          {/* Long Bar */}
+          <div
+            className="bg-emerald-500 h-full"
+            style={{ width: `${Math.min(parseFloat(displayData.exposureMetrics?.grossLongExposure || 50), 100)}%` }}
+          ></div>
+          {/* Short Bar (represented as space or distinct color if we had gross short scaling nicely, but simplified here) */}
+        </div>
+        <div className="flex justify-between mt-1">
+          <Text className="text-[10px] text-emerald-600 font-medium">Long</Text>
+          <Text className="text-[10px] text-gray-400">Net Exposure</Text>
+          <Text className="text-[10px] text-red-500 font-medium">Short</Text>
         </div>
       </div>
 
-      {/* Net Exposure */}
-      {displayData.exposureMetrics && (
-        <div className="mb-6 pt-6 border-t dark:border-gray-700">
-          <Title className="text-sm mb-3 dark:text-white">Net Exposure</Title>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Gross Exposure</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.exposureMetrics.grossExposure || 0).toFixed(2)}%</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
-              <Text className="text-xs dark:text-white">Net Long</Text>
-              <Badge color="emerald" size="xs">
-                {parseFloat(displayData.exposureMetrics.netLongExposure || 0).toFixed(2)}%
-              </Badge>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">
-              <Text className="text-xs dark:text-white">Net Short</Text>
-              <Badge color="red" size="xs">
-                {parseFloat(displayData.exposureMetrics.netShortExposure || 0).toFixed(2)}%
-              </Badge>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Net Exposure</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.exposureMetrics.netExposure || 0).toFixed(2)}%</Text>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Risk Metrics */}
-      {displayData.riskMetrics && (
-        <div className="mb-6 pt-6 border-t dark:border-gray-700">
-          <Title className="text-sm mb-3 dark:text-white">Risk Metrics</Title>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Sharpe Ratio</Text>
-              <Text className="text-xs font-semibold dark:text-white">{displayData.riskMetrics.sharpeRatio || '0.00'}</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Sortino Ratio</Text>
-              <Text className="text-xs font-semibold dark:text-white">{displayData.riskMetrics.sortinoRatio || '0.00'}</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">
-              <Text className="text-xs dark:text-white">VaR (1d, 95%)</Text>
-              <Badge color="red" size="xs">${displayData.riskMetrics.var95 || '0'}</Badge>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-amber-50 dark:bg-amber-900/20 rounded border border-amber-200 dark:border-amber-800">
-              <Text className="text-xs dark:text-white">Max Drawdown</Text>
-              <Badge color="amber" size="xs">{displayData.riskMetrics.maxDrawdown || '0.00'}%</Badge>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Volatility (Ann.)</Text>
-              <Text className="text-xs font-semibold dark:text-white">{displayData.riskMetrics.volatility || '0.00'}%</Text>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Asset Class Allocation */}
-      {Object.keys(displayData.assetAllocation).length > 0 && (
-        <div className="mb-6 pt-6 border-t dark:border-gray-700">
-          <Title className="text-sm mb-3 dark:text-white">Asset Class Allocation</Title>
-          <div className="space-y-2">
-            {Object.entries(displayData.assetAllocation).map(([type, percentage]) => (
-              <div key={type} className="space-y-1">
-                <div className="flex justify-between items-center">
-                  <Text className="text-xs dark:text-white">{type}</Text>
-                  <Text className="text-xs font-semibold dark:text-white">{parseFloat(percentage || 0).toFixed(2)}%</Text>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full"
-                    style={{ width: `${Math.min(parseFloat(percentage), 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Top Holdings */}
-      {displayData.topHoldings && displayData.topHoldings.length > 0 && (
-        <div className="mb-6 pt-6 border-t dark:border-gray-700">
-          <Title className="text-sm mb-3 dark:text-white">Top Holdings</Title>
-          <div className="space-y-2">
-            {displayData.topHoldings.map((holding) => (
-              <div key={holding.symbol} className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                <Text className="text-xs font-semibold dark:text-white">{holding.symbol}</Text>
-                <Text className="text-xs dark:text-white">
-                  {portfolioData ? `$${holding.marketValue?.toLocaleString() || '0'}` : `${holding.accountPercent}%`}
-                </Text>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Geographic Exposure */}
-      {displayData.factorExposures?.geographic && (
-        <div className="mb-6 pt-6 border-t dark:border-gray-700">
-          <Title className="text-sm mb-3 dark:text-white">Geographic Exposure</Title>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">North America</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.northAmerica || 0).toFixed(2)}%</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Europe</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.europe || 0).toFixed(2)}%</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Asia Pacific</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.asiaPacific || 0).toFixed(2)}%</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Emerging Markets</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.factorExposures.geographic.emergingMarkets || 0).toFixed(2)}%</Text>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Concentration Risk */}
-      {displayData.concentrationMetrics && (
-        <div className="pt-6 border-t dark:border-gray-700">
-          <Title className="text-sm mb-3 dark:text-white">Concentration Risk</Title>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Top 10 Holdings</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.concentrationMetrics.top10HoldingsPercent || 0).toFixed(2)}%</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">Largest Position</Text>
-              <Text className="text-xs font-semibold dark:text-white">{parseFloat(displayData.concentrationMetrics.largestPositionPercent || 0).toFixed(2)}%</Text>
-            </div>
-            <div className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
-              <Text className="text-xs dark:text-white">HHI Index</Text>
-              <Text className="text-xs font-semibold dark:text-white">{displayData.concentrationMetrics.hhiIndex || '0.000'}</Text>
-            </div>
-          </div>
-        </div>
-      )}
-    </Card>
+      {/* Call to action for full breakdown */}
+      <div className="mt-auto pt-8 text-center">
+        <Text className="text-xs text-gray-400 italic">
+          See Portfolio Analysis tab for detailed analysis
+        </Text>
+      </div>
+    </div>
   );
 
   // Loading state
@@ -788,42 +644,88 @@ const PortfolioDashboard = () => {
           <button
             onClick={toggleTheme}
             className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full"
-            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              gap: showPortfolioMetrics ? '12px' : '0'
+            }}
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
-            {theme === 'dark' ? '☀️' : '🌙'}
+            <div style={{ width: '20px', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: '16px', lineHeight: 1 }}>{theme === 'dark' ? '☀️' : '🌙'}</span>
+            </div>
+            {showPortfolioMetrics && (
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+              </span>
+            )}
           </button>
 
           {/* X/Twitter Logo Button */}
           <button
             onClick={() => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer')}
             className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
-            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              gap: showPortfolioMetrics ? '12px' : '0'
+            }}
             title="Open X (Twitter) List"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-            </svg>
+            <div style={{ width: '20px', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300 shrink-0">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
+            </div>
+            {showPortfolioMetrics && (
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                X.com
+              </span>
+            )}
           </button>
 
           {/* The Pods Button */}
           <button
             onClick={() => setShowPeaPodWindow(!showPeaPodWindow)}
             className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
-            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              overflow: 'hidden',
+              gap: showPortfolioMetrics ? '12px' : '0'
+            }}
             title="The Pods"
           >
-            {peaPodImageError ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-                <path d="M7 4C5.5 4 4 5.5 4 7.5c0 1.5.8 2.5 2 3v8c0 1.1.9 2 2 2s2-.9 2-2v-8c1.2-.5 2-1.5 2-3 0-2-1.5-3.5-3-3.5zm-1 4.5c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S4.5 10.8 4.5 10s.7-1.5 1.5-1.5zm3 0c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S7.5 10.8 7.5 10s.7-1.5 1.5-1.5z" />
-              </svg>
-            ) : (
-              <img
-                src="/images/icons/pea-pod.png"
-                alt="The Pods"
-                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                onError={() => setPeaPodImageError(true)}
-              />
+            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
+              {peaPodImageError ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
+                  <path d="M7 4C5.5 4 4 5.5 4 7.5c0 1.5.8 2.5 2 3v8c0 1.1.9 2 2 2s2-.9 2-2v-8c1.2-.5 2-1.5 2-3 0-2-1.5-3.5-3-3.5zm-1 4.5c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S4.5 10.8 4.5 10s.7-1.5 1.5-1.5zm3 0c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S7.5 10.8 7.5 10s.7-1.5 1.5-1.5z" />
+                </svg>
+              ) : (
+                <img
+                  src="/images/icons/pea-pod.png"
+                  alt="The Pods"
+                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                  onError={() => setPeaPodImageError(true)}
+                />
+              )}
+            </div>
+            {showPortfolioMetrics && (
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                The Pods
+              </span>
             )}
           </button>
 
@@ -832,20 +734,36 @@ const PortfolioDashboard = () => {
             ref={bookMenuRef}
             onClick={() => setShowBookMenu(!showBookMenu)}
             className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
-            style={{ minWidth: '32px', height: '32px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              overflow: 'hidden',
+              gap: showPortfolioMetrics ? '12px' : '0'
+            }}
             title="Open Notes"
           >
-            {bookImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-                <path d="M4 6 L12 4 L12 20 L4 18 Z M12 4 L20 6 L20 18 L12 20 Z" />
-              </svg>
-            ) : (
-              <img
-                src="/images/icons/book.png"
-                alt="Open Notes"
-                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                onError={() => setBookImageError(true)}
-              />
+            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
+              {bookImageError ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
+                  <path d="M4 6 L12 4 L12 20 L4 18 Z M12 4 L20 6 L20 18 L12 20 Z" />
+                </svg>
+              ) : (
+                <img
+                  src="/images/icons/book.png"
+                  alt="Open Notes"
+                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                  onError={() => setBookImageError(true)}
+                />
+              )}
+            </div>
+            {showPortfolioMetrics && (
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                Notes
+              </span>
             )}
           </button>
 
@@ -912,45 +830,53 @@ const PortfolioDashboard = () => {
             style={{
               minWidth: '32px',
               height: '32px',
-              padding: '0',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               overflow: 'hidden',
-              marginTop: '4px'
+              marginTop: '4px',
+              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Securities Universe"
           >
-            {securitiesUniverseImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showSecuritiesUniverse ? "text-white" : "text-gray-700 dark:text-gray-300"}>
-                <defs>
-                  <radialGradient id="planetGradient" cx="0.4" cy="0.3">
-                    <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9" />
-                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95" />
-                    <stop offset="100%" stopColor="#663399" stopOpacity="1" />
-                  </radialGradient>
-                  <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8" />
-                    <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9" />
-                    <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8" />
-                  </linearGradient>
-                </defs>
-                <circle cx="12" cy="12" r="7" fill="url(#planetGradient)" />
-                <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4" />
-                <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3" />
-                <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9" />
-                <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7" />
-                <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8" />
-                <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6" />
-                <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7" />
-              </svg>
-            ) : (
-              <img
-                src="/images/icons/securities-universe.png"
-                alt="Securities Universe"
-                style={{ width: '24px', height: '24px', objectFit: 'contain' }}
-                onError={() => setSecuritiesUniverseImageError(true)}
-              />
+            <div className="shrink-0 flex items-center justify-center w-6 h-6" style={{ width: '20px', flexShrink: 0 }}>
+              {securitiesUniverseImageError ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showSecuritiesUniverse ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                  <defs>
+                    <radialGradient id="planetGradient" cx="0.4" cy="0.3">
+                      <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9" />
+                      <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95" />
+                      <stop offset="100%" stopColor="#663399" stopOpacity="1" />
+                    </radialGradient>
+                    <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8" />
+                      <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9" />
+                      <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8" />
+                    </linearGradient>
+                  </defs>
+                  <circle cx="12" cy="12" r="7" fill="url(#planetGradient)" />
+                  <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4" />
+                  <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3" />
+                  <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9" />
+                  <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7" />
+                  <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8" />
+                  <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6" />
+                  <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7" />
+                </svg>
+              ) : (
+                <img
+                  src="/images/icons/securities-universe.png"
+                  alt="Securities Universe"
+                  style={{ width: '24px', height: '24px', objectFit: 'contain' }}
+                  onError={() => setSecuritiesUniverseImageError(true)}
+                />
+              )}
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`text-sm font-medium whitespace-nowrap ${showSecuritiesUniverse ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
+                Securities Universe
+              </span>
             )}
           </button>
 
@@ -964,27 +890,35 @@ const PortfolioDashboard = () => {
             style={{
               minWidth: '32px',
               height: '32px',
-              padding: '0',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               overflow: 'hidden',
-              marginTop: '4px'
+              marginTop: '4px',
+              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Performance Tracking"
           >
-            {performanceImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPerformanceTracking ? "text-white" : "text-gray-700 dark:text-gray-300"}>
-                <polyline points="22 6 13.5 15.5 8.5 10.5 2 17" />
-                <polyline points="16 6 22 6 22 12" />
-              </svg>
-            ) : (
-              <img
-                src="/images/icons/performance.png"
-                alt="Performance Tracking"
-                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                onError={() => setPerformanceImageError(true)}
-              />
+            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
+              {performanceImageError ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPerformanceTracking ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                  <polyline points="22 6 13.5 15.5 8.5 10.5 2 17" />
+                  <polyline points="16 6 22 6 22 12" />
+                </svg>
+              ) : (
+                <img
+                  src="/images/icons/performance.png"
+                  alt="Performance Tracking"
+                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                  onError={() => setPerformanceImageError(true)}
+                />
+              )}
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`text-sm font-medium whitespace-nowrap ${showPerformanceTracking ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
+                Performance
+              </span>
             )}
           </button>
 
@@ -998,29 +932,37 @@ const PortfolioDashboard = () => {
             style={{
               minWidth: '32px',
               height: '32px',
-              padding: '0',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               overflow: 'hidden',
-              marginTop: '4px'
+              marginTop: '4px',
+              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Portfolio Breakdown"
           >
-            {portfolioBreakdownImageError ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-white" : "text-gray-700 dark:text-gray-300"}>
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8" />
-                <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4" />
-                <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2" />
-              </svg>
-            ) : (
-              <img
-                src="/images/icons/portfolio-construction.png"
-                alt="Portfolio Breakdown"
-                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                onError={() => setPortfolioBreakdownImageError(true)}
-              />
+            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
+              {portfolioBreakdownImageError ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8" />
+                  <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4" />
+                  <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2" />
+                </svg>
+              ) : (
+                <img
+                  src="/images/icons/portfolio-construction.png"
+                  alt="Portfolio Breakdown"
+                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                  onError={() => setPortfolioBreakdownImageError(true)}
+                />
+              )}
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
+                Portfolio Analysis
+              </span>
             )}
           </button>
 
@@ -1991,7 +1933,7 @@ const PortfolioDashboard = () => {
                   userSelect: 'none',
                 }}
               >
-                Portfolio Breakdown
+                Portfolio Analysis
               </Title>
             </div>
             <div
@@ -2027,6 +1969,7 @@ const PortfolioDashboard = () => {
             : 'none',
           transition: 'width 0.3s ease-in-out',
           display: showWorkflowStatus ? 'flex' : 'none',
+          visibility: showWorkflowStatus ? 'visible' : 'hidden',
           flexDirection: 'column',
           overflow: 'hidden',
           borderRadius: showWorkflowStatus ? '0.75rem 0 0 0' : '0', // Rounded top-left corner
@@ -2152,7 +2095,7 @@ const PortfolioDashboard = () => {
           />
         </Button>
       </div>
-    </div>
+    </div >
   );
 };
 
