@@ -27,7 +27,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       // Show immediate feedback
@@ -80,10 +80,10 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
     if (csvDate) {
       try {
         const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-        
+
         // Add timeout to date check (2 seconds max)
         const dateCheckPromise = fetch(`${backendUrl}/api/portfolio`);
-        const timeoutPromise = new Promise((_, reject) => 
+        const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Date check timeout')), 2000)
         );
 
@@ -132,20 +132,20 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
 
   const performUpload = async (file) => {
     setIsUploading(true);
-    
+
     try {
       // Validate CSV
       PresignedUploadService.validateCSV(file);
-      
+
       // Update status: Uploading to S3
       setUploadStatus({ type: 'info', message: 'Uploading to S3...' });
-      
+
       // Upload to S3
       const result = await PresignedUploadService.uploadCSV(file);
-      
+
       // Update status: Processing (Lambda is processing)
       setUploadStatus({ type: 'info', message: 'Processing...' });
-      
+
       setLastUploadTime(new Date().toLocaleTimeString('en-US', {
         hour: 'numeric',
         minute: '2-digit',
@@ -176,11 +176,11 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
 
     } catch (error) {
       console.error('Upload error:', error);
-      setUploadStatus({ 
-        type: 'error', 
-        message: error.message 
+      setUploadStatus({
+        type: 'error',
+        message: error.message
       });
-      
+
       if (onUploadError) {
         onUploadError(error);
       }
@@ -199,20 +199,20 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
       try {
         const portfolioData = await MarketDataService.getPortfolio();
         const lastUpdatedStr = portfolioData?.lastUpdated;
-        
-        if (lastUpdatedStr && 
-            lastUpdatedStr !== 'Schwab Integration Pending' && 
-            lastUpdatedStr !== 'No portfolio data - upload a Schwab CSV to get started') {
+
+        if (lastUpdatedStr &&
+          lastUpdatedStr !== 'Schwab Integration Pending' &&
+          lastUpdatedStr !== 'No portfolio data - upload a Schwab CSV to get started') {
           // Extract date from lastUpdated string (format: "MM/DD/YYYY, HH:MM AM/PM PST / HH:MM AM/PM EST")
           // Example: "01/11/2026, 8:19 AM PST / 11:19 AM EST"
           const dateMatch = lastUpdatedStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-          
+
           if (dateMatch && dateMatch.length >= 4) {
             const year = dateMatch[3];
             const month = parseInt(dateMatch[1]) - 1; // Month is 0-indexed
             const day = dateMatch[2];
             const date = new Date(year, month, day);
-            
+
             // Verify date is valid
             if (!isNaN(date.getTime())) {
               // Format as "Month Day, Year" (e.g., "January 11, 2026")
@@ -243,7 +243,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
     };
 
     window.addEventListener('portfolioRefresh', handlePortfolioRefresh);
-    
+
     return () => {
       window.removeEventListener('portfolioRefresh', handlePortfolioRefresh);
     };
@@ -252,7 +252,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
   return (
     <div>
       {/* Upload Area */}
-      <Card 
+      <Card
         className={`cursor-pointer transition-all rounded-lg ${isDragging ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -266,7 +266,7 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
           onChange={handleFileSelect}
           style={{ display: 'none' }}
         />
-        
+
         {isUploading ? (
           <div className="flex items-center justify-center py-4">
             <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent mr-3"></div>
@@ -290,15 +290,14 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
       </Card>
 
       {/* Status Message */}
-      {uploadStatus && (
-        <Card className={`mt-3 rounded-lg ${
-          uploadStatus.type === 'success' 
-            ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' 
+      {uploadStatus && !isUploading && (
+        <Card className={`mt-3 rounded-lg ${uploadStatus.type === 'success'
+            ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800'
             : uploadStatus.type === 'error'
-            ? 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'
-            : 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800'
-        }`}>
-          <Badge 
+              ? 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'
+              : 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800'
+          }`}>
+          <Badge
             color={uploadStatus.type === 'success' ? 'emerald' : uploadStatus.type === 'error' ? 'red' : 'blue'}
             size="lg"
           >
@@ -315,11 +314,11 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
               <Text className="text-3xl mr-3">⚠️</Text>
               <Title className="dark:text-white">Older Statement Detected</Title>
             </Flex>
-            
+
             <Text className="mb-4 dark:text-gray-300">
               The CSV file you're trying to upload appears to be from an older date:
             </Text>
-            
+
             <Card className="mb-4 bg-white dark:bg-gray-800">
               <Flex justifyContent="between" alignItems="center" className="mb-2">
                 <Text className="font-semibold dark:text-white">CSV Statement Date:</Text>
@@ -330,21 +329,21 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
                 <Badge color="emerald">{warningData.existingDate}</Badge>
               </Flex>
             </Card>
-            
+
             <Text className="text-xs text-gray-600 dark:text-gray-400 mb-4">
-              Uploading an older statement will overwrite your current portfolio data. 
+              Uploading an older statement will overwrite your current portfolio data.
               Are you sure you want to continue?
             </Text>
 
             <Flex className="gap-3">
-              <Button 
+              <Button
                 onClick={handleCancelUpload}
                 variant="secondary"
                 className="flex-1"
               >
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={handleConfirmOldUpload}
                 color="red"
                 className="flex-1"

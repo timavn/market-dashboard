@@ -2627,7 +2627,10 @@ app.get('/api/portfolio', async (req, res) => {
         totalDayChangePercent: latestSnapshot.summary?.totalDayChangePercent || '0.00',
         totalGainLoss: latestSnapshot.summary?.totalGainLoss || 0,
         totalGainLossPercent: latestSnapshot.summary?.totalGainLossPercent || '0.00',
-        positionCount: latestSnapshot.summary?.positionCount || holdings.length
+        totalGainLossPercent: latestSnapshot.summary?.totalGainLossPercent || '0.00',
+        positionCount: latestSnapshot.summary?.positionCount || holdings.length,
+        longCount: latestSnapshot.summary?.longCount || 0,
+        shortCount: latestSnapshot.summary?.shortCount || 0
       },
       assetAllocation: latestSnapshot.assetAllocation || {},
       // Include full holdings array for PortfolioBreakdown component

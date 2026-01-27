@@ -24,8 +24,15 @@ const PortfolioAnalytics = ({ portfolioData }) => {
     longShortFactors: portfolioData.longShortFactors || {},
     sensitivities: portfolioData.sensitivities || {},
     liquidity: portfolioData.liquidity || { buckets: {}, topRiskContributors: [] },
-    scenarios: portfolioData.scenarios || []
-  } : {};
+    scenarios: portfolioData.scenarios || [],
+    // Fallback to summary counts if not in riskMetrics
+    longCount: portfolioData.riskMetrics?.longCount || portfolioData.summary?.longCount || 0,
+    shortCount: portfolioData.riskMetrics?.shortCount || portfolioData.summary?.shortCount || 0
+  } : {
+    // Fallback if riskMetrics is null but summary exists
+    longCount: portfolioData.summary?.longCount || 0,
+    shortCount: portfolioData.summary?.shortCount || 0
+  };
 
   // Formatted data for charts
   const macroFactorData = Object.entries(analytics.longShortFactors || {}).map(([name, data]) => ({

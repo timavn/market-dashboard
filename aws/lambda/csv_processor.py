@@ -124,6 +124,10 @@ def parse_schwab_csv(csv_content):
     total_value = Decimal('0')
     asset_allocation = {}
     account_total_from_csv = None  # Will store Account Total if found in CSV
+    
+    # Initialize counters
+    long_count = 0
+    short_count = 0
 
     for row in reader:
         symbol = row.get('Symbol', '').strip()
@@ -156,6 +160,12 @@ def parse_schwab_csv(csv_content):
                 print(f"Found additional cash: ${cash_value}")
                 # Add to total but don't create a holding
                 total_value += cash_value
+                
+                # FIXED: Add to asset allocation
+                if 'Cash' in asset_allocation:
+                    asset_allocation['Cash'] += cash_value
+                else:
+                    asset_allocation['Cash'] = cash_value
             continue
 
         # Parse numerical values using exact Schwab column names
@@ -193,6 +203,12 @@ def parse_schwab_csv(csv_content):
             holdings.append(holding)
             # FIXED: Use actual market_value (not abs) so shorts subtract from total
             total_value += market_value
+            
+            # Count Long/Short positions
+            if market_value > 0:
+                long_count += 1
+            elif market_value < 0:
+                short_count += 1
 
             # Aggregate asset allocation
             if asset_class in asset_allocation:
@@ -226,6 +242,8 @@ def parse_schwab_csv(csv_content):
             'totalGainLoss': total_gain_loss,
             'totalGainLossPercent': total_gain_loss_pct,
             'positionCount': len(holdings),
+            'longCount': long_count,
+            'shortCount': short_count,
             'totalCostBasis': total_cost_basis
         },
         'assetAllocation': asset_allocation_pct
@@ -279,7 +297,9 @@ def store_portfolio_snapshot(portfolio_data):
         'timestamp': timestamp,
         'summary': converted_summary,
         'assetAllocation': converted_asset_allocation,
-        'holdingsCount': len(portfolio_data['holdings'])
+        'holdingsCount': len(portfolio_data['holdings']),
+        'longCount': portfolio_data['summary'].get('longCount', 0),
+        'shortCount': portfolio_data['summary'].get('shortCount', 0)
     }
 
     try:

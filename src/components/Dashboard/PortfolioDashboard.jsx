@@ -435,57 +435,138 @@ const PortfolioDashboard = () => {
         </Text>
       </div>
 
-      {/* Snapshot Metrics - Single Compact Row */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <Card className="p-3 bg-white dark:bg-gray-800 border-none shadow-sm flex flex-col items-center justify-center">
-          <Text className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total Value</Text>
-          <Text className="text-sm font-bold mt-0.5 dark:text-white">
-            ${(displayData.summary.totalValue / 1000).toFixed(1)}k
-          </Text>
-        </Card>
+      {(() => {
+        // Calculate robust metrics from holdings
+        const totalVal = parseFloat(displayData.summary?.totalValue) || 1;
+        const holdings = displayData.holdings || [];
 
-        <Card className="p-3 bg-white dark:bg-gray-800 border-none shadow-sm flex flex-col items-center justify-center">
-          <Text className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Net Exposure</Text>
-          <Text className="text-sm font-bold mt-0.5 dark:text-white">
-            {parseFloat(displayData.exposureMetrics?.netExposure || 0).toFixed(1)}%
-          </Text>
-        </Card>
+        let longVal = 0;
+        let shortVal = 0;
+        let netVal = 0;
+        let cashVal = 0;
 
-        <Card className="p-3 bg-white dark:bg-gray-800 border-none shadow-sm flex flex-col items-center justify-center">
-          <Text className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Cash</Text>
-          <Text className="text-sm font-bold mt-0.5 dark:text-white">
-            {/* Simple cash calculation approximation if not explicitly provided */}
-            {displayData.assetAllocation?.['Cash'] ? parseFloat(displayData.assetAllocation['Cash']).toFixed(1) : '—'}%
-          </Text>
-        </Card>
-      </div>
+        holdings.forEach(h => {
+          const val = parseFloat(h.marketValue) || 0;
+          const absVal = Math.abs(val);
+          // Check for cash
+          const isCash = (h.assetClass === 'Cash' || h.symbol === 'Cash & Cash Investments' || h.assetType === 'Cash');
 
-      {/* Secondary Info - Text Row */}
-      <div className="flex justify-between items-center px-2 py-2 border-t border-gray-100 dark:border-gray-800">
-        <Text className="text-xs text-gray-500">
-          Positions: <span className="font-medium text-gray-700 dark:text-gray-300">{displayData.summary.positionCount}</span>
-        </Text>
-        <Text className="text-xs text-gray-500">
-          <span className="text-green-600 font-medium">{displayData.summary.longCount || 0} Long</span> / <span className="text-red-600 font-medium">{displayData.summary.shortCount || 0} Short</span>
-        </Text>
-      </div>
+          if (isCash) {
+            cashVal += val;
+          } else if (val > 0) {
+            longVal += absVal;
+            netVal += val;
+          } else if (val < 0) {
+            shortVal += absVal;
+            netVal += val;
+          }
+        });
 
-      {/* Optional: Simple Net Exposure Bar */}
-      <div className="mt-4 px-2">
-        <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5 overflow-hidden flex">
-          {/* Long Bar */}
-          <div
-            className="bg-emerald-500 h-full"
-            style={{ width: `${Math.min(parseFloat(displayData.exposureMetrics?.grossLongExposure || 50), 100)}%` }}
-          ></div>
-          {/* Short Bar (represented as space or distinct color if we had gross short scaling nicely, but simplified here) */}
-        </div>
-        <div className="flex justify-between mt-1">
-          <Text className="text-[10px] text-emerald-600 font-medium">Long</Text>
-          <Text className="text-[10px] text-gray-400">Net Exposure</Text>
-          <Text className="text-[10px] text-red-500 font-medium">Short</Text>
-        </div>
-      </div>
+        const longPct = (longVal / totalVal) * 100;
+        const shortPct = (shortVal / totalVal) * 100;
+        const netPct = (netVal / totalVal) * 100;
+        const grossPct = ((longVal + shortVal) / totalVal) * 100;
+        const calculatedCashPct = Math.max(0, 100 - Math.round(grossPct));
+
+        return (
+          <div className="flex flex-col space-y-8">
+            {/* Top Section: Headline Metrics */}
+            <div className="grid grid-cols-3 gap-4">
+              {/* Total Value */}
+              <Card className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center">
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Total Value</Text>
+                <Text className="text-xl font-bold text-gray-900 dark:text-white">
+                  ${totalVal.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </Text>
+              </Card>
+
+              {/* Net Exposure */}
+              <Card className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center">
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Net Exposure</Text>
+                <Text className={`text-xl font-bold ${netPct > 0 ? 'text-green-600 dark:text-green-400' : (netPct < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white')}`}>
+                  {netPct > 0 ? '+' : ''}{Math.round(netPct)}%
+                </Text>
+              </Card>
+
+              {/* Cash */}
+              <Card className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center">
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Cash</Text>
+                <Text className="text-xl font-bold text-gray-900 dark:text-white">
+                  {calculatedCashPct.toFixed(1)}%
+                </Text>
+              </Card>
+            </div>
+
+            {/* Middle Section: Net Market Exposure Bar */}
+            <div className="w-full px-2">
+              <div className="text-center mb-6">
+                <Text className="text-sm font-bold text-gray-900 dark:text-white block">Net Market Exposure</Text>
+
+              </div>
+
+              <div className="relative h-12">
+                {/* Labels */}
+                <div className="relative h-8 mb-2 text-[10px]">
+                  <span className="absolute left-0 top-0 text-red-600 dark:text-red-400 font-medium text-center leading-tight">-100%<br />Short</span>
+                  <div className="absolute left-1/2 top-0 transform -translate-x-1/2 flex flex-col items-center leading-tight">
+                    <span className="text-gray-900 dark:text-white font-medium">0%</span>
+                    <span className="text-gray-900 dark:text-white font-medium">Neutral</span>
+                  </div>
+                  <span className="absolute right-0 top-0 text-green-600 dark:text-green-400 font-medium text-center leading-tight">+100%<br />Long</span>
+                </div>
+
+                {/* Gradient Bar Track */}
+                <div className="h-4 w-full relative overflow-visible shadow-inner"
+                  style={{ background: 'linear-gradient(to right, #EF4444 50%, #10B981 50%)' }}>
+
+                  {/* Center Tick */}
+                  <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-white/50 backdrop-blur-sm transform -translate-x-1/2 z-10"></div>
+
+                  {/* Position Marker */}
+                  <div
+                    className="absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 transition-all duration-500 ease-out z-20"
+                    style={{ left: `${Math.min(Math.max((netPct + 100) / 2, 0), 100)}%` }}
+                  >
+                    <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[10px] border-t-gray-800 dark:border-t-white transform -translate-y-[14px] drop-shadow-md"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Section: Exposure Breakdown */}
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-100 dark:border-gray-800">
+
+
+              <div className="grid grid-cols-5 gap-4">
+                <div className="flex flex-col items-center">
+                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Gross</Text>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">{Math.round(grossPct)}%</Text>
+                </div>
+
+                <div className="flex flex-col items-center">
+                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Long</Text>
+                  <Text className="text-sm font-bold text-green-600 dark:text-green-400">{Math.round(longPct)}%</Text>
+                </div>
+
+                <div className="flex flex-col items-center">
+                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Short</Text>
+                  <Text className="text-sm font-bold text-red-600 dark:text-red-400">{Math.round(shortPct)}%</Text>
+                </div>
+
+                <div className="flex flex-col items-center">
+                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Cash</Text>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">{calculatedCashPct.toFixed(1)}%</Text>
+                </div>
+
+                <div className="flex flex-col items-center">
+                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Positions</Text>
+                  <Text className="text-sm font-bold text-gray-900 dark:text-white">{displayData.summary.positionCount}</Text>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Call to action for full breakdown */}
       <div className="mt-auto pt-8 text-center">

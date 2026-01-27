@@ -18,12 +18,20 @@ export const separateLongsAndShorts = (holdings) => {
 
   holdings.forEach(holding => {
     const quantity = parseFloat(holding.quantity) || 0;
-    if (quantity > 0) {
+    const marketValue = parseFloat(holding.marketValue) || 0;
+
+    // Use market value as primary determinant (more reliable than quantity parsing)
+    // Or if market value is 0, try quantity
+    if (marketValue > 0) {
+      longs.push(holding);
+    } else if (marketValue < 0) {
+      shorts.push(holding);
+    } else if (quantity > 0) {
       longs.push(holding);
     } else if (quantity < 0) {
       shorts.push(holding);
     }
-    // If quantity is 0, we skip it
+    // If both are 0, we skip it
   });
 
   return { longs, shorts };
@@ -46,7 +54,7 @@ export const calculateAssetClassAllocation = (holdings, totalValue) => {
   holdings.forEach(holding => {
     const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
     const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType);
-    
+
     if (!allocation[assetClass]) {
       allocation[assetClass] = 0;
     }
@@ -78,9 +86,9 @@ export const mapAssetClassToDisplay = (assetClass) => {
     // Default to Equities instead of "Other"
     return 'Equities';
   }
-  
+
   const lower = assetClass.toLowerCase();
-  
+
   // Map to display categories
   if (lower.includes('equity') || lower.includes('stock') || lower.includes('etf') || lower.includes('equities')) {
     // Check if it's international
@@ -89,23 +97,23 @@ export const mapAssetClassToDisplay = (assetClass) => {
     }
     return 'Equities';
   }
-  
+
   if (lower.includes('bond') || lower.includes('fixed income') || lower.includes('treasury') || lower.includes('credit') || lower.includes('mbs') || lower.includes('tips')) {
     return 'Fixed Income';
   }
-  
+
   if (lower.includes('currency') || lower.includes('fx') || lower.includes('forex') || lower.includes('usd') || lower.includes('gold') || lower.includes('silver')) {
     return 'Currencies';
   }
-  
+
   if (lower.includes('commodity') || lower.includes('oil') || lower.includes('metal') || lower.includes('energy') || lower.includes('agriculture') || lower.includes('corn') || lower.includes('wheat')) {
     return 'Commodities';
   }
-  
+
   if (lower.includes('crypto') || lower.includes('bitcoin') || lower.includes('ethereum')) {
     return 'Equities'; // Crypto mapped to Equities per existing logic
   }
-  
+
   // Default to Equities instead of "Other" to ensure we never show "Other"
   return 'Equities';
 };
@@ -118,29 +126,29 @@ export const mapAssetClassToDisplay = (assetClass) => {
  */
 export const mapAssetClassToFactor = (assetClass, factorExposures) => {
   if (!factorExposures) return 'Growth';
-  
+
   const lower = assetClass.toLowerCase();
-  
+
   // Technology/Equities typically map to Growth
   if (lower.includes('tech') || lower.includes('equity') || lower.includes('stock')) {
     return 'Growth';
   }
-  
+
   // Value stocks map to Value
   if (lower.includes('value')) {
     return 'Value';
   }
-  
+
   // Quality stocks map to Quality
   if (lower.includes('quality')) {
     return 'Quality';
   }
-  
+
   // Momentum
   if (lower.includes('momentum')) {
     return 'Momentum';
   }
-  
+
   // Default to Growth for most equities
   return 'Growth';
 };
@@ -164,7 +172,7 @@ export const prepareDoublePieData = (holdings, totalValue, factorExposures) => {
   holdings.forEach(holding => {
     const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
     const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType);
-    
+
     if (!assetClassMap[assetClass]) {
       assetClassMap[assetClass] = 0;
     }
@@ -182,12 +190,12 @@ export const prepareDoublePieData = (holdings, totalValue, factorExposures) => {
   // Calculate factor exposure (outer ring)
   // Use actual factorExposures data if available, otherwise map from asset classes
   const factorMap = {};
-  
+
   if (factorExposures && factorExposures.sectors) {
     // Use actual sector exposures from portfolio analytics
     const sectors = factorExposures.sectors;
     const totalFactorValue = totalValue;
-    
+
     // Map sectors to factors and calculate values
     if (sectors.technology) {
       const techValue = (parseFloat(sectors.technology) / 100) * totalFactorValue;
@@ -210,7 +218,7 @@ export const prepareDoublePieData = (holdings, totalValue, factorExposures) => {
       const energyValue = (parseFloat(sectors.energy) / 100) * totalFactorValue;
       factorMap['Value'] = (factorMap['Value'] || 0) + energyValue;
     }
-    
+
     // Add remaining allocation to Growth if not fully allocated
     const allocated = Object.values(factorMap).reduce((sum, val) => sum + val, 0);
     if (allocated < totalFactorValue * 0.9) {
@@ -222,7 +230,7 @@ export const prepareDoublePieData = (holdings, totalValue, factorExposures) => {
       const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
       const assetClass = mapAssetClassToDisplay(holding.assetClass || holding.assetType);
       const factor = mapAssetClassToFactor(assetClass, factorExposures);
-      
+
       if (!factorMap[factor]) {
         factorMap[factor] = 0;
       }

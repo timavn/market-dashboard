@@ -22,7 +22,7 @@ from parse_signal_strength import extract_signal_strength, save_to_dynamodb as s
 from date_utils import extract_date_from_pdf
 import boto3
 
-DOWNLOADS_DIR = Path.home() / "Desktop" / "hedgeye"
+DOWNLOADS_DIR = Path.home() / "Desktop" / "dashboard" / "hedgeye"
 
 # PDF type detection patterns (based on first page content)
 PDF_TYPES = {

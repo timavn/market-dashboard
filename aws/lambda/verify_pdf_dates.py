@@ -13,17 +13,17 @@ from datetime import datetime
 def verify_pdf_dates():
     """Verify that all PDFs in hedgeye folder match their DynamoDB snapshot dates"""
 
-    hedgeye_dir = Path.home() / 'Desktop' / 'hedgeye'
+    hedgeye_dir = Path.home() / 'Desktop' / 'dashboard' / 'hedgeye'
 
     print("="*70)
     print("VERIFICATION: PDF Dates vs DynamoDB Snapshot Dates")
     print("="*70)
 
     # Get all PDFs
-    pdfs = list(hedgeye_dir.glob("*.pdf"))
+    pdfs = list(hedgeye_dir.rglob("*.pdf"))
 
     if not pdfs:
-        print("\n❌ No PDFs found in ~/Desktop/hedgeye/")
+        print("\n❌ No PDFs found in ~/Desktop/dashboard/hedgeye/")
         return
 
     print(f"\nFound {len(pdfs)} PDFs\n")

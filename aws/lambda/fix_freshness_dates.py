@@ -12,7 +12,7 @@ from pathlib import Path
 from date_utils import extract_date_from_pdf
 
 # Import all the parsers
-from parse_hedgeye_pdf import extract_risk_ranges, save_to_dynamodb as save_risk_ranges
+from parse_hedgeye_pdf import extract_all_risk_range_data as extract_risk_ranges, save_to_dynamodb as save_risk_ranges
 from parse_early_look import extract_early_look, save_to_dynamodb as save_early_look
 from parse_bitcoin_tracker import extract_bitcoin_tracker, save_to_dynamodb as save_bitcoin_tracker
 from parse_momo_tracker import extract_momo_tracker, save_to_dynamodb as save_momo_tracker
@@ -86,7 +86,7 @@ def process_pdf(pdf_path, data_type):
 
 def main():
     """Main function to process all PDFs"""
-    hedgeye_dir = Path.home() / 'Desktop' / 'hedgeye'
+    hedgeye_dir = Path.home() / 'Desktop' / 'dashboard' / 'hedgeye'
     
     if not hedgeye_dir.exists():
         print(f"❌ Hedgeye directory not found: {hedgeye_dir}")
