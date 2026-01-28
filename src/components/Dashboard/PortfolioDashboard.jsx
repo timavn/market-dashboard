@@ -1042,7 +1042,7 @@ const PortfolioDashboard = () => {
             </div>
             {showPortfolioMetrics && (
               <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
-                Portfolio Analysis
+                Portfolio
               </span>
             )}
           </button>
@@ -1994,34 +1994,9 @@ const PortfolioDashboard = () => {
           <>
             <div
               style={{
-                padding: '12px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
-              onClick={() => setShowPortfolioBreakdown(false)}
-            >
-              <Title
-                className="dark:text-white"
-                style={{
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  color: '#374151',
-                  margin: 0,
-                  userSelect: 'none',
-                }}
-              >
-                Portfolio Analysis
-              </Title>
-            </div>
-            <div
-              style={{
                 flex: 1,
                 overflowY: 'auto',
-                padding: '16px',
+                padding: '4px 16px 16px 16px',
               }}
             >
               <PortfolioBreakdown portfolioData={portfolioData} isLoading={loading} />

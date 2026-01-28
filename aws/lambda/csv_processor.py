@@ -66,16 +66,27 @@ def lambda_handler(event, context):
                 trading_date = (upload_time - timedelta(days=1)).strftime('%Y-%m-%d')
             print(f"Could not extract date from filename, using: {trading_date}")
 
-        # Parse Schwab CSV
-        portfolio_data = parse_schwab_csv(csv_content)
+        # Check if it's a Transactions CSV or Positions CSV
+        if is_transactions_csv(csv_content):
+            print("Detected Transactions CSV format")
+            transactions = parse_schwab_transactions_csv(csv_content)
+            process_transaction_history(transactions)
+            store_transactions(transactions)
+            message = f"Processed {len(transactions)} transactions"
+            snapshot_id = "transactions_" + datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        else:
+            # Parse Schwab Positions CSV
+            print("Detected Positions CSV format")
+            portfolio_data = parse_schwab_csv(csv_content)
 
-        # Store in DynamoDB
-        snapshot_id = store_portfolio_snapshot(portfolio_data)
-        store_holdings(snapshot_id, portfolio_data['holdings'])
+            # Store in DynamoDB
+            snapshot_id = store_portfolio_snapshot(portfolio_data)
+            store_holdings(snapshot_id, portfolio_data['holdings'])
 
-        # Store performance data
-        store_performance_data(trading_date, portfolio_data, snapshot_id)
-        store_position_performance_data(trading_date, portfolio_data['holdings'])
+            # Store performance data
+            store_performance_data(trading_date, portfolio_data, snapshot_id)
+            store_position_performance_data(trading_date, portfolio_data['holdings'])
+            message = 'Portfolio snapshot processed successfully'
 
         # Log successful processing
         log_processing(bucket, key, 'SUCCESS', snapshot_id)
@@ -83,9 +94,8 @@ def lambda_handler(event, context):
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'CSV processed successfully',
-                'snapshotId': snapshot_id,
-                'holdingsCount': len(portfolio_data['holdings'])
+                'message': message,
+                'snapshotId': snapshot_id
             })
         }
 
@@ -476,6 +486,53 @@ def store_performance_data(trading_date, portfolio_data, snapshot_id):
         # Don't fail the whole function if performance storage fails
         pass
 
+def store_transactions(transactions):
+    """Store individual transactions in Transactions table"""
+    try:
+        table_name = os.environ.get('TRANSACTIONS_TABLE', 'Transactions')
+        table = dynamodb.Table(table_name)
+        
+        with table.batch_writer() as batch:
+            for t in transactions:
+                # Create a unique ID for the transaction if one doesn't exist
+                # Use date + symbol + action + quantity to be reasonably unique
+                # or just use a random ID if we want to be safe, but deterministic is better for idempotency
+                
+                # Format: Date#Timestamp or just Date for sorting
+                date = t['date']
+                symbol = t['symbol']
+                action = t['action']
+                qty = str(t['quantity'])
+                price = str(t['price'])
+                
+                # Generate SK: Date#Action#Quantity (Simple deduplication key)
+                # We add a hash to ensure uniqueness
+                import hashlib
+                raw_id = f"{date}_{symbol}_{action}_{qty}_{price}"
+                tx_hash = hashlib.md5(raw_id.encode()).hexdigest()[:8]
+                sort_key = f"{date}#{tx_hash}"
+                
+                item = {
+                    'symbol': symbol,
+                    'sk': sort_key, # GSI usually needed for querying by Key
+                    'date': date,
+                    'action': action,
+                    'quantity': convert_floats_to_decimals(t['quantity']),
+                    'price': convert_floats_to_decimals(t['price']),
+                    'amount': convert_floats_to_decimals(t['amount']),
+                    'description': t.get('description', ''),
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                
+                batch.put_item(Item=item)
+                
+        print(f"Stored {len(transactions)} transactions in {table_name}")
+        
+    except Exception as e:
+        print(f"Error storing transactions: {str(e)}")
+        # Don't fail the whole function
+        pass
+
 
 def get_previous_position_data(symbol, trading_date):
     """Get previous day's position data for a symbol"""
@@ -590,3 +647,350 @@ def log_processing(bucket, key, status, snapshot_id=None, error=None):
     except Exception as e:
         # Don't fail the whole function if logging fails
         print(f"Warning: Could not log to ProcessingLogs: {str(e)}")
+
+
+def is_transactions_csv(csv_content):
+    """Check if CSV content looks like a transactions export"""
+    first_lines = csv_content.strip().split('\n')[:5]
+    for line in first_lines:
+        if '"Action"' in line and '"Date"' in line:
+            return True
+        if 'Action' in line and 'Date' in line and 'Symbol' in line:
+            return True
+    return False
+
+
+def parse_schwab_transactions_csv(csv_content):
+    """
+    Parse Schwab Transactions CSV
+    Expected format: "Date","Action","Symbol","Description","Quantity","Price","Fees & Comm","Amount"
+    """
+    lines = csv_content.strip().split('\n')
+    header_index = -1
+    for i, line in enumerate(lines):
+        if '"Date"' in line and '"Action"' in line and '"Symbol"' in line:
+            header_index = i
+            break
+            
+    if header_index == -1:
+         # Try without quotes
+        for i, line in enumerate(lines):
+            if 'Date' in line and 'Action' in line and 'Symbol' in line:
+                header_index = i
+                break
+                
+    if header_index == -1:
+        raise ValueError("Could not find Transactions header row")
+
+    csv_data = '\n'.join(lines[header_index:])
+    reader = csv.DictReader(StringIO(csv_data))
+    
+    transactions = []
+    
+    for row in reader:
+        try:
+            date_str = row.get('Date', '').split(' as of')[0].strip() # Handle "12/23/2025 as of ..."
+            try:
+                date = datetime.strptime(date_str, '%m/%d/%Y').strftime('%Y-%m-%d')
+            except ValueError:
+                print(f"Skipping invalid date: {date_str}")
+                continue
+
+            action = row.get('Action', '').strip()
+            symbol = row.get('Symbol', '').strip()
+            qty_str = row.get('Quantity', '0')
+            description = row.get('Description', '').strip()
+            price_str = row.get('Price', '0')
+            amount_str = row.get('Amount', '0')
+            
+            # Skip empty or summary rows
+            if not date or action == '':
+                continue
+                
+            qty = parse_number(qty_str)
+            price = parse_number(price_str)
+            amount = parse_number(amount_str) # Net amount (includes fees)
+            
+            transactions.append({
+                'date': date,
+                'action': action,
+                'symbol': symbol,
+                'description': description,
+                'quantity': qty,
+                'price': price,
+                'amount': amount,
+                'type': 'transaction'
+            })
+        except Exception as e:
+            print(f"Error parsing transaction row: {row} - {e}")
+            continue
+            
+    # Sort by date ascending
+    transactions.sort(key=lambda x: x['date'])
+    return transactions
+
+
+def get_current_portfolio_state():
+    """Get current holdings and cash from DynamoDB"""
+    try:
+        # Get latest snapshot
+        table = dynamodb.Table(PORTFOLIO_TABLE)
+        response = table.scan() # Inefficient but works for now, needs GSI
+        items = response.get('Items', [])
+        if not items:
+            return None, None
+            
+        latest_snapshot = max(items, key=lambda x: x['timestamp'])
+        snapshot_id = latest_snapshot['snapshotId']
+        
+        # Get holdings for snapshot
+        holdings_table = dynamodb.Table(HOLDINGS_TABLE) # Need to filter by snapshotId
+        # Since we don't have GSI yet, we scan and filter (inefficient!)
+        # TODO: Use GSI
+        resp = holdings_table.scan()
+        all_holdings = resp.get('Items', [])
+        current_holdings = [h for h in all_holdings if h.get('snapshotId') == snapshot_id]
+        
+        # Convert list to dict: symbol -> quantity
+        holdings_map = {}
+        for h in current_holdings:
+            holdings_map[h['symbol']] = Decimal(str(h['quantity']))
+            
+        # Get cash from asset allocation
+        cash = Decimal('0')
+        aa = latest_snapshot.get('assetAllocation', {})
+        if 'Cash' in aa:
+            cash = Decimal(str(aa['Cash']))
+            
+        return holdings_map, cash, snapshot_id
+    except Exception as e:
+        print(f"Error getting portfolio state: {e}")
+        return {}, Decimal('0'), None
+
+
+def get_historical_prices(symbol):
+    """
+    Fetch YTD historical prices for a symbol
+    Returns dict: { 'YYYY-MM-DD': Decimal(price) }
+    """
+    try:
+        # Check DynamoDB first
+        table = dynamodb.Table(os.environ.get('MARKET_DATA_TABLE', 'MarketPriceHistory'))
+        response = table.query(
+            KeyConditionExpression='symbol = :symbol',
+            ExpressionAttributeValues={':symbol': symbol}
+        )
+        items = response.get('Items', [])
+        
+        prices = {}
+        for item in items:
+            date_str = item.get('date')
+            price = item.get('close') or item.get('price')
+            if date_str and price:
+                prices[date_str] = Decimal(str(price))
+                
+        # If we have recent data, return it
+        if prices:
+             # Logic to check if we have enough data (e.g. YTD)
+             # For now, just return what we have.
+             # If missing, we might want to fallback to API.
+             return prices
+             
+        # Fallback to Yahoo Finance (simplified)
+        # Note: In production, consider using a dedicated market data lambda or service
+        print(f"Fetching history for {symbol} from external source...")
+        try:
+            import requests
+            import time
+            
+            # Yahoo Finance "Chart" API
+            # period1 = start of year (approx timestamp)
+            # period2 = now
+            current_yr = datetime.utcnow().year
+            start_ts = int(datetime(current_yr, 1, 1).timestamp())
+            end_ts = int(datetime.utcnow().timestamp())
+            
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+            params = {
+                'period1': start_ts,
+                'period2': end_ts,
+                'interval': '1d'
+            }
+            
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            resp = requests.get(url, params=params, headers=headers, timeout=5)
+            data = resp.json()
+            
+            if 'chart' in data and 'result' in data['chart']:
+                res = data['chart']['result'][0]
+                timestamps = res['timestamp']
+                quotes = res['indicators']['quote'][0]['close']
+                
+                for i, ts in enumerate(timestamps):
+                    if quotes[i] is not None:
+                        d = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+                        prices[d] = Decimal(str(quotes[i]))
+                        
+                # Cache to DynamoDB (batch write later?)
+        except Exception as e:
+            print(f"Error fetching from Yahoo: {e}")
+            
+        return prices
+    except Exception as e:
+        print(f"Error fetching history for {symbol}: {e}")
+        return {}
+
+def process_transaction_history(transactions):
+    """
+    Reconstruct portfolio history from transactions
+    Backwards reconstruction approach:
+    1. Start with Current Holdings (Today)
+    2. Iterate backwards through transactions
+    3. Calculate daily value and store
+    """
+    print(f"Processing {len(transactions)} transactions for history reconstruction")
+    
+    # 1. Get Current State
+    current_holdings, current_cash, snapshot_id = get_current_portfolio_state()
+    if snapshot_id is None:
+        print("No current portfolio snapshot found. Cannot reconstruct history.")
+        return False
+        
+    print(f"Starting reconstruction from snapshot {snapshot_id}")
+    print(f"Current Cash: ${current_cash}")
+    print(f"Current Holdings: {len(current_holdings)} symbols")
+    
+    # 2. Identify all symbols needed
+    all_symbols = set(current_holdings.keys())
+    for t in transactions:
+        all_symbols.add(t['symbol'])
+        
+    print(f"Fetching price history for {len(all_symbols)} symbols...")
+    price_cache = {}
+    for sym in all_symbols:
+        price_cache[sym] = get_historical_prices(sym)
+        
+    # Helper to get price
+    def get_price(sym, date):
+        if sym in price_cache and date in price_cache[sym]:
+            return price_cache[sym][date]
+        return Decimal('0') # Default to 0? Or previous close?
+    
+    # Group transactions by date
+    trans_by_date = {}
+    for t in transactions:
+        d = t['date']
+        if d not in trans_by_date:
+            trans_by_date[d] = []
+        trans_by_date[d].append(t)
+        
+    # Get all dates from earliest transaction to today
+    sorted_dates = sorted(trans_by_date.keys())
+    if not sorted_dates:
+        return False
+        
+    start_date = sorted_dates[0]
+    end_date = datetime.utcnow().strftime('%Y-%m-%d')
+    
+    # Iterate BACKWARDS from today to start_date
+    current_date = datetime.strptime(end_date, '%Y-%m-%d')
+    target_date = datetime.strptime(start_date, '%Y-%m-%d')
+    
+    # Simulation state (starting at TODAY)
+    sim_holdings = current_holdings.copy()
+    sim_cash = current_cash
+    
+    # Pass 1: Reconstruct Positions (Backward)
+    history_map = {} # { date: { holdings: {}, cash: val } }
+    
+    print("Pass 1: Reconstructing positions backwards...")
+    while current_date >= target_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        
+        # Save state for this day (representing End of Day)
+        history_map[date_str] = {
+            'holdings': sim_holdings.copy(),
+            'cash': sim_cash
+        }
+        
+        # Reverse Transactions to get PREVIOUS day's end state
+        if date_str in trans_by_date:
+            day_trans = trans_by_date[date_str]
+            for t in day_trans:
+                action = t['action'].lower()
+                qty = Decimal(str(t['quantity']))
+                amt = Decimal(str(t['amount']))
+                sym = t['symbol']
+                
+                if 'buy' in action:
+                    sim_holdings[sym] = sim_holdings.get(sym, Decimal('0')) - qty
+                    sim_cash += amt 
+                elif 'sell' in action:
+                    sim_holdings[sym] = sim_holdings.get(sym, Decimal('0')) + qty
+                    sim_cash -= amt
+                elif 'div' in action or 'interest' in action:
+                    sim_cash -= amt
+                elif 'deposit' in action:
+                    sim_cash -= amt
+                elif 'withdrawal' in action:
+                    sim_cash += abs(amt)
+                    
+        current_date -= timedelta(days=1)
+        
+    print(f"Reconstructed history for {len(history_map)} days.")
+    
+    # Pass 2: Calculate Performance (Forward)
+    print("Pass 2: Calculating performance forward...")
+    forward_dates = sorted(history_map.keys())
+    
+    prev_total_value = None
+    
+    for date_str in forward_dates:
+        state = history_map[date_str]
+        daily_cash = state['cash']
+        daily_holdings_map = state['holdings']
+        
+        daily_equity = daily_cash
+        daily_positions = []
+        
+        for symbol, qty in daily_holdings_map.items():
+            if qty != 0:
+                price = get_price(symbol, date_str)
+                mkt_val = qty * price
+                daily_equity += mkt_val
+                
+                # We need extensive fields for the standard store function or custom logic?
+                # The 'store_position_performance_data' function calculates returns.
+                # So we just pass the basic data
+                daily_positions.append({
+                    'symbol': symbol,
+                    'quantity': qty,
+                    'price': price,
+                    'marketValue': mkt_val,
+                    'description': '', # Optional
+                    'costBasis': Decimal('0'), # Hard to reconstruct without FIFO/LIFO logic
+                    'gainLoss': Decimal('0'),
+                    'gainLossPercent': Decimal('0')
+                })
+        
+        # Determine Snapshot ID (use recon + date)
+        recon_id = f"recon_{date_str}"
+        
+        # Store Daily Performance (Portfolio Level)
+        # Check prev value for simplistic return calc (optional, as store_performance_data does it too)
+        store_performance_data(date_str, {
+            'summary': {
+                'totalValue': daily_equity,
+                'positionCount': len(daily_positions)
+            }
+        }, recon_id)
+        
+        # Store Position Performance (Security Level)
+        if daily_positions:
+             store_position_performance_data(date_str, daily_positions)
+        
+    return True
+
+
+
+

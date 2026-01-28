@@ -59,6 +59,10 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Performance Routes
+const performanceRoutes = require('./src/routes/performance');
+app.use('/api/performance', performanceRoutes);
+
 // Import ticker mapping configuration
 // Note: Since server.js is CommonJS and securitiesConfig.js is ES6, we'll create a helper function
 // that replicates the logic. In the future, consider converting to ES6 modules or creating a shared config.

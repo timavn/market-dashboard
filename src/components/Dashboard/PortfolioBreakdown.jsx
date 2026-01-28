@@ -11,6 +11,7 @@ import {
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
 import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
 import FactorExposureChart from './FactorExposureChart';
+import FactorDeepDiveSidebar from './FactorDeepDiveSidebar';
 import PortfolioAnalytics from './PortfolioAnalytics';
 
 // Asset class colors - 5 core asset classes
@@ -173,7 +174,10 @@ const calculateAssetClassAllocationFromUniverse = (holdings) => {
 
 const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
+  const [selectedFactor, setSelectedFactor] = useState(null);
   const holdings = portfolioData?.holdings || [];
+
+
   const totalValue = portfolioData?.summary?.totalValue || 0;
   const factorExposures = portfolioData?.factorExposures || {};
 
@@ -1502,128 +1506,135 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Sticky Header - Top 5 Factors */}
-      <div
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
-          backgroundColor: 'white',
-          padding: '6px 12px',
-          borderBottom: '1px solid #E5E7EB',
-          marginBottom: '12px'
-        }}
-        className="dark:bg-gray-900 dark:border-gray-700"
-      >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '10px' }}>
-          {/* Left Column - Top 5 Factor Exposures */}
-          <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-blue-50 dark:bg-blue-900/10 rounded border border-blue-200 dark:border-blue-700 relative">
-            <div className="flex items-center gap-1" style={{ marginBottom: '2px' }}>
-              <div className="font-medium text-blue-700 dark:text-blue-400">Top 5 Factors:</div>
-              <button
-                onClick={() => setShowFactorExposureInfo(!showFactorExposureInfo)}
-                className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-300"
-                title="Factor Exposure Information"
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  border: '1px solid currentColor',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '8px',
-                  cursor: 'pointer',
-                  lineHeight: '1'
-                }}
-              >
-                i
-              </button>
-            </div>
-            {showFactorExposureInfo && (
-              <div
-                className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg"
-                style={{
-                  maxWidth: '400px',
-                  maxHeight: '500px',
-                  overflowY: 'auto',
-                  left: '0',
-                  top: '100%',
-                  marginTop: '4px'
-                }}
-              >
-                <Text className="text-xs font-semibold mb-2 block dark:text-white">Factor Definitions</Text>
-                <div className="space-y-3">
-                  {Object.entries(FACTOR_DEFINITIONS.factors).map(([factorName, factorData]) => (
-                    <div key={factorName} className="border-b border-gray-200 dark:border-gray-700 pb-2 last:border-b-0">
-                      <Text className="text-xs font-semibold dark:text-white">{factorData.title || factorName}</Text>
-                      <Text className="text-xs text-gray-600 dark:text-gray-400 mt-1 block">
-                        {factorData.description}
-                      </Text>
-                    </div>
-                  ))}
-                </div>
+      {/* Portfolio Construction Section */}
+      <div className="mb-0">
+        <Title className="text-2xl font-semibold mb-1 text-center dark:text-white">
+          Portfolio Construction
+        </Title>
+
+        {/* Sticky Header - Top 5 Factors */}
+        <div
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+            backgroundColor: 'white',
+            padding: '6px 12px',
+            borderBottom: '1px solid #E5E7EB',
+            marginBottom: '12px'
+          }}
+          className="dark:bg-gray-900 dark:border-gray-700"
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '10px' }}>
+            {/* Left Column - Top 5 Factor Exposures */}
+            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-blue-50 dark:bg-blue-900/10 rounded border border-blue-200 dark:border-blue-700 relative">
+              <div className="flex items-center gap-1" style={{ marginBottom: '2px' }}>
+                <div className="font-medium text-blue-700 dark:text-blue-400">Top 5 Factors:</div>
                 <button
-                  onClick={() => setShowFactorExposureInfo(false)}
-                  className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                  onClick={() => setShowFactorExposureInfo(!showFactorExposureInfo)}
+                  className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-300"
+                  title="Factor Exposure Information"
+                  style={{
+                    width: '12px',
+                    height: '12px',
+                    borderRadius: '50%',
+                    border: '1px solid currentColor',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '8px',
+                    cursor: 'pointer',
+                    lineHeight: '1'
+                  }}
                 >
-                  Close
+                  i
                 </button>
               </div>
-            )}
-            <div>
-              {topFactorExposures.length > 0 ? (
-                topFactorExposures.map((item, idx) => (
-                  <div key={idx}>
-                    {item.factor}: {item.percentage.toFixed(1)}%
+              {showFactorExposureInfo && (
+                <div
+                  className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg"
+                  style={{
+                    maxWidth: '400px',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                    left: '0',
+                    top: '100%',
+                    marginTop: '4px'
+                  }}
+                >
+                  <Text className="text-xs font-semibold mb-2 block dark:text-white">Factor Definitions</Text>
+                  <div className="space-y-3">
+                    {Object.entries(FACTOR_DEFINITIONS.factors).map(([factorName, factorData]) => (
+                      <div key={factorName} className="border-b border-gray-200 dark:border-gray-700 pb-2 last:border-b-0">
+                        <Text className="text-xs font-semibold dark:text-white">{factorData.title || factorName}</Text>
+                        <Text className="text-xs text-gray-600 dark:text-gray-400 mt-1 block">
+                          {factorData.description}
+                        </Text>
+                      </div>
+                    ))}
                   </div>
-                ))
-              ) : (
-                <div className="text-gray-400">No data</div>
+                  <button
+                    onClick={() => setShowFactorExposureInfo(false)}
+                    className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Close
+                  </button>
+                </div>
               )}
-            </div>
-          </div>
-
-          {/* Middle Column - Basis Points */}
-          <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
-            <div className="font-medium text-gray-700 dark:text-gray-300" style={{ marginBottom: '2px' }}>Basis Points:</div>
-            <div className="grid grid-cols-2 gap-x-2">
-              <div>25: ${Math.floor(totalValue * 0.0025).toLocaleString()}</div>
-              <div>50: ${Math.floor(totalValue * 0.005).toLocaleString()}</div>
-              <div>75: ${Math.floor(totalValue * 0.0075).toLocaleString()}</div>
-              <div>100: ${Math.floor(totalValue * 0.01).toLocaleString()}</div>
-              <div>125: ${Math.floor(totalValue * 0.0125).toLocaleString()}</div>
-              <div>150: ${Math.floor(totalValue * 0.015).toLocaleString()}</div>
-              <div>175: ${Math.floor(totalValue * 0.0175).toLocaleString()}</div>
-              <div>200: ${Math.floor(totalValue * 0.02).toLocaleString()}</div>
-              <div>225: ${Math.floor(totalValue * 0.0225).toLocaleString()}</div>
-              <div>250: ${Math.floor(totalValue * 0.025).toLocaleString()}</div>
-            </div>
-          </div>
-
-          {/* Right Column - Position Sizing */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-            {/* Long Position Sizing */}
-            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-green-50 dark:bg-green-900/10 rounded border border-green-200 dark:border-green-800">
-              <div className="font-medium text-green-700 dark:text-green-400" style={{ marginBottom: '2px' }}>Longs:</div>
               <div>
-                <div>FX: 4-12%</div>
-                <div>FI: 4-10%</div>
-                <div>Eq: 2-6%</div>
-                <div>Com: 2-4%</div>
-                <div>Crypto: 1-3%</div>
+                {topFactorExposures.length > 0 ? (
+                  topFactorExposures.map((item, idx) => (
+                    <div key={idx}>
+                      {item.factor}: {item.percentage.toFixed(1)}%
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-gray-400">No data</div>
+                )}
               </div>
             </div>
 
-            {/* Short Position Sizing */}
-            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-red-50 dark:bg-red-900/10 rounded border border-red-200 dark:border-red-800">
-              <div className="font-medium text-red-700 dark:text-red-400" style={{ marginBottom: '2px' }}>Shorts:</div>
-              <div>
-                <div>FX: 2-6%</div>
-                <div>FI: 2-5%</div>
-                <div>Eq: 1-3%</div>
-                <div>Com: 1-2%</div>
-                <div>Crypto: 0.5-1%</div>
+            {/* Middle Column - Basis Points */}
+            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+              <div className="font-medium text-gray-700 dark:text-gray-300" style={{ marginBottom: '2px' }}>Basis Points:</div>
+              <div className="grid grid-cols-2 gap-x-2">
+                <div>25: ${Math.floor(totalValue * 0.0025).toLocaleString()}</div>
+                <div>50: ${Math.floor(totalValue * 0.005).toLocaleString()}</div>
+                <div>75: ${Math.floor(totalValue * 0.0075).toLocaleString()}</div>
+                <div>100: ${Math.floor(totalValue * 0.01).toLocaleString()}</div>
+                <div>125: ${Math.floor(totalValue * 0.0125).toLocaleString()}</div>
+                <div>150: ${Math.floor(totalValue * 0.015).toLocaleString()}</div>
+                <div>175: ${Math.floor(totalValue * 0.0175).toLocaleString()}</div>
+                <div>200: ${Math.floor(totalValue * 0.02).toLocaleString()}</div>
+                <div>225: ${Math.floor(totalValue * 0.0225).toLocaleString()}</div>
+                <div>250: ${Math.floor(totalValue * 0.025).toLocaleString()}</div>
+              </div>
+            </div>
+
+            {/* Right Column - Position Sizing */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
+              {/* Long Position Sizing */}
+              <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-green-50 dark:bg-green-900/10 rounded border border-green-200 dark:border-green-800">
+                <div className="font-medium text-green-700 dark:text-green-400" style={{ marginBottom: '2px' }}>Longs:</div>
+                <div>
+                  <div>FX: 4-12%</div>
+                  <div>FI: 4-10%</div>
+                  <div>Eq: 2-6%</div>
+                  <div>Com: 2-4%</div>
+                  <div>Crypto: 1-3%</div>
+                </div>
+              </div>
+
+              {/* Short Position Sizing */}
+              <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-red-50 dark:bg-red-900/10 rounded border border-red-200 dark:border-red-800">
+                <div className="font-medium text-red-700 dark:text-red-400" style={{ marginBottom: '2px' }}>Shorts:</div>
+                <div>
+                  <div>FX: 2-6%</div>
+                  <div>FI: 2-5%</div>
+                  <div>Eq: 1-3%</div>
+                  <div>Com: 1-2%</div>
+                  <div>Crypto: 0.5-1%</div>
+                </div>
               </div>
             </div>
           </div>
@@ -1632,6 +1643,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
 
       {/* Scrollable Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px 2px' }}>
+
         {/* Longs/Shorts Breakdown Section */}
         <div style={{ marginBottom: '32px' }}>
           {/* Shared Header with Long/Short counts and net percentage */}
@@ -2161,17 +2173,47 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         </div>
 
 
-        {/* Factor Exposure Section */}
-        <div style={{ marginTop: '32px' }}>
-          <Title className="text-lg mb-4 dark:text-white">Factor Exposure</Title>
-          <Card className="dark:bg-gray-800 rounded-lg p-4">
-            <FactorExposureChart data={factorExposures} />
-          </Card>
-        </div>
-
         {/* Portfolio Analysis Section */}
-        <div style={{ marginTop: '32px' }}>
-          <PortfolioAnalytics portfolioData={portfolioData} />
+        {/* Portfolio Analysis Section */}
+        <div style={{ marginTop: '24px' }}>
+          <Title className="text-2xl font-semibold mb-1 text-center dark:text-white">
+            Portfolio Analysis
+          </Title>
+          <div className="text-center mb-6">
+            <Text className="text-[11px] font-medium text-gray-400 italic">
+              "Every metric on this page should help me decide whether to size a position up or down."
+            </Text>
+          </div>
+
+          {/* Factor Exposure */}
+          {/* Factor Exposure */}
+          <div className="mb-8">
+            <Card className="dark:bg-gray-800 rounded-lg p-0 overflow-hidden">
+              <div className="flex flex-row h-[600px]">
+                {/* Main Chart Area */}
+                <div className="flex-1 p-6 overflow-y-auto">
+                  <FactorExposureChart
+                    data={factorExposures}
+                    onFactorSelect={setSelectedFactor}
+                  />
+                </div>
+
+                {/* Deep Dive Panel - always mounted for layout stability if needed, but conditionally rendered here for simple show/hide */}
+                {selectedFactor && (
+                  <FactorDeepDiveSidebar
+                    factor={selectedFactor}
+                    isOpen={!!selectedFactor}
+                    onClose={() => setSelectedFactor(null)}
+                  />
+                )}
+              </div>
+            </Card>
+          </div>
+
+          {/* Detailed Analytics */}
+          <div>
+            <PortfolioAnalytics portfolioData={portfolioData} />
+          </div>
         </div>
       </div>
     </div>

@@ -44,12 +44,7 @@ const PortfolioAnalytics = ({ portfolioData }) => {
 
   return (
     <div className="space-y-6">
-      <div className="mb-2">
-        <Title className="dark:text-white text-xl">Portfolio Analysis</Title>
-        <Text className="text-sm font-medium text-gray-400 italic">
-          "Every metric on this page should help me decide whether to size a position up or down."
-        </Text>
-      </div>
+
 
       {/* Top Section: Net/Gross & Macro Factors */}
       <Grid numItems={12} className="gap-6 h-full">

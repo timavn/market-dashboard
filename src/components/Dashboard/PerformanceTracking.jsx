@@ -124,9 +124,9 @@ const PerformanceTracking = () => {
     if (value === null || value === undefined || isNaN(value)) {
       return '';
     }
-    
+
     const absValue = Math.abs(value);
-    
+
     if (absValue < 1.0) {
       // Light blue for -0.99 to 0.99
       return 'text-blue-400';
@@ -252,14 +252,14 @@ const PerformanceTracking = () => {
   }
 
   return (
-    <div className="p-6 space-y-6" style={{ backgroundColor: isDark ? '#111827' : '#f9fafb', minHeight: '100vh' }}>
+    <div className="p-2 space-y-3" style={{ backgroundColor: isDark ? '#111827' : '#f9fafb', minHeight: '100vh' }}>
       {/* Header */}
       <div className="flex justify-between items-center">
-        <Title>Performance Tracking</Title>
+        <Title className="text-base">Performance Tracking</Title>
         <Select
           value={selectedPeriod}
           onValueChange={setSelectedPeriod}
-          className="w-40"
+          className="w-32 scale-90 origin-right"
         >
           <SelectItem value="all">All Time</SelectItem>
           <SelectItem value="1y">1 Year</SelectItem>
@@ -269,51 +269,51 @@ const PerformanceTracking = () => {
       </div>
 
       {/* Key Metrics */}
-      <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-4">
-        <Card className="rounded-lg">
-          <Text>Sharpe Ratio</Text>
-          <Metric>{metrics?.sharpeRatio?.toFixed(2) || 'N/A'}</Metric>
+      <Grid numItems={2} numItemsSm={4} numItemsLg={4} className="gap-2">
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Sharpe Ratio</Text>
+          <Metric className="text-lg">{metrics?.sharpeRatio?.toFixed(2) || 'N/A'}</Metric>
         </Card>
-        <Card className="rounded-lg">
-          <Text>Max Drawdown</Text>
-          <Metric className={getValueColor(metrics?.maxDrawdown)}>
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Max Drawdown</Text>
+          <Metric className={`text-lg ${getValueColor(metrics?.maxDrawdown)}`}>
             {metrics?.maxDrawdown ? formatPercent(metrics.maxDrawdown) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg">
-          <Text>Volatility</Text>
-          <Metric>{metrics?.volatility ? `${metrics.volatility.toFixed(2)}%` : 'N/A'}</Metric>
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Volatility</Text>
+          <Metric className="text-lg">{metrics?.volatility ? `${metrics.volatility.toFixed(2)}%` : 'N/A'}</Metric>
         </Card>
-        <Card className="rounded-lg">
-          <Text>Win Rate</Text>
-          <Metric>{metrics?.winRate ? `${metrics.winRate.toFixed(1)}%` : 'N/A'}</Metric>
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Win Rate</Text>
+          <Metric className="text-lg">{metrics?.winRate ? `${metrics.winRate.toFixed(1)}%` : 'N/A'}</Metric>
         </Card>
       </Grid>
 
       {/* Additional Metrics */}
-      <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-4">
-        <Card className="rounded-lg">
-          <Text>Avg Daily Return</Text>
-          <Metric className={getValueColor(metrics?.avgDailyReturn)}>
+      <Grid numItems={2} numItemsSm={4} numItemsLg={4} className="gap-2">
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Avg Daily Return</Text>
+          <Metric className={`text-lg ${getValueColor(metrics?.avgDailyReturn)}`}>
             {metrics?.avgDailyReturn ? formatPercent(metrics.avgDailyReturn) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg">
-          <Text>Best Day</Text>
-          <Metric className={getValueColor(metrics?.bestDay)}>
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Best Day</Text>
+          <Metric className={`text-lg ${getValueColor(metrics?.bestDay)}`}>
             {metrics?.bestDay ? formatPercent(metrics.bestDay) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg">
-          <Text>Worst Day</Text>
-          <Metric className={getValueColor(metrics?.worstDay)}>
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Worst Day</Text>
+          <Metric className={`text-lg ${getValueColor(metrics?.worstDay)}`}>
             {metrics?.worstDay ? formatPercent(metrics.worstDay) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg">
-          <Text>Current Value</Text>
-          <Metric>
-            {equityCurve?.values?.length > 0 
+        <Card className="rounded-lg p-2">
+          <Text className="text-xs">Current Value</Text>
+          <Metric className="text-lg">
+            {equityCurve?.values?.length > 0
               ? formatCurrency(equityCurve.values[equityCurve.values.length - 1])
               : 'N/A'}
           </Metric>
@@ -322,21 +322,22 @@ const PerformanceTracking = () => {
 
       {/* Rolling Returns */}
       {metrics?.rollingReturns && Object.keys(metrics.rollingReturns).length > 0 && (
-        <Card className="rounded-lg">
-          <Title>Rolling Returns</Title>
-          <ResponsiveContainer width="100%" height={300}>
+        <Card className="rounded-lg p-3">
+          <Title className="text-sm">Rolling Returns</Title>
+          <ResponsiveContainer width="100%" height={150}>
             <BarChart data={Object.entries(metrics.rollingReturns).map(([period, value]) => ({
               period: period.toUpperCase(),
               return: value
             }))}>
               <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
-              <XAxis dataKey="period" stroke={isDark ? '#9ca3af' : '#6b7280'} />
-              <YAxis stroke={isDark ? '#9ca3af' : '#6b7280'} />
+              <XAxis dataKey="period" stroke={isDark ? '#9ca3af' : '#6b7280'} tick={{ fontSize: 10 }} />
+              <YAxis stroke={isDark ? '#9ca3af' : '#6b7280'} tick={{ fontSize: 10 }} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: isDark ? '#1f2937' : '#fff',
                   border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                  borderRadius: '6px'
+                  borderRadius: '6px',
+                  fontSize: '10px'
                 }}
                 formatter={(value) => formatPercent(value)}
               />
@@ -347,9 +348,9 @@ const PerformanceTracking = () => {
       )}
 
       {/* Equity Curve with Drawdown */}
-      <Card>
-        <Title>Equity Curve</Title>
-        <ResponsiveContainer width="100%" height={400}>
+      <Card className="p-3">
+        <Title className="text-sm">Equity Curve</Title>
+        <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={equityChartData}>
             <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
             <XAxis
@@ -409,9 +410,9 @@ const PerformanceTracking = () => {
 
       {/* Performance vs Benchmarks */}
       {benchmarkChartData.length > 0 && (
-        <Card className="rounded-lg">
-          <Title>Performance vs Benchmarks</Title>
-          <ResponsiveContainer width="100%" height={400}>
+        <Card className="rounded-lg p-3">
+          <Title className="text-sm">Performance vs Benchmarks</Title>
+          <ResponsiveContainer width="100%" height={240}>
             <LineChart data={benchmarkChartData}>
               <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
               <XAxis
@@ -464,9 +465,9 @@ const PerformanceTracking = () => {
 
       {/* Daily Returns Distribution */}
       {returnsHistogram.length > 0 && (
-        <Card className="rounded-lg">
-          <Title>Daily Returns Distribution</Title>
-          <ResponsiveContainer width="100%" height={300}>
+        <Card className="rounded-lg p-3">
+          <Title className="text-sm">Daily Returns Distribution</Title>
+          <ResponsiveContainer width="100%" height={150}>
             <BarChart data={returnsHistogram}>
               <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
               <XAxis
@@ -493,29 +494,29 @@ const PerformanceTracking = () => {
 
       {/* Benchmark Comparison Table */}
       {metrics?.vsBenchmark && Object.keys(metrics.vsBenchmark).length > 0 && (
-        <Card className="rounded-lg">
-          <Title>Benchmark Comparison</Title>
-          <div className="overflow-x-auto mt-4">
-            <table className="w-full">
+        <Card className="rounded-lg p-3">
+          <Title className="text-sm">Benchmark Comparison</Title>
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full text-xs">
               <thead>
                 <tr className="border-b">
-                  <th className="text-left p-2">Benchmark</th>
-                  <th className="text-right p-2">Return</th>
-                  <th className="text-right p-2">Alpha</th>
-                  <th className="text-right p-2">Beta</th>
+                  <th className="text-left p-1">Benchmark</th>
+                  <th className="text-right p-1">Return</th>
+                  <th className="text-right p-1">Alpha</th>
+                  <th className="text-right p-1">Beta</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(metrics.vsBenchmark).map(([benchmark, data]) => (
                   <tr key={benchmark} className="border-b">
-                    <td className="p-2">{benchmark}</td>
-                    <td className={`text-right p-2 ${getValueColor(data.return || 0)}`}>
+                    <td className="p-1">{benchmark}</td>
+                    <td className={`text-right p-1 ${getValueColor(data.return || 0)}`}>
                       {formatPercent(data.return || 0)}
                     </td>
-                    <td className={`text-right p-2 ${getValueColor(data.alpha || 0)}`}>
+                    <td className={`text-right p-1 ${getValueColor(data.alpha || 0)}`}>
                       {formatPercent(data.alpha || 0)}
                     </td>
-                    <td className="text-right p-2">{data.beta?.toFixed(2) || 'N/A'}</td>
+                    <td className="text-right p-1">{data.beta?.toFixed(2) || 'N/A'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -526,13 +527,13 @@ const PerformanceTracking = () => {
 
       {/* Statement Archive */}
       {statements.length > 0 && (
-        <Card className="rounded-lg">
-          <div className="flex justify-between items-center mb-4">
-            <Title>Statement Archive</Title>
+        <Card className="rounded-lg p-3">
+          <div className="flex justify-between items-center mb-2">
+            <Title className="text-sm">Statement Archive</Title>
             <Select
               value={selectedStatementDate || ''}
               onValueChange={setSelectedStatementDate}
-              className="w-48"
+              className="w-40 scale-90 origin-right"
               placeholder="Select a date..."
             >
               {statements.map((stmt) => (
@@ -548,66 +549,66 @@ const PerformanceTracking = () => {
           </div>
 
           {loadingStatement && (
-            <div className="text-center py-8">
+            <div className="text-center py-4">
               <Text>Loading statement...</Text>
             </div>
           )}
 
           {selectedStatement && !loadingStatement && (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {/* Statement Summary */}
               <div>
-                <Text className="text-lg font-semibold mb-3">
+                <Text className="text-sm font-semibold mb-2">
                   Statement for {new Date(selectedStatement.date).toLocaleDateString('en-US', {
                     year: 'numeric',
-                    month: 'long',
+                    month: 'short',
                     day: 'numeric'
                   })}
                 </Text>
-                <Grid numItems={1} numItemsSm={2} numItemsLg={4} className="gap-4">
-                  <Card className="rounded-lg">
-                    <Text>Total Value</Text>
-                    <Metric>{formatCurrency(selectedStatement.summary?.totalValue || 0)}</Metric>
+                <Grid numItems={2} numItemsSm={4} numItemsLg={4} className="gap-2">
+                  <Card className="rounded-lg p-2">
+                    <Text className="text-xs">Total Value</Text>
+                    <Metric className="text-lg">{formatCurrency(selectedStatement.summary?.totalValue || 0)}</Metric>
                   </Card>
-                  <Card className="rounded-lg">
-                    <Text>Day Change</Text>
-                    <Metric className={getValueColor(parseFloat(selectedStatement.summary?.totalDayChangePercent || 0))}>
+                  <Card className="rounded-lg p-2">
+                    <Text className="text-xs">Day Change</Text>
+                    <Metric className={`text-lg ${getValueColor(parseFloat(selectedStatement.summary?.totalDayChangePercent || 0))}`}>
                       {formatCurrency(selectedStatement.summary?.totalDayChange || 0)} ({selectedStatement.summary?.totalDayChangePercent || '0.00'}%)
                     </Metric>
                   </Card>
-                  <Card className="rounded-lg">
-                    <Text>Total Gain/Loss</Text>
-                    <Metric className={getValueColor(parseFloat(selectedStatement.summary?.totalGainLossPercent || 0))}>
+                  <Card className="rounded-lg p-2">
+                    <Text className="text-xs">Gain/Loss</Text>
+                    <Metric className={`text-lg ${getValueColor(parseFloat(selectedStatement.summary?.totalGainLossPercent || 0))}`}>
                       {formatCurrency(selectedStatement.summary?.totalGainLoss || 0)} ({selectedStatement.summary?.totalGainLossPercent || '0.00'}%)
                     </Metric>
                   </Card>
-                  <Card className="rounded-lg">
-                    <Text>Positions</Text>
-                    <Metric>{selectedStatement.summary?.positionCount || 0}</Metric>
+                  <Card className="rounded-lg p-2">
+                    <Text className="text-xs">Positions</Text>
+                    <Metric className="text-lg">{selectedStatement.summary?.positionCount || 0}</Metric>
                   </Card>
                 </Grid>
               </div>
 
               {/* Performance Metrics */}
               {selectedStatement.performance && (
-                <Card className="rounded-lg">
-                  <Title className="mb-3">Performance Metrics</Title>
-                  <Grid numItems={1} numItemsSm={3} className="gap-4">
+                <Card className="rounded-lg p-2">
+                  <Title className="mb-2 text-xs">Performance Metrics</Title>
+                  <Grid numItems={3} className="gap-2">
                     <div>
-                      <Text>Daily Return</Text>
-                      <Metric className={getValueColor(selectedStatement.performance.dailyReturn)}>
+                      <Text className="text-xs">Daily Return</Text>
+                      <Metric className={`text-base ${getValueColor(selectedStatement.performance.dailyReturn)}`}>
                         {formatPercent(selectedStatement.performance.dailyReturn)}
                       </Metric>
                     </div>
                     <div>
-                      <Text>Cumulative Return</Text>
-                      <Metric className={getValueColor(selectedStatement.performance.cumulativeReturn)}>
+                      <Text className="text-xs">Cumulative Return</Text>
+                      <Metric className={`text-base ${getValueColor(selectedStatement.performance.cumulativeReturn)}`}>
                         {formatPercent(selectedStatement.performance.cumulativeReturn)}
                       </Metric>
                     </div>
                     <div>
-                      <Text>Portfolio Value</Text>
-                      <Metric>{formatCurrency(selectedStatement.performance.totalValue)}</Metric>
+                      <Text className="text-xs">Portfolio Value</Text>
+                      <Metric className="text-base">{formatCurrency(selectedStatement.performance.totalValue)}</Metric>
                     </div>
                   </Grid>
                 </Card>
@@ -615,13 +616,13 @@ const PerformanceTracking = () => {
 
               {/* Asset Allocation */}
               {selectedStatement.assetAllocation && Object.keys(selectedStatement.assetAllocation).length > 0 && (
-                <Card className="rounded-lg">
-                  <Title className="mb-3">Asset Allocation</Title>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <Card className="rounded-lg p-2">
+                  <Title className="mb-2 text-xs">Asset Allocation</Title>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {Object.entries(selectedStatement.assetAllocation).map(([asset, percent]) => (
                       <div key={asset}>
-                        <Text className="text-sm">{asset}</Text>
-                        <Metric className="text-lg">{parseFloat(percent).toFixed(1)}%</Metric>
+                        <Text className="text-xs">{asset}</Text>
+                        <Metric className="text-base">{parseFloat(percent).toFixed(1)}%</Metric>
                       </div>
                     ))}
                   </div>
@@ -630,35 +631,35 @@ const PerformanceTracking = () => {
 
               {/* Holdings Table */}
               {selectedStatement.holdings && selectedStatement.holdings.length > 0 && (
-                <Card className="rounded-lg">
-                  <Title className="mb-3">Holdings</Title>
+                <Card className="rounded-lg p-2">
+                  <Title className="mb-2 text-xs">Holdings</Title>
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full text-xs">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left p-2">Symbol</th>
-                          <th className="text-left p-2">Description</th>
-                          <th className="text-right p-2">Quantity</th>
-                          <th className="text-right p-2">Price</th>
-                          <th className="text-right p-2">Market Value</th>
-                          <th className="text-right p-2">Cost Basis</th>
-                          <th className="text-right p-2">Gain/Loss</th>
-                          <th className="text-right p-2">Gain/Loss %</th>
+                          <th className="text-left p-1">Symbol</th>
+                          <th className="text-left p-1">Description</th>
+                          <th className="text-right p-1">Quantity</th>
+                          <th className="text-right p-1">Price</th>
+                          <th className="text-right p-1">Market Value</th>
+                          <th className="text-right p-1">Cost Basis</th>
+                          <th className="text-right p-1">Gain/Loss</th>
+                          <th className="text-right p-1">Gain/Loss %</th>
                         </tr>
                       </thead>
                       <tbody>
                         {selectedStatement.holdings.map((holding, idx) => (
                           <tr key={`${holding.symbol}-${idx}`} className="border-b">
-                            <td className="p-2 font-medium">{holding.symbol}</td>
-                            <td className="p-2 text-sm text-gray-600 dark:text-gray-400">{holding.description}</td>
-                            <td className="text-right p-2">{holding.quantity?.toLocaleString() || '0'}</td>
-                            <td className="text-right p-2">{formatCurrency(holding.price || 0)}</td>
-                            <td className="text-right p-2">{formatCurrency(holding.marketValue || 0)}</td>
-                            <td className="text-right p-2">{formatCurrency(holding.costBasis || 0)}</td>
-                            <td className={`text-right p-2 ${getValueColor(holding.gainLossPercent || 0)}`}>
+                            <td className="p-1 font-medium">{holding.symbol}</td>
+                            <td className="p-1 text-xs text-gray-600 dark:text-gray-400 truncate max-w-[150px]">{holding.description}</td>
+                            <td className="text-right p-1">{holding.quantity?.toLocaleString() || '0'}</td>
+                            <td className="text-right p-1">{formatCurrency(holding.price || 0)}</td>
+                            <td className="text-right p-1">{formatCurrency(holding.marketValue || 0)}</td>
+                            <td className="text-right p-1">{formatCurrency(holding.costBasis || 0)}</td>
+                            <td className={`text-right p-1 ${getValueColor(holding.gainLossPercent || 0)}`}>
                               {formatCurrency(holding.gainLoss || 0)}
                             </td>
-                            <td className={`text-right p-2 ${getValueColor(holding.gainLossPercent || 0)}`}>
+                            <td className={`text-right p-1 ${getValueColor(holding.gainLossPercent || 0)}`}>
                               {formatPercent(holding.gainLossPercent || 0)}
                             </td>
                           </tr>
@@ -672,8 +673,8 @@ const PerformanceTracking = () => {
           )}
 
           {!selectedStatementDate && !loadingStatement && (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <Text>Select a date from the dropdown above to view a statement</Text>
+            <div className="text-center py-4 text-gray-500 dark:text-gray-400">
+              <Text className="text-xs">Select a date from the dropdown above</Text>
             </div>
           )}
         </Card>

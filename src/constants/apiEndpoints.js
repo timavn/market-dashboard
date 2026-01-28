@@ -7,23 +7,30 @@ export const ENDPOINTS = {
   MARKET_DATA: '/api/market',
   QUOTES: '/api/quotes',
   OPTIONS_CHAIN: '/api/options',
-  
+
   // Portfolio data
   PORTFOLIO: '/api/portfolio',
   POSITIONS: '/api/positions',
   PERFORMANCE: '/api/performance',
-  
+  PERFORMANCE_HISTORY: '/api/performance/history',
+  PERFORMANCE_METRICS: '/api/performance/metrics',
+  PERFORMANCE_POSITIONS: '/api/performance/positions',
+  PERFORMANCE_BENCHMARK: '/api/performance/benchmark',
+  PERFORMANCE_EQUITY_CURVE: '/api/performance/equity-curve',
+  PERFORMANCE_STATEMENTS: '/api/performance/statements',
+  PERFORMANCE_STATEMENT: '/api/performance/statement',
+
   // Economic indicators
   VIX: '/api/indicators/vix',
   VOLATILITY: '/api/indicators/volatility',
   VOLUME: '/api/indicators/volume',
-  
+
   // Risk ranges
   RISK_RANGES: '/api/risk-ranges',
-  
+
   // Workflow status
   WORKFLOW_STATUS: '/api/workflow-status',
-  
+
   // WebSocket endpoints
   WS_MARKET_DATA: '/ws/market',
   WS_OPTIONS: '/ws/options',

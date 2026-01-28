@@ -34,14 +34,14 @@ export class MarketDataService {
       const params = snapshotId ? { snapshotId } : {};
       const response = await apiClient.get(ENDPOINTS.PORTFOLIO, { params });
       const data = response.data;
-      
+
       // Handle both AWS API Gateway format (with snapshot/holdings) and local server format (direct)
       let portfolioData;
       if (data.snapshot && data.holdings) {
         // AWS API Gateway format
         const { snapshot, holdings } = data;
         const enhancedMetrics = PortfolioAnalytics.calculatePortfolioMetrics(holdings, snapshot);
-        
+
         portfolioData = {
           summary: {
             totalValue: snapshot.summary.totalValue,
@@ -59,7 +59,7 @@ export class MarketDataService {
             accountPercent: ((holding.marketValue / snapshot.summary.totalValue) * 100).toFixed(2)
           })),
           lastUpdated: new Date(snapshot.timestamp).toLocaleString(),
-          
+
           // Enhanced analytics
           riskMetrics: {
             volatility: enhancedMetrics.volatility,
@@ -115,7 +115,7 @@ export class MarketDataService {
           holdings: data.holdings || [],
           topHoldings: data.topHoldings || [],
           lastUpdated: data.lastUpdated || new Date().toLocaleString(),
-          
+
           // Mock analytics for local development
           riskMetrics: {
             volatility: '18.75%',
@@ -136,28 +136,19 @@ export class MarketDataService {
             hhiIndex: '0.15'
           },
           factorExposures: {
-            marketCap: {
-              largeCap: '75.0%',
-              midCap: '20.0%',
-              smallCap: '5.0%'
-            },
-            sectors: {
-              technology: '35.0%',
-              healthcare: '15.0%',
-              financials: '12.0%',
-              consumer: '18.0%',
-              energy: '8.0%'
-            },
-            geographic: {
-              northAmerica: '80.0%',
-              europe: '12.0%',
-              asiaPacific: '6.0%',
-              emergingMarkets: '2.0%'
-            }
+            'Momentum': { long: '18.5%', short: '8.2%' },
+            'Value': { long: '12.4%', short: '15.1%' },
+            'Quality': { long: '22.1%', short: '5.4%' },
+            'Volatility': { long: '5.2%', short: '12.8%' },
+            'Growth': { long: '28.4%', short: '10.2%' },
+            'Size': { long: '8.5%', short: '2.1%' },
+            'Liquidity': { long: '15.8%', short: '3.5%' },
+            'Carry': { long: '10.2%', short: '4.8%' },
+            'Crowding': { long: '4.5%', short: '14.2%' }
           }
         };
       }
-      
+
       return portfolioData;
     } catch (error) {
       console.error('Error fetching portfolio:', error);
@@ -170,7 +161,7 @@ export class MarketDataService {
     try {
       const params = { symbol };
       if (expiration) params.expiration = expiration;
-      
+
       const response = await apiClient.get(ENDPOINTS.OPTIONS_CHAIN, { params });
       return response.data;
     } catch (error) {
@@ -272,11 +263,11 @@ export class MarketDataService {
       // Get all tickers from securities list
       const { getAllTickers } = await import('../../constants/securitiesConfig');
       const tickers = getAllTickers();
-      
+
       // Fetch quotes for all securities in batches
       const batchSize = 50; // Yahoo Finance can handle multiple symbols
       const allData = {};
-      
+
       for (let i = 0; i < tickers.length; i += batchSize) {
         const batch = tickers.slice(i, i + batchSize);
         try {
@@ -286,7 +277,7 @@ export class MarketDataService {
           console.error(`Error fetching batch ${i}-${i + batchSize}:`, error);
         }
       }
-      
+
       return allData;
     } catch (error) {
       console.error('Error fetching all securities data:', error);
