@@ -17,11 +17,29 @@ import { getFormattedQuadRanking } from '../../utils/quadRankingUtils';
 import { getVolatilityMetrics } from '../../constants/securityCategoryMapping';
 import { METRIC_DEFINITIONS } from '../../constants/metricDefinitions';
 import MetricDefinitionPopover from '../common/MetricDefinitionPopover';
+import {
+  AlignLeft,
+  FileText,
+  Activity,
+  BarChart3,
+  AreaChart,
+  SlidersHorizontal,
+  Percent,
+  // Sigma, // Lucide doesn't have Sigma in all versions, using FunctionSquare as fallback if needed or custom path
+  FunctionSquare,
+  LineChart,
+  Type,
+  LayoutGrid,
+  DollarSign,
+  ArrowUp,
+  ArrowDown,
+  TrendingUp
+} from 'lucide-react';
 
 // Day label component with hover tooltip
 const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
   const [showTooltip, setShowTooltip] = useState(false);
-  
+
   return (
     <div
       style={{
@@ -68,7 +86,7 @@ const TruncatedSecurityName = ({ name, maxLength = 20 }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const isTruncated = name && name.length > maxLength;
   const displayName = isTruncated ? `${name.substring(0, maxLength)}...` : name;
-  
+
   return (
     <div
       style={{
@@ -120,29 +138,22 @@ const SecuritiesUniverse = () => {
   const [selectedQuad, setSelectedQuad] = useState(null);
   const [shortsMode, setShortsMode] = useState(false); // false = longs (best quads), true = shorts (worst quads)
   const [openPopover, setOpenPopover] = useState(null); // { metricKey, position: { top, left } }
+  const [riskRanges, setRiskRanges] = useState({});
 
-  // Risk Range History - 10 day history for each security
-  // Format: { ticker: { hrr: [t-9, t-8, t-7, t-6, t-5, t-4, t-3, t-2, t-1, today], lrr: [...], ath: number } }
-  const riskRangeHistory = useMemo(() => {
-    const defaultHistory = { hrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], lrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ath: 0 };
-    const history = {};
-    
-    // Initialize all securities with default 0 values
-    SECURITIES_LIST.forEach(security => {
-      history[security.ticker] = { ...defaultHistory };
-    });
-    
-    // Test data for BKLN to verify color coding
-    // HRR: varied pattern to show green (up), red (down), blue (new ATH)
-    // LRR: varied pattern to show higher low (green) and lower low (red)
-    // ATH: 6.5 (so HRR value of 7 should be blue)
-    history['BKLN'] = {
-      hrr: [4, 5, 4, 5, 6, 7, 6, 5, 6, 5],
-      lrr: [1, 2, 1, 2, 3, 2, 3, 2, 3, 2],
-      ath: 6.5
+  // Fetch Risk Ranges
+  useEffect(() => {
+    const fetchRiskRanges = async () => {
+      try {
+        // Fetch full history from bulk endpoint
+        const historyData = await MarketDataService.getAllRiskRangeHistory();
+        if (historyData) {
+          setRiskRanges(historyData); // Stores { ticker: [history array] }
+        }
+      } catch (error) {
+        console.error('Error fetching risk ranges:', error);
+      }
     };
-    
-    return history;
+    fetchRiskRanges();
   }, []);
 
   // Fetch prices for all securities (non-blocking - show table even if prices fail)
@@ -151,13 +162,13 @@ const SecuritiesUniverse = () => {
       try {
         // Set loading to false immediately so table shows, then load prices in background
         setLoading(false);
-        
+
         const tickers = SECURITIES_LIST.map(s => s.ticker);
-        
+
         // Fetch quotes in smaller batches to avoid rate limiting
         const batchSize = 20; // Smaller batches
         const allQuotes = {};
-        
+
         for (let i = 0; i < tickers.length; i += batchSize) {
           const batch = tickers.slice(i, i + batchSize);
           try {
@@ -174,7 +185,7 @@ const SecuritiesUniverse = () => {
             // Continue with other batches even if one fails
           }
         }
-        
+
         setPrices(allQuotes);
         console.log(`Loaded prices for ${Object.keys(allQuotes).length} securities`);
       } catch (error) {
@@ -190,15 +201,16 @@ const SecuritiesUniverse = () => {
   useEffect(() => {
     const fetchPriceHistory = async () => {
       try {
-        // Fetch history for first 30 securities as a sample (can be enhanced to fetch all)
-        const sampleTickers = SECURITIES_LIST.slice(0, 30).map(s => s.ticker);
+        // Fetch history for all securities
+        const allTickers = SECURITIES_LIST.map(s => s.ticker);
         const historyData = {};
-        
+
         // Fetch in parallel with delay to avoid rate limiting
         const fetchWithDelay = async (ticker, delay) => {
           await new Promise(resolve => setTimeout(resolve, delay));
           try {
-            const history = await MarketDataService.getHistoricalData(ticker, 60);
+            // We only need last 10-15 days, fetching 20 to be safe
+            const history = await MarketDataService.getHistoricalData(ticker, 20);
             if (history && history.data && Array.isArray(history.data)) {
               historyData[ticker] = history.data;
             }
@@ -208,13 +220,22 @@ const SecuritiesUniverse = () => {
           }
         };
 
-        // Fetch with staggered delays
-        const promises = sampleTickers.map((ticker, index) => 
-          fetchWithDelay(ticker, index * 100)
-        );
-        
-        await Promise.all(promises);
-        setPriceHistory(historyData);
+        // Fetch in batches of 10 to act as a rolling window
+        const batchSize = 10;
+        for (let i = 0; i < allTickers.length; i += batchSize) {
+          const batch = allTickers.slice(i, i + batchSize);
+          const promises = batch.map((ticker, index) =>
+            fetchWithDelay(ticker, index * 50) // 50ms stagger within batch
+          );
+
+          await Promise.all(promises);
+
+          // Update state incrementally so results stream in
+          setPriceHistory(prev => ({ ...prev, ...historyData }));
+
+          // Wait a bit between batches
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
       } catch (error) {
         console.error('Error fetching price history:', error);
       }
@@ -234,14 +255,14 @@ const SecuritiesUniverse = () => {
       const currentPrice = quote?.price || quote?.close || null;
       const priceTimestamp = quote?.timestamp || null;
       const history = priceHistory[security.ticker] || [];
-      
+
       // Calculate Z-score from price history
       // History is array of {date, close} objects from API
-      const priceValues = Array.isArray(history) 
+      const priceValues = Array.isArray(history)
         ? history.map(item => parseFloat(item.close || item.price || 0)).filter(p => p > 0)
         : [];
-      
-      const zScore = currentPrice && priceValues.length >= 20 
+
+      const zScore = currentPrice && priceValues.length >= 20
         ? calculateZScore(currentPrice, priceValues, 20)
         : null;
 
@@ -260,8 +281,33 @@ const SecuritiesUniverse = () => {
       // Get Quad ranking
       const quadRanking = getFormattedQuadRanking(security.ticker);
 
-      // Get risk range history for this security
-      const securityRiskRangeHistory = riskRangeHistory[security.ticker] || { hrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], lrr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
+      // Get risk range for this security
+      // riskRanges is now { ticker: [ { date, lrr, hrr, trend... } ] }
+      const historyItems = riskRanges[security.ticker] || riskRanges[security.ticker.toUpperCase()] || [];
+      const riskData = historyItems.length > 0 ? historyItems[historyItems.length - 1] : null;
+
+      // Map history to arrays for sparkline
+      // Limit to last 10 days to match the table headers (t-9 to t)
+      let recentHistory = historyItems.slice(-10);
+
+      // If we have fewer than 10 items, we need to pad with placeholder/zeros 
+      // so that the latest data aligns with the rightmost 't' column
+      if (recentHistory.length < 10) {
+        const paddingCount = 10 - recentHistory.length;
+        // Use 0 for hrr/lrr so they render as '--' in getRiskRangeColor/renderRiskRangeCell (logic handles value > 0)
+        const padding = Array(paddingCount).fill({ hrr: 0, lrr: 0, date: null });
+        recentHistory = [...padding, ...recentHistory];
+      }
+
+      const securityRiskRangeHistory = {
+        hrr: recentHistory.map(item => item.hrr),
+        lrr: recentHistory.map(item => item.lrr),
+        // Use the proper close price from the risk range data itself
+        prices: recentHistory.map(item => item.close || 0),
+        dates: recentHistory.map(item => item.date),
+        ath: 0,
+        current: riskData || null
+      };
 
       // Get volatility metrics for this security
       const volMetrics = getVolatilityMetrics(security.ticker);
@@ -277,12 +323,12 @@ const SecuritiesUniverse = () => {
         priceHistory: history, // Store price history for Risk Range display
         beta: '--', // Placeholder
         quadRanking,
-        signal: 0,
+        signal: riskData?.trend || '--', // Use Trend from risk ranges if available
         riskRangeHistory: securityRiskRangeHistory,
         volatilityMetrics: volMetrics
       };
     });
-  }, [prices, priceHistory, riskRangeHistory]);
+  }, [prices, priceHistory, riskRanges]);
 
   // Filter securities based on search query and active filters
   const filteredSecurities = useMemo(() => {
@@ -303,14 +349,14 @@ const SecuritiesUniverse = () => {
 
     // Apply factor exposure filters
     if (activeFilters.factorExposures.length > 0) {
-      filtered = filtered.filter(security => 
+      filtered = filtered.filter(security =>
         activeFilters.factorExposures.includes(security.factorExposure)
       );
     }
 
     // Apply bias filters
     if (activeFilters.biases.length > 0) {
-      filtered = filtered.filter(security => 
+      filtered = filtered.filter(security =>
         activeFilters.biases.includes(security.bias)
       );
     }
@@ -366,6 +412,13 @@ const SecuritiesUniverse = () => {
           bValue = biasOrder[b.bias] || 0;
         }
 
+        // Handle Risk Range sorting (sort by presence of data)
+        if (sort.key === 'riskRangeHistory') {
+          // Sort values: 1 for has data, 0 for no data
+          aValue = (a.riskRangeHistory && a.riskRangeHistory.current) ? 1 : 0;
+          bValue = (b.riskRangeHistory && b.riskRangeHistory.current) ? 1 : 0;
+        }
+
         // Handle null/undefined
         if (aValue === null || aValue === undefined) aValue = '';
         if (bValue === null || bValue === undefined) bValue = '';
@@ -396,7 +449,7 @@ const SecuritiesUniverse = () => {
   const handleSort = (key) => {
     setSortConfig(prev => {
       const existingIndex = prev.findIndex(s => s.key === key);
-      
+
       if (existingIndex >= 0) {
         // Column is already sorted - toggle direction or remove
         const existing = prev[existingIndex];
@@ -431,7 +484,7 @@ const SecuritiesUniverse = () => {
     setActiveFilters(prev => {
       const currentFilters = prev[category] || [];
       const isActive = currentFilters.includes(value);
-      
+
       return {
         ...prev,
         [category]: isActive
@@ -457,7 +510,7 @@ const SecuritiesUniverse = () => {
   // Handle metric definition popover on button click
   const handleMetricDefinitionClick = (e, metricKey) => {
     e.stopPropagation(); // Prevent sorting when clicking definition button
-    
+
     const definition = METRIC_DEFINITIONS[metricKey];
     if (!definition) return;
 
@@ -478,12 +531,12 @@ const SecuritiesUniverse = () => {
     if (price === null || price === undefined) return '--';
     const num = parseFloat(price);
     if (isNaN(num)) return '--';
-    
+
     // Treasury yields show as percentage
     if (ticker?.startsWith('UST')) {
       return `${num.toFixed(2)}%`;
     }
-    
+
     return num.toFixed(2);
   };
 
@@ -597,7 +650,7 @@ const SecuritiesUniverse = () => {
     const tradingDays = [];
     const today = new Date();
     let currentDate = new Date(today);
-    
+
     // We need 10 trading days (t-9, t-8, t-7, t-6, t-5, t-4, t-3, t-2, t-1, t)
     while (tradingDays.length < 10) {
       const dayOfWeek = currentDate.getDay();
@@ -607,7 +660,7 @@ const SecuritiesUniverse = () => {
       }
       currentDate.setDate(currentDate.getDate() - 1);
     }
-    
+
     return tradingDays;
   };
 
@@ -625,38 +678,48 @@ const SecuritiesUniverse = () => {
   };
 
   // Render the Risk Range mini-table for a security
-  const renderRiskRangeCell = (riskRangeHistory, priceHistory = []) => {
-    const { hrr, lrr, ath } = riskRangeHistory;
+  const renderRiskRangeCell = (riskRangeHistory) => {
+    const { hrr, lrr, ath, prices } = riskRangeHistory;
     const lastIndex = dayLabels.length - 1;
-    
-    // Extract last 10 trading days of closing prices
-    // Price history is sorted by date (oldest first), so we need the last 10 items
-    const closingPrices = [];
-    if (Array.isArray(priceHistory) && priceHistory.length > 0) {
-      // Get last 10 items from price history
-      const last10 = priceHistory.slice(-10);
-      // Pad to 10 items if we have fewer than 10
-      for (let i = 0; i < 10; i++) {
-        if (i < last10.length) {
-          const price = parseFloat(last10[i]?.close || last10[i]?.price || 0);
-          closingPrices.push(price > 0 ? price : null);
-        } else {
-          closingPrices.push(null);
-        }
-      }
-    } else {
-      // No price history, fill with nulls
-      closingPrices.push(...Array(10).fill(null));
-    }
-    
+
+    // Use prices directly from risk history object
+    // If prices array is missing or empty, fill with nulls
+    const closingPrices = Array.isArray(prices) && prices.length > 0
+      ? prices.map(p => p > 0 ? parseFloat(p) : null)
+      : Array(10).fill(null);
+
     // Helper to format price
     const formatClosingPrice = (price) => {
       if (price === null || price === undefined || price === 0) return '--';
+      // If 4 digits or more on left side (>= 1000), no decimals
+      if (Math.abs(price) >= 1000) return price.toFixed(0);
       return price.toFixed(2);
     };
-    
+
+    // Helper to format HRR/LRR
+    const formatRangeValue = (value) => {
+      if (value === null || value === undefined || value === 0) return '--';
+      // If 4 digits or more on left side (>= 1000), no decimals
+      if (Math.abs(value) >= 1000) return value.toFixed(0);
+      return value.toFixed(2);
+    };
+
+    const cellWidth = '42px'; // Increased from 28px
+    const lastCellWidth = '46px'; // Increased from 32px
+    const cellStyle = (index, color = '#6b7280') => ({
+      width: index === lastIndex ? lastCellWidth : cellWidth,
+      textAlign: 'center',
+      fontSize: '9px',
+      borderRight: index < lastIndex ? '1px solid #e5e7eb' : 'none', // Vertical divider
+      padding: '0 2px',
+      color: color,
+      fontWeight: 600,
+      backgroundColor: index === lastIndex ? '#eff6ff' : 'transparent', // Highlight 't' column
+      borderRadius: index === lastIndex ? '4px' : '0'
+    });
+
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '9px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9px' }}>
         {/* ATH Row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>ATH</span>
@@ -667,34 +730,44 @@ const SecuritiesUniverse = () => {
         {/* Day Labels Row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: '36px' }}></span>
-          <div style={{ display: 'flex', gap: '4px' }}>
+          <div style={{ display: 'flex' }}> {/* Removed gap to make dividers continuous */}
             {dayLabels.map((label, index) => (
-              <DayLabelWithTooltip
+              <div
                 key={`label-${index}`}
-                label={label}
-                date={formatTradingDate(tradingDays[index])}
-                isLast={index === lastIndex}
-              />
+                style={{
+                  width: index === lastIndex ? lastCellWidth : cellWidth,
+                  textAlign: 'center',
+                  borderRight: index < lastIndex ? '1px solid transparent' : 'none', // Placeholder for alignment
+                  padding: '0 2px'
+                }}
+              >
+                <div
+                  style={{
+                    width: '100%',
+                    position: 'relative',
+                    backgroundColor: index === lastIndex ? '#eff6ff' : '#f3f4f6', // Highlight 't' label
+                    fontWeight: index === lastIndex ? 'bold' : 'normal',
+                    color: index === lastIndex ? '#1e40af' : '#6b7280'
+                  }}
+                  title={formatTradingDate(tradingDays[index])}
+                >
+                  {label}
+                </div>
+              </div>
             ))}
           </div>
         </div>
         {/* HRR Row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>HRR</span>
-          <div style={{ display: 'flex', gap: '4px' }}>
+          <div style={{ display: 'flex' }}>
             {hrr.map((value, index) => (
               <span
                 key={`hrr-${index}`}
-                style={{
-                  width: index === lastIndex ? '32px' : '28px',
-                  textAlign: 'center',
-                  fontWeight: 600,
-                  fontSize: '9px',
-                  color: getRiskRangeColor(value, index > 0 ? hrr[index - 1] : null, index === 0, ath, true)
-                }}
+                style={cellStyle(index, getRiskRangeColor(value, index > 0 ? hrr[index - 1] : null, index === 0, ath, true))}
                 title={`${value}${ath && value > ath ? ' (New ATH!)' : ''}`}
               >
-                {value}
+                {formatRangeValue(value)}
               </span>
             ))}
           </div>
@@ -702,16 +775,13 @@ const SecuritiesUniverse = () => {
         {/* Closing Prices Row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>Price</span>
-          <div style={{ display: 'flex', gap: '4px' }}>
+          <div style={{ display: 'flex' }}>
             {closingPrices.map((price, index) => (
               <span
                 key={`price-${index}`}
                 style={{
-                  width: index === lastIndex ? '32px' : '28px',
-                  textAlign: 'center',
-                  fontWeight: 600,
-                  color: price !== null ? '#374151' : '#9ca3af',
-                  fontSize: '9px'
+                  ...cellStyle(index, price !== null ? '#374151' : '#9ca3af'),
+                  fontWeight: 600
                 }}
               >
                 {formatClosingPrice(price)}
@@ -722,19 +792,13 @@ const SecuritiesUniverse = () => {
         {/* LRR Row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>LRR</span>
-          <div style={{ display: 'flex', gap: '4px' }}>
+          <div style={{ display: 'flex' }}>
             {lrr.map((value, index) => (
               <span
                 key={`lrr-${index}`}
-                style={{
-                  width: index === lastIndex ? '32px' : '28px',
-                  textAlign: 'center',
-                  fontWeight: 600,
-                  fontSize: '9px',
-                  color: getRiskRangeColor(value, index > 0 ? lrr[index - 1] : null, index === 0)
-                }}
+                style={cellStyle(index, getRiskRangeColor(value, index > 0 ? lrr[index - 1] : null, index === 0))}
               >
-                {value}
+                {formatRangeValue(value)}
               </span>
             ))}
           </div>
@@ -745,10 +809,8 @@ const SecuritiesUniverse = () => {
 
   return (
     <div style={{ padding: '16px', overflowY: 'auto', height: '100%' }}>
-      <Title className="text-lg mb-4 dark:text-white">Securities Universe</Title>
-
       {/* Search Bar */}
-      <Card className="mb-4 dark:bg-gray-800">
+      <div style={{ margin: '0 auto', width: '400px', marginBottom: '8px' }}>
         <input
           type="text"
           placeholder="Search by ticker, name, asset class, factor exposure, benchmark..."
@@ -757,561 +819,306 @@ const SecuritiesUniverse = () => {
           className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           style={{ fontSize: '14px' }}
         />
-        <Text className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-          {searchQuery || Object.values(activeFilters).some(arr => arr.length > 0) || selectedQuad !== null
-            ? `Showing ${filteredSecurities.length} of ${SECURITIES_LIST.length} securities`
-            : `${SECURITIES_LIST.length} securities total`}
+      </div>
+
+      {/* Filter Summary & Clear */}
+      <div className="flex flex-col items-center gap-1 mb-8">
+        <Text className="text-sm text-gray-500 dark:text-gray-400 font-medium">
+          {`Showing ${filteredSecurities.length} of ${SECURITIES_LIST.length} securities`}
         </Text>
-      </Card>
+        <button
+          onClick={clearAllFilters}
+          className="text-xs text-blue-600 hover:text-blue-800 underline decoration-blue-300 underline-offset-2"
+        >
+          Clear all filters
+        </button>
+      </div>
 
       {/* Filter Tags */}
-      <Card className="mb-4 dark:bg-gray-800">
-        <div className="space-y-3">
-          {/* Asset Class Filters */}
-          <div>
-            <Text className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 block">
-              Asset Class
-            </Text>
-            <div className="flex flex-wrap gap-2">
-              {['Currency/FX', 'Fixed Income', 'Equity', 'Commodity', 'Cryptocurrency'].map(assetClass => {
-                const isActive = activeFilters.assetClasses.includes(assetClass);
-                // Map display names to asset class keys for color lookup
-                const assetClassKey = Object.keys(ASSET_CLASS_NAMES).find(
-                  key => ASSET_CLASS_NAMES[key] === assetClass
-                );
-                // Color mapping matching signal strength card
-                const colorMap = {
-                  fixedIncome: { active: '#3B82F6', inactive: '#DBEAFE', text: '#1E40AF' },  // Blue
-                  equity: { active: '#10B981', inactive: '#D1FAE5', text: '#065F46' },        // Green
-                  currency: { active: '#8B5CF6', inactive: '#E9D5FF', text: '#6B21A8' },     // Violet
-                  commodity: { active: '#F97316', inactive: '#FED7AA', text: '#9A3412' },    // Orange
-                  crypto: { active: '#EAB308', inactive: '#FDE68A', text: '#854D0E' }         // Yellow
-                };
-                const colors = colorMap[assetClassKey] || { active: '#6B7280', inactive: '#F3F4F6', text: '#374151' };
-                const backgroundColor = isActive ? colors.active : colors.inactive;
-                const textColor = isActive ? '#ffffff' : colors.text;
-                return (
-                  <button
-                    key={assetClass}
-                    onClick={() => toggleFilter('assetClasses', assetClass)}
-                    style={{
-                      backgroundColor,
-                      color: textColor,
-                      padding: '4px 12px',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      borderRadius: '9999px',
-                      transition: 'all 0.2s',
-                      border: 'none',
-                      cursor: 'pointer'
-                    }}
-                    className={!isActive ? 'hover:opacity-80 dark:hover:opacity-70' : ''}
-                  >
-                    {assetClass}
-                  </button>
-                );
-              })}
+      {/* New Filter Menu Design */}
+      <div className="mb-8 pl-2 space-y-6">
+        {/* Helper for Filter Row */}
+        {[
+          {
+            title: 'ASSET CLASS',
+            icon: (
+              <svg width="48" height="48" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 2 L12 12 L22 12" />
+              </svg>
+            ),
+            options: ['CURRENCY/FX', 'FIXED INCOME', 'EQUITY', 'COMMODITY', 'CRYPTOCURRENCY'],
+            activeValues: activeFilters.assetClasses.map(a => a.toUpperCase()),
+            onSelect: (val) => {
+              // Map back to original casing if needed, or update logic to be case-insensitive
+              // The original list was Title Case. We need to match it.
+              const originalMap = {
+                'CURRENCY/FX': 'Currency/FX',
+                'FIXED INCOME': 'Fixed Income',
+                'EQUITY': 'Equity',
+                'COMMODITY': 'Commodity',
+                'CRYPTOCURRENCY': 'Cryptocurrency'
+              };
+              toggleFilter('assetClasses', originalMap[val]);
+            }
+          },
+          {
+            title: 'FACTOR EXPOSURE',
+            icon: <SlidersHorizontal size={48} strokeWidth={1.5} className="text-blue-500" />,
+            options: ['GROWTH', 'VALUE', 'QUALITY', 'MOMENTUM', 'LOW VOLATILITY'],
+            activeValues: activeFilters.factorExposures.map(f => f.toUpperCase()),
+            onSelect: (val) => {
+              const originalMap = {
+                'GROWTH': 'Growth',
+                'VALUE': 'Value',
+                'QUALITY': 'Quality',
+                'MOMENTUM': 'Momentum',
+                'LOW VOLATILITY': 'Low Volatility'
+              };
+              toggleFilter('factorExposures', originalMap[val]);
+            }
+          },
+          {
+            title: 'BIAS',
+            icon: (
+              <svg width="48" height="48" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h2" />
+                <line x1="12" y1="4" x2="12" y2="20" />
+                <path d="M17 4h2c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2h-2" />
+              </svg>
+            ),
+            options: ['BULLISH', 'BEARISH', 'NEUTRAL'],
+            activeValues: activeFilters.biases, // These are already uppercase in state
+            onSelect: (val) => {
+              toggleFilter('biases', val);
+            }
+          },
+          {
+            title: 'QUAD FILTER',
+            icon: <LayoutGrid size={48} strokeWidth={1.5} className="text-blue-500" />,
+            options: ['QUAD 1', 'QUAD 2', 'QUAD 3', 'QUAD 4'],
+            activeValues: selectedQuad ? [`QUAD ${selectedQuad}`] : [],
+            onSelect: (val) => {
+              const num = parseInt(val.split(' ')[1]);
+              setSelectedQuad(selectedQuad === num ? null : num);
+            }
+          }
+        ].map((section, idx) => (
+          <div key={idx} className="flex items-start gap-4">
+            {/* Icon Column */}
+            <div className="pt-1 w-12 flex justify-center">
+              {section.icon}
+            </div>
+            {/* Controls Column */}
+            <div className="flex flex-col gap-1 w-full">
+              <span className="text-xs font-semibold text-black uppercase tracking-wide">
+                {section.title}
+              </span>
+              <div className="flex w-max">
+                {section.options.map((opt, i) => {
+                  const isActive = section.activeValues.includes(opt);
+                  const isFirst = i === 0;
+                  const isLast = i === section.options.length - 1;
+
+                  return (
+                    <button
+                      key={opt}
+                      onClick={() => section.onSelect(opt)}
+                      style={{
+                        border: '1px solid #3b82f6', // Blue-500
+                        padding: '6px 16px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        backgroundColor: isActive ? '#dbeafe' : '#ffffff', // blue-100 : white
+                        color: isActive ? '#1e3a8a' : '#1e293b', // blue-900 : slate-800
+                        borderRightWidth: isLast ? '1px' : '0', // Collapse borders
+                        borderRadius: isFirst ? '4px 0 0 4px' : isLast ? '0 4px 4px 0' : '0',
+                        cursor: 'pointer',
+                        minWidth: '80px',
+                        transition: 'background-color 0.1s'
+                      }}
+                      className="hover:bg-slate-50 relative"
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
+        ))}
 
-          {/* Factor Exposure Filters */}
-          <div>
-            <Text className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 block">
-              Factor Exposure
-            </Text>
-            <div className="flex flex-wrap gap-2">
-              {['Growth', 'Value', 'Quality', 'Momentum', 'Low Volatility'].map(factor => {
-                const isActive = activeFilters.factorExposures.includes(factor);
-                return (
-                  <button
-                    key={factor}
-                    onClick={() => toggleFilter('factorExposures', factor)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                      isActive
-                        ? 'bg-purple-500 text-white dark:bg-purple-600'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-                    }`}
-                  >
-                    {factor}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Bias Filters */}
-          <div>
-            <Text className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2 block">
-              Bias
-            </Text>
-            <div className="flex flex-wrap gap-2">
-              {['BULLISH', 'BEARISH', 'NEUTRAL'].map(bias => {
-                const isActive = activeFilters.biases.includes(bias);
-                const getBiasColor = (bias) => {
-                  if (bias === 'BULLISH') return isActive ? '#10b981' : '#d1fae5';
-                  if (bias === 'BEARISH') return isActive ? '#ef4444' : '#fee2e2';
-                  return isActive ? '#6b7280' : '#f3f4f6';
-                };
-                const getTextColor = (bias) => {
-                  if (isActive) return '#ffffff';
-                  if (bias === 'BULLISH') return '#065f46';
-                  if (bias === 'BEARISH') return '#991b1b';
-                  return '#374151';
-                };
-                return (
-                  <button
-                    key={bias}
-                    onClick={() => toggleFilter('biases', bias)}
-                    style={{
-                      backgroundColor: getBiasColor(bias),
-                      color: getTextColor(bias),
-                      padding: '4px 12px',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      borderRadius: '9999px',
-                      transition: 'all 0.2s',
-                      border: 'none',
-                      cursor: 'pointer'
-                    }}
-                    className={!isActive ? 'hover:opacity-80 dark:hover:opacity-70' : ''}
-                  >
-                    {bias}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Quad Filter */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <Text className="text-xs font-semibold text-gray-600 dark:text-gray-400">
-                Quad Filter
-              </Text>
-              {selectedQuad !== null && (
-                <button
-                  onClick={() => setShortsMode(!shortsMode)}
-                  style={{
-                    backgroundColor: shortsMode ? '#ef4444' : '#10b981',
-                    color: '#ffffff',
-                    padding: '4px 12px',
-                    fontSize: '11px',
-                    fontWeight: 500,
-                    borderRadius: '9999px',
-                    transition: 'all 0.2s',
-                    border: 'none',
-                    cursor: 'pointer'
-                  }}
-                  className="hover:opacity-80"
-                  title={shortsMode ? 'Switch to longs mode (best quads)' : 'Switch to shorts mode (worst quads)'}
-                >
-                  {shortsMode ? 'Shorts' : 'Longs'}
-                </button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {[1, 2, 3, 4].map(quadNum => {
-                const isActive = selectedQuad === quadNum;
-                const getQuadButtonColor = (quadNum, isActive) => {
-                  const colors = {
-                    1: isActive ? '#10b981' : '#d1fae5', // Darker green
-                    2: isActive ? '#34d399' : '#a7f3d0', // Lighter green
-                    3: isActive ? '#f59e0b' : '#fde68a', // Orange/Gold
-                    4: isActive ? '#ef4444' : '#fee2e2'  // Red
-                  };
-                  return colors[quadNum] || '#f3f4f6';
-                };
-                const getQuadTextColor = (quadNum, isActive) => {
-                  if (isActive) return '#ffffff';
-                  const textColors = {
-                    1: '#065f46', // Dark green
-                    2: '#047857', // Medium green
-                    3: '#92400e', // Dark orange
-                    4: '#991b1b'  // Dark red
-                  };
-                  return textColors[quadNum] || '#374151';
-                };
-                return (
-                  <button
-                    key={quadNum}
-                    onClick={() => setSelectedQuad(isActive ? null : quadNum)}
-                    style={{
-                      backgroundColor: getQuadButtonColor(quadNum, isActive),
-                      color: getQuadTextColor(quadNum, isActive),
-                      padding: '4px 12px',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      borderRadius: '9999px',
-                      transition: 'all 0.2s',
-                      border: 'none',
-                      cursor: 'pointer'
-                    }}
-                    className={!isActive ? 'hover:opacity-80 dark:hover:opacity-70' : ''}
-                  >
-                    Quad {quadNum}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Clear Filters Button */}
-          {(searchQuery || Object.values(activeFilters).some(arr => arr.length > 0) || selectedQuad !== null) && (
-            <div className="pt-2 border-t dark:border-gray-700">
-              <button
-                onClick={clearAllFilters}
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                Clear all filters
-              </button>
-            </div>
-          )}
-        </div>
-      </Card>
+      </div>
 
       {/* Data Table */}
       <Card className="dark:bg-gray-800">
         <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
+            <thead className="bg-white text-slate-800">
+              <tr style={{ borderBottom: '1px solid #3b82f6' }}>
+                {[
+                  { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'left', width: '60px' },
+                  { key: 'name', label: 'Name', icon: <AlignLeft size={24} className="text-blue-500" />, align: 'left', width: '100px' },
+                  {
+                    key: 'assetClass', label: 'Asset Class', icon: (
+                      <svg width="24" height="24" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 2 L12 12 L22 12" />
+                      </svg>
+                    ), align: 'left', width: '70px'
+                  },
+                  { key: 'factorExposure', label: 'Factor Exposure', icon: <SlidersHorizontal size={24} className="text-blue-500" />, align: 'left', width: '80px' },
+                  {
+                    key: 'bias', label: 'Bias', icon: (
+                      <svg width="24" height="24" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M7 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h2" />
+                        <line x1="12" y1="4" x2="12" y2="20" />
+                        <path d="M17 4h2c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2h-2" />
+                      </svg>
+                    ), align: 'center', infoParams: 'trend', width: '80px'
+                  },
+                  { key: 'riskRangeHistory', label: 'Risk Range', icon: <div style={{ height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">RR</div>, align: 'center', infoParams: 'riskRange', width: '400px' },
+                  { key: 'ivolPrem', label: 'IVOL Prem', icon: <Percent size={24} className="text-blue-500" />, align: 'center', infoParams: 'ivolPrem', width: '65px' },
+                  { key: 'ttmZScore', label: 'TTM Z-Score', icon: <div style={{ height: '24px', width: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'ttmZScore', width: '55px' },
+                  { key: 'ivolZScore', label: 'IVOL High', icon: <Percent size={24} className="text-blue-500" />, align: 'center', infoParams: 'ivolZScore', width: '60px' },
+                  { key: 'zScore', label: 'Z-Score', icon: <div style={{ height: '24px', width: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'zScore', width: '50px' },
+                  { key: 'beta', label: 'Beta', icon: <div style={{ height: '24px', width: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">β</div>, align: 'center', infoParams: 'beta', width: '40px' },
+
+                  { key: 'quadRanking', label: 'Quad', icon: <LayoutGrid size={24} className="text-blue-500" />, align: 'center', infoParams: 'quad', width: '50px' },
+                  { key: 'priceChanges', label: 'Price Change', icon: <DollarSign size={24} className="text-blue-500" />, align: 'right', width: '80px' },
+                  { key: 'signal', label: 'Sig', icon: <Activity size={24} className="text-blue-500" />, align: 'center', width: '50px' }
+                ].map((col, index, arr) => (
                   <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('ticker')}
+                    key={col.key}
+                    style={{
+                      padding: '6px 8px',
+                      textAlign: col.align,
+                      verticalAlign: 'top',
+                      background: '#ffffff',
+                      color: '#1e293b',
+                      borderRight: index === arr.length - 1 ? 'none' : '1px solid #3b82f6',
+                      borderBottom: '1px solid #3b82f6',
+                      width: col.width,
+                      minWidth: col.width,
+                      maxWidth: col.width
+                    }}
+                    className="group hover:bg-slate-50 transition-colors"
+                    onClick={() => handleSort(col.key)}
                   >
-                    Ticker {(() => {
-                      const sortInfo = getSortInfo('ticker');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
-                  </th>
-                  <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('name')}
-                  >
-                    Name {(() => {
-                      const sortInfo = getSortInfo('name');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
-                  </th>
-                  <th
-                    data-metric-key="riskRange"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white"
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
-                      Risk Range
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'riskRange')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '45px' }}>
+                      {/* Top Row: Label + Icon */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, width: '100%', cursor: 'pointer' }}>
+                        {/* Label Area - Fixed Height for 2 lines */}
+                        <div style={{
+                          height: '18px',
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                    </span>
-                  </th>
-                  <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('price')}
-                  >
-                    Spot price {(() => {
-                      const sortInfo = getSortInfo('price');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
-                  </th>
-                  <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('assetClass')}
-                  >
-                    Asset Class {(() => {
-                      const sortInfo = getSortInfo('assetClass');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
-                  </th>
-                  <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('factorExposure')}
-                  >
-                    Factor Exposure {(() => {
-                      const sortInfo = getSortInfo('factorExposure');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
-                  </th>
-                  <th
-                    data-metric-key="ivolPrem"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white"
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
-                      IVOL Prem %
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'ivolPrem')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
+                          justifyContent: 'center',
+                          marginBottom: '2px',
+                          width: '100%',
+                          textAlign: 'center'
+                        }}>
+                          <span
+                            onClick={(e) => {
+                              if (col.infoParams) {
+                                e.stopPropagation();
+                                handleMetricDefinitionClick(e, col.infoParams);
+                              }
+                            }}
+                            style={{
+                              fontSize: '9px',
+                              color: '#000000',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              lineHeight: '1.2',
+                              cursor: col.infoParams ? 'pointer' : 'default',
+                              borderBottom: col.infoParams ? '1px dotted #94a3b8' : 'none' // Subtle indicator
+                            }}
+                            className={col.infoParams ? "hover:text-blue-600 transition-colors" : ""}
+                          >
+                            {col.label}
+                          </span>
+                        </div>
+                        <div style={{
                           display: 'flex',
+                          flexDirection: 'column', // Stack Icon and Arrows
+                          justifyContent: 'center',
                           alignItems: 'center',
-                          justifyContent: 'center'
+                          flex: 1,
+                          paddingBottom: '2px',
+                          cursor: 'pointer'
                         }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                    </span>
+                        >
+                          {/* Restored Main Icon */}
+                          <div style={{ color: '#1e40af', marginBottom: '2px' }}>
+                            {col.icon}
+                          </div>
+
+                          {/* Sort Arrows Container - Fixed Height to prevent shift */}
+                          <div style={{ height: '14px', minHeight: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {(() => {
+                              const sortInfo = getSortInfo(col.key);
+                              if (sortInfo) {
+                                // Sorted State: Number + Single Arrow (Bold)
+                                return (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#2563eb', fontWeight: 700, fontSize: '10px', lineHeight: 1 }}>
+                                    <span>{sortInfo.order}</span>
+                                    {sortInfo.direction === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />}
+                                  </div>
+                                );
+                              }
+                              // Unsorted State: Small Gray Up/Down Arrows
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#cbd5e1' }}>
+                                  <ArrowUp size={10} strokeWidth={2.5} />
+                                  <ArrowDown size={10} strokeWidth={2.5} />
+                                </div>
+                              );
+                            })()
+                            }
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Row: Controls (Sort + Info) - ALWAYS Rendered for uniformity */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingTop: '2px', // Reduced
+                        fontSize: '10px',
+                        color: '#64748b',
+                        height: '14px', // Reduced height
+                        width: '100%'
+                      }}>
+                        {col.key !== 'signal' && (
+                          <>
+                            {/* Sort Indicator Moved to Center - Keeping slot empty for alignment if needed, or just removing visual */}
+                            <div style={{ minWidth: '20px' }}></div>
+
+                            {/* Menu/Info (Right) - Empty now as Info button is removed */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </th>
-                  <th
-                    data-metric-key="ttmZScore"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white"
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
-                      TTM Z-Score
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'ttmZScore')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                    </span>
-                  </th>
-                  <th
-                    data-metric-key="iovrPercentile"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white"
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
-                      IOVR %ile
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'iovrPercentile')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                    </span>
-                  </th>
-                  <th
-                    data-metric-key="zScore"
-                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('zScore')}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', width: '100%', justifyContent: 'flex-end' }}>
-                      Z-Score
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'zScore')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                      {(() => {
-                        const sortInfo = getSortInfo('zScore');
-                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                      })()}
-                    </span>
-                  </th>
-                  <th
-                    data-metric-key="beta"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('beta')}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
-                      Beta
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'beta')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                      {(() => {
-                        const sortInfo = getSortInfo('beta');
-                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                      })()}
-                    </span>
-                  </th>
-                  <th
-                    style={{ padding: '6px 5px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', fontSize: '9px' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('benchmark')}
-                  >
-                    Benchmark {(() => {
-                      const sortInfo = getSortInfo('benchmark');
-                      return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                    })()}
-                  </th>
-                  <th
-                    data-metric-key="ttt"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('bias')}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
-                      T/T/T
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'ttt')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                      {(() => {
-                        const sortInfo = getSortInfo('bias');
-                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                      })()}
-                    </span>
-                  </th>
-                  <th
-                    data-metric-key="quadRanking"
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, cursor: 'pointer', fontSize: '9px', position: 'relative' }}
-                    className="dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-                    onClick={() => handleSort('quadRanking')}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', position: 'relative', justifyContent: 'center' }}>
-                      Quad
-                      <button
-                        onClick={(e) => handleMetricDefinitionClick(e, 'quadRanking')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '0',
-                          marginLeft: '4px',
-                          fontSize: '10px',
-                          color: '#6b7280',
-                          lineHeight: '1',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        className="dark:text-gray-400 hover:dark:text-gray-200"
-                        title="Click for definition"
-                      >
-                        ℹ️
-                      </button>
-                      {(() => {
-                        const sortInfo = getSortInfo('quadRanking');
-                        return sortInfo ? ` ${sortInfo.order}${sortInfo.direction === 'asc' ? '↑' : '↓'}` : '';
-                      })()}
-                    </span>
-                  </th>
-                  <th
-                    style={{ padding: '6px 5px', textAlign: 'right', fontWeight: 600, fontSize: '9px' }}
-                    className="dark:text-white"
-                  >
-                    Price Change
-                  </th>
-                  <th
-                    style={{ padding: '6px 5px', textAlign: 'center', fontWeight: 600, fontSize: '9px' }}
-                    className="dark:text-white"
-                  >
-                    Signal
-                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedSecurities.length === 0 ? (
+                <tr>
+                  <td colSpan="16" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
+                    {searchQuery
+                      ? `No securities found matching "${searchQuery}"`
+                      : 'No securities available'}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {sortedSecurities.length === 0 ? (
-                  <tr>
-                    <td colSpan="16" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
-                      {searchQuery
-                        ? `No securities found matching "${searchQuery}"`
-                        : 'No securities available'}
-                    </td>
-                  </tr>
-                ) : (
-                  sortedSecurities.map((security, index) => {
+              ) : (
+                sortedSecurities.map((security, index) => {
                   const priceChange1D = security.priceChanges?.['1D'];
                   const priceChange1W = security.priceChanges?.['1W'];
                   const priceChange1M = security.priceChanges?.['1M'];
@@ -1332,22 +1139,24 @@ const SecuritiesUniverse = () => {
                       <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
                         <TruncatedSecurityName name={security.name} maxLength={18} />
                       </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
-                        {renderRiskRangeCell(security.riskRangeHistory, security.priceHistory)}
-                      </td>
-                      <td
-                        style={{ padding: '5px 4px', textAlign: 'left', cursor: security.priceTimestamp ? 'help' : 'default' }}
-                        className="dark:text-white"
-                        title={formatPriceDate(security.priceTimestamp) ? `Last updated: ${formatPriceDate(security.priceTimestamp)}` : undefined}
-                      >
-                        {formatPrice(security.price, security.ticker)}
-                      </td>
                       <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
                         {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
                       </td>
                       <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
                         {security.factorExposure}
                       </td>
+                      <td style={{ padding: '5px 4px', textAlign: 'center', fontWeight: 600 }} className="dark:text-gray-300">
+                        <span style={{
+                          color: security.bias === 'BULLISH' ? '#10b981' :
+                            security.bias === 'BEARISH' ? '#ef4444' : '#6b7280'
+                        }}>
+                          {security.bias}
+                        </span>
+                      </td>
+                      <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
+                        {renderRiskRangeCell(security.riskRangeHistory, security.priceHistory)}
+                      </td>
+
                       <td
                         style={{
                           padding: '5px 4px',
@@ -1406,47 +1215,7 @@ const SecuritiesUniverse = () => {
                       <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
                         {security.beta}
                       </td>
-                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
-                        {security.benchmark}
-                      </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'center' }}>
-                        {(() => {
-                          const signals = getTTTSignals(security);
-                          return (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                                <div
-                                  style={{
-                                    width: '8px',
-                                    height: '8px',
-                                    borderRadius: '50%',
-                                    backgroundColor: getSignalColor(signals.trade)
-                                  }}
-                                  title={`Trade: ${signals.trade}`}
-                                />
-                                <div
-                                  style={{
-                                    width: '8px',
-                                    height: '8px',
-                                    borderRadius: '50%',
-                                    backgroundColor: getSignalColor(signals.trend)
-                                  }}
-                                  title={`Trend: ${signals.trend}`}
-                                />
-                                <div
-                                  style={{
-                                    width: '8px',
-                                    height: '8px',
-                                    borderRadius: '50%',
-                                    backgroundColor: getSignalColor(signals.tail)
-                                  }}
-                                  title={`Tail: ${signals.tail}`}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </td>
+
                       <td style={{ padding: '5px 4px', textAlign: 'center' }}>
                         {security.quadRanking && security.quadRanking !== '--' ? (
                           <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'center' }}>
@@ -1479,7 +1248,7 @@ const SecuritiesUniverse = () => {
                           <span
                             style={{
                               color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#10b981' :
-                                     getPriceChangeColor(priceChange1D) === 'red' ? '#ef4444' : '#6b7280'
+                                getPriceChangeColor(priceChange1D) === 'red' ? '#ef4444' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
@@ -1488,7 +1257,7 @@ const SecuritiesUniverse = () => {
                           <span
                             style={{
                               color: getPriceChangeColor(priceChange1W) === 'emerald' ? '#10b981' :
-                                     getPriceChangeColor(priceChange1W) === 'red' ? '#ef4444' : '#6b7280'
+                                getPriceChangeColor(priceChange1W) === 'red' ? '#ef4444' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
@@ -1497,7 +1266,7 @@ const SecuritiesUniverse = () => {
                           <span
                             style={{
                               color: getPriceChangeColor(priceChange1M) === 'emerald' ? '#10b981' :
-                                     getPriceChangeColor(priceChange1M) === 'red' ? '#ef4444' : '#6b7280'
+                                getPriceChangeColor(priceChange1M) === 'red' ? '#ef4444' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
@@ -1511,21 +1280,23 @@ const SecuritiesUniverse = () => {
                     </tr>
                   );
                 })
-                )}
-              </tbody>
-            </table>
-          </div>
-      </Card>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card >
 
       {/* Metric Definition Popover */}
-      {openPopover && (
-        <MetricDefinitionPopover
-          metricKey={openPopover.metricKey}
-          definition={openPopover.definition}
-          onClose={closePopover}
-        />
-      )}
-    </div>
+      {
+        openPopover && (
+          <MetricDefinitionPopover
+            metricKey={openPopover.metricKey}
+            definition={openPopover.definition}
+            onClose={closePopover}
+          />
+        )
+      }
+    </div >
   );
 };
 

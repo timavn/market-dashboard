@@ -1131,6 +1131,85 @@ app.get('/api/risk-ranges', async (req, res) => {
   }
 });
 
+// Historical Risk Ranges endpoint - specific ticker history
+app.get('/api/risk-ranges/history', async (req, res) => {
+  const startTime = Date.now();
+  const { ticker, limit = 30 } = req.query;
+
+  if (!ticker) {
+    return res.status(400).json({ error: 'Ticker parameter is required' });
+  }
+
+  const parsedLimit = parseInt(limit) || 30;
+  const upperTicker = ticker.toUpperCase();
+
+  try {
+    console.log(`[API] /api/risk-ranges/history called for ${upperTicker} (limit: ${parsedLimit})`);
+
+    const params = {
+      TableName: 'RiskRangeData',
+      KeyConditionExpression: 'ticker = :ticker',
+      ExpressionAttributeValues: {
+        ':ticker': upperTicker
+      },
+      ScanIndexForward: false, // Descending order (newest first)
+      Limit: parsedLimit
+    };
+
+    const result = await dynamodb.query(params).promise();
+    const items = result.Items || [];
+
+    // Sort array by date ascending for the chart (oldest to newest)
+    items.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] Returning ${items.length} historical items for ${upperTicker} (${totalTime}ms)`);
+
+    res.json(items);
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/risk-ranges/history after ${totalTime}ms:`, error);
+    res.status(500).json({ error: 'Failed to fetch risk range history', details: error.message });
+  }
+});
+
+// Bulk history endpoint for Securities Universe
+app.get('/api/risk-ranges/history-all', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    console.log('[API] /api/risk-ranges/history-all called');
+
+    const params = { TableName: 'RiskRangeData' };
+    const result = await dynamodb.scan(params).promise();
+    const items = result.Items || [];
+
+    const grouped = {};
+    items.forEach(item => {
+      if (!grouped[item.ticker]) grouped[item.ticker] = [];
+      grouped[item.ticker].push({
+        date: item.date,
+        lrr: item.lrr,
+        hrr: item.hrr,
+        trend: item.trend,
+        close: item.close,
+        timestamp: item.timestamp
+      });
+    });
+
+    Object.keys(grouped).forEach(ticker => {
+      grouped[ticker].sort((a, b) => new Date(a.date) - new Date(b.date));
+    });
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] Returning full history for ${Object.keys(grouped).length} tickers (${items.length} total items) in ${totalTime}ms`);
+
+    res.json(grouped);
+  } catch (error) {
+    console.error('[API] Error in /api/risk-ranges/history-all:', error);
+    res.status(500).json({ error: 'Failed to fetch bulk history' });
+  }
+});
+
 // Hedgeye Freshness endpoint - returns status of all 6 Hedgeye data types
 app.get('/api/hedgeye/freshness', async (req, res) => {
   const startTime = Date.now();

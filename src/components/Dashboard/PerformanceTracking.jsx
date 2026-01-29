@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import PerformanceService from '../../services/api/performanceService';
 import { useTheme } from '../../context/ThemeContext';
+import SecurityDetailModal from './SecurityDetailModal';
 
 const PerformanceTracking = () => {
   const { theme } = useTheme();
@@ -31,8 +32,17 @@ const PerformanceTracking = () => {
   const [selectedStatementDate, setSelectedStatementDate] = useState(null);
   const [selectedStatement, setSelectedStatement] = useState(null);
   const [loadingStatement, setLoadingStatement] = useState(false);
+  const [selectedSecurity, setSelectedSecurity] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const isDark = theme === 'dark';
+
+  const handleSecurityClick = (symbol) => {
+    if (symbol) {
+      setSelectedSecurity(symbol);
+      setIsModalOpen(true);
+    }
+  };
 
   // Fetch all performance data
   useEffect(() => {
@@ -649,8 +659,12 @@ const PerformanceTracking = () => {
                       </thead>
                       <tbody>
                         {selectedStatement.holdings.map((holding, idx) => (
-                          <tr key={`${holding.symbol}-${idx}`} className="border-b">
-                            <td className="p-1 font-medium">{holding.symbol}</td>
+                          <tr
+                            key={`${holding.symbol}-${idx}`}
+                            className="border-b hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                            onClick={() => handleSecurityClick(holding.symbol)}
+                          >
+                            <td className="p-1 font-medium text-blue-500 hover:text-blue-700">{holding.symbol}</td>
                             <td className="p-1 text-xs text-gray-600 dark:text-gray-400 truncate max-w-[150px]">{holding.description}</td>
                             <td className="text-right p-1">{holding.quantity?.toLocaleString() || '0'}</td>
                             <td className="text-right p-1">{formatCurrency(holding.price || 0)}</td>
@@ -679,9 +693,15 @@ const PerformanceTracking = () => {
           )}
         </Card>
       )}
-    </div>
+
+      {/* Security Detail Modal */}
+      <SecurityDetailModal
+        ticker={selectedSecurity}
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+      />
+    </div >
   );
 };
 
 export default PerformanceTracking;
-

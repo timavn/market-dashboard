@@ -901,6 +901,50 @@ const PortfolioDashboard = () => {
             margin: '12px 0 8px 0'
           }} />
 
+          {/* Portfolio Breakdown Button */}
+          <button
+            onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
+            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showPortfolioBreakdown
+              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
+              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              overflow: 'hidden',
+              marginTop: '4px',
+              gap: showPortfolioMetrics ? '12px' : '0'
+            }}
+            title="Portfolio Breakdown"
+          >
+            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
+              {portfolioBreakdownImageError ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8" />
+                  <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4" />
+                  <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2" />
+                </svg>
+              ) : (
+                <img
+                  src="/images/icons/portfolio-construction.png"
+                  alt="Portfolio Breakdown"
+                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                  onError={() => setPortfolioBreakdownImageError(true)}
+                />
+              )}
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
+                Portfolio
+              </span>
+            )}
+          </button>
+
           {/* Securities Universe Button */}
           <button
             onClick={() => setShowSecuritiesUniverse(!showSecuritiesUniverse)}
@@ -999,50 +1043,6 @@ const PortfolioDashboard = () => {
             {showPortfolioMetrics && (
               <span className={`text-sm font-medium whitespace-nowrap ${showPerformanceTracking ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
                 Performance
-              </span>
-            )}
-          </button>
-
-          {/* Portfolio Breakdown Button */}
-          <button
-            onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
-            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showPortfolioBreakdown
-              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
-              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
-              }`}
-            style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              overflow: 'hidden',
-              marginTop: '4px',
-              gap: showPortfolioMetrics ? '12px' : '0'
-            }}
-            title="Portfolio Breakdown"
-          >
-            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
-              {portfolioBreakdownImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-white" : "text-gray-700 dark:text-gray-300"}>
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8" />
-                  <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4" />
-                  <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2" />
-                </svg>
-              ) : (
-                <img
-                  src="/images/icons/portfolio-construction.png"
-                  alt="Portfolio Breakdown"
-                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                  onError={() => setPortfolioBreakdownImageError(true)}
-                />
-              )}
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
-                Portfolio
               </span>
             )}
           </button>

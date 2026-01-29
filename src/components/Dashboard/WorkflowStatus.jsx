@@ -766,8 +766,18 @@ const WorkflowStatus = () => {
                               borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`
                             }}>
                               <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Asset</Text>
-                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Previous</Text>
-                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Current</Text>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Previous</Text>
+                                <Text style={{ fontSize: '8px', color: isDark ? '#6b7280' : '#9ca3af' }}>
+                                  {diff.previousDate ? new Date(diff.previousDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : ''}
+                                </Text>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Current</Text>
+                                <Text style={{ fontSize: '8px', color: isDark ? '#6b7280' : '#9ca3af' }}>
+                                  {diff.currentDate ? new Date(diff.currentDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : ''}
+                                </Text>
+                              </div>
                             </div>
                             {/* Table Rows */}
                             {diff.trendChanges.map((change, idx) => (

@@ -352,6 +352,27 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=Non
     snap_table.put_item(Item=snapshot_item)
     print(f"   ✅ Snapshot saved ({len(data['trendChanges'])} changes, {len(data['outbucket'])} outbucket)")
 
+    # Save to RiskRangeData (New table for historical tracking per ticker)
+    history_table = db.Table('RiskRangeData')
+    count = 0
+    with history_table.batch_writer() as batch:
+        for ticker, d in data['riskRanges'].items():
+            item = {
+                'ticker': ticker,
+                'date': date,
+                'lrr': Decimal(str(d['buyTrade'])),
+                'hrr': Decimal(str(d['sellTrade'])),
+                'trend': d['trend'],
+                'close': Decimal(str(d.get('prevClose', 0))),
+                'timestamp': ts,
+                'source': 'hedgeye-pdf',
+                'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60)) # 2 years retention
+            }
+            batch.put_item(Item=item)
+            count += 1
+            
+    print(f"   ✅ {count} items saved to RiskRangeData (History)")
+
     print("\n🎉 SUCCESS! Check your dashboard.\n")
 
 

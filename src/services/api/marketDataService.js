@@ -308,6 +308,36 @@ export class MarketDataService {
     }
   }
 
+  // Get risk range history for a specific ticker
+  static async getRiskRangeHistory(ticker, limit = 30) {
+    try {
+      const response = await apiClient.get('/api/risk-ranges/history', {
+        params: { ticker, limit }
+      });
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        // Fallback for older servers or missing endpoint
+        console.warn('Risk range history endpoint not found, returning empty array');
+        return [];
+      }
+      console.error(`Error fetching risk range history for ${ticker}:`, error);
+      throw error;
+    }
+  }
+
+  // Get all risk range history (bulk)
+  static async getAllRiskRangeHistory() {
+    try {
+      const response = await apiClient.get('/api/risk-ranges/history-all');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching all risk range history:', error);
+      // Fallback to empty object
+      return {};
+    }
+  }
+
   // Get Hedgeye freshness status for all 6 data types
   static async getHedgeyeFreshness() {
     try {
