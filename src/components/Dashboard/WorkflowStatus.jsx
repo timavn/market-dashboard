@@ -7,6 +7,13 @@ import { SERVICE_CONFIG, calculateTotals } from '../../constants/serviceTracking
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import axios from 'axios';
 
+// Helper to format dates consistently (M/D)
+const formatDate = (dateStr) => {
+  if (!dateStr) return '';
+  // Append T12:00:00 to force local time interpretation in mid-day (avoiding timezone shifts)
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+};
+
 const WorkflowStatus = () => {
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
@@ -753,122 +760,178 @@ const WorkflowStatus = () => {
                           </Text>
                         )}
 
-                        {/* RISK RANGES: Asset/Previous/Current Table */}
-                        {key === 'risk-ranges' && diff && diff.trendChanges && diff.trendChanges.length > 0 && (
-                          <div>
-                            {/* Table Header */}
-                            <div style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1fr 1fr 1fr',
-                              gap: '8px',
-                              padding: '6px 8px',
-                              backgroundColor: isDark ? '#374151' : '#f3f4f6',
-                              borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`
-                            }}>
-                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Asset</Text>
-                              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Previous</Text>
-                                <Text style={{ fontSize: '8px', color: isDark ? '#6b7280' : '#9ca3af' }}>
-                                  {diff.previousDate ? new Date(diff.previousDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : ''}
-                                </Text>
+                        {key === 'risk-ranges' && diff && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* 1. Trend Changes */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
+                                Trend Changes <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
                               </div>
-                              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Current</Text>
-                                <Text style={{ fontSize: '8px', color: isDark ? '#6b7280' : '#9ca3af' }}>
-                                  {diff.currentDate ? new Date(diff.currentDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : ''}
+                              {diff.trendChanges && diff.trendChanges.length > 0 ? (
+                                <div style={{ display: 'grid', gap: '4px' }}>
+                                  {/* Header */}
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>
+                                    <span>Asset</span>
+                                    <span>Previous ({formatDate(diff.previousDate)})</span>
+                                    <span>Current ({formatDate(diff.currentDate)})</span>
+                                  </div>
+                                  {/* Rows */}
+                                  {diff.trendChanges.map((change, idx) => (
+                                    <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '10px' }}>
+                                      <span style={{ fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>{change.ticker}</span>
+                                      <span style={{ color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
+                                        {change.oldTrend === 'BULLISH' ? 'BULLISH' : change.oldTrend === 'BEARISH' ? 'BEARISH' : 'NEUTRAL'}
+                                      </span>
+                                      <span style={{ color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
+                                        {change.newTrend === 'BULLISH' ? 'BULLISH' : change.newTrend === 'BEARISH' ? 'BEARISH' : 'NEUTRAL'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <Text style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                  N/A
                                 </Text>
+                              )}
+                            </div>
+
+                            {/* 2. Risk Ranges (Constituents) */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
+                                Risk Ranges <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                <div>
+                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Added</span>
+                                  {(diff.added?.length > 0) ? (
+                                    diff.added.map(t => (
+                                      <div key={t} style={{ fontSize: '10px', color: '#10b981' }}>{t}</div>
+                                    ))
+                                  ) : (
+                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                      N/A
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Removed</span>
+                                  {(diff.removed?.length > 0) ? (
+                                    diff.removed.map(t => (
+                                      <div key={t} style={{ fontSize: '10px', color: '#ef4444' }}>{t}</div>
+                                    ))
+                                  ) : (
+                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                      N/A
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                            {/* Table Rows */}
-                            {diff.trendChanges.map((change, idx) => (
-                              <div key={idx} style={{
-                                display: 'grid',
-                                gridTemplateColumns: '1fr 1fr 1fr',
-                                gap: '8px',
-                                padding: '6px 8px',
-                                borderBottom: idx < diff.trendChanges.length - 1 ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}` : 'none'
-                              }}>
-                                <span style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontWeight: 500 }}>{change.ticker}</span>
-                                <span style={{
-                                  fontSize: '10px',
-                                  fontWeight: 500,
-                                  color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827')
-                                }}>
-                                  {change.oldTrend === 'BULLISH' ? 'Bullish' : change.oldTrend === 'BEARISH' ? 'Bearish' : 'Neutral'}
-                                </span>
-                                <span style={{
-                                  fontSize: '10px',
-                                  fontWeight: 500,
-                                  color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827')
-                                }}>
-                                  {change.newTrend === 'BULLISH' ? 'Bullish' : change.newTrend === 'BEARISH' ? 'Bearish' : 'Neutral'}
-                                </span>
+
+                            {/* 3. OutBucket */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
+                                OutBucket <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
                               </div>
-                            ))}
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                <div>
+                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Added</span>
+                                  {(diff.outbucketDiff?.added?.length > 0) ? (
+                                    (diff.outbucketDiff.added || []).map(t => {
+                                      const text = typeof t === 'string' ? t : (t?.ticker || t?.symbol || JSON.stringify(t));
+                                      // Parse: "Name (TICKER) - TREND" -> ticker and trend
+                                      const tickerMatch = text.match(/\(([^)]+)\)/);
+                                      const ticker = tickerMatch ? tickerMatch[1] : text.split(' ')[0];
+                                      const trendMatch = text.match(/-\s*(BULLISH|BEARISH|NEUTRAL)\s*$/i);
+                                      const trend = trendMatch ? trendMatch[1].toUpperCase() : '';
+                                      const trendColor = trend === 'BULLISH' ? '#10b981' : trend === 'BEARISH' ? '#ef4444' : (isDark ? '#9ca3af' : '#6b7280');
+                                      return (
+                                        <div key={text} style={{ fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={text}>
+                                          <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>{ticker} - </span>
+                                          <span style={{ color: trendColor }}>{trend || 'N/A'}</span>
+                                        </div>
+                                      );
+                                    })
+                                  ) : (
+                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                      N/A
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Removed</span>
+                                  {(diff.outbucketDiff?.removed?.length > 0) ? (
+                                    (diff.outbucketDiff.removed || []).map(t => {
+                                      const text = typeof t === 'string' ? t : (t?.ticker || t?.symbol || JSON.stringify(t));
+                                      // Parse: "Name (TICKER) - TREND" -> ticker and trend
+                                      const tickerMatch = text.match(/\(([^)]+)\)/);
+                                      const ticker = tickerMatch ? tickerMatch[1] : text.split(' ')[0];
+                                      const trendMatch = text.match(/-\s*(BULLISH|BEARISH|NEUTRAL)\s*$/i);
+                                      const trend = trendMatch ? trendMatch[1].toUpperCase() : '';
+                                      const trendColor = trend === 'BULLISH' ? '#10b981' : trend === 'BEARISH' ? '#ef4444' : (isDark ? '#9ca3af' : '#6b7280');
+                                      return (
+                                        <div key={text} style={{ fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={text}>
+                                          <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>{ticker} - </span>
+                                          <span style={{ color: trendColor }}>{trend || 'N/A'}</span>
+                                        </div>
+                                      );
+                                    })
+                                  ) : (
+                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                      N/A
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         )}
 
                         {/* EARLY LOOK, SIGNAL STRENGTH, etc: Added/Removed Table */}
                         {key !== 'risk-ranges' && hasData && (
                           <div>
-                            {/* Table Header */}
-                            <div style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1fr 1fr',
-                              gap: '8px',
-                              padding: '6px 8px',
-                              backgroundColor: isDark ? '#374151' : '#f3f4f6',
-                              borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`
-                            }}>
-                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Added</Text>
-                              <Text style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#9ca3af' : '#6b7280' }}>Removed</Text>
+                            {/* Section Header - match Risk Ranges style */}
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
+                              Early Look <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
                             </div>
 
-                            {/* Table Rows - Display items side by side */}
-                            {(() => {
-                              const addedItems = diff.added || [];
-                              const removedItems = diff.removed || [];
-                              const maxLength = Math.max(addedItems.length, removedItems.length);
-
-                              if (maxLength === 0) {
-                                return (
-                                  <div style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: '1fr 1fr',
-                                    gap: '8px',
-                                    padding: '6px 8px'
-                                  }}>
-                                    <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>—</span>
-                                    <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>—</span>
+                            {/* Added/Removed Grid - match Risk Ranges style */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                              <div>
+                                <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Added</span>
+                                {(diff.added?.length > 0) ? (
+                                  diff.added.map(t => {
+                                    // Extract ticker from strings like "Consumer Discretionary (XLY)" -> "XLY"
+                                    const match = t.match(/\(([^)]+)\)/);
+                                    const ticker = match ? match[1] : t;
+                                    return (
+                                      <div key={t} style={{ fontSize: '10px', color: '#10b981' }}>{ticker}</div>
+                                    );
+                                  })
+                                ) : (
+                                  <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                    N/A
                                   </div>
-                                );
-                              }
-
-                              return Array.from({ length: maxLength }).map((_, idx) => (
-                                <div key={idx} style={{
-                                  display: 'grid',
-                                  gridTemplateColumns: '1fr 1fr',
-                                  gap: '8px',
-                                  padding: '6px 8px',
-                                  borderBottom: idx < maxLength - 1 ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}` : 'none'
-                                }}>
-                                  <span style={{
-                                    fontSize: '10px',
-                                    fontWeight: 500,
-                                    color: addedItems[idx] ? '#10b981' : 'transparent'
-                                  }}>
-                                    {addedItems[idx] || ''}
-                                  </span>
-                                  <span style={{
-                                    fontSize: '10px',
-                                    fontWeight: 500,
-                                    color: removedItems[idx] ? '#ef4444' : 'transparent'
-                                  }}>
-                                    {removedItems[idx] || ''}
-                                  </span>
-                                </div>
-                              ));
-                            })()}
+                                )}
+                              </div>
+                              <div>
+                                <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Removed</span>
+                                {(diff.removed?.length > 0) ? (
+                                  diff.removed.map(t => {
+                                    // Extract ticker from strings like "Consumer Discretionary (XLY)" -> "XLY"
+                                    const match = t.match(/\(([^)]+)\)/);
+                                    const ticker = match ? match[1] : t;
+                                    return (
+                                      <div key={t} style={{ fontSize: '10px', color: '#ef4444' }}>{ticker}</div>
+                                    );
+                                  })
+                                ) : (
+                                  <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                    N/A
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </Card>

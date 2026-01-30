@@ -205,7 +205,43 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=Non
         snapshot_item['screenshotS3Key'] = screenshot_s3_key
 
     snap_table.put_item(Item=snapshot_item)
-    print(f"   ✅ Saved {len(data)} risk ranges")
+    print(f"   ✅ Saved {len(data)} risk ranges to HedgeyeDailySnapshot")
+
+    # Save to Master Risk Range Tables
+    range_table = db.Table('HedgeyeRiskRanges')
+    history_table = db.Table('RiskRangeData')
+
+    for ticker, d in data.items():
+        # 1. Update Current State (HedgeyeRiskRanges)
+        item = {
+            'date': date,
+            'ticker': ticker,
+            'name': d.get('originalName'),
+            'lrr': Decimal(str(d['lrr'])),
+            'hrr': Decimal(str(d['hrr'])),
+            'trend': d['trend'],
+            'updatedAt': ts,
+            'source': 'hedgeye-early-look',
+            'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
+        }
+        if pdf_s3_key:
+            item['pdfSource'] = pdf_s3_key
+        
+        range_table.put_item(Item=item)
+
+        # 2. Add to History (RiskRangeData)
+        history_item = {
+            'ticker': ticker,
+            'date': date,
+            'lrr': Decimal(str(d['lrr'])),
+            'hrr': Decimal(str(d['hrr'])),
+            'trend': d['trend'],
+            'timestamp': ts,
+            'source': 'hedgeye-early-look'
+        }
+        history_table.put_item(Item=history_item)
+
+    print(f"   ✅ Saved {len(data)} risk ranges to HedgeyeRiskRanges and RiskRangeData")
     print("\n🎉 SUCCESS! Early Look data saved.\n")
 
 

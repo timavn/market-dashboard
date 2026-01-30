@@ -1947,6 +1947,32 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           }
         }
 
+        // Sort snapshots: 
+        // 1. Newest Date first
+        // 2. If same date, prefer 'risk-ranges' over 'early-look' (as it's more complete)
+        recentSnapshots.sort((a, b) => {
+          const dateA = new Date(a.date);
+          const dateB = new Date(b.date);
+          if (dateB - dateA !== 0) return dateB - dateA;
+
+          // Same date: prefer risk-ranges (priority 1) over early-look (priority 0)
+          const priorityA = a.snapshotType === 'risk-ranges' ? 1 : 0;
+          const priorityB = b.snapshotType === 'risk-ranges' ? 1 : 0;
+          return priorityB - priorityA;
+        });
+
+        // De-duplicate dates - keep only the highest priority snapshot for each date
+        const uniqueSnapshots = [];
+        const seenDates = new Set();
+
+        for (const snap of recentSnapshots) {
+          if (!seenDates.has(snap.date)) {
+            uniqueSnapshots.push(snap);
+            seenDates.add(snap.date);
+          }
+          if (uniqueSnapshots.length >= 2) break;
+        }
+
         if (recentSnapshots.length < 2) {
           results[type] = { added: [], removed: [], available: recentSnapshots.length > 0 };
           return;
@@ -2091,9 +2117,60 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             console.log('[Changelog] No trendChanges found for risk-ranges');
           }
 
-          if (current.outbucket) {
-            console.log('[Changelog] Adding outbucket to risk-ranges:', current.outbucket.length, 'items');
-            results[type].outbucket = current.outbucket;
+          // Pass through raw lists for reference (optional, or just rely on diffs)
+          results[type].outbucketList = current.outbucket || [];
+
+          // Helper to normalize OutBucket items to display strings 
+          const normalizeOutbucketItem = (item) => {
+            if (typeof item === 'string') return item;
+            if (item && typeof item === 'object') {
+              // Format: "Name (TICKER) - TREND"
+              const name = item.name || 'Unknown';
+              const ticker = item.ticker || item.symbol || '';
+              const trend = item.trend || '';
+              if (ticker) return `${name} (${ticker}) - ${trend}`;
+              return name;
+            }
+            return String(item);
+          };
+
+          // Helper to extract ticker for comparison
+          const extractTicker = (item) => {
+            if (typeof item === 'string') {
+              const match = item.match(/\(([^)]+)\)/);
+              return match ? match[1] : item;
+            }
+            if (item && typeof item === 'object') {
+              return item.ticker || item.symbol || JSON.stringify(item);
+            }
+            return String(item);
+          };
+
+          // Compare OutBucket lists to find Added/Removed
+          if (current.outbucket && previous.outbucket) {
+            const currOut = current.outbucket.map(extractTicker);
+            const prevOut = previous.outbucket.map(extractTicker);
+
+            // Filter for added/removed, then normalize for display
+            const addedOut = current.outbucket
+              .filter(item => !prevOut.includes(extractTicker(item)))
+              .map(normalizeOutbucketItem);
+            const removedOut = previous.outbucket
+              .filter(item => !currOut.includes(extractTicker(item)))
+              .map(normalizeOutbucketItem);
+
+            results[type].outbucketDiff = {
+              added: addedOut,
+              removed: removedOut
+            };
+          } else if (current.outbucket) {
+            // If previous has no outbucket, everything is new (or just initialization)
+            results[type].outbucketDiff = {
+              added: current.outbucket.map(normalizeOutbucketItem),
+              removed: []
+            };
+          } else {
+            results[type].outbucketDiff = { added: [], removed: [] };
           }
         }
 

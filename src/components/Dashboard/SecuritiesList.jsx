@@ -63,7 +63,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     if (price === undefined || price === null) {
       return '--';
     }
-    
+
     // Handle both old format (string) and new format (object with price property)
     let priceValue;
     if (typeof price === 'object' && price !== null) {
@@ -75,22 +75,22 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     } else {
       return '--';
     }
-    
+
     // Check if priceValue is valid
     if (!priceValue || priceValue === 'N/A' || priceValue === '--') {
       return '--';
     }
-    
+
     const priceNum = parseFloat(priceValue);
     if (isNaN(priceNum)) {
       return '--';
     }
-    
+
     // Treasury yields show as percentage
     if (ticker.startsWith('UST')) {
       return `${priceNum.toFixed(2)}%`;
     }
-    
+
     // For other assets, show as number without $ symbol
     return `${priceNum.toFixed(2)}`;
   }, []);
@@ -100,12 +100,12 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   // (accounts for market close ~4 PM ET to next day open ~9:30 AM ET)
   const isMoreThanOneMarketDayOld = (timestamp) => {
     if (!timestamp) return false;
-    
+
     const now = Date.now();
     const timestampMs = typeof timestamp === 'string' ? new Date(timestamp).getTime() : timestamp;
     const elapsedMs = now - timestampMs;
     const elapsedHours = elapsedMs / (1000 * 60 * 60);
-    
+
     // More than 26 hours old (accounts for market close to next day open)
     return elapsedHours > 26;
   };
@@ -146,7 +146,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     if (!spotPrice || spotPrice === '--' || spotPrice === 'N/A') {
       return { upside: null, downside: null };
     }
-    
+
     // Extract numeric value from price data
     let spotValue;
     if (typeof spotPrice === 'object' && spotPrice !== null) {
@@ -156,11 +156,11 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     } else {
       spotValue = parseFloat(spotPrice);
     }
-    
+
     if (isNaN(spotValue) || spotValue <= 0) {
       return { upside: null, downside: null };
     }
-    
+
     // Calculate upside from HRR
     let upside = null;
     if (hrr && hrr !== '--' && hrr !== 'N/A') {
@@ -169,7 +169,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
         upside = ((hrrValue - spotValue) / spotValue) * 100;
       }
     }
-    
+
     // Calculate downside from LRR
     let downside = null;
     if (lrr && lrr !== '--' && lrr !== 'N/A') {
@@ -178,47 +178,79 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
         downside = ((spotValue - lrrValue) / spotValue) * 100;
       }
     }
-    
+
     return { upside, downside };
+  };
+
+  // Helper to format risk levels with max 6 digits to keep columns aligned
+  const formatRiskLevel = (value, isPercentage = false) => {
+    if (value === undefined || value === null || value === '--') return '--';
+    const num = parseFloat(value);
+    if (isNaN(num)) return '--';
+
+    // Percentage case (e.g., UST)
+    if (isPercentage) {
+      return `${num.toFixed(2)}%`;
+    }
+
+    // Default case: Max 2 decimals, limit total digits to 6
+    let decimals = 2;
+    let formatted = num.toFixed(decimals);
+
+    // Help count digits
+    const countDigits = (str) => str.replace(/[^0-9]/g, '').length;
+
+    // Reduce precision if we have more than 6 digits
+    while (decimals > 0 && countDigits(formatted) > 6) {
+      decimals--;
+      formatted = num.toFixed(decimals);
+    }
+
+    // Remove .00
+    if (formatted.endsWith('.00')) {
+      return formatted.slice(0, -3);
+    }
+
+    return formatted;
   };
 
   // Poll for prices every 8 seconds
   useEffect(() => {
     const isDev = process.env.NODE_ENV === 'development';
-    
+
     if (isDev) {
       console.log('[SecuritiesList] Setting up polling interval');
     }
-    
+
     let pollCount = 0;
-    
+
     // Fetch prices function
     const fetchPricesData = async () => {
       pollCount++;
       const pollId = `poll-${pollCount}`;
       const isFirstPoll = pollCount === 1;
-      
+
       // Only log in dev mode or for first poll
       if (isDev && isFirstPoll) {
         console.log(`[SecuritiesList] [${pollId}] Starting fetchPricesData (poll #${pollCount})`);
       }
-      
+
       try {
         const tickers = securities.map(s => s.ticker);
-        
+
         if (isDev && isFirstPoll) {
           console.log(`[SecuritiesList] [${pollId}] Fetching prices for ${tickers.length} securities`);
         }
-        
+
         const quotes = await MarketDataService.getQuotes(tickers);
-        
+
         if (isDev && isFirstPoll) {
           console.log(`[SecuritiesList] [${pollId}] API Response received:`, {
             quoteCount: Object.keys(quotes).length,
             sampleQuote: quotes[Object.keys(quotes)[0]]
           });
         }
-        
+
         // Handle empty response
         if (!quotes || Object.keys(quotes).length === 0) {
           console.warn(`[SecuritiesList] [${pollId}] Empty quotes response! Keeping existing data.`);
@@ -226,11 +258,11 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           setLoading(false);
           return;
         }
-        
+
         const priceMap = {};
         let successCount = 0;
         let failCount = 0;
-        
+
         tickers.forEach(ticker => {
           const quote = quotes[ticker.toUpperCase()];
           if (quote && quote.price) {
@@ -254,18 +286,18 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             failCount++;
           }
         });
-        
+
         // Only log summary in dev mode or if there are failures
         if (isDev && (isFirstPoll || failCount > 0)) {
           console.log(`[SecuritiesList] [${pollId}] Price fetch complete: ${successCount} success, ${failCount} failed`);
         }
-        
+
         setPrices(priceMap);
         pricesRef.current = priceMap; // Update ref
         setLoading(false);
         // Trigger update for dot colors
         setUpdateTrigger(prev => prev + 1);
-        
+
         // Mark all rows with price data as updated for blink animation
         const updatedTickers = new Set();
         Object.keys(priceMap).forEach(ticker => {
@@ -274,7 +306,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           }
         });
         setUpdatedRows(updatedTickers);
-        
+
         // Clear updated rows after animation completes (1.5 seconds)
         setTimeout(() => {
           setUpdatedRows(new Set());
@@ -292,7 +324,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             method: error.config?.method
           }
         });
-        
+
         // On error, keep existing data if available
         if (Object.keys(pricesRef.current).length > 0) {
           if (isDev) {
@@ -301,22 +333,22 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
         } else {
           console.warn(`[SecuritiesList] [${pollId}] Error occurred and no existing data available`);
         }
-        
+
         setLoading(false);
       }
     };
-    
+
     // Initial fetch
     if (isDev) {
       console.log('[SecuritiesList] Performing initial fetch');
     }
     fetchPricesData();
-    
+
     // Set up polling interval (8 seconds)
     const interval = setInterval(() => {
       fetchPricesData();
     }, 8000);
-    
+
     return () => {
       if (isDev) {
         console.log('[SecuritiesList] Cleaning up polling interval');
@@ -331,7 +363,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
       try {
         const tickers = securities.map(s => s.ticker);
         const riskRangeData = await MarketDataService.getRiskRanges(tickers);
-        
+
         // Transform data to match our format
         const riskRangeMap = {};
         Object.keys(riskRangeData).forEach(ticker => {
@@ -340,11 +372,12 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             riskRangeMap[ticker.toUpperCase()] = {
               lrr: data.lrr,
               hrr: data.hrr,
+              trend: data.trend,
               timestamp: data.timestamp
             };
           }
         });
-        
+
         setRiskRanges(riskRangeMap);
         riskRangesRef.current = riskRangeMap;
       } catch (error) {
@@ -352,15 +385,15 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
         // Keep existing data on error
       }
     };
-    
+
     // Initial fetch
     fetchRiskRanges();
-    
+
     // Refresh risk ranges every 5 minutes (they update daily after market close)
     const riskRangeInterval = setInterval(() => {
       fetchRiskRanges();
     }, 5 * 60 * 1000); // 5 minutes
-    
+
     return () => clearInterval(riskRangeInterval);
   }, [securities]);
 
@@ -369,7 +402,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     const colorUpdateInterval = setInterval(() => {
       setUpdateTrigger(prev => prev + 1);
     }, 10000); // Update every 10 seconds
-    
+
     return () => clearInterval(colorUpdateInterval);
   }, []);
 
@@ -447,7 +480,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
               // console.error(`Error calculating movers for ${ticker}:`, error);
             }
           }));
-          
+
           // Small delay between batches to avoid overwhelming the API
           if (i + batchSize < tickersWithPrices.length) {
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -483,7 +516,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
       const timeoutId = setTimeout(() => {
         calculateTopMovers();
       }, 1000);
-      
+
       return () => clearTimeout(timeoutId);
     }
   }, [prices, loading, securities]);
@@ -516,28 +549,28 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
               }}
               className="absolute right-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               title={isExpanded ? "Collapse Signal Strength" : "Expand Signal Strength"}
-              style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
+              style={{
+                display: 'flex',
+                alignItems: 'center',
                 justifyContent: 'center',
                 width: '28px',
                 height: '28px',
                 padding: '0'
               }}
             >
-              <svg 
-                width="16" 
-                height="16" 
-                viewBox="0 0 16 16" 
-                fill="none" 
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
                 xmlns="http://www.w3.org/2000/svg"
                 className="text-gray-700 dark:text-gray-300"
               >
-                <path 
+                <path
                   d={isExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
-                  stroke="currentColor" 
-                  strokeWidth="2" 
-                  strokeLinecap="round" 
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
                   strokeLinejoin="round"
                 />
               </svg>
@@ -545,7 +578,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           )}
         </div>
       </div>
-      
+
       {/* Top Movers Section - Compact Table Format */}
       <div className="top-movers-section">
         <div className="top-movers-compact">
@@ -566,7 +599,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                   topMovers.weekly.upside.map((mover, idx) => {
                     // Find matching monthly data for this ticker
                     const monthlyData = topMovers.monthly.upside.find(m => m.ticker === mover.ticker) ||
-                                       topMovers.monthly.downside.find(m => m.ticker === mover.ticker);
+                      topMovers.monthly.downside.find(m => m.ticker === mover.ticker);
                     const monthlyChange = monthlyData?.change;
                     return (
                       <tr key={mover.ticker}>
@@ -605,7 +638,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                   topMovers.weekly.downside.map((mover, idx) => {
                     // Find matching monthly data for this ticker
                     const monthlyData = topMovers.monthly.downside.find(m => m.ticker === mover.ticker) ||
-                                       topMovers.monthly.upside.find(m => m.ticker === mover.ticker);
+                      topMovers.monthly.upside.find(m => m.ticker === mover.ticker);
                     const monthlyChange = monthlyData?.change;
                     return (
                       <tr key={mover.ticker}>
@@ -628,7 +661,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           </div>
         </div>
       </div>
-      
+
       {/* Quick Section - ADDED and REMOVED */}
       <div className="quick-section px-2 py-1.5 border-b border-gray-200 dark:border-gray-700">
         <div className="quick-item">
@@ -673,18 +706,18 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           );
         })}
       </div>
-      
+
       <div className="securities-table-wrapper">
         {/* Header Row */}
-        <div 
+        <div
           className="securities-header-row"
           style={{
-            gridTemplateColumns: isExpanded 
-              ? '20px 30px 60px 70px 50px 50px 80px 45px' 
-              : '20px 30px 60px 70px 50px 50px'
+            gridTemplateColumns: isExpanded
+              ? '20px 30px 60px 70px 60px 50px 50px 80px 45px'
+              : '20px 30px 60px 70px 60px 50px 50px'
           }}
         >
-          <div 
+          <div
             className="header-dot relative"
             ref={dotLegendRef}
             onMouseEnter={() => setShowDotLegend(true)}
@@ -693,7 +726,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             <span className="cursor-pointer hover:opacity-70">U</span>
             {/* Dot Status Legend Popover */}
             {showDotLegend && (
-              <div 
+              <div
                 className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg min-w-[200px]"
                 style={{ left: 0, top: '100%' }}
               >
@@ -722,6 +755,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           <div className="header-number">#</div>
           <div className="header-ticker">Ticker</div>
           <div className="header-price">Spot Price</div>
+          <div className="header-bias">Bias</div>
           <div className="header-lrr">LRR</div>
           <div className="header-hrr">HRR</div>
           {isExpanded && (
@@ -731,17 +765,17 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             </>
           )}
         </div>
-        
+
         {/* Data Rows */}
         <div className="securities-data-container">
           {securities.map((security, index) => (
-            <div 
+            <div
               key={security.ticker}
               className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
               style={{
-                gridTemplateColumns: isExpanded 
-                  ? '20px 30px 60px 70px 50px 50px 80px 45px' 
-                  : '20px 30px 60px 70px 50px 50px'
+                gridTemplateColumns: isExpanded
+                  ? '20px 30px 60px 70px 60px 50px 50px 80px 45px'
+                  : '20px 30px 60px 70px 60px 50px 50px'
               }}
             >
               <div className="data-dot-cell">
@@ -754,7 +788,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                   const status = getUpdateStatus(timestamp, lrrTimestamp, hrrTimestamp);
                   // Use updateTrigger to force re-render for real-time updates
                   const _ = updateTrigger;
-                  
+
                   let tooltipText = '';
                   if (status.status === 'lrr-stale' || status.status === 'hrr-stale') {
                     tooltipText = `LRR/HRR are more than 1 market day old`;
@@ -767,7 +801,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                   } else {
                     tooltipText = `Last updated: ${timestamp ? new Date(timestamp).toLocaleTimeString() : 'Never'} (${status.status})`;
                   }
-                  
+
                   return (
                     <span
                       className="ticker-dot-emoji"
@@ -800,16 +834,37 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                   })()}
                 </span>
               </div>
+              <div className="data-bias-cell">
+                {(() => {
+                  const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
+                  const trend = riskRangeData?.trend;
+
+                  let displayTrend = '--';
+                  let colorClass = 'text-gray-400';
+
+                  if (trend === 'BULLISH') {
+                    displayTrend = 'Bullish';
+                    colorClass = '!text-emerald-600 dark:!text-emerald-400 font-bold';
+                  } else if (trend === 'BEARISH') {
+                    displayTrend = 'Bearish';
+                    colorClass = '!text-red-600 dark:!text-red-400 font-bold';
+                  } else if (trend === 'NEUTRAL') {
+                    displayTrend = 'Neutral';
+                    colorClass = 'text-gray-500 dark:text-gray-400';
+                  }
+
+                  return <span className={`data-signal text-[10px] ${colorClass}`}>{displayTrend}</span>;
+                })()}
+              </div>
               <div className="data-lrr-cell">
                 <span className="data-lrr">
                   {(() => {
                     const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                    if (riskRangeData && riskRangeData.lrr !== undefined && riskRangeData.lrr !== null) {
-                      // Format based on asset class (treasury yields are percentages)
-                      if (security.ticker.startsWith('UST')) {
-                        return `${parseFloat(riskRangeData.lrr).toFixed(2)}%`;
-                      }
-                      return parseFloat(riskRangeData.lrr).toFixed(2);
+                    const lrr = riskRangeData?.lrr;
+
+                    if (lrr !== undefined && lrr !== null) {
+                      const isPercentage = security.ticker.startsWith('UST');
+                      return formatRiskLevel(lrr, isPercentage);
                     }
                     return '--';
                   })()}
@@ -819,12 +874,11 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                 <span className="data-hrr">
                   {(() => {
                     const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                    if (riskRangeData && riskRangeData.hrr !== undefined && riskRangeData.hrr !== null) {
-                      // Format based on asset class (treasury yields are percentages)
-                      if (security.ticker.startsWith('UST')) {
-                        return `${parseFloat(riskRangeData.hrr).toFixed(2)}%`;
-                      }
-                      return parseFloat(riskRangeData.hrr).toFixed(2);
+                    const hrr = riskRangeData?.hrr;
+
+                    if (hrr !== undefined && hrr !== null) {
+                      const isPercentage = security.ticker.startsWith('UST');
+                      return formatRiskLevel(hrr, isPercentage);
                     }
                     return '--';
                   })()}
@@ -840,14 +894,14 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                       const lrr = riskRangeData?.lrr || '--';
                       const hrr = riskRangeData?.hrr || '--';
                       const odds = calculateOdds(spotPrice, lrr, hrr);
-                      
+
                       if (odds.upside === null && odds.downside === null) {
                         return <span className="data-odds">--</span>;
                       }
-                      
+
                       const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
                       const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
-                      
+
                       return (
                         <span className="data-odds">
                           {odds.upside !== null && (
