@@ -9,7 +9,10 @@ import axios from 'axios';
 
 // Helper to format dates consistently (M/D)
 const formatDate = (dateStr) => {
-  if (!dateStr) return '';
+  // Fallback to today's date if dateStr is empty/null
+  if (!dateStr) {
+    return new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+  }
   // Append T12:00:00 to force local time interpretation in mid-day (avoiding timezone shifts)
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
 };
@@ -729,8 +732,8 @@ const WorkflowStatus = () => {
                   ].map(({ key, label }) => {
                     const diff = changelogData[key];
 
-                    // Always show bitcoin-trend-tracker and portfolio-solutions cards
-                    const alwaysShow = key === 'bitcoin-trend-tracker' || key === 'portfolio-solutions';
+                    // Always show bitcoin-trend-tracker, portfolio-solutions, momo-tracker, and signal-strength cards
+                    const alwaysShow = key === 'bitcoin-trend-tracker' || key === 'portfolio-solutions' || key === 'momo-tracker' || key === 'signal-strength';
 
                     if (!alwaysShow) {
                       if (!diff || !diff.available) return null;
@@ -742,7 +745,9 @@ const WorkflowStatus = () => {
                       diff.added.length > 0 ||
                       diff.removed.length > 0 ||
                       (diff.updates && diff.updates.length > 0) ||
-                      (diff.trendChanges && diff.trendChanges.length > 0)
+                      (diff.trendChanges && diff.trendChanges.length > 0) ||
+                      (diff.cryptoTrendChanges && diff.cryptoTrendChanges.length > 0) ||
+                      (diff.etfTrendChanges && diff.etfTrendChanges.length > 0)
                     );
 
                     return (
@@ -754,11 +759,8 @@ const WorkflowStatus = () => {
                           </Text>
                         </div>
 
-                        {!hasData && alwaysShow && (
-                          <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                            No changes detected
-                          </Text>
-                        )}
+                        {/* Removed 'No changes detected' text per user request */}
+
 
                         {key === 'risk-ranges' && diff && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -887,12 +889,198 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
-                        {/* EARLY LOOK, SIGNAL STRENGTH, etc: Added/Removed Table */}
-                        {key !== 'risk-ranges' && hasData && (
+                        {/* BITCOIN TRACKER: Crypto + Crypto ETFs Trend Changes */}
+                        {key === 'bitcoin-trend-tracker' && diff && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* 1. Crypto Trend Changes */}
+                            <div style={{ marginBottom: '8px' }}>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Cryptocurrencies</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {diff.cryptoTrendChanges && diff.cryptoTrendChanges.length > 0 ? (
+                                <div style={{ display: 'grid', gap: '4px' }}>
+                                  {/* Header */}
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>
+                                    <span>Asset</span>
+                                    <span>Previous ({formatDate(diff.previousDate)})</span>
+                                    <span>Current ({formatDate(diff.currentDate)})</span>
+                                  </div>
+                                  {/* Rows */}
+                                  {diff.cryptoTrendChanges.map((change, idx) => (
+                                    <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '10px' }}>
+                                      <span style={{ fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>{change.ticker}</span>
+                                      <span style={{ color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
+                                        {change.oldTrend}
+                                      </span>
+                                      <span style={{ color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
+                                        {change.newTrend}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+
+                            {/* 2. Crypto ETFs Trend Changes */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Crypto ETFs</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {diff.etfTrendChanges && diff.etfTrendChanges.length > 0 ? (
+                                <div style={{ display: 'grid', gap: '4px' }}>
+                                  {/* Header */}
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>
+                                    <span>Asset</span>
+                                    <span>Previous ({formatDate(diff.previousDate)})</span>
+                                    <span>Current ({formatDate(diff.currentDate)})</span>
+                                  </div>
+                                  {/* Rows */}
+                                  {diff.etfTrendChanges.map((change, idx) => (
+                                    <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '10px' }}>
+                                      <span style={{ fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>{change.ticker}</span>
+                                      <span style={{ color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
+                                        {change.oldTrend}
+                                      </span>
+                                      <span style={{ color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
+                                        {change.newTrend}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PORTFOLIO SOLUTIONS: Added/Removed with Blue Headers */}
+                        {key === 'portfolio-solutions' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* Added Section */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff?.added && diff.added.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.added.map(t => {
+                                    const match = t.match(/\(([^)]+)\)/);
+                                    const ticker = match ? match[1] : t;
+                                    return (
+                                      <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+
+                            {/* Removed Section */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff?.removed && diff.removed.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.removed.map(t => {
+                                    const match = t.match(/\(([^)]+)\)/);
+                                    const ticker = match ? match[1] : t;
+                                    return (
+                                      <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* SIGNAL STRENGTH: Added/Removed with Blue Headers */}
+                        {key === 'signal-strength' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* Added Section */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff.added && diff.added.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.added.map(t => (
+                                    <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+
+                            {/* Removed Section */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff.removed && diff.removed.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.removed.map(t => (
+                                    <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* MOMO TRACKER: Added/Removed with Blue Headers */}
+                        {key === 'momo-tracker' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* Added Section */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff?.added && diff.added.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.added.map(t => (
+                                    <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+
+                            {/* Removed Section */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff?.removed && diff.removed.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.removed.map(t => (
+                                    <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* GENERIC FALLBACK: Added/Removed Table for any others */}
+                        {key !== 'risk-ranges' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && hasData && (
                           <div>
                             {/* Section Header - match Risk Ranges style */}
                             <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
-                              Early Look <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
+                              {label} <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
                             </div>
 
                             {/* Added/Removed Grid - match Risk Ranges style */}
@@ -1864,11 +2052,15 @@ const WorkflowStatus = () => {
                           const topMovers = data.topMovers || { weekly: [], monthly: [] };
                           const bottomMovers = data.bottomMovers || { weekly: [], monthly: [] };
 
+                          // Try to get date from data or fallback to freshness
+                          const dataDate = data.date || data.timestamp || freshnessData?.dataTypes?.['portfolio-solutions']?.date;
+                          const formattedDate = dataDate ? formatDate(dataDate) : '';
+
                           const renderMoverSection = (title, top, bottom) => (
                             <div style={{ marginBottom: '16px' }}>
-                              <Text style={{ fontSize: '11px', fontWeight: 700, color: isDark ? '#f3f4f6' : '#111827', textTransform: 'uppercase', marginBottom: '8px' }}>
-                                {title}
-                              </Text>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>{title}</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({formattedDate})</span>
+                              </div>
 
                               {/* Top Movers */}
                               <div style={{ marginBottom: '6px' }}>
@@ -1909,9 +2101,9 @@ const WorkflowStatus = () => {
                               {renderMoverSection('1-Month Re-Rank History', topMovers.monthly, bottomMovers.monthly)}
 
                               <div style={{ marginTop: '12px', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, paddingTop: '12px' }}>
-                                <Text style={{ fontSize: '11px', fontWeight: 700, color: isDark ? '#f3f4f6' : '#111827', textTransform: 'uppercase', marginBottom: '8px' }}>
-                                  Ranked List ({rankings.length})
-                                </Text>
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '8px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span>RANKED LIST ({rankings.length})</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({formattedDate})</span>
+                                </div>
                                 <Table>
                                   <TableHead>
                                     <TableRow>

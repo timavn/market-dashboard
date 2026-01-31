@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from date_utils import extract_date_from_pdf
+from boto3.dynamodb.conditions import Key
 
 try:
     from pdf2image import convert_from_path
@@ -329,6 +330,82 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
     return data
 
 
+def get_previous_trends(db, current_date):
+    """Query DynamoDB for the most recent snapshot before current_date to get previous trends"""
+    try:
+        from datetime import datetime as dt, timedelta
+        snap_table = db.Table('HedgeyeDailySnapshot')
+        
+        # Parse current date and iterate backwards to find previous snapshot
+        current_dt = dt.strptime(current_date, '%Y-%m-%d')
+        
+        # Check up to 30 previous days for a snapshot
+        for i in range(1, 31):
+            prev_dt = current_dt - timedelta(days=i)
+            prev_date_str = prev_dt.strftime('%Y-%m-%d')
+            
+            # Use get_item since date is partition key, snapshotType is sort key
+            response = snap_table.get_item(
+                Key={
+                    'date': prev_date_str,
+                    'snapshotType': 'bitcoin-trend-tracker'
+                }
+            )
+            
+            if response.get('Item'):
+                prev_snapshot = response['Item']
+                prev_data = prev_snapshot.get('data', {})
+                prev_date = prev_snapshot.get('date', prev_date_str)
+                
+                # Extract trends for cryptos and stocks
+                crypto_trends = {k: str(v.get('trend', 'N/A')) for k, v in prev_data.get('cryptos', {}).items()}
+                stock_trends = {k: str(v.get('trend', 'N/A')) for k, v in prev_data.get('stocks', {}).items()}
+                
+                print(f"   📊 Found previous snapshot from {prev_date}")
+                return prev_date, crypto_trends, stock_trends
+        
+        print("   ℹ️  No previous snapshot found within last 30 days")
+        return None, {}, {}
+            
+    except Exception as e:
+        print(f"   ⚠️  Error querying previous snapshot: {e}")
+        return None, {}, {}
+
+
+def detect_trend_changes(current_data, prev_crypto_trends, prev_stock_trends):
+    """Compare current trends vs previous trends and return changes"""
+    crypto_changes = []
+    etf_changes = []
+    
+    # Check crypto trend changes (BTC, ETH, SOL, AVAX, XRP)
+    for ticker, info in current_data.get('cryptos', {}).items():
+        current_trend = info.get('trend', 'N/A')
+        old_trend = prev_crypto_trends.get(ticker, 'N/A')
+        
+        if old_trend != 'N/A' and current_trend != old_trend:
+            crypto_changes.append({
+                'ticker': ticker,
+                'oldTrend': old_trend,
+                'newTrend': current_trend
+            })
+            print(f"   🔄 {ticker}: {old_trend} → {current_trend}")
+    
+    # Check stock/ETF trend changes (IBIT, MSTR, MARA, ETHA, BLOK, COIN, CRCL, BMNR)
+    for ticker, info in current_data.get('stocks', {}).items():
+        current_trend = info.get('trend', 'N/A')
+        old_trend = prev_stock_trends.get(ticker, 'N/A')
+        
+        if old_trend != 'N/A' and current_trend != old_trend:
+            etf_changes.append({
+                'ticker': ticker,
+                'oldTrend': old_trend,
+                'newTrend': current_trend
+            })
+            print(f"   🔄 {ticker}: {old_trend} → {current_trend}")
+    
+    return crypto_changes, etf_changes
+
+
 def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=None):
     """Save Bitcoin Tracker data to DynamoDB"""
     if not data or (not data.get('cryptos') and not data.get('stocks')):
@@ -344,6 +421,18 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=Non
         
     date = pdf_date
     ts = datetime.now(timezone.utc).isoformat()
+
+    # Get previous trends for change detection
+    print("\n   🔍 Checking for trend changes...")
+    prev_date, prev_crypto_trends, prev_stock_trends = get_previous_trends(db, date)
+    
+    # Detect trend changes
+    crypto_trend_changes, etf_trend_changes = detect_trend_changes(data, prev_crypto_trends, prev_stock_trends)
+    
+    if crypto_trend_changes or etf_trend_changes:
+        print(f"\n   📈 Found {len(crypto_trend_changes)} crypto and {len(etf_trend_changes)} ETF trend changes")
+    else:
+        print("   ℹ️  No trend changes detected")
 
     # Save to HedgeyeDailySnapshot
     snap_table = db.Table('HedgeyeDailySnapshot')
@@ -370,6 +459,10 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=Non
                 'timestamp': v['timestamp']
             } for k, v in data.get('stocks', {}).items()}
         },
+        # Add trend changes for changelog
+        'cryptoTrendChanges': crypto_trend_changes,
+        'etfTrendChanges': etf_trend_changes,
+        'previousDate': prev_date,
         'scrapedAt': ts,
         'source': 'textract',
         'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
@@ -389,6 +482,10 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=Non
 
     snap_table.put_item(Item=snapshot_item)
     print(f"   ✅ Saved {len(data.get('cryptos', {}))} cryptos and {len(data.get('stocks', {}))} stocks")
+    if crypto_trend_changes:
+        print(f"   ✅ Saved {len(crypto_trend_changes)} crypto trend changes")
+    if etf_trend_changes:
+        print(f"   ✅ Saved {len(etf_trend_changes)} ETF trend changes")
     print("\n🎉 SUCCESS! Bitcoin Tracker data saved.\n")
 
 

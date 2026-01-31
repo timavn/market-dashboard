@@ -1974,7 +1974,26 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
         }
 
         if (recentSnapshots.length < 2) {
-          results[type] = { added: [], removed: [], available: recentSnapshots.length > 0 };
+          // For signal-strength, use explicit added/removed from the PDF even with just 1 snapshot
+          if (type === 'signal-strength' && recentSnapshots.length === 1) {
+            const current = recentSnapshots[0];
+            const explicitAdded = (current.data?.added && Array.isArray(current.data.added)) ? current.data.added : [];
+            const explicitRemoved = (current.data?.removed && Array.isArray(current.data.removed)) ? current.data.removed : [];
+            results[type] = {
+              added: explicitAdded,
+              removed: explicitRemoved,
+              available: true,
+              currentDate: current.date
+            };
+            return;
+          }
+
+          results[type] = {
+            added: [],
+            removed: [],
+            available: recentSnapshots.length > 0,
+            currentDate: recentSnapshots.length > 0 ? recentSnapshots[0].date : null
+          };
           return;
         }
 
@@ -2092,6 +2111,16 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           }
         }
 
+        // Add topMovers and bottomMovers for portfolio-solutions
+        if (type === 'portfolio-solutions') {
+          if (current.data && current.data.topMovers) {
+            results[type].topMovers = current.data.topMovers;
+          }
+          if (current.data && current.data.bottomMovers) {
+            results[type].bottomMovers = current.data.bottomMovers;
+          }
+        }
+
         // SPECIAL LOGIC: For 'early-look', if a removed item exists in today's 'risk-ranges', 
         // ignore the removal. This handles cases where a partial file (like Geopolitical Risk) 
         // was uploaded instead of the full Early Look, but the data exists elsewhere.
@@ -2172,6 +2201,18 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           } else {
             results[type].outbucketDiff = { added: [], removed: [] };
           }
+        }
+
+        // Add cryptoTrendChanges and etfTrendChanges for bitcoin-trend-tracker
+        if (type === 'bitcoin-trend-tracker') {
+          // Pass through the trend changes arrays from the snapshot
+          results[type].cryptoTrendChanges = current.cryptoTrendChanges || [];
+          results[type].etfTrendChanges = current.etfTrendChanges || [];
+          results[type].previousDate = current.previousDate || previous.date;
+
+          console.log('[Changelog] Bitcoin Tracker - Crypto trend changes:',
+            results[type].cryptoTrendChanges.length,
+            'ETF trend changes:', results[type].etfTrendChanges.length);
         }
 
         // Calculate trendChanges for early-look by comparing trends
