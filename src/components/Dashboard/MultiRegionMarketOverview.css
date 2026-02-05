@@ -1,32 +1,46 @@
 /* Multi-Region Market Overview - Light Theme */
 
 .multi-region-overview {
-  width: calc(100% + 48px); /* Extend beyond parent Card padding (typically 24px on each side) */
-  margin-left: -24px; /* Offset parent Card padding */
-  margin-right: -24px; /* Offset parent Card padding */
-  margin-top: 0; /* Keep at top border of card */
-  margin-bottom: -24px; /* Extend to bottom edge */
-  background: #E8F4F8; /* Light blue background */
-  padding: 0; /* No padding - bars and content handle their own spacing */
-  border-radius: 8px 8px 8px 8px; /* Rounded corners on all sides */
-  overflow: hidden; /* Ensure content respects rounded corners */
+  width: calc(100% + 48px);
+  /* Extend beyond parent Card padding (typically 24px on each side) */
+  margin-left: -24px;
+  /* Offset parent Card padding */
+  margin-right: -24px;
+  /* Offset parent Card padding */
+  margin-top: 0;
+  /* Keep at top border of card */
+  margin-bottom: -24px;
+  /* Extend to bottom edge */
+  background: #E8F4F8;
+  /* Light blue background */
+  padding: 0;
+  /* No padding - bars and content handle their own spacing */
+  border-radius: 8px 8px 8px 8px;
+  /* Rounded corners on all sides */
+  overflow: hidden;
+  /* Ensure content respects rounded corners */
 }
 
 /* Timezone Clock Bar - Timeline Design - Standalone */
 .timezone-clock-bar {
   position: relative;
   margin-bottom: 0;
-  padding: 16px 14px 14px 14px; /* Adjusted padding for better alignment */
-  border-radius: 8px; /* All corners rounded for standalone component */
+  padding: 16px 14px 14px 14px;
+  /* Adjusted padding for better alignment */
+  border-radius: 8px;
+  /* All corners rounded for standalone component */
   border: none;
   min-height: auto;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  width: calc(100% + 48px); /* Extend beyond parent Card padding (typically 24px on each side) */
-  margin-left: -24px; /* Offset parent Card padding */
-  margin-right: -24px; /* Offset parent Card padding */
+  width: calc(100% + 48px);
+  /* Extend beyond parent Card padding (typically 24px on each side) */
+  margin-left: -24px;
+  /* Offset parent Card padding */
+  margin-right: -24px;
+  /* Offset parent Card padding */
 }
 
 /* Timeline line - horizontal line running behind cities */
@@ -37,7 +51,8 @@
   top: 50%;
   transform: translateY(-50%);
   height: 2px;
-  background: #87CEEB; /* Light blue */
+  background: #87CEEB;
+  /* Light blue */
   z-index: 1;
 }
 
@@ -96,7 +111,8 @@
 .home-icon {
   width: 12px;
   height: 12px;
-  margin-bottom: 4px; /* Even spacing */
+  margin-bottom: 4px;
+  /* Even spacing */
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.3));
   flex-shrink: 0;
 }
@@ -105,17 +121,20 @@
 .timezone-label {
   font-size: 10px;
   font-weight: 700;
-  color: #ffffff; /* White text for visibility on gradient */
+  color: #ffffff;
+  /* White text for visibility on gradient */
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 5px; /* Even spacing */
+  margin-bottom: 5px;
+  /* Even spacing */
   line-height: 1.2;
   flex-shrink: 0;
 }
 
 /* Home timezone (LA) highlight */
 .timezone-timeline-node.home-timezone .timezone-label {
-  color: #000080; /* Brand navy blue */
+  color: #000080;
+  /* Brand navy blue */
   font-weight: 800;
   text-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
 }
@@ -128,7 +147,8 @@
   z-index: 3;
   position: relative;
   filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.4));
-  margin-bottom: 5px; /* Even spacing above the line */
+  margin-bottom: 5px;
+  /* Even spacing above the line */
   flex-shrink: 0;
 }
 
@@ -150,11 +170,13 @@
   border: 2px solid rgba(255, 255, 255, 0.8);
   z-index: 3;
   position: relative;
-  margin-bottom: 5px; /* Even spacing below the line */
+  margin-bottom: 5px;
+  /* Even spacing below the line */
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
   /* Center the circle on the line by adjusting position */
-  margin-top: -1px; /* Half of border width to center on 2px line */
+  margin-top: -1px;
+  /* Half of border width to center on 2px line */
 }
 
 /* Home timezone line marker highlight */
@@ -164,7 +186,8 @@
   box-shadow: 0 0 4px rgba(0, 0, 128, 0.6);
   width: 8px;
   height: 8px;
-  margin-top: -2px; /* Adjust for larger size to center on line */
+  margin-top: -2px;
+  /* Adjust for larger size to center on line */
 }
 
 /* Time container for both formats */
@@ -173,7 +196,8 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  margin-top: 0; /* No extra margin, spacing handled by marker margin-bottom */
+  margin-top: 0;
+  /* No extra margin, spacing handled by marker margin-bottom */
   line-height: 1.2;
   flex-shrink: 0;
 }
@@ -182,7 +206,8 @@
 .timezone-time {
   font-size: 12px;
   font-weight: 600;
-  color: #ffffff; /* White text for visibility on gradient */
+  color: #ffffff;
+  /* White text for visibility on gradient */
   font-variant-numeric: tabular-nums;
 }
 
@@ -190,14 +215,16 @@
 .timezone-time-24 {
   font-size: 10px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.85); /* Slightly transparent white */
+  color: rgba(255, 255, 255, 0.85);
+  /* Slightly transparent white */
   font-variant-numeric: tabular-nums;
 }
 
 /* Home timezone time with underline */
 .timezone-time.home-time {
   color: #ffffff;
-  border-bottom: 2px solid #000080; /* Brand navy blue underline */
+  border-bottom: 2px solid #000080;
+  /* Brand navy blue underline */
   padding-bottom: 2px;
   font-weight: 700;
 }
@@ -210,10 +237,14 @@
   gap: 8px;
   margin-bottom: 16px;
   padding: 10px 14px;
-  background: #D6EAF8; /* Lighter blue for countdown */
-  border-radius: 0; /* No border radius to reach edges */
-  border-left: none; /* No left border */
-  border-right: none; /* No right border */
+  background: #D6EAF8;
+  /* Lighter blue for countdown */
+  border-radius: 0;
+  /* No border radius to reach edges */
+  border-left: none;
+  /* No left border */
+  border-right: none;
+  /* No right border */
   border-top: 1px solid #B8D4E0;
   border-bottom: 1px solid #B8D4E0;
 }
@@ -230,20 +261,29 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
 }
 
 .market-countdown .status-text {
   font-size: 13px;
-  color: #000080; /* Navy text */
+  color: #000080;
+  /* Navy text */
   font-weight: 600;
   letter-spacing: 0.3px;
 }
 
 .market-countdown .game-day-text {
   font-size: 12px;
-  color: #000080; /* Navy text */
+  color: #000080;
+  /* Navy text */
   font-weight: 500;
   letter-spacing: 0.2px;
   text-align: right;
@@ -411,6 +451,13 @@
   padding: 8px 12px;
   background: #f8fafc;
   border-bottom: 1px solid #e5e7eb;
+  gap: 12px;
+}
+
+.currencies-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .currencies-title {
@@ -422,9 +469,69 @@
 }
 
 .currencies-hours {
+  display: none;
+  /* Hidden in favor of header indices */
+}
+
+.currencies-header-indices {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+  flex-wrap: wrap;
+}
+
+.currency-header-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   font-size: 9px;
   color: #6b7280;
+}
+
+.currency-header-name {
   font-weight: 500;
+}
+
+.currency-header-change {
+  font-weight: 600;
+}
+
+.currency-header-change.positive {
+  color: #16a34a;
+}
+
+.currency-header-change.negative {
+  color: #dc2626;
+}
+
+.currencies-range-selector {
+  display: flex;
+  gap: 2px;
+}
+
+.currency-range-btn {
+  padding: 3px 6px;
+  font-size: 9px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.currency-range-btn:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.currency-range-btn.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
 }
 
 .currencies-grid {
@@ -494,22 +601,32 @@
 
 /* Region Panel */
 .region-panel {
-  background: #E8F4F8; /* Light blue background */
-  border-radius: 4px; /* 50% smaller from 8px */
-  padding: 6px; /* 50% smaller from 12px */
-  border: 1px solid #4682B4; /* Dark blue border to match title */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); /* 50% smaller shadow */
+  background: #E8F4F8;
+  /* Light blue background */
+  border-radius: 4px;
+  /* 50% smaller from 8px */
+  padding: 6px;
+  /* 50% smaller from 12px */
+  border: 1px solid #4682B4;
+  /* Dark blue border to match title */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  /* 50% smaller shadow */
 }
 
 .region-title {
-  font-size: 10.5px; /* 25% smaller from 14px */
+  font-size: 10.5px;
+  /* 25% smaller from 14px */
   font-weight: 700;
-  color: #000080; /* Navy text */
-  margin-bottom: 6px; /* 50% smaller from 12px */
+  color: #000080;
+  /* Navy text */
+  margin-bottom: 6px;
+  /* 50% smaller from 12px */
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-bottom: 1px solid #4682B4; /* 50% smaller from 2px */
-  padding-bottom: 3px; /* 50% smaller from 6px */
+  border-bottom: 1px solid #4682B4;
+  /* 50% smaller from 2px */
+  padding-bottom: 3px;
+  /* 50% smaller from 6px */
   word-wrap: break-word;
   white-space: normal;
   line-height: 1.3;
@@ -518,30 +635,40 @@
 /* Indices Grid - 2 columns per region */
 .indices-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr); /* 2 columns of 3 cards each = 6 total */
-  gap: 4px; /* 50% smaller from 8px */
+  grid-template-columns: repeat(2, 1fr);
+  /* 2 columns of 3 cards each = 6 total */
+  gap: 4px;
+  /* 50% smaller from 8px */
 }
 
 /* Index Card */
 .index-card {
-  background: #FFFFFF; /* White background for individual cards */
-  border: 1px solid #B8D4E0; /* Light blue border */
-  border-radius: 3px; /* 25% smaller from 4px */
-  padding: 7.5px; /* 25% smaller from 10px */
-  min-height: 82.5px; /* 25% smaller from 110px */
+  background: #FFFFFF;
+  /* White background for individual cards */
+  border: 1px solid #B8D4E0;
+  /* Light blue border */
+  border-radius: 3px;
+  /* 25% smaller from 4px */
+  padding: 7.5px;
+  /* 25% smaller from 10px */
+  min-height: 120px;
+  /* Increased by 25% as requested */
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  position: relative; /* For absolute positioning of percentage */
+  position: relative;
+  /* For absolute positioning of percentage */
   transition: box-shadow 0.2s ease;
-  overflow: hidden; /* Ensure fill respects rounded corners */
+  overflow: hidden;
+  /* Ensure fill respects rounded corners */
   /* Clip background to rounded corners */
   clip-path: inset(0 round 3px);
   -webkit-clip-path: inset(0 round 3px);
 }
 
 .index-card:hover {
-  box-shadow: 0 1.5px 4.5px rgba(0, 0, 128, 0.1); /* 25% smaller shadow */
+  box-shadow: 0 1.5px 4.5px rgba(0, 0, 128, 0.1);
+  /* 25% smaller shadow */
 }
 
 .index-name-row {
@@ -574,8 +701,10 @@
 }
 
 .index-name {
-  font-size: 9px; /* 25% smaller from 12px */
-  color: #000080; /* Navy text */
+  font-size: 9px;
+  /* 25% smaller from 12px */
+  color: #000080;
+  /* Navy text */
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -591,74 +720,96 @@
 .index-prev-close {
   font-size: 10px;
   font-weight: 600;
-  color: #666666; /* Gray text for previous close */
+  color: #666666;
+  /* Gray text for previous close */
   font-variant-numeric: tabular-nums;
   padding: 3px 5px;
   border: 1px solid #B8D4E0;
   border-radius: 2px;
-  background: #F0F8FF; /* Very light blue background */
+  background: #F0F8FF;
+  /* Very light blue background */
 }
 
 .index-value {
-  font-size: 6.75px; /* 50% smaller from 13.5px */
+  font-size: 6.75px;
+  /* 50% smaller from 13.5px */
   font-weight: 700;
-  color: #000080; /* Navy text */
+  color: #000080;
+  /* Navy text */
   font-variant-numeric: tabular-nums;
-  padding: 2.25px 3.75px; /* 50% smaller from 4.5px 7.5px */
-  border: 0.75px solid #4682B4; /* 50% smaller from 1.5px */
-  border-radius: 1.5px; /* 50% smaller from 3px */
-  background: #ffffff; /* White background for value box */
+  padding: 2.25px 3.75px;
+  /* 50% smaller from 4.5px 7.5px */
+  border: 0.75px solid #4682B4;
+  /* 50% smaller from 1.5px */
+  border-radius: 1.5px;
+  /* 50% smaller from 3px */
+  background: #ffffff;
+  /* White background for value box */
   display: inline-block;
   width: fit-content;
 }
 
 /* Sparkline Container */
 .sparkline-container {
-  height: 22.5px; /* 25% smaller from 30px */
-  margin: 3px 0; /* 25% smaller from 4px */
+  height: 55px;
+  /* Increased proportionally for larger cards */
+  margin: 4px 0;
+  /* Increased from 3px for better spacing */
   display: flex;
   align-items: center;
 }
 
 /* Index Change */
 .index-change {
-  font-size: 9px; /* 25% smaller from 12px */
+  font-size: 9px;
+  /* 25% smaller from 12px */
   font-weight: 600;
   display: flex;
-  gap: 3px; /* 25% smaller from 4px */
+  gap: 3px;
+  /* 25% smaller from 4px */
   align-items: center;
 }
 
 .index-change.positive {
-  color: #16a34a; /* Dark green for positive */
+  color: #16a34a;
+  /* Dark green for positive */
 }
 
 .index-change.negative {
-  color: #dc2626; /* Dark red for negative */
+  color: #dc2626;
+  /* Dark red for negative */
 }
 
 .index-change .arrow {
-  font-size: 7.5px; /* 25% smaller from 10px */
+  font-size: 7.5px;
+  /* 25% smaller from 10px */
 }
 
 /* Index Percent - Bottom Right */
 .index-percent {
   position: absolute;
-  bottom: 7.5px; /* 25% smaller from 10px */
-  right: 7.5px; /* 25% smaller from 10px */
-  font-size: 8.25px; /* 25% smaller from 11px */
+  bottom: 7.5px;
+  /* 25% smaller from 10px */
+  right: 7.5px;
+  /* 25% smaller from 10px */
+  font-size: 8.25px;
+  /* 25% smaller from 11px */
   font-weight: 600;
-  padding: 2.25px 4.5px; /* 25% smaller from 3px 6px */
-  border-radius: 2.25px; /* 25% smaller from 3px */
+  padding: 2.25px 4.5px;
+  /* 25% smaller from 3px 6px */
+  border-radius: 2.25px;
+  /* 25% smaller from 3px */
   background: rgba(255, 255, 255, 0.8);
 }
 
 .index-percent.positive {
-  color: #16a34a; /* Dark green for positive */
+  color: #16a34a;
+  /* Dark green for positive */
 }
 
 .index-percent.negative {
-  color: #dc2626; /* Dark red for negative */
+  color: #dc2626;
+  /* Dark red for negative */
 }
 
 /* Liquidity Container */
@@ -670,15 +821,18 @@
 
 /* Liquidity Card */
 .liquidity-card {
-  background: #FFFFFF; /* White background for liquidity card */
-  border: 1px solid #B8D4E0; /* Light blue border */
+  background: #FFFFFF;
+  /* White background for liquidity card */
+  border: 1px solid #B8D4E0;
+  /* Light blue border */
   border-radius: 3px;
   padding: 7.5px;
   min-height: 82.5px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow: hidden; /* Ensure fill respects rounded corners */
+  overflow: hidden;
+  /* Ensure fill respects rounded corners */
   /* Clip background to rounded corners */
   clip-path: inset(0 round 3px);
   -webkit-clip-path: inset(0 round 3px);
@@ -701,7 +855,8 @@
 
 .liquidity-title {
   font-size: 8px;
-  color: #000080; /* Navy text */
+  color: #000080;
+  /* Navy text */
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -725,7 +880,8 @@
 
 .liquidity-metric-label {
   font-size: 8px;
-  color: #000080; /* Navy text */
+  color: #000080;
+  /* Navy text */
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.2px;
@@ -733,7 +889,8 @@
 
 .liquidity-metric-sublabel {
   font-size: 6px;
-  color: #666666; /* Gray text */
+  color: #666666;
+  /* Gray text */
   font-weight: 500;
   font-style: italic;
   margin-top: 2px;
@@ -752,11 +909,13 @@
 }
 
 .liquidity-metric-value.positive {
-  color: #16a34a; /* Dark green for positive */
+  color: #16a34a;
+  /* Dark green for positive */
 }
 
 .liquidity-metric-value.negative {
-  color: #dc2626; /* Dark red for negative */
+  color: #dc2626;
+  /* Dark red for negative */
 }
 
 .liquidity-note {
@@ -792,7 +951,8 @@
 
 /* Expanded chart wrapper */
 .expanded-chart-wrapper {
-  grid-column: 1 / -1; /* Span full width of grid */
+  grid-column: 1 / -1;
+  /* Span full width of grid */
   animation: expandChart 0.3s ease;
 }
 
@@ -801,6 +961,7 @@
     opacity: 0;
     transform: scaleY(0.9);
   }
+
   to {
     opacity: 1;
     transform: scaleY(1);

@@ -15,7 +15,7 @@ const isJPHoliday = (date) => isMarketHoliday(date, JP_MARKET_HOLIDAYS);
 const getMarketStatus = (region) => {
   const now = new Date();
 
-  switch(region) {
+  switch (region) {
     case 'US': {
       const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
       const dayOfWeek = etTime.getDay();
@@ -183,7 +183,13 @@ const CURRENCIES_CONFIG = {
     { symbol: 'GBPUSD', name: 'GBP/USD' },
     { symbol: 'AUDUSD', name: 'AUD/USD' },
     { symbol: 'USDCAD', name: 'USD/CAD' },
-    { symbol: 'USDMXN', name: 'USD/MXN' }
+    { symbol: 'USDMXN', name: 'USD/MXN' },
+    { symbol: 'USDCHF', name: 'USD/CHF' },
+    { symbol: 'NZDUSD', name: 'NZD/USD' },
+    { symbol: 'USDCNY', name: 'USD/CNY' },
+    { symbol: 'EURGBP', name: 'EUR/GBP' },
+    { symbol: 'USD', name: 'DXY' },
+    { symbol: 'UUP', name: 'UUP' }
   ]
 };
 
@@ -243,13 +249,13 @@ function IndexCard({ symbol, name, value, change, changePercent, sparklineData, 
         <div className="sparkline-container">
           <Sparklines
             data={normalizedSparklineData}
-            width={90}
-            height={22.5}
-            margin={1.5}
+            width={100}
+            height={35}
+            margin={8}
           >
             <SparklinesLine
               color={isPositive ? '#16a34a' : '#dc2626'}
-              style={{ strokeWidth: 1.125, fill: 'none' }}
+              style={{ strokeWidth: 0.4, fill: 'none' }}
             />
           </Sparklines>
         </div>
@@ -407,13 +413,64 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
   );
 }
 
+// Time range options for currencies
+const CURRENCY_TIME_RANGES = [
+  { key: '1d', label: '1D' },
+  { key: '5d', label: '5D' },
+  { key: '1mo', label: '1M' },
+  { key: '3mo', label: '3M' },
+  { key: '6mo', label: '6M' },
+  { key: '1y', label: '1Y' }
+];
+
 // CurrenciesPanel component - displays mini currency cards
 function CurrenciesPanel({ data, loading }) {
+  const [range, setRange] = React.useState('1d');
+
+  // Helper to get change data
+  const getIndexChange = (symbol) => {
+    const indexQuote = data?.find(d => d.symbol === symbol);
+    if (!indexQuote?.changePercent) return null;
+    const changeNum = parseFloat(indexQuote.changePercent.toString().replace(/[^0-9.-]/g, ''));
+    return {
+      percent: indexQuote.changePercent,
+      isPositive: changeNum >= 0
+    };
+  };
+
   return (
     <div className="currencies-panel">
       <div className="currencies-header">
-        <span className="currencies-title">Currencies</span>
-        <span className="currencies-hours">{CURRENCIES_CONFIG.tradingHours}</span>
+        <div className="currencies-header-left">
+          <span className="currencies-title">Currencies</span>
+          <div className="currencies-header-indices">
+            {CURRENCIES_CONFIG.indices.map((idx) => {
+              const change = getIndexChange(idx.symbol);
+              return (
+                <div key={idx.symbol} className="currency-header-item">
+                  <span className="currency-header-name">{idx.name}</span>
+                  {change && (
+                    <span className={`currency-header-change ${change.isPositive ? 'positive' : 'negative'}`}>
+                      {change.isPositive ? '▲' : '▼'}{change.percent}%
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="currencies-range-selector">
+          {CURRENCY_TIME_RANGES.map(({ key, label }) => (
+            <button
+              key={key}
+              className={`currency-range-btn ${range === key ? 'active' : ''}`}
+              onClick={() => setRange(key)}
+              title={`Show ${label} data`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="currencies-grid">
         {CURRENCIES_CONFIG.indices.map((index) => {

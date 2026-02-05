@@ -31,6 +31,12 @@ const WorkflowStatus = () => {
   const [serviceTotals, setServiceTotals] = useState(null);
   const [csvUrl, setCsvUrl] = useState(null);
   const [previewViewMode, setPreviewViewMode] = useState('table'); // 'table' or 'json'
+  const [selectedPreviewDate, setSelectedPreviewDate] = useState(() => {
+    // Default to today in YYYY-MM-DD format (EST timezone)
+    const today = new Date();
+    return today.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  });
+  const [snapshotCache, setSnapshotCache] = useState({}); // Cache: {"type-date": {data, pdfUrl}}
 
   // All 6 data types with their PDF loading states
   const DATA_TYPES = [
@@ -168,6 +174,14 @@ const WorkflowStatus = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch preview data when selected date changes
+  useEffect(() => {
+    if (activeTab === 'preview' && selectedPreviewDate) {
+      console.log(`📅 Fetching preview data for ${selectedPreviewDate}`);
+      fetchAllPdfs(selectedPreviewDate);
+    }
+  }, [selectedPreviewDate, activeTab]);
+
   // Helper: Get data from local storage cache
   const getFromCache = (key, date) => {
     try {
@@ -195,12 +209,12 @@ const WorkflowStatus = () => {
 
 
   // Improved parallel fetcher
-  const fetchAllPdfs = async () => {
+  const fetchAllPdfs = async (customDate = null) => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
-    if (!currentHedgeyeStatus.lastRun) return;
+    if (!currentHedgeyeStatus.lastRun && !customDate) return;
 
     const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-    const date = new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
+    const date = customDate || new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
 
     // Helper to fetch single item
     const fetchItem = async (key) => {
@@ -236,22 +250,39 @@ const WorkflowStatus = () => {
           [key]: { loading: false, ...pdfResult }
         }));
 
-        // --- Snapshot Handling (Parallel with PDF fetch? No, let's do it here to keep related data sync'd or parallelize within item) ---
-        // Let's fetch snapshot in parallel with PDF check to max speed
-        // But for code clarity, sequential inside this item is fine, or Promise.all for this item.
+        // --- Snapshot Handling (with cache) ---
+        const cacheKey = `${key}-${date}`;
 
-        try {
-          const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/snapshot/${key}`);
+        // Check cache first
+        if (snapshotCache[cacheKey]) {
+          console.log(`✓ Using cached snapshot for ${key} on ${date}`);
           setAllSnapshotData(prev => ({
             ...prev,
-            [key]: snapshotResponse.data
+            [key]: snapshotCache[cacheKey]
           }));
-        } catch (err) {
-          console.warn(`Snapshot failed for ${key}`, err);
-          setAllSnapshotData(prev => ({
-            ...prev,
-            [key]: null
-          }));
+        } else {
+          // Fetch from API
+          try {
+            const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/snapshot/${key}?date=${date}`);
+            const snapshotData = snapshotResponse.data;
+
+            // Store in cache
+            setSnapshotCache(prev => ({
+              ...prev,
+              [cacheKey]: snapshotData
+            }));
+
+            setAllSnapshotData(prev => ({
+              ...prev,
+              [key]: snapshotData
+            }));
+          } catch (err) {
+            console.warn(`Snapshot failed for ${key} on ${date}`, err);
+            setAllSnapshotData(prev => ({
+              ...prev,
+              [key]: null
+            }));
+          }
         }
 
       } catch (error) {
@@ -1523,40 +1554,60 @@ const WorkflowStatus = () => {
                     }}>
                       {label}
                     </Text>
-                    {/* View Toggle for Data */}
-                    <div style={{ display: 'flex', backgroundColor: isDark ? '#374151' : '#e5e7eb', borderRadius: '4px', padding: '2px' }}>
-                      <button
-                        onClick={() => setPreviewViewMode('table')}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {/* Date Picker */}
+                      <input
+                        type="date"
+                        value={selectedPreviewDate}
+                        onChange={(e) => setSelectedPreviewDate(e.target.value)}
+                        max={new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })}
                         style={{
-                          padding: '2px 8px',
-                          fontSize: '10px',
-                          fontWeight: 600,
-                          borderRadius: '3px',
-                          border: 'none',
-                          cursor: 'pointer',
-                          backgroundColor: previewViewMode === 'table' ? (isDark ? '#1f2937' : 'white') : 'transparent',
-                          color: previewViewMode === 'table' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
-                          boxShadow: previewViewMode === 'table' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                          padding: '3px 8px',
+                          fontSize: '11px',
+                          fontWeight: 500,
+                          borderRadius: '4px',
+                          border: `1px solid ${isDark ? '#4b5563' : '#d1d5db'}`,
+                          backgroundColor: isDark ? '#1f2937' : 'white',
+                          color: isDark ? '#f9fafb' : '#111827',
+                          cursor: 'pointer'
                         }}
-                      >
-                        Table
-                      </button>
-                      <button
-                        onClick={() => setPreviewViewMode('json')}
-                        style={{
-                          padding: '2px 8px',
-                          fontSize: '10px',
-                          fontWeight: 600,
-                          borderRadius: '3px',
-                          border: 'none',
-                          cursor: 'pointer',
-                          backgroundColor: previewViewMode === 'json' ? (isDark ? '#1f2937' : 'white') : 'transparent',
-                          color: previewViewMode === 'json' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
-                          boxShadow: previewViewMode === 'json' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
-                        }}
-                      >
-                        JSON
-                      </button>
+                      />
+
+                      {/* View Toggle for Data */}
+                      <div style={{ display: 'flex', backgroundColor: isDark ? '#374151' : '#e5e7eb', borderRadius: '4px', padding: '2px' }}>
+                        <button
+                          onClick={() => setPreviewViewMode('table')}
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            borderRadius: '3px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            backgroundColor: previewViewMode === 'table' ? (isDark ? '#1f2937' : 'white') : 'transparent',
+                            color: previewViewMode === 'table' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
+                            boxShadow: previewViewMode === 'table' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                          }}
+                        >
+                          Table
+                        </button>
+                        <button
+                          onClick={() => setPreviewViewMode('json')}
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            borderRadius: '3px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            backgroundColor: previewViewMode === 'json' ? (isDark ? '#1f2937' : 'white') : 'transparent',
+                            color: previewViewMode === 'json' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
+                            boxShadow: previewViewMode === 'json' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                          }}
+                        >
+                          JSON
+                        </button>
+                      </div>
                     </div>
                   </div>
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Card, Title, Text, Metric, Grid, BarList, Table, TableHead, TableHeaderCell, TableBody, TableRow, TableCell, Badge, Flex, ProgressBar } from '@tremor/react';
+import GranularFactorAnalysis from './GranularFactorAnalysis';
 
 const PortfolioAnalytics = ({ portfolioData }) => {
   if (!portfolioData || !portfolioData.summary) {
@@ -227,6 +228,11 @@ const PortfolioAnalytics = ({ portfolioData }) => {
           </div>
         </Card>
       </Grid>
+
+      {/* Granular Factor Analysis */}
+      <div className="mt-8">
+        <GranularFactorAnalysis />
+      </div>
 
     </div>
   );
