@@ -3124,6 +3124,7 @@ function normalizeCurrencySymbol(symbol) {
 // Uses query parameter to handle symbols with slashes (e.g., GBP/USD, EUR/USD)
 app.get('/api/usd/historical', async (req, res) => {
   const startTime = Date.now();
+  const now = Date.now();
   try {
     const { symbol, days = 30 } = req.query;
 
@@ -3136,6 +3137,7 @@ app.get('/api/usd/historical', async (req, res) => {
 
     // Normalize currency pair formats
     const normalizedSymbol = normalizeCurrencySymbol(decodedSymbol);
+    const cacheKey = normalizedSymbol;
 
     // Calculate date range
     const endDate = new Date();
@@ -3224,6 +3226,11 @@ app.get('/api/usd/historical', async (req, res) => {
         });
 
         const data = response.data;
+        console.log(`[Yahoo Debug] ${yahooTicker} - Chart Result Length:`, data.chart?.result?.length);
+        if (data.chart?.result?.[0]?.indicators?.quote?.[0]) {
+          const q = data.chart.result[0].indicators.quote[0];
+          console.log(`[Yahoo Debug] ${yahooTicker} - Volume array length:`, q.volume ? q.volume.length : 'undefined');
+        }
         if (data.chart && data.chart.result && data.chart.result.length > 0) {
           const result = data.chart.result[0];
           const timestamps = result.timestamp || [];
@@ -3265,7 +3272,7 @@ app.get('/api/usd/historical', async (req, res) => {
               // Store in cache (even for Yahoo Finance fallback)
               historicalCache.set(cacheKey, {
                 data: responseData,
-                timestamp: now
+                timestamp: Date.now()
               });
 
               console.log(`Fetched ${trimmedData.length} data points from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol})`);
@@ -3274,6 +3281,7 @@ app.get('/api/usd/historical', async (req, res) => {
           }
         }
       } catch (yahooError) {
+        // Log Yahoo Finance errors but don't block the overall response
         console.error(`Error fetching from Yahoo Finance for ${normalizedSymbol} (original: ${decodedSymbol}):`, yahooError.message);
       }
 

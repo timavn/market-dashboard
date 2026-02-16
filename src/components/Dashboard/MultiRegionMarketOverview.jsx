@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sparklines, SparklinesLine } from 'react-sparklines';
 import { MarketDataService } from '../../services/api/marketDataService';
 import MarketChartCard, { prefetchChartData } from './MarketChartCard';
+import MarketVolumeTable from './MarketVolumeTable';
 import { US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, isMarketHoliday } from '../../constants/globalMarkets';
 import './MultiRegionMarketOverview.css';
 
@@ -289,14 +290,7 @@ function LiquidityCard() {
           <span className="liquidity-title">Global Dollar Liquidity</span>
         </div>
         <div className="liquidity-content">
-          <div className="liquidity-metric">
-            <div className="liquidity-metric-label">3M Annualized</div>
-            <div className="liquidity-metric-value positive">+7%</div>
-          </div>
-          <div className="liquidity-metric">
-            <div className="liquidity-metric-label">US M3</div>
-            <div className="liquidity-metric-value positive">&gt; 4%</div>
-          </div>
+
           <div className="liquidity-note">
             Expanding well above nominal GDP = asset inflation
           </div>
@@ -305,24 +299,7 @@ function LiquidityCard() {
 
       {/* Market Volume Section */}
       <div className="liquidity-section">
-        <div className="liquidity-header">
-          <span className="liquidity-title">Market Volume (1/9 vs.)</span>
-        </div>
-        <div className="liquidity-content">
-          <div className="liquidity-metric">
-            <div className="liquidity-metric-label">Total Mkt Vol</div>
-            <div className="liquidity-metric-value negative">-4%</div>
-            <div className="liquidity-metric-sublabel">vs. 1Y Ave</div>
-          </div>
-          <div className="liquidity-metric">
-            <div className="liquidity-metric-label">Exchange Vol</div>
-            <div className="liquidity-metric-value negative">-1%</div>
-            <div className="liquidity-metric-sublabel">vs. 1Y Ave</div>
-          </div>
-          <div className="liquidity-note">
-            Total US exchange + OTC/OTCBB trading volume
-          </div>
-        </div>
+        <MarketVolumeTable />
       </div>
     </div>
   );

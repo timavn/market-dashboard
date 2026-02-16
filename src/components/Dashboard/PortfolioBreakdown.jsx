@@ -10,11 +10,7 @@ import {
 } from '../../utils/portfolioBreakdownUtils';
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
 import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
-import FactorExposureChart from './FactorExposureChart';
-import FactorDeepDiveSidebar from './FactorDeepDiveSidebar';
 import PortfolioAnalytics from './PortfolioAnalytics';
-
-// Asset class colors - 5 core asset classes
 const ASSET_CLASS_COLORS = {
   'Equities': '#10B981',      // Emerald green
   'Fixed Income': '#3B82F6',  // Blue
@@ -175,6 +171,7 @@ const calculateAssetClassAllocationFromUniverse = (holdings) => {
 const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
   const [selectedFactor, setSelectedFactor] = useState(null);
+
   const holdings = portfolioData?.holdings || [];
 
 
@@ -2172,51 +2169,13 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
           </div>
         </div>
 
-
-        {/* Portfolio Analysis Section */}
         {/* Portfolio Analysis Section */}
         <div style={{ marginTop: '24px' }}>
-          <Title className="text-2xl font-semibold mb-1 text-center dark:text-white">
-            Portfolio Analysis
-          </Title>
-          <div className="text-center mb-6">
-            <Text className="text-[11px] font-medium text-gray-400 italic">
-              "Every metric on this page should help me decide whether to size a position up or down."
-            </Text>
-          </div>
-
-          {/* Factor Exposure */}
-          {/* Factor Exposure */}
-          <div className="mb-8">
-            <Card className="dark:bg-gray-800 rounded-lg p-0 overflow-hidden">
-              <div className="flex flex-row h-[600px]">
-                {/* Main Chart Area */}
-                <div className="flex-1 p-6 overflow-y-auto">
-                  <FactorExposureChart
-                    data={factorExposures}
-                    onFactorSelect={setSelectedFactor}
-                  />
-                </div>
-
-                {/* Deep Dive Panel - always mounted for layout stability if needed, but conditionally rendered here for simple show/hide */}
-                {selectedFactor && (
-                  <FactorDeepDiveSidebar
-                    factor={selectedFactor}
-                    isOpen={!!selectedFactor}
-                    onClose={() => setSelectedFactor(null)}
-                  />
-                )}
-              </div>
-            </Card>
-          </div>
-
-          {/* Detailed Analytics */}
-          <div>
-            <PortfolioAnalytics portfolioData={portfolioData} />
-          </div>
+          <PortfolioAnalytics portfolioData={portfolioData} />
         </div>
       </div>
     </div>
+
   );
 };
 
