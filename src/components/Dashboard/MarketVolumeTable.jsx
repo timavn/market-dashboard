@@ -217,7 +217,7 @@ const MarketVolumeTable = () => {
     return (
         <div className="mt-2 text-[10px]" style={{ fontFamily: 'Inter, sans-serif' }}>
             {/* Header Strip mimicking screenshot - Black bar with white text */}
-            <div className="flex bg-black text-white px-2 py-1 items-center justify-between">
+            <div className="flex text-white px-2 py-1 items-center justify-between" style={{ background: '#000080' }}>
                 <div className="font-bold uppercase tracking-wider">Index/Security</div>
                 <div className="flex gap-4">
                     <div className="font-bold">VOLUME:</div>

@@ -5,7 +5,6 @@ import USQuadChart from './USQuadChart';
 import WelcomeToTheMachine from './WelcomeToTheMachine';
 import MultiRegionMarketOverview from './MultiRegionMarketOverview';
 import GlobalMarketDayCycleHeader from './GlobalMarketDayCycleHeader';
-import DailyNotepad from './DailyNotepad';
 import FXLayoutsShowcase from './FXLayoutsShowcase';
 import { USDMarketService } from '../../services/api/usdMarketService';
 import { REFRESH_INTERVALS } from '../../constants/usdMarket';
@@ -68,51 +67,40 @@ const USDMacroDashboard = () => {
         </div>
       </Card>
 
-      {/* Events/Signals and Daily Notepad - Side by Side */}
+      {/* MACRO and THE CALL - Side by Side */}
       <div className="flex flex-col md:flex-row gap-4" style={{ alignItems: 'stretch' }}>
-        {/* Left: Events & Signals */}
-        <div className="flex-1">
+        {/* Left: MACRO */}
+        <div className="flex-1 macro-call-card">
           <Card className="dark:bg-gray-800 rounded-lg" style={{ height: '100%' }}>
-            <Title className="mb-4 dark:text-white">Events & Signals</Title>
-            <div className="space-y-3">
-              <div>
-                <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Market Events</Text>
-                <ul className="list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                  <li>Placeholder for significant market events</li>
-                  <li>Economic data releases and surprises</li>
-                  <li>Central bank announcements</li>
-                </ul>
+            <div className="macro-call-header">
+              <span className="region-status-emoji" title="Active">🟢</span>
+              <span className="region-label dark:text-white">MACRO</span>
+              <div className="macro-call-long-short">
+                <div className="macro-call-row long">LONG:</div>
+                <div className="macro-call-row short">SHORT:</div>
               </div>
-              <div>
-                <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Outlier Signals</Text>
-                <ul className="list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                  <li>Placeholder for outlier price movements</li>
-                  <li>Unusual volume spikes</li>
-                  <li>Volatility breakouts</li>
-                </ul>
-              </div>
-              <div>
-                <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Important Indicators</Text>
-                <ul className="list-disc list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                  <li>Placeholder for key indicator signals</li>
-                  <li>Risk range violations</li>
-                  <li>Correlation breakdowns</li>
-                </ul>
-              </div>
-              <div className="pt-3 border-t dark:border-gray-700">
-                <Text className="text-sm font-semibold mb-2 dark:text-gray-300">Previous Week Portfolio Summary</Text>
-                <Text className="text-sm text-gray-600 dark:text-gray-400">
-                  Placeholder for weekly portfolio summary including currency market review, signals, and positioning updates. 
-                  Example: Global currency market analysis, position performance, and trend signals across major pairs.
-                </Text>
-              </div>
+            </div>
+            <div className="macro-call-body">
+              {/* Empty - populated from Hedgeye Macro Show summary */}
             </div>
           </Card>
         </div>
 
-        {/* Right: Daily Notepad */}
-        <div className="flex-1">
-          <DailyNotepad />
+        {/* Right: THE CALL */}
+        <div className="flex-1 macro-call-card">
+          <Card className="dark:bg-gray-800 rounded-lg" style={{ height: '100%' }}>
+            <div className="macro-call-header">
+              <span className="region-status-emoji" title="Active">🟢</span>
+              <span className="region-label dark:text-white">THE CALL</span>
+              <div className="macro-call-long-short">
+                <div className="macro-call-row long">LONG:</div>
+                <div className="macro-call-row short">SHORT:</div>
+              </div>
+            </div>
+            <div className="macro-call-body">
+              {/* Empty - populated from Hedgeye analyst call summary */}
+            </div>
+          </Card>
         </div>
       </div>
 

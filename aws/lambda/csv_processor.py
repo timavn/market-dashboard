@@ -992,5 +992,3 @@ def process_transaction_history(transactions):
     return True
 
 
-
-

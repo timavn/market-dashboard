@@ -3,6 +3,7 @@ import { Sparklines, SparklinesLine } from 'react-sparklines';
 import { MarketDataService } from '../../services/api/marketDataService';
 import MarketChartCard, { prefetchChartData } from './MarketChartCard';
 import MarketVolumeTable from './MarketVolumeTable';
+import { VolatilityTableWithTabs } from './VolatilityTable';
 import { US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, isMarketHoliday } from '../../constants/globalMarkets';
 import './MultiRegionMarketOverview.css';
 
@@ -280,27 +281,46 @@ function IndexCard({ symbol, name, value, change, changePercent, sparklineData, 
   );
 }
 
-// LiquidityCard component - displays liquidity metrics
-function LiquidityCard() {
+// VolumeCard - standalone card (styled like region panels)
+function VolumeCard() {
+  const [usStatus, setUsStatus] = React.useState('closed');
+  React.useEffect(() => {
+    const update = () => setUsStatus(getMarketStatus('US'));
+    update();
+    const interval = setInterval(update, 60000);
+    return () => clearInterval(interval);
+  }, []);
+  const statusIndicator = usStatus === 'open' || usStatus === 'extended'
+    ? { emoji: '🟢', title: usStatus === 'open' ? 'Market open' : 'Extended hours' }
+    : { emoji: '🔴', title: 'Market closed' };
+
   return (
-    <div className="liquidity-card">
-      {/* Global Dollar Liquidity Section */}
-      <div className="liquidity-section">
-        <div className="liquidity-header">
-          <span className="liquidity-title">Global Dollar Liquidity</span>
-        </div>
-        <div className="liquidity-content">
-
-          <div className="liquidity-note">
-            Expanding well above nominal GDP = asset inflation
-          </div>
-        </div>
+    <div className="secondary-card volume-card">
+      <div className="macro-call-header macro-call-header-simple">
+        <span className="region-status-emoji" title={statusIndicator.title}>{statusIndicator.emoji}</span>
+        <span className="region-label">Volume</span>
       </div>
+      <MarketVolumeTable />
+    </div>
+  );
+}
 
-      {/* Market Volume Section */}
-      <div className="liquidity-section">
-        <MarketVolumeTable />
-      </div>
+// VolatilityCard - standalone card (styled like region panels)
+function VolatilityCard() {
+  const [usStatus, setUsStatus] = React.useState('closed');
+  React.useEffect(() => {
+    const update = () => setUsStatus(getMarketStatus('US'));
+    update();
+    const interval = setInterval(update, 60000);
+    return () => clearInterval(interval);
+  }, []);
+  const statusIndicator = usStatus === 'open' || usStatus === 'extended'
+    ? { emoji: '🟢', title: usStatus === 'open' ? 'Market open' : 'Extended hours' }
+    : { emoji: '🔴', title: 'Market closed' };
+
+  return (
+    <div className="secondary-card volatility-card">
+      <VolatilityTableWithTabs statusIndicator={statusIndicator} />
     </div>
   );
 }
@@ -415,10 +435,21 @@ function CurrenciesPanel({ data, loading }) {
     };
   };
 
+  // Currencies (Forex) status - 24/5
+  const [currenciesStatus, setCurrenciesStatus] = React.useState('closed');
+  React.useEffect(() => {
+    const update = () => setCurrenciesStatus(getMarketStatus('Currencies'));
+    update();
+    const interval = setInterval(update, 60000);
+    return () => clearInterval(interval);
+  }, []);
+  const currStatus = currenciesStatus === 'open' ? { emoji: '🟢', title: 'Market open' } : { emoji: '🔴', title: 'Market closed' };
+
   return (
     <div className="currencies-panel">
       <div className="currencies-header">
         <div className="currencies-header-left">
+          <span className="region-status-emoji" title={currStatus.title}>{currStatus.emoji}</span>
           <span className="currencies-title">Currencies</span>
           <div className="currencies-header-indices">
             {CURRENCIES_CONFIG.indices.map((idx) => {
@@ -575,7 +606,10 @@ export default function MultiRegionMarketOverview() {
           data={marketData.currencies}
           loading={loading}
         />
-        <LiquidityCard />
+        <div className="secondary-cards-stack">
+          <VolumeCard />
+          <VolatilityCard />
+        </div>
       </div>
     </div>
   );

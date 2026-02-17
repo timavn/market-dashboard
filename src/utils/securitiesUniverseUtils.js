@@ -3,7 +3,7 @@
  * Functions to process and format securities data for the universe interface
  */
 
-import { ASSET_CLASS_NAMES } from '../constants/securitiesList';
+import { ASSET_CLASS_NAMES, GICS_SECTOR_MAPPING } from '../constants/securitiesList';
 
 /**
  * Map asset class to primary factor exposure
@@ -72,6 +72,15 @@ export const mapAssetClassToFactor = (assetClass, ticker = '', name = '') => {
   }
 
   return 'Growth'; // Default
+};
+
+/**
+ * Get GICS sector for a security from GICS_SECTOR_MAPPING
+ * @param {string} ticker - Ticker symbol
+ * @returns {string} GICS sector name or 'N/A' if not applicable
+ */
+export const getGicsSector = (ticker) => {
+  return GICS_SECTOR_MAPPING[ticker] ?? 'N/A';
 };
 
 /**
@@ -270,6 +279,7 @@ export const filterSecurities = (securities, query) => {
     const ticker = (security.ticker || '').toLowerCase();
     const name = (security.name || '').toLowerCase();
     const assetClass = (ASSET_CLASS_NAMES[security.assetClass] || security.assetClass || '').toLowerCase();
+    const sector = (security.sector || '').toLowerCase();
     const factorExposure = (security.factorExposure || '').toLowerCase();
     const benchmark = (security.benchmark || '').toLowerCase();
     const bias = (security.bias || '').toLowerCase();
@@ -277,6 +287,7 @@ export const filterSecurities = (securities, query) => {
     return ticker.includes(lowerQuery) ||
            name.includes(lowerQuery) ||
            assetClass.includes(lowerQuery) ||
+           sector.includes(lowerQuery) ||
            factorExposure.includes(lowerQuery) ||
            benchmark.includes(lowerQuery) ||
            bias.includes(lowerQuery);

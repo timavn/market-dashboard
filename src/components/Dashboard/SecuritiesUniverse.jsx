@@ -5,6 +5,7 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import {
   mapAssetClassToFactor,
   getBenchmark,
+  getGicsSector,
   calculateZScore,
   calculatePriceChanges,
   formatPriceChange,
@@ -275,6 +276,9 @@ const SecuritiesUniverse = () => {
       // Map factor exposure
       const factorExposure = mapAssetClassToFactor(security.assetClass, security.ticker, security.name);
 
+      // Get GICS sector (N/A for non-equity sectors)
+      const sector = getGicsSector(security.ticker);
+
       // Get benchmark
       const benchmark = getBenchmark(security.assetClass, security.ticker);
 
@@ -317,6 +321,7 @@ const SecuritiesUniverse = () => {
         price: currentPrice,
         priceTimestamp,
         factorExposure,
+        sector,
         benchmark,
         zScore,
         priceChanges,
@@ -814,7 +819,7 @@ const SecuritiesUniverse = () => {
         <div style={{ width: '100%', maxWidth: '400px' }}>
           <input
             type="text"
-            placeholder="Search by ticker, name, asset class, factor exposure, benchmark..."
+            placeholder="Search by ticker, name, asset class, sector, factor exposure, benchmark..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1005,6 +1010,7 @@ const SecuritiesUniverse = () => {
                       </svg>
                     ), align: 'center', width: '70px'
                   },
+                  { key: 'sector', label: 'Sector', icon: <LayoutGrid size={18} className="text-blue-500" />, align: 'center', width: '90px' },
                   { key: 'factorExposure', label: 'Factor Exposure', icon: <SlidersHorizontal size={18} className="text-blue-500" />, align: 'center', width: '80px' },
                   {
                     key: 'bias', label: 'Bias', icon: (
@@ -1093,7 +1099,7 @@ const SecuritiesUniverse = () => {
             <tbody>
               {sortedSecurities.length === 0 ? (
                 <tr>
-                  <td colSpan="16" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
+                  <td colSpan="15" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
                     {searchQuery
                       ? `No securities found matching "${searchQuery}"`
                       : 'No securities available'}
@@ -1125,6 +1131,9 @@ const SecuritiesUniverse = () => {
                       </td>
                       <td style={{ padding: '4px 6px', borderRight: '1px solid #bfdbfe', textAlign: 'center' }} className="dark:text-gray-300">
                         {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
+                      </td>
+                      <td style={{ padding: '4px 6px', borderRight: '1px solid #bfdbfe', textAlign: 'center' }} className="dark:text-gray-300">
+                        {security.sector || 'N/A'}
                       </td>
                       <td style={{ padding: '4px 6px', borderRight: '1px solid #bfdbfe', textAlign: 'center' }} className="dark:text-gray-300">
                         {security.factorExposure}

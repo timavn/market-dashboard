@@ -2,6 +2,8 @@
 // Complete list of tradeable ETFs and securities
 // Generated from securities universe compilation - 119 securities
 
+import { getSecurityCategory } from './securityCategoryMapping';
+
 export const SECURITIES_LIST = [
   // Fixed Income (Treasury + Corporate Bonds)
   { ticker: 'BKLN', name: 'Corporate Senior Loans (BKLN)', assetClass: 'fixedIncome', bias: 'NEUTRAL' },
@@ -150,6 +152,35 @@ export const ASSET_CLASS_NAMES = {
   commodity: 'Commodity',
   crypto: 'Cryptocurrency'
 };
+
+// GICS sector mapping for each security in the universe (based on securityCategoryMapping)
+// N/A = not applicable - fill manually in this object if needed (e.g., AAAU)
+const GICS_CATEGORY_TO_SECTOR = {
+  'Tech': 'Information Technology',
+  'REITs': 'Real Estate',
+  'Consumer Discretionary': 'Consumer Discretionary',
+  'Communication Services': 'Communication Services',
+  'Industrials': 'Industrials',
+  'Materials': 'Materials',
+  'Utilities': 'Utilities',
+  'Consumer Staples': 'Consumer Staples',
+  'Health Care': 'Health Care',
+  'Energy': 'Energy',
+  'Financials': 'Financials'
+};
+
+export const GICS_SECTOR_MAPPING = (() => {
+  const list = {};
+  SECURITIES_LIST.forEach(({ ticker }) => {
+    const mapping = getSecurityCategory(ticker);
+    if (mapping?.type === 'equitySectors' && mapping.category) {
+      list[ticker] = GICS_CATEGORY_TO_SECTOR[mapping.category] || mapping.category;
+    } else {
+      list[ticker] = 'N/A';
+    }
+  });
+  return list;
+})();
 
 // Placeholder data structure for future ranking algorithm
 export const getSecurityWithPlaceholders = (security) => ({
