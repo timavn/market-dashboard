@@ -808,196 +808,234 @@ const SecuritiesUniverse = () => {
   };
 
   return (
-    <div style={{ padding: '16px', overflowY: 'auto', height: '100%' }}>
-      {/* Search Bar */}
-      <div style={{ margin: '0 auto', width: '400px', marginBottom: '8px' }}>
-        <input
-          type="text"
-          placeholder="Search by ticker, name, asset class, factor exposure, benchmark..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          style={{ fontSize: '14px' }}
-        />
+    <div style={{ padding: '8px 12px', overflowY: 'auto', height: '100%' }}>
+      {/* Search Bar centered, summary underneath centered */}
+      <div className="flex flex-col items-center mb-2">
+        <div style={{ width: '100%', maxWidth: '400px' }}>
+          <input
+            type="text"
+            placeholder="Search by ticker, name, asset class, factor exposure, benchmark..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{ fontSize: '14px' }}
+          />
+        </div>
+        <div className="flex flex-col items-center gap-0.5 mt-1">
+          <Text className="text-sm text-gray-500 dark:text-gray-400 font-medium">
+            {`Showing ${filteredSecurities.length} of ${SECURITIES_LIST.length} securities`}
+          </Text>
+          <button
+            onClick={clearAllFilters}
+            className="text-xs text-blue-600 hover:text-blue-800 underline decoration-blue-300 underline-offset-2"
+          >
+            Clear all filters
+          </button>
+        </div>
       </div>
 
-      {/* Filter Summary & Clear */}
-      <div className="flex flex-col items-center gap-1 mb-8">
-        <Text className="text-sm text-gray-500 dark:text-gray-400 font-medium">
-          {`Showing ${filteredSecurities.length} of ${SECURITIES_LIST.length} securities`}
-        </Text>
-        <button
-          onClick={clearAllFilters}
-          className="text-xs text-blue-600 hover:text-blue-800 underline decoration-blue-300 underline-offset-2"
-        >
-          Clear all filters
-        </button>
-      </div>
-
-      {/* Filter Tags */}
-      {/* New Filter Menu Design */}
-      <div className="mb-8 pl-2 space-y-6">
-        {/* Helper for Filter Row */}
-        {[
-          {
-            title: 'ASSET CLASS',
-            icon: (
-              <svg width="48" height="48" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 2 L12 12 L22 12" />
-              </svg>
-            ),
-            options: ['CURRENCY/FX', 'FIXED INCOME', 'EQUITY', 'COMMODITY', 'CRYPTOCURRENCY'],
-            activeValues: activeFilters.assetClasses.map(a => a.toUpperCase()),
-            onSelect: (val) => {
-              // Map back to original casing if needed, or update logic to be case-insensitive
-              // The original list was Title Case. We need to match it.
-              const originalMap = {
-                'CURRENCY/FX': 'Currency/FX',
-                'FIXED INCOME': 'Fixed Income',
-                'EQUITY': 'Equity',
-                'COMMODITY': 'Commodity',
-                'CRYPTOCURRENCY': 'Cryptocurrency'
-              };
-              toggleFilter('assetClasses', originalMap[val]);
+      {/* Filter Tags - Left: Asset Class + Factor Exposure; Right: Bias + Quad Filter (mirrored) */}
+      <div className="flex flex-wrap justify-between items-start gap-4 mb-3">
+        {/* Left column: Asset Class + Factor Exposure */}
+        <div className="flex flex-col gap-2 items-start">
+          {[
+            {
+              title: 'ASSET CLASS',
+              icon: (
+                <svg width="24" height="24" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 2 L12 12 L22 12" />
+                </svg>
+              ),
+              options: ['CURRENCY/FX', 'FIXED INCOME', 'EQUITY', 'COMMODITY', 'CRYPTOCURRENCY'],
+              activeValues: activeFilters.assetClasses.map(a => a.toUpperCase()),
+              onSelect: (val) => {
+                const originalMap = {
+                  'CURRENCY/FX': 'Currency/FX',
+                  'FIXED INCOME': 'Fixed Income',
+                  'EQUITY': 'Equity',
+                  'COMMODITY': 'Commodity',
+                  'CRYPTOCURRENCY': 'Cryptocurrency'
+                };
+                toggleFilter('assetClasses', originalMap[val]);
+              }
+            },
+            {
+              title: 'FACTOR EXPOSURE',
+              icon: <SlidersHorizontal size={24} strokeWidth={1.5} className="text-blue-500" />,
+              options: ['GROWTH', 'VALUE', 'QUALITY', 'MOMENTUM', 'LOW VOLATILITY'],
+              activeValues: activeFilters.factorExposures.map(f => f.toUpperCase()),
+              onSelect: (val) => {
+                const originalMap = {
+                  'GROWTH': 'Growth',
+                  'VALUE': 'Value',
+                  'QUALITY': 'Quality',
+                  'MOMENTUM': 'Momentum',
+                  'LOW VOLATILITY': 'Low Volatility'
+                };
+                toggleFilter('factorExposures', originalMap[val]);
+              }
             }
-          },
-          {
-            title: 'FACTOR EXPOSURE',
-            icon: <SlidersHorizontal size={48} strokeWidth={1.5} className="text-blue-500" />,
-            options: ['GROWTH', 'VALUE', 'QUALITY', 'MOMENTUM', 'LOW VOLATILITY'],
-            activeValues: activeFilters.factorExposures.map(f => f.toUpperCase()),
-            onSelect: (val) => {
-              const originalMap = {
-                'GROWTH': 'Growth',
-                'VALUE': 'Value',
-                'QUALITY': 'Quality',
-                'MOMENTUM': 'Momentum',
-                'LOW VOLATILITY': 'Low Volatility'
-              };
-              toggleFilter('factorExposures', originalMap[val]);
-            }
-          },
-          {
-            title: 'BIAS',
-            icon: (
-              <svg width="48" height="48" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M7 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h2" />
-                <line x1="12" y1="4" x2="12" y2="20" />
-                <path d="M17 4h2c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2h-2" />
-              </svg>
-            ),
-            options: ['BULLISH', 'BEARISH', 'NEUTRAL'],
-            activeValues: activeFilters.biases, // These are already uppercase in state
-            onSelect: (val) => {
-              toggleFilter('biases', val);
-            }
-          },
-          {
-            title: 'QUAD FILTER',
-            icon: <LayoutGrid size={48} strokeWidth={1.5} className="text-blue-500" />,
-            options: ['QUAD 1', 'QUAD 2', 'QUAD 3', 'QUAD 4'],
-            activeValues: selectedQuad ? [`QUAD ${selectedQuad}`] : [],
-            onSelect: (val) => {
-              const num = parseInt(val.split(' ')[1]);
-              setSelectedQuad(selectedQuad === num ? null : num);
-            }
-          }
-        ].map((section, idx) => (
-          <div key={idx} className="flex items-start gap-4">
-            {/* Icon Column */}
-            <div className="pt-1 w-12 flex justify-center">
-              {section.icon}
-            </div>
-            {/* Controls Column */}
-            <div className="flex flex-col gap-1 w-full">
-              <span className="text-xs font-semibold text-black uppercase tracking-wide">
-                {section.title}
-              </span>
-              <div className="flex w-max">
-                {section.options.map((opt, i) => {
-                  const isActive = section.activeValues.includes(opt);
-                  const isFirst = i === 0;
-                  const isLast = i === section.options.length - 1;
-
-                  return (
-                    <button
-                      key={opt}
-                      onClick={() => section.onSelect(opt)}
-                      style={{
-                        border: '1px solid #3b82f6', // Blue-500
-                        padding: '6px 16px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        backgroundColor: isActive ? '#dbeafe' : '#ffffff', // blue-100 : white
-                        color: isActive ? '#1e3a8a' : '#1e293b', // blue-900 : slate-800
-                        borderRightWidth: isLast ? '1px' : '0', // Collapse borders
-                        borderRadius: isFirst ? '4px 0 0 4px' : isLast ? '0 4px 4px 0' : '0',
-                        cursor: 'pointer',
-                        minWidth: '80px',
-                        transition: 'background-color 0.1s'
-                      }}
-                      className="hover:bg-slate-50 relative"
-                    >
-                      {opt}
-                    </button>
-                  );
-                })}
+          ].map((section, idx) => (
+            <div key={idx} className="flex gap-2">
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <div className="flex-shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                    {section.icon}
+                  </div>
+                  <span className="text-xs font-semibold text-black uppercase tracking-wide leading-tight">{section.title}</span>
+                </div>
+                <div className="flex w-max">
+                  {section.options.map((opt, i) => {
+                    const isActive = section.activeValues.includes(opt);
+                    const isFirst = i === 0;
+                    const isLast = i === section.options.length - 1;
+                    return (
+                      <button
+                        key={opt}
+                        onClick={() => section.onSelect(opt)}
+                        style={{
+                          border: '1px solid #3b82f6',
+                          padding: '4px 12px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          backgroundColor: isActive ? '#dbeafe' : '#ffffff',
+                          color: isActive ? '#1e3a8a' : '#1e293b',
+                          borderRightWidth: isLast ? '1px' : '0',
+                          borderRadius: isFirst ? '4px 0 0 4px' : isLast ? '0 4px 4px 0' : '0',
+                          cursor: 'pointer',
+                          minWidth: '70px',
+                          transition: 'background-color 0.1s'
+                        }}
+                        className="hover:bg-slate-50"
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-
-
+          ))}
+        </div>
+        {/* Right column: Bias + Quad Filter (mirrored - right-aligned) */}
+        <div className="flex flex-col gap-2 items-end">
+          {[
+            {
+              title: 'BIAS',
+              icon: (
+                <svg width="24" height="24" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h2" />
+                  <line x1="12" y1="4" x2="12" y2="20" />
+                  <path d="M17 4h2c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2h-2" />
+                </svg>
+              ),
+              options: ['BULLISH', 'BEARISH', 'NEUTRAL'],
+              activeValues: activeFilters.biases,
+              onSelect: (val) => toggleFilter('biases', val)
+            },
+            {
+              title: 'QUAD FILTER',
+              icon: <LayoutGrid size={24} strokeWidth={1.5} className="text-blue-500" />,
+              options: ['QUAD 1', 'QUAD 2', 'QUAD 3', 'QUAD 4'],
+              activeValues: selectedQuad ? [`QUAD ${selectedQuad}`] : [],
+              onSelect: (val) => {
+                const num = parseInt(val.split(' ')[1]);
+                setSelectedQuad(selectedQuad === num ? null : num);
+              }
+            }
+          ].map((section, idx) => (
+            <div key={idx} className="flex gap-2 flex-row-reverse">
+              <div className="flex flex-col gap-0.5 items-end">
+                <div className="flex items-center gap-2 flex-row-reverse">
+                  <div className="flex-shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                    {section.icon}
+                  </div>
+                  <span className="text-xs font-semibold text-black uppercase tracking-wide leading-tight">{section.title}</span>
+                </div>
+                <div className="flex w-max">
+                  {section.options.map((opt, i) => {
+                    const isActive = section.activeValues.includes(opt);
+                    const isFirst = i === 0;
+                    const isLast = i === section.options.length - 1;
+                    return (
+                      <button
+                        key={opt}
+                        onClick={() => section.onSelect(opt)}
+                        style={{
+                          border: '1px solid #3b82f6',
+                          padding: '4px 12px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          backgroundColor: isActive ? '#dbeafe' : '#ffffff',
+                          color: isActive ? '#1e3a8a' : '#1e293b',
+                          borderRightWidth: isLast ? '1px' : '0',
+                          borderRadius: isFirst ? '4px 0 0 4px' : isLast ? '0 4px 4px 0' : '0',
+                          cursor: 'pointer',
+                          minWidth: '70px',
+                          transition: 'background-color 0.1s'
+                        }}
+                        className="hover:bg-slate-50"
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Data Table */}
-      <Card className="dark:bg-gray-800">
+      <Card className="dark:bg-gray-800 p-0 rounded-lg overflow-hidden">
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
             <thead className="bg-white text-slate-800">
-              <tr style={{ borderBottom: '1px solid #3b82f6' }}>
+              <tr style={{ borderTop: '1px solid #3b82f6', borderBottom: '1px solid #3b82f6' }}>
                 {[
-                  { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'left', width: '60px' },
-                  { key: 'name', label: 'Name', icon: <AlignLeft size={24} className="text-blue-500" />, align: 'left', width: '100px' },
+                  { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'center', width: '60px' },
+                  { key: 'name', label: 'Name', icon: <AlignLeft size={18} className="text-blue-500" />, align: 'center', width: '100px' },
                   {
                     key: 'assetClass', label: 'Asset Class', icon: (
-                      <svg width="24" height="24" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="18" height="18" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 2 L12 12 L22 12" />
                       </svg>
-                    ), align: 'left', width: '70px'
+                    ), align: 'center', width: '70px'
                   },
-                  { key: 'factorExposure', label: 'Factor Exposure', icon: <SlidersHorizontal size={24} className="text-blue-500" />, align: 'left', width: '80px' },
+                  { key: 'factorExposure', label: 'Factor Exposure', icon: <SlidersHorizontal size={18} className="text-blue-500" />, align: 'center', width: '80px' },
                   {
                     key: 'bias', label: 'Bias', icon: (
-                      <svg width="24" height="24" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="18" height="18" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M7 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h2" />
                         <line x1="12" y1="4" x2="12" y2="20" />
                         <path d="M17 4h2c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2h-2" />
                       </svg>
                     ), align: 'center', infoParams: 'trend', width: '80px'
                   },
-                  { key: 'riskRangeHistory', label: 'Risk Range', icon: <div style={{ height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">RR</div>, align: 'center', infoParams: 'riskRange', width: '400px' },
-                  { key: 'ivolPrem', label: 'IVOL Prem', icon: <Percent size={24} className="text-blue-500" />, align: 'center', infoParams: 'ivolPrem', width: '65px' },
-                  { key: 'ttmZScore', label: 'TTM Z-Score', icon: <div style={{ height: '24px', width: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'ttmZScore', width: '55px' },
-                  { key: 'ivolZScore', label: 'IVOL High', icon: <Percent size={24} className="text-blue-500" />, align: 'center', infoParams: 'ivolZScore', width: '60px' },
-                  { key: 'zScore', label: 'Z-Score', icon: <div style={{ height: '24px', width: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'zScore', width: '50px' },
-                  { key: 'beta', label: 'Beta', icon: <div style={{ height: '24px', width: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 600 }} className="text-blue-500">β</div>, align: 'center', infoParams: 'beta', width: '40px' },
+                  { key: 'riskRangeHistory', label: 'Risk Range', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">RR</div>, align: 'center', infoParams: 'riskRange', width: '400px' },
+                  { key: 'ivolPrem', label: 'IVOL Prem', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolPrem', width: '65px' },
+                  { key: 'ttmZScore', label: 'TTM Z-Score', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'ttmZScore', width: '55px' },
+                  { key: 'ivolZScore', label: 'IVOL High', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolZScore', width: '60px' },
+                  { key: 'zScore', label: 'Z-Score', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'zScore', width: '50px' },
+                  { key: 'beta', label: 'Beta', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">β</div>, align: 'center', infoParams: 'beta', width: '40px' },
 
-                  { key: 'quadRanking', label: 'Quad', icon: <LayoutGrid size={24} className="text-blue-500" />, align: 'center', infoParams: 'quad', width: '50px' },
-                  { key: 'priceChanges', label: 'Price Change', icon: <DollarSign size={24} className="text-blue-500" />, align: 'right', width: '80px' },
-                  { key: 'signal', label: 'Sig', icon: <Activity size={24} className="text-blue-500" />, align: 'center', width: '50px' }
+                  { key: 'quadRanking', label: 'Quad', icon: <LayoutGrid size={18} className="text-blue-500" />, align: 'center', infoParams: 'quad', width: '50px' },
+                  { key: 'priceChanges', label: 'Price Change', icon: <DollarSign size={18} className="text-blue-500" />, align: 'center', width: '80px' },
+                  { key: 'signal', label: 'Sig', icon: <Activity size={18} className="text-blue-500" />, align: 'center', width: '50px' }
                 ].map((col, index, arr) => (
                   <th
                     key={col.key}
                     style={{
-                      padding: '6px 8px',
+                      padding: '4px 6px',
                       textAlign: col.align,
-                      verticalAlign: 'top',
+                      verticalAlign: 'middle',
                       background: '#ffffff',
                       color: '#1e293b',
-                      borderRight: index === arr.length - 1 ? 'none' : '1px solid #3b82f6',
+                      borderLeft: index === 0 ? '1px solid #3b82f6' : 'none',
+                      borderRight: index === arr.length - 1 ? '1px solid #3b82f6' : '1px solid #bfdbfe',
                       borderBottom: '1px solid #3b82f6',
                       width: col.width,
                       minWidth: col.width,
@@ -1006,102 +1044,46 @@ const SecuritiesUniverse = () => {
                     className="group hover:bg-slate-50 transition-colors"
                     onClick={() => handleSort(col.key)}
                   >
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '45px' }}>
-                      {/* Top Row: Label + Icon */}
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, width: '100%', cursor: 'pointer' }}>
-                        {/* Label Area - Fixed Height for 2 lines */}
-                        <div style={{
-                          height: '18px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          marginBottom: '2px',
-                          width: '100%',
-                          textAlign: 'center'
-                        }}>
-                          <span
-                            onClick={(e) => {
-                              if (col.infoParams) {
-                                e.stopPropagation();
-                                handleMetricDefinitionClick(e, col.infoParams);
-                              }
-                            }}
-                            style={{
-                              fontSize: '9px',
-                              color: '#000000',
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.05em',
-                              lineHeight: '1.2',
-                              cursor: col.infoParams ? 'pointer' : 'default',
-                              borderBottom: col.infoParams ? '1px dotted #94a3b8' : 'none' // Subtle indicator
-                            }}
-                            className={col.infoParams ? "hover:text-blue-600 transition-colors" : ""}
-                          >
-                            {col.label}
-                          </span>
-                        </div>
-                        <div style={{
-                          display: 'flex',
-                          flexDirection: 'column', // Stack Icon and Arrows
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          flex: 1,
-                          paddingBottom: '2px',
-                          cursor: 'pointer'
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', cursor: 'pointer' }}>
+                      <span
+                        onClick={(e) => {
+                          if (col.infoParams) {
+                            e.stopPropagation();
+                            handleMetricDefinitionClick(e, col.infoParams);
+                          }
                         }}
-                        >
-                          {/* Restored Main Icon */}
-                          <div style={{ color: '#1e40af', marginBottom: '2px' }}>
-                            {col.icon}
-                          </div>
-
-                          {/* Sort Arrows Container - Fixed Height to prevent shift */}
-                          <div style={{ height: '14px', minHeight: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {(() => {
-                              const sortInfo = getSortInfo(col.key);
-                              if (sortInfo) {
-                                // Sorted State: Number + Single Arrow (Bold)
-                                return (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#2563eb', fontWeight: 700, fontSize: '10px', lineHeight: 1 }}>
-                                    <span>{sortInfo.order}</span>
-                                    {sortInfo.direction === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />}
-                                  </div>
-                                );
-                              }
-                              // Unsorted State: Small Gray Up/Down Arrows
-                              return (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#cbd5e1' }}>
-                                  <ArrowUp size={10} strokeWidth={2.5} />
-                                  <ArrowDown size={10} strokeWidth={2.5} />
-                                </div>
-                              );
-                            })()
-                            }
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Bottom Row: Controls (Sort + Info) - ALWAYS Rendered for uniformity */}
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        paddingTop: '2px', // Reduced
-                        fontSize: '10px',
-                        color: '#64748b',
-                        height: '14px', // Reduced height
-                        width: '100%'
-                      }}>
-                        {col.key !== 'signal' && (
-                          <>
-                            {/* Sort Indicator Moved to Center - Keeping slot empty for alignment if needed, or just removing visual */}
-                            <div style={{ minWidth: '20px' }}></div>
-
-                            {/* Menu/Info (Right) - Empty now as Info button is removed */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        style={{
+                          fontSize: '9px',
+                          color: '#000000',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          lineHeight: 1.2,
+                          cursor: col.infoParams ? 'pointer' : 'default',
+                          borderBottom: col.infoParams ? '1px dotted #94a3b8' : 'none'
+                        }}
+                        className={col.infoParams ? "hover:text-blue-600 transition-colors" : ""}
+                      >
+                        {col.label}
+                      </span>
+                      <div style={{ display: 'flex', justifyContent: 'center', color: '#1e40af' }}>{col.icon}</div>
+                      <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        {(() => {
+                          const sortInfo = getSortInfo(col.key);
+                          if (sortInfo) {
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '1px', color: '#2563eb', fontWeight: 700, fontSize: '9px' }}>
+                                <span>{sortInfo.order}</span>
+                                {sortInfo.direction === 'asc' ? <ArrowUp size={10} strokeWidth={3} /> : <ArrowDown size={10} strokeWidth={3} />}
+                              </div>
+                            );
+                          }
+                          return (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#cbd5e1' }}>
+                              <ArrowUp size={8} strokeWidth={2.5} />
+                              <ArrowDown size={8} strokeWidth={2.5} />
                             </div>
-                          </>
-                        )}
+                          );
+                        })()}
                       </div>
                     </div>
                   </th>
@@ -1128,24 +1110,26 @@ const SecuritiesUniverse = () => {
                     <tr
                       key={security.ticker}
                       style={{
-                        borderBottom: '1px solid #e5e7eb',
+                        borderBottom: '1px solid #f3f4f6',
                         backgroundColor: index % 2 === 0 ? 'transparent' : '#f9fafb'
                       }}
                       className="dark:border-gray-700 dark:bg-gray-800"
                     >
-                      <td style={{ padding: '5px 4px', fontWeight: '600' }} className="dark:text-white">
+                      <td style={{ padding: '4px 6px', fontWeight: '600', borderRight: '1px solid #bfdbfe', textAlign: 'center' }} className="dark:text-white">
                         {security.ticker}
                       </td>
-                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
-                        <TruncatedSecurityName name={security.name} maxLength={18} />
+                      <td style={{ padding: '4px 6px', borderRight: '1px solid #bfdbfe', textAlign: 'center' }} className="dark:text-gray-300">
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <TruncatedSecurityName name={security.name} maxLength={18} />
+                        </div>
                       </td>
-                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
+                      <td style={{ padding: '4px 6px', borderRight: '1px solid #bfdbfe', textAlign: 'center' }} className="dark:text-gray-300">
                         {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
                       </td>
-                      <td style={{ padding: '5px 4px' }} className="dark:text-gray-300">
+                      <td style={{ padding: '4px 6px', borderRight: '1px solid #bfdbfe', textAlign: 'center' }} className="dark:text-gray-300">
                         {security.factorExposure}
                       </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'center', fontWeight: 600 }} className="dark:text-gray-300">
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #bfdbfe' }} className="dark:text-gray-300">
                         <span style={{
                           color: security.bias === 'BULLISH' ? '#10b981' :
                             security.bias === 'BEARISH' ? '#ef4444' : '#6b7280'
@@ -1153,16 +1137,19 @@ const SecuritiesUniverse = () => {
                           {security.bias}
                         </span>
                       </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
-                        {renderRiskRangeCell(security.riskRangeHistory, security.priceHistory)}
+                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #bfdbfe' }} className="dark:text-gray-300">
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          {renderRiskRangeCell(security.riskRangeHistory, security.priceHistory)}
+                        </div>
                       </td>
 
                       <td
                         style={{
-                          padding: '5px 4px',
+                          padding: '4px 6px',
                           textAlign: 'center',
                           color: volMetrics ? getIvolPremColor(volMetrics.ivolPrem) : '#6b7280',
-                          fontWeight: 600
+                          fontWeight: 600,
+                          borderRight: '1px solid #bfdbfe'
                         }}
                         className="dark:text-white"
                       >
@@ -1170,10 +1157,11 @@ const SecuritiesUniverse = () => {
                       </td>
                       <td
                         style={{
-                          padding: '5px 4px',
+                          padding: '4px 6px',
                           textAlign: 'center',
                           color: volMetrics ? getTTMZScoreColor(volMetrics.ttmZScore) : '#6b7280',
-                          fontWeight: 600
+                          fontWeight: 600,
+                          borderRight: '1px solid #bfdbfe'
                         }}
                         className="dark:text-white"
                       >
@@ -1181,16 +1169,17 @@ const SecuritiesUniverse = () => {
                       </td>
                       <td
                         style={{
-                          padding: '5px 4px',
+                          padding: '4px 6px',
                           textAlign: 'center',
                           color: volMetrics ? getIOVRPercentileColor(volMetrics.iovrPercentile) : '#6b7280',
-                          fontWeight: 600
+                          fontWeight: 600,
+                          borderRight: '1px solid #bfdbfe'
                         }}
                         className="dark:text-white"
                       >
                         {volMetrics ? formatVolatilityMetric(volMetrics.iovrPercentile, true) : '--'}
                       </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'right' }} className="dark:text-white">
+                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #bfdbfe' }} className="dark:text-white">
                         {(() => {
                           const zScoreColors = getZScoreColor(security.zScore);
                           return (
@@ -1203,8 +1192,11 @@ const SecuritiesUniverse = () => {
                                 borderRadius: '4px',
                                 backgroundColor: zScoreColors.bgColor,
                                 color: zScoreColors.color,
-                                border: `1px solid ${zScoreColors.borderColor}`,
-                                fontWeight: 600
+                                border: zScoreColors.emphasis
+                                  ? `2px solid ${zScoreColors.borderColor}`
+                                  : `1px solid ${zScoreColors.borderColor}`,
+                                fontWeight: zScoreColors.emphasis ? 700 : 600,
+                                boxShadow: zScoreColors.emphasis ? '0 1px 3px rgba(0,0,0,0.15)' : 'none'
                               }}
                             >
                               {formatZScore(security.zScore)}
@@ -1212,11 +1204,11 @@ const SecuritiesUniverse = () => {
                           );
                         })()}
                       </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'center' }} className="dark:text-gray-300">
+                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #bfdbfe' }} className="dark:text-gray-300">
                         {security.beta}
                       </td>
 
-                      <td style={{ padding: '5px 4px', textAlign: 'center' }}>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #bfdbfe' }}>
                         {security.quadRanking && security.quadRanking !== '--' ? (
                           <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'center' }}>
                             {security.quadRanking.split('/').map((quadNum, index, array) => {
@@ -1243,8 +1235,8 @@ const SecuritiesUniverse = () => {
                           <span className="dark:text-gray-400">--</span>
                         )}
                       </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '7px' }}>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #bfdbfe' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '7px', alignItems: 'center' }}>
                           <span
                             style={{
                               color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#10b981' :
@@ -1274,7 +1266,7 @@ const SecuritiesUniverse = () => {
                           </span>
                         </div>
                       </td>
-                      <td style={{ padding: '5px 4px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
                         {security.signal}
                       </td>
                     </tr>

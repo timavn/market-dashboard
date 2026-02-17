@@ -297,25 +297,54 @@ export const formatZScore = (zScore) => {
 
 /**
  * Get color for Z-score
+ * 0 to 1.0: light green/red
+ * 1.01 to 2: bright green/red
+ * 2.5+: bright with additional emphasis (border, shadow)
  * @param {number|null} zScore - Z-score value
- * @returns {Object} { color: hex color, bgColor: background color }
+ * @returns {Object} { color, bgColor, borderColor, emphasis? }
  */
 export const getZScoreColor = (zScore) => {
   if (zScore === null || zScore === undefined || isNaN(zScore)) {
     return { color: '#6b7280', bgColor: '#f3f4f6', borderColor: '#d1d5db' }; // Gray
   }
   const num = parseFloat(zScore);
-  const threshold = 2; // Based on definition: ±2 = consensus "fade" level
-  
-  if (num > threshold) {
-    return { color: '#065f46', bgColor: '#d1fae5', borderColor: '#10b981' }; // Dark green - strong positive (> 2)
-  } else if (num > 0) {
-    return { color: '#047857', bgColor: '#a7f3d0', borderColor: '#34d399' }; // Light green - moderate positive (0 to 2)
-  } else if (num < -threshold) {
-    return { color: '#991b1b', bgColor: '#fee2e2', borderColor: '#ef4444' }; // Dark red - strong negative (< -2)
-  } else if (num < 0) {
-    return { color: '#b91c1c', bgColor: '#fecaca', borderColor: '#f87171' }; // Light red - moderate negative (-2 to 0)
+  const abs = Math.abs(num);
+
+  // 2.5+: bright with additional emphasis (white text on solid color, bolder border)
+  if (abs >= 2.5) {
+    if (num > 0) {
+      return {
+        color: '#ffffff',
+        bgColor: '#059669',
+        borderColor: '#047857',
+        emphasis: true
+      }; // White text on bright green
+    } else {
+      return {
+        color: '#ffffff',
+        bgColor: '#dc2626',
+        borderColor: '#b91c1c',
+        emphasis: true
+      }; // White text on bright red
+    }
   }
+
+  // 1.01 to 2: bright green/red
+  if (abs > 1) {
+    if (num > 0) {
+      return { color: '#047857', bgColor: '#a7f3d0', borderColor: '#10b981' }; // Bright green
+    } else {
+      return { color: '#b91c1c', bgColor: '#fecaca', borderColor: '#ef4444' }; // Bright red
+    }
+  }
+
+  // 0 to 1.0: light green/red
+  if (num > 0) {
+    return { color: '#059669', bgColor: '#d1fae5', borderColor: '#6ee7b7' }; // Light green
+  } else if (num < 0) {
+    return { color: '#dc2626', bgColor: '#fee2e2', borderColor: '#fca5a5' }; // Light red
+  }
+
   return { color: '#6b7280', bgColor: '#f3f4f6', borderColor: '#d1d5db' }; // Gray - exactly zero
 };
 
