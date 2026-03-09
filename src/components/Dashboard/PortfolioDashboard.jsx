@@ -6,7 +6,6 @@ import { useTheme } from '../../context/ThemeContext';
 import CSVUpload from '../CSVUpload';
 import USDMacroDashboard from './USDMacroDashboard';
 import SecuritiesList from './SecuritiesList';
-import ResizableBottomPanels from './ResizableBottomPanels';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { bookContent } from '../../constants/bookContent';
 import WorkflowStatus from './WorkflowStatus';
@@ -23,11 +22,7 @@ const PortfolioDashboard = () => {
   const portfolioDataRef = useRef(null); // Ref to track current portfolio data for polling
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
   const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
-  const [volatilityExpanded, setVolatilityExpanded] = useState(false);
-  const [securitiesExpanded, setSecuritiesExpanded] = useState(false);
-  const [securitiesFullWidth, setSecuritiesFullWidth] = useState(false);
   const [signalStrengthExpanded, setSignalStrengthExpanded] = useState(false);
-  const [selectedSecurityTicker, setSelectedSecurityTicker] = useState(null);
   const [peaPodImageError, setPeaPodImageError] = useState(false);
   const [bookImageError, setBookImageError] = useState(false);
   const [showBookMenu, setShowBookMenu] = useState(false);
@@ -411,12 +406,6 @@ const PortfolioDashboard = () => {
   const displayData = portfolioData || defaultData;
 
   // Calculate bottom padding based on panel heights
-  const COLLAPSED_HEIGHT = 40; // Matches ResizableBottomPanels collapsed height
-  const EXPANDED_HEIGHT = 500; // 25% taller than 400px
-  const volatilityHeight = volatilityExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
-  const securitiesHeight = securitiesExpanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT;
-  const maxPanelHeight = Math.max(volatilityHeight, securitiesHeight);
-
   // Portfolio Metrics Content Component (Refactored to Snapshot)
   const PortfolioMetricsContent = () => (
     <div className="h-full flex flex-col p-4">
@@ -470,77 +459,19 @@ const PortfolioDashboard = () => {
 
         return (
           <div className="flex flex-col space-y-8">
-            {/* Top Section: Headline Metrics */}
-            <div className="grid grid-cols-3 gap-4">
-              {/* Total Value */}
-              <Card className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Total Value</Text>
-                <Text className="text-xl font-bold text-gray-900 dark:text-white">
-                  ${totalVal.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                </Text>
-              </Card>
-
-              {/* Net Exposure */}
-              <Card className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Net Exposure</Text>
-                <Text className={`text-xl font-bold ${netPct > 0 ? 'text-green-600 dark:text-green-400' : (netPct < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white')}`}>
-                  {netPct > 0 ? '+' : ''}{Math.round(netPct)}%
-                </Text>
-              </Card>
-
-              {/* Cash */}
-              <Card className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Cash</Text>
-                <Text className="text-xl font-bold text-gray-900 dark:text-white">
-                  {calculatedCashPct.toFixed(1)}%
-                </Text>
-              </Card>
-            </div>
-
-            {/* Middle Section: Net Market Exposure Bar */}
-            <div className="w-full px-2">
-              <div className="text-center mb-6">
-                <Text className="text-sm font-bold text-gray-900 dark:text-white block">Net Market Exposure</Text>
-
-              </div>
-
-              <div className="relative h-12">
-                {/* Labels */}
-                <div className="relative h-8 mb-2 text-[10px]">
-                  <span className="absolute left-0 top-0 text-red-600 dark:text-red-400 font-medium text-center leading-tight">-100%<br />Short</span>
-                  <div className="absolute left-1/2 top-0 transform -translate-x-1/2 flex flex-col items-center leading-tight">
-                    <span className="text-gray-900 dark:text-white font-medium">0%</span>
-                    <span className="text-gray-900 dark:text-white font-medium">Neutral</span>
-                  </div>
-                  <span className="absolute right-0 top-0 text-green-600 dark:text-green-400 font-medium text-center leading-tight">+100%<br />Long</span>
-                </div>
-
-                {/* Gradient Bar Track */}
-                <div className="h-4 w-full relative overflow-visible shadow-inner"
-                  style={{ background: 'linear-gradient(to right, #EF4444 50%, #10B981 50%)' }}>
-
-                  {/* Center Tick */}
-                  <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-white/50 backdrop-blur-sm transform -translate-x-1/2 z-10"></div>
-
-                  {/* Position Marker */}
-                  <div
-                    className="absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 transition-all duration-500 ease-out z-20"
-                    style={{ left: `${Math.min(Math.max((netPct + 100) / 2, 0), 100)}%` }}
-                  >
-                    <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[10px] border-t-gray-800 dark:border-t-white transform -translate-y-[14px] drop-shadow-md"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Section: Exposure Breakdown */}
+            {/* Exposure metrics: Gross, Net, Long, Short, Cash */}
             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-100 dark:border-gray-800">
-
-
               <div className="grid grid-cols-5 gap-4">
                 <div className="flex flex-col items-center">
                   <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Gross</Text>
                   <Text className="text-sm font-bold text-gray-900 dark:text-white">{Math.round(grossPct)}%</Text>
+                </div>
+
+                <div className="flex flex-col items-center">
+                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Net</Text>
+                  <Text className={`text-sm font-bold ${netPct > 0 ? 'text-green-600 dark:text-green-400' : (netPct < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white')}`}>
+                    {netPct > 0 ? '+' : ''}{Math.round(netPct)}%
+                  </Text>
                 </div>
 
                 <div className="flex flex-col items-center">
@@ -556,11 +487,6 @@ const PortfolioDashboard = () => {
                 <div className="flex flex-col items-center">
                   <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Cash</Text>
                   <Text className="text-sm font-bold text-gray-900 dark:text-white">{calculatedCashPct.toFixed(1)}%</Text>
-                </div>
-
-                <div className="flex flex-col items-center">
-                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Positions</Text>
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white">{displayData.summary.positionCount}</Text>
                 </div>
               </div>
             </div>
@@ -620,9 +546,9 @@ const PortfolioDashboard = () => {
     <div
       className="min-h-screen p-4 bg-gray-50 dark:bg-gray-900"
       style={{
-        paddingBottom: `${maxPanelHeight + 20}px`, // Panel height + extra padding
+        paddingBottom: '1.5rem',
         paddingRight: showPortfolioMetrics ? '0px' : '40px', // No padding when open to extend content closer, matches collapsed width
-        transition: 'padding-right 0.3s ease-in-out, padding-bottom 0.3s ease-in-out',
+        transition: 'padding-right 0.3s ease-in-out',
       }}
     >
       {/* Data Updated Notification (Optimistic Update) */}
@@ -657,10 +583,6 @@ const PortfolioDashboard = () => {
           }}
         >
           <SecuritiesList
-            onTickerClick={(ticker) => {
-              setSelectedSecurityTicker(ticker);
-              setSecuritiesExpanded(true);
-            }}
             isPortfolioOpen={showPortfolioMetrics}
             isExpanded={signalStrengthExpanded}
             onExpandToggle={() => setSignalStrengthExpanded(!signalStrengthExpanded)}
@@ -1092,6 +1014,49 @@ const PortfolioDashboard = () => {
             <PortfolioMetricsContent />
           </div>
         )}
+
+        {/* Analytics Button - Docked at Bottom of Portfolio Bar */}
+        <div
+          style={{
+            marginTop: 'auto',
+            padding: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderTop: '1px solid #e5e7eb',
+          }}
+          className="dark:border-gray-700"
+        >
+          <Button
+            onClick={() => setShowWorkflowStatus(!showWorkflowStatus)}
+            variant={showWorkflowStatus ? 'primary' : 'secondary'}
+            size="md"
+            className="shadow-lg"
+            style={{
+              minWidth: '48px',
+              height: '48px',
+              padding: '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%',
+              border: showWorkflowStatus ? '2px solid #3b82f6' : '2px solid #e5e7eb',
+              backgroundColor: '#ffffff',
+              transition: 'all 0.2s ease-in-out',
+            }}
+            title="Analytics"
+          >
+            <img
+              src="/images/icons/analytics.png"
+              alt="Analytics"
+              style={{
+                width: '24px',
+                height: '24px',
+                objectFit: 'contain',
+              }}
+            />
+          </Button>
+        </div>
       </div>
 
       {/* The Pods Window - Separate Pop-out Panel */}
@@ -1807,22 +1772,6 @@ const PortfolioDashboard = () => {
         </div>
       )}
 
-      {/* Resizable Bottom Panels */}
-      <ResizableBottomPanels
-        volatilityExpanded={volatilityExpanded}
-        securitiesExpanded={securitiesExpanded}
-        onVolatilityToggle={setVolatilityExpanded}
-        onSecuritiesToggle={setSecuritiesExpanded}
-        securitiesFullWidth={securitiesFullWidth}
-        onSecuritiesFullWidthToggle={(fullWidth) => {
-          setSecuritiesFullWidth(fullWidth);
-          if (fullWidth) {
-            setSecuritiesExpanded(true);
-          }
-        }}
-        selectedTicker={selectedSecurityTicker}
-      />
-
       {/* Securities Universe Panel */}
       <div
         style={{
@@ -1834,7 +1783,7 @@ const PortfolioDashboard = () => {
           width: showSecuritiesUniverse
             ? (showPortfolioMetrics
               ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (9/12) - 40px)')
+              : 'calc((100vw - 16px) * (10/12) - 40px)')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
@@ -2112,45 +2061,6 @@ const PortfolioDashboard = () => {
         )}
       </div>
 
-      {/* Analytics Button - Standalone in Bottom Right Corner */}
-      <div
-        style={{
-          position: 'fixed',
-          bottom: '16px',
-          right: '16px',
-          zIndex: 1700,
-        }}
-      >
-        <Button
-          onClick={() => setShowWorkflowStatus(!showWorkflowStatus)}
-          variant={showWorkflowStatus ? 'primary' : 'secondary'}
-          size="md"
-          className="shadow-lg"
-          style={{
-            minWidth: '48px',
-            height: '48px',
-            padding: '0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: '50%',
-            border: showWorkflowStatus ? '2px solid #3b82f6' : '2px solid #e5e7eb',
-            backgroundColor: '#ffffff',
-            transition: 'all 0.2s ease-in-out',
-          }}
-          title="Analytics"
-        >
-          <img
-            src="/images/icons/analytics.png"
-            alt="Analytics"
-            style={{
-              width: '24px',
-              height: '24px',
-              objectFit: 'contain',
-            }}
-          />
-        </Button>
-      </div>
     </div >
   );
 };

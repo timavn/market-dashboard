@@ -759,16 +759,21 @@ const WorkflowStatus = () => {
                     { key: 'bitcoin-trend-tracker', label: 'Bitcoin Tracker' },
                     { key: 'portfolio-solutions', label: 'Portfolio Solutions' },
                     { key: 'signal-strength', label: 'Signal Strength' },
-                    { key: 'momo-tracker', label: 'MOMO Tracker' }
+                    { key: 'momo-tracker', label: 'MOMO Tracker' },
+                    { key: 'the-call', label: 'The Call' },
+                    { key: 'the-macro-show', label: 'The Macro Show' }
                   ].map(({ key, label }) => {
-                    const diff = changelogData[key];
+                    const diff = changelogData?.[key];
 
-                    // Always show bitcoin-trend-tracker, portfolio-solutions, momo-tracker, and signal-strength cards
-                    const alwaysShow = key === 'bitcoin-trend-tracker' || key === 'portfolio-solutions' || key === 'momo-tracker' || key === 'signal-strength';
+                    // Always show these cards (including placeholders with no data)
+                    const alwaysShow = [
+                      'risk-ranges', 'early-look', 'bitcoin-trend-tracker', 'portfolio-solutions',
+                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show'
+                    ].includes(key);
 
                     if (!alwaysShow) {
                       if (!diff || !diff.available) return null;
-                      if (diff.added.length === 0 && diff.removed.length === 0 && (!diff.updates || diff.updates.length === 0) && (!diff.trendChanges || diff.trendChanges.length === 0)) return null;
+                      if ((diff.added?.length || 0) === 0 && (diff.removed?.length || 0) === 0 && (!diff.updates || diff.updates.length === 0) && (!diff.trendChanges || diff.trendChanges.length === 0)) return null;
                     }
 
                     // Check if there's any data to display
@@ -822,9 +827,9 @@ const WorkflowStatus = () => {
                                   ))}
                                 </div>
                               ) : (
-                                <Text style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
                                   N/A
-                                </Text>
+                                </div>
                               )}
                             </div>
 
@@ -835,7 +840,7 @@ const WorkflowStatus = () => {
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                                 <div>
-                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Added</span>
+                                  <span style={{ fontSize: '9px', color: '#10b981' }}>Added</span>
                                   {(diff.added?.length > 0) ? (
                                     diff.added.map(t => (
                                       <div key={t} style={{ fontSize: '10px', color: '#10b981' }}>{t}</div>
@@ -847,7 +852,7 @@ const WorkflowStatus = () => {
                                   )}
                                 </div>
                                 <div>
-                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Removed</span>
+                                  <span style={{ fontSize: '9px', color: '#ef4444' }}>Removed</span>
                                   {(diff.removed?.length > 0) ? (
                                     diff.removed.map(t => (
                                       <div key={t} style={{ fontSize: '10px', color: '#ef4444' }}>{t}</div>
@@ -1069,6 +1074,48 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
+                        {/* EARLY LOOK: Added/Removed with Blue Headers (same style as Portfolio Solutions) */}
+                        {key === 'early-look' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff?.added && diff.added.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.added.map(t => {
+                                    const match = t.match(/\(([^)]+)\)/);
+                                    const ticker = match ? match[1] : t;
+                                    return (
+                                      <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                              </div>
+                              {(diff?.removed && diff.removed.length > 0) ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                  {diff.removed.map(t => {
+                                    const match = t.match(/\(([^)]+)\)/);
+                                    const ticker = match ? match[1] : t;
+                                    return (
+                                      <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         {/* MOMO TRACKER: Added/Removed with Blue Headers */}
                         {key === 'momo-tracker' && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1106,8 +1153,17 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
+                        {/* THE CALL & THE MACRO SHOW: Placeholder cards */}
+                        {(key === 'the-call' || key === 'the-macro-show') && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center', justifyContent: 'center', minHeight: '80px' }}>
+                            <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                              Coming soon
+                            </Text>
+                          </div>
+                        )}
+
                         {/* GENERIC FALLBACK: Added/Removed Table for any others */}
-                        {key !== 'risk-ranges' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && hasData && (
+                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && hasData && (
                           <div>
                             {/* Section Header - match Risk Ranges style */}
                             <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>

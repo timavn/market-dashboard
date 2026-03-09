@@ -105,6 +105,10 @@ const YAHOO_TICKER_MAP = {
   'IXIC': '^IXIC',
   'RUT': '^RUT',
   'VIX': '^VIX',
+  'RVX': '^RVX',
+  'VXN': '^VXN',
+  'GVZ': '^GVZ',
+  'OVX': '^OVX',
   'CRB': '^CRB',
 
   // Indices - European
@@ -633,19 +637,22 @@ const generateOptionsData = () => ([
   { symbol: 'NVDA', strike: '217', expiration: '12/20', type: 'C', bid: '2.80', ask: '2.95', volume: 1081, openInterest: 6327 }
 ]);
 
-// Real VIX data from Yahoo Finance
-const fetchVIXData = async () => {
+// Real volatility index data from Yahoo Finance (VIX, VVIX, RVX, etc.)
+const fetchVolatilityData = async (yahooTicker) => {
+  const fallbackCurrent = { '^VIX': '18.42', '^VVIX': '90', '^RVX': '22' }[yahooTicker] || '18.42';
   try {
-    // Using Yahoo Finance API (free, no API key required)
-    const response = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d');
-    const data = await response.json();
+    const encoded = encodeURIComponent(yahooTicker);
+    const response = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encoded}`, {
+      params: { interval: '1d', range: '1d' },
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    const data = response.data;
 
     if (data.chart && data.chart.result && data.chart.result[0]) {
       const result = data.chart.result[0];
       const meta = result.meta;
-      const quotes = result.indicators.quote[0];
 
-      // Get the latest price
       const latestPrice = meta.regularMarketPrice || meta.previousClose || 0;
       const previousClose = meta.previousClose || 0;
       const change = latestPrice - previousClose;
@@ -663,32 +670,32 @@ const fetchVIXData = async () => {
       };
     }
 
-    // Fallback to mock data if API fails
     return {
-      current: '18.42',
+      current: fallbackCurrent,
       change: '0.00',
       changePercent: '0.00',
       timestamp: new Date().toISOString(),
-      high: 19.50,
-      low: 17.80,
-      open: 18.20,
+      high: 0,
+      low: 0,
+      open: 0,
       volume: 0
     };
   } catch (error) {
-    console.error('Error fetching VIX data:', error);
-    // Fallback to mock data
+    console.error(`Error fetching volatility data for ${yahooTicker}:`, error);
     return {
-      current: '18.42',
+      current: fallbackCurrent,
       change: '0.00',
       changePercent: '0.00',
       timestamp: new Date().toISOString(),
-      high: 19.50,
-      low: 17.80,
-      open: 18.20,
+      high: 0,
+      low: 0,
+      open: 0,
       volume: 0
     };
   }
 };
+
+const fetchVIXData = async () => fetchVolatilityData('^VIX');
 
 // Helper to batch process with delays (rate limiting)
 async function batchProcess(items, batchSize, delayMs, processor) {
@@ -2914,6 +2921,8 @@ app.get('/api/options', (req, res) => {
   res.json(generateOptionsData());
 });
 
+const VOL_YAHOO_SYMBOLS = { vix: '^VIX', vvix: '^VVIX', rvx: '^RVX' };
+
 app.get('/api/indicators/vix', async (req, res) => {
   try {
     const vixData = await fetchVIXData();
@@ -2922,6 +2931,109 @@ app.get('/api/indicators/vix', async (req, res) => {
     console.error('Error in VIX endpoint:', error);
     res.status(500).json({ error: 'Failed to fetch VIX data' });
   }
+});
+
+app.get('/api/indicators/volatility/:ticker', async (req, res) => {
+  const ticker = (req.params.ticker || '').toLowerCase();
+  const yahooSymbol = VOL_YAHOO_SYMBOLS[ticker];
+  if (!yahooSymbol) {
+    return res.status(400).json({ error: `Unknown volatility ticker: ${req.params.ticker}. Use vix, vvix, or rvx.` });
+  }
+  try {
+    const data = await fetchVolatilityData(yahooSymbol);
+    res.json(data);
+  } catch (error) {
+    console.error(`Error in volatility endpoint (${ticker}):`, error);
+    res.status(500).json({ error: `Failed to fetch ${ticker.toUpperCase()} data` });
+  }
+});
+
+app.get('/api/volatility-snapshot', async (req, res) => {
+  const VOL_TICKERS = {
+    VIX:    '^VIX',
+    VVIX:   '^VVIX',
+    RVX:    '^RVX',
+    NazVol: '^VXN',
+    GVZ:    '^GVZ',
+    OVX:    '^OVX',
+    MOVE:   '^MOVE',
+  };
+
+  const fetches = Object.entries(VOL_TICKERS).map(async ([name, yahooTicker]) => {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}`;
+    const response = await axios.get(url, {
+      params: { range: '3mo', interval: '1d', includePrePost: 'false' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 10000
+    });
+    const result = response.data?.chart?.result?.[0];
+    const meta = result?.meta || {};
+    const closes = result?.indicators?.quote?.[0]?.close || [];
+    // Filter nulls then reverse so index 0 = most recent trading day
+    const valid = closes.filter(v => v != null).reverse();
+    const lastPx = meta.regularMarketPrice ?? valid[0] ?? null;
+    const day1Ago = meta.previousClose ?? valid[1] ?? null;
+    if (lastPx == null) {
+      console.warn(`[volatility-snapshot] ${name} has no lastPx (result=${!!result}, meta=${!!meta}, quote=${!!(result?.indicators?.quote?.[0])})`);
+    }
+    return {
+      name,
+      lastPx,
+      day1Ago,
+      week1Ago: valid[5] ?? null,
+      week4Ago: valid[21] ?? null,
+    };
+  });
+
+  const settled = await Promise.allSettled(fetches);
+  const snapshot = {};
+  const tickerNames = Object.keys(VOL_TICKERS);
+  settled.forEach((r, i) => {
+    const name = tickerNames[i];
+    if (r.status === 'rejected') {
+      console.warn(`[volatility-snapshot] ${name} failed:`, r.reason?.message || r.reason);
+      return;
+    }
+    const { name: _n, ...vals } = r.value;
+    snapshot[name] = vals;
+  });
+
+  // Fallback for VVIX and RVX when 3mo chart returns no current price (keep any existing week1Ago/week4Ago)
+  for (const name of ['VVIX', 'RVX']) {
+    if (!snapshot[name] || snapshot[name].lastPx == null) {
+      try {
+        const data = await fetchVolatilityData(VOL_TICKERS[name]);
+        const prev = (parseFloat(data.current) - parseFloat(data.change)).toFixed(2);
+        const existing = snapshot[name] || {};
+        snapshot[name] = {
+          lastPx: data.current,
+          day1Ago: prev,
+          week1Ago: existing.week1Ago ?? null,
+          week4Ago: existing.week4Ago ?? null,
+        };
+        // Second 3mo request to try to fill week1Ago/week4Ago when main fetch had no quote
+        try {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(VOL_TICKERS[name])}`;
+          const res3mo = await axios.get(url, {
+            params: { range: '3mo', interval: '1d', includePrePost: 'false' },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 10000
+          });
+          const result = res3mo.data?.chart?.result?.[0];
+          const closes = result?.indicators?.quote?.[0]?.close || [];
+          const valid = closes.filter(v => v != null).reverse();
+          if (valid.length > 21) {
+            snapshot[name].week1Ago = valid[5] ?? null;
+            snapshot[name].week4Ago = valid[21] ?? null;
+          }
+        } catch (_) { /* leave week columns as-is */ }
+      } catch (err) {
+        console.warn(`[volatility-snapshot] fallback for ${name} failed:`, err?.message || err);
+      }
+    }
+  }
+
+  res.json(snapshot);
 });
 
 app.get('/api/indicators/volume', (req, res) => {

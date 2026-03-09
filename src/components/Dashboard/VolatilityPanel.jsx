@@ -30,6 +30,7 @@ const VolatilityPanel = () => {
 
   const volatilityOptions = [
     { value: 'VIX', label: 'VIX' },
+    { value: 'VVIX', label: 'VVIX' },
     { value: 'MOVE', label: 'MOVE' },
     { value: 'GVZ', label: 'GVZ' },
     { value: 'EVZ', label: 'EVZ' },
@@ -192,14 +193,14 @@ const VolatilityPanel = () => {
         } finally {
           setLoading(false);
         }
-      } else if (selectedVolatility === 'VIX') {
+      } else if (['VIX', 'VVIX', 'RVX'].includes(selectedVolatility)) {
         setLoading(true);
         try {
-          const response = await fetch('http://localhost:3000/api/indicators/vix');
+          const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+          const response = await fetch(`${backendUrl}/api/indicators/volatility/${selectedVolatility.toLowerCase()}`);
           const data = await response.json();
           setVixData(data);
 
-          // Map timeframe to days
           const timeframeMap = {
             '1D': 1,
             '1W': 7,
@@ -209,18 +210,23 @@ const VolatilityPanel = () => {
             '1Y': 365
           };
           const days = timeframeMap[selectedTimeframe] || 30;
-
-          // Generate mock chart data
-          const mockData = generateMockChartData(days, parseFloat(data.current || 18));
+          const fallback = selectedVolatility === 'VVIX' ? 90 : selectedVolatility === 'RVX' ? 22 : 18;
+          const mockData = generateMockChartData(days, parseFloat(data.current || fallback));
           setChartData(mockData);
           calculateMetrics(mockData);
         } catch (error) {
-          console.error('Error fetching VIX data:', error);
+          console.error(`Error fetching ${selectedVolatility} data:`, error);
+          const timeframeMap = { '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365 };
+          const days = timeframeMap[selectedTimeframe] || 30;
+          const fallback = selectedVolatility === 'VVIX' ? 90 : selectedVolatility === 'RVX' ? 22 : 18;
+          const mockData = generateMockChartData(days, fallback);
+          setChartData(mockData);
+          calculateMetrics(mockData);
         } finally {
           setLoading(false);
         }
       } else {
-        // For non-VIX volatility, generate mock data
+        // MOVE, GVZ, EVZ, TYVIX, etc. – mock data
         const timeframeMap = {
           '1D': 1,
           '1W': 7,

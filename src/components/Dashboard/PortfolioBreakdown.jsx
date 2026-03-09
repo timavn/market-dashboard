@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, Title, Text } from '@tremor/react';
 import { Badge } from '@tremor/react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
 import {
   separateLongsAndShorts,
   formatPerformance,
@@ -11,6 +11,7 @@ import {
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
 import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
 import PortfolioAnalytics from './PortfolioAnalytics';
+import PerformanceService from '../../services/api/performanceService';
 const ASSET_CLASS_COLORS = {
   'Equities': '#10B981',      // Emerald green
   'Fixed Income': '#3B82F6',  // Blue
@@ -171,6 +172,10 @@ const calculateAssetClassAllocationFromUniverse = (holdings) => {
 const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
   const [selectedFactor, setSelectedFactor] = useState(null);
+  // Portfolio performance chart (Schwab-style)
+  const [equityCurve, setEquityCurve] = useState({ dates: [], values: [], returns: [] });
+  const [performanceChartLoading, setPerformanceChartLoading] = useState(false);
+  const [performanceRange, setPerformanceRange] = useState('YTD');
 
   const holdings = portfolioData?.holdings || [];
 
@@ -213,6 +218,29 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     window.addEventListener('resize', updateWidths);
     return () => window.removeEventListener('resize', updateWidths);
   }, [columnVisibility]);
+
+  // Fetch equity curve for portfolio performance chart
+  useEffect(() => {
+    let cancelled = false;
+    setPerformanceChartLoading(true);
+    PerformanceService.getEquityCurve()
+      .then((data) => {
+        if (!cancelled && data?.dates?.length) {
+          setEquityCurve({
+            dates: data.dates,
+            values: data.values || [],
+            returns: data.returns || []
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEquityCurve({ dates: [], values: [], returns: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setPerformanceChartLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Sorting state for longs and shorts tables
   const [longsSortConfig, setLongsSortConfig] = useState({ field: null, direction: 'desc' });
@@ -1309,6 +1337,44 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     return { innerData: allAllocation, outerData: allAllocation };
   }, [holdings]);
 
+  // Filter equity curve by selected range for performance chart (must be before any early return)
+  const performanceChartData = useMemo(() => {
+    const { dates, values } = equityCurve;
+    if (!dates.length || !values.length) return { chartData: [], periodChange: null, currentValue: null, startValue: null };
+    const now = new Date();
+    const endDate = dates[dates.length - 1];
+    const endIdx = dates.length - 1;
+    let startDateStr;
+    if (performanceRange === 'YTD') {
+      startDateStr = `${now.getFullYear()}-01-01`;
+    } else {
+      const days = { '1D': 1, '5D': 5, '1M': 30, '3M': 90, '6M': 180, '1Y': 365, '3Y': 1095, '5Y': 1825 }[performanceRange] ?? 365;
+      const start = new Date(endDate);
+      start.setDate(start.getDate() - days);
+      startDateStr = start.toISOString().split('T')[0];
+    }
+    let startIdx = 0;
+    for (let i = 0; i < dates.length; i++) {
+      if (dates[i] >= startDateStr) {
+        startIdx = i;
+        break;
+      }
+    }
+    const chartData = dates.slice(startIdx, endIdx + 1).map((d, i) => ({
+      date: d,
+      value: values[startIdx + i],
+      displayDate: formatDate(d)
+    }));
+    const startValue = values[startIdx];
+    const currentValue = values[endIdx];
+    const periodChange = startValue > 0 && currentValue != null
+      ? ((currentValue - startValue) / startValue) * 100
+      : null;
+    return { chartData, periodChange, currentValue, startValue };
+  }, [equityCurve, performanceRange]);
+
+  const PERFORMANCE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y'];
+
   // Early return after all hooks - check for actual data, not just portfolioData existence
   // The API returns an object with empty values when no data exists, so we need to check for actual holdings
   // Don't show "no data" message if we're actively loading/polling
@@ -2169,9 +2235,88 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
           </div>
         </div>
 
-        {/* Portfolio Analysis Section */}
+        {/* Portfolio Analysis Section (Macro Factor Exposure + factor tables) */}
         <div style={{ marginTop: '24px' }}>
           <PortfolioAnalytics portfolioData={portfolioData} />
+        </div>
+
+        {/* Portfolio performance chart: very bottom, full width */}
+        <div className="mt-6 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden" style={{ width: '100%' }}>
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+            {PERFORMANCE_RANGES.map((range) => (
+              <button
+                key={range}
+                type="button"
+                onClick={() => setPerformanceRange(range)}
+                className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+                  performanceRange === range
+                    ? 'bg-blue-600 text-white border-blue-600 dark:bg-blue-500'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {range}
+              </button>
+            ))}
+          </div>
+          <div className="relative px-2 pb-2 pt-1 w-full">
+            {performanceChartLoading ? (
+              <div className="h-[220px] flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
+                Loading chart...
+              </div>
+            ) : performanceChartData.chartData.length === 0 ? (
+              <div className="h-[220px] flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
+                No performance data yet. Upload statements to see your portfolio performance over time.
+              </div>
+            ) : (
+              <>
+                <div className="absolute top-2 right-4 z-10 text-right">
+                  <div className="text-sm font-bold text-gray-900 dark:text-white">
+                    ${performanceChartData.currentValue != null
+                      ? Number(performanceChartData.currentValue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                      : '--'}
+                  </div>
+                  {performanceChartData.periodChange != null && (
+                    <div className={`text-xs font-medium ${performanceChartData.periodChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {performanceChartData.periodChange >= 0 ? '+' : ''}
+                      {(performanceChartData.periodChange).toFixed(2)}%
+                    </div>
+                  )}
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={performanceChartData.chartData} margin={{ top: 8, right: 48, left: 8, bottom: 24 }}>
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={(d) => formatDate(d)}
+                      tick={{ fontSize: 10, fill: '#9CA3AF' }}
+                      axisLine={{ stroke: '#D1D5DB' }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      domain={['auto', 'auto']}
+                      tick={{ fontSize: 10, fill: '#9CA3AF' }}
+                      axisLine={{ stroke: '#D1D5DB' }}
+                      tickLine={false}
+                      tickFormatter={(v) => `$${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v.toFixed(0)}`}
+                      width={44}
+                    />
+                    <Tooltip
+                      formatter={(value) => [`$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`, 'Value']}
+                      labelFormatter={(label) => formatDate(label)}
+                      contentStyle={{ fontSize: '12px' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#2563eb"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={true}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

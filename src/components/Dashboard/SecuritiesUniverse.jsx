@@ -732,25 +732,43 @@ const SecuritiesUniverse = () => {
             {ath > 0 ? ath.toFixed(2) : '--'}
           </span>
         </div>
-        {/* Day Labels Row */}
+        {/* Day Labels Row (date + t label stacked) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span style={{ width: '36px' }}></span>
-          <div style={{ display: 'flex' }}> {/* Removed gap to make dividers continuous */}
+          <div style={{ display: 'flex' }}>
             {dayLabels.map((label, index) => (
               <div
                 key={`label-${index}`}
                 style={{
                   width: index === lastIndex ? lastCellWidth : cellWidth,
                   textAlign: 'center',
-                  borderRight: index < lastIndex ? '1px solid transparent' : 'none', // Placeholder for alignment
+                  borderRight: index < lastIndex ? '1px solid transparent' : 'none',
                   padding: '0 2px'
                 }}
               >
+                {/* Date line above t-label */}
+                <div
+                  style={{
+                    width: '100%',
+                    fontSize: '9px',
+                    fontWeight: 'normal',
+                    color: index === lastIndex ? '#1e40af' : '#6b7280',
+                    lineHeight: '1.2',
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {tradingDays[index]
+                    ? tradingDays[index].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : ''}
+                </div>
+                {/* t / t-1 / t-2 etc. label */}
                 <div
                   style={{
                     width: '100%',
                     position: 'relative',
-                    backgroundColor: index === lastIndex ? '#eff6ff' : '#f3f4f6', // Highlight 't' label
+                    backgroundColor: index === lastIndex ? '#eff6ff' : '#f3f4f6',
                     fontWeight: index === lastIndex ? 'bold' : 'normal',
                     color: index === lastIndex ? '#1e40af' : '#6b7280'
                   }}

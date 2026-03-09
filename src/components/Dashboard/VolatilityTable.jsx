@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MarketDataService } from '../../services/api/marketDataService';
 import './VolatilityTable.css';
 
 // Volatility ranges from The Process (bookContent.js) - VIX explicit; others use similar framework
@@ -57,65 +56,56 @@ const VOL_RANGES = {
       { min: 100, max: 120, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' },
       { min: 120, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
     ]
+  },
+  VVIX: {
+    name: 'VVIX (VIX of VIX – Vol of Vol)',
+    source: 'CBOE – similar framework to VIX',
+    ranges: [
+      { min: 70, max: 95, label: 'Investable', color: 'green', desc: 'Lower vol-of-vol' },
+      { min: 95, max: 115, label: 'Chop bucket', color: 'yellow', desc: 'Elevated vol-of-vol' },
+      { min: 115, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
+    ]
   }
 };
 
-const MACRO_SERIES = [
-  { name: 'VIX', symbol: '^VIX', rowStyle: 'green' },
-  { name: 'RVX', symbol: '^RVX', rowStyle: 'yellow' },
-  { name: 'NazVol', symbol: '^VXN', rowStyle: 'yellow' },
-  { name: 'GVZ', symbol: '^GVZ', rowStyle: 'blue' },
-  { name: 'OVX', symbol: '^OVX', rowStyle: 'blue' }
+// All 7 series in one table — VVIX under VIX; MOVE from RATES
+const ALL_SERIES = [
+  { name: 'VIX',    symbol: 'VIX',  rowStyle: 'green'  },
+  { name: 'VVIX',   symbol: 'VVIX', rowStyle: 'green'  },
+  { name: 'RVX',    symbol: 'RVX', rowStyle: 'yellow' },
+  { name: 'NazVol', symbol: 'VXN',  rowStyle: 'yellow' },
+  { name: 'GVZ',    symbol: 'GVZ',  rowStyle: 'blue'   },
+  { name: 'OVX',    symbol: 'OVX',  rowStyle: 'blue'   },
+  { name: 'MOVE',   symbol: 'MOVE', rowStyle: 'blue'   },
 ];
 
-const RATES_SERIES = [
-  { name: 'MOVE', symbol: '^MOVE', rowStyle: 'blue' }
-];
-
-// VIX buckets from The Process (bookContent.js): 9-19 Investable, 20-29 Chop, 29+ Uninvestable
-const getVixBucket = (value) => {
-  if (value == null || isNaN(value)) return null;
+// Value-based bucket from VOL_RANGES (green/yellow/red). Returns null for missing/invalid value or unknown series.
+// Iterate ranges in reverse so upper buckets (e.g. red 29+) take precedence on boundary values.
+const getBucketForSeries = (seriesName, value) => {
+  if (value == null || value === '' || Number.isNaN(Number(value))) return null;
+  const config = VOL_RANGES[seriesName];
+  if (!config?.ranges?.length) return null;
   const v = parseFloat(value);
-  if (v < 9) return 'green'; // Below investable range = low vol, favorable
-  if (v <= 19) return 'green'; // Investable
-  if (v <= 29) return 'yellow'; // Chop bucket
-  return 'red'; // Uninvestable
+  for (let i = config.ranges.length - 1; i >= 0; i--) {
+    const r = config.ranges[i];
+    const inRange = v >= r.min && (r.max == null || v <= r.max);
+    if (inRange) return r.color;
+  }
+  return null;
 };
 
 const POLL_INTERVAL_MS = 60000; // 1 minute during market hours
 
-const VolatilityTable = ({ mode = 'macro', onIndicatorHelp }) => {
-  const series = mode === 'rates' ? RATES_SERIES : MACRO_SERIES;
+const VolatilityTable = ({ onIndicatorHelp }) => {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
 
   const fetchVolatilityData = async () => {
     try {
-      const symbols = series.map(s => s.symbol);
-      const [quotesRes, ...historicalRes] = await Promise.all([
-        MarketDataService.getQuotes(symbols),
-        ...series.map(s => MarketDataService.getHistoricalData(s.symbol, 30))
-      ]);
-
-      const result = {};
-      series.forEach((s, i) => {
-        const quote = quotesRes?.[s.symbol] || quotesRes?.[s.symbol.replace('^', '')] || quotesRes?.[s.name];
-        const hist = historicalRes[i]?.data || [];
-        const sorted = [...hist].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-        const lastPx = quote?.price ?? (sorted[0]?.close != null ? parseFloat(sorted[0].close) : null);
-        const day1 = sorted[1]?.close != null ? parseFloat(sorted[1].close) : null;
-        const week1 = sorted[5]?.close != null ? parseFloat(sorted[5].close) : null;
-        const week4 = sorted[21]?.close != null ? parseFloat(sorted[21].close) : null;
-
-        result[s.name] = {
-          lastPx,
-          day1Ago: day1,
-          week1Ago: week1,
-          week4Ago: week4
-        };
-      });
-      setData(result);
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${backendUrl}/api/volatility-snapshot`);
+      const snapshot = await response.json();
+      setData(snapshot);
     } catch (err) {
       console.error('Error fetching volatility data:', err);
     } finally {
@@ -128,22 +118,19 @@ const VolatilityTable = ({ mode = 'macro', onIndicatorHelp }) => {
     fetchVolatilityData();
     const interval = setInterval(fetchVolatilityData, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [mode]);
+  }, []);
 
   const formatValue = (v) => (v != null ? Number(v).toFixed(2) : '--');
 
+  const getValueForColumn = (rowData, colIndex) => {
+    const keys = ['lastPx', 'day1Ago', 'week1Ago', 'week4Ago'];
+    return rowData?.[keys[colIndex]];
+  };
+
   const getCellClass = (s, rowData, colIndex) => {
-    // VIX: dynamic color from Last Px per Process ranges (9-19 green, 20-29 yellow, 29+ red)
-    if (s.name === 'VIX') {
-      const bucket = getVixBucket(rowData?.lastPx);
-      if (bucket) return `vol-cell ${bucket}`;
-      return 'vol-cell';
-    }
-    if (s.rowStyle === 'blue') return 'vol-cell blue';
-    if (s.rowStyle === 'green') return 'vol-cell green';
-    if (s.rowStyle === 'yellow') {
-      return colIndex < 3 ? 'vol-cell yellow' : 'vol-cell green';
-    }
+    const value = getValueForColumn(rowData, colIndex);
+    const bucket = getBucketForSeries(s.name, value);
+    if (bucket) return `vol-cell ${bucket}`;
     return 'vol-cell';
   };
 
@@ -162,7 +149,7 @@ const VolatilityTable = ({ mode = 'macro', onIndicatorHelp }) => {
         <div className="vol-th">1 Wk Ago</div>
         <div className="vol-th">4 Wks Ago</div>
       </div>
-      {series.map((s) => {
+      {ALL_SERIES.map((s) => {
         const row = data[s.name] || {};
         return (
           <div key={s.name} className="volatility-table-row">
@@ -238,7 +225,6 @@ const VolRangesPopover = ({ indicatorKey, onClose }) => {
 };
 
 const VolatilityTableWithTabs = ({ statusIndicator }) => {
-  const [activeTab, setActiveTab] = React.useState('macro');
   const [openIndicator, setOpenIndicator] = React.useState(null);
   const status = statusIndicator || { emoji: '🟢', title: 'Active' };
   return (
@@ -246,23 +232,9 @@ const VolatilityTableWithTabs = ({ statusIndicator }) => {
       <div className="volatility-header-with-tabs">
         <span className="region-status-emoji" title={status.title}>{status.emoji}</span>
         <span className="region-label">Volatility</span>
-        <div className="volatility-tab-buttons-inline">
-          <button
-            className={`volatility-tab-btn ${activeTab === 'macro' ? 'active' : ''}`}
-            onClick={() => setActiveTab('macro')}
-          >
-            MACRO
-          </button>
-          <button
-            className={`volatility-tab-btn ${activeTab === 'rates' ? 'active' : ''}`}
-            onClick={() => setActiveTab('rates')}
-          >
-            Rates
-          </button>
-        </div>
       </div>
       <VolRangesPopover indicatorKey={openIndicator} onClose={() => setOpenIndicator(null)} />
-      <VolatilityTable mode={activeTab} onIndicatorHelp={setOpenIndicator} />
+      <VolatilityTable onIndicatorHelp={setOpenIndicator} />
     </div>
   );
 };

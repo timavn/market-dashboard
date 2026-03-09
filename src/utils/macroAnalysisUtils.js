@@ -221,16 +221,14 @@ export const calculateMacroFactorExposures = (holdings, totalPortfolioValue) => 
 
             factorTotals[factorId] += contribution;
 
-            // Only track meaningful contributions (not zero)
-            if (Math.abs(contribution) > 0.0001) { // 0.01%
-                contributorMap[factorId].push({
-                    symbol: holding.symbol,
-                    name: holding.name || holding.description,
-                    weight: weight,
-                    beta: beta,
-                    contribution: contribution
-                });
-            }
+            // Track every holding for this factor (so "expand to view all" = full portfolio)
+            contributorMap[factorId].push({
+                symbol: holding.symbol,
+                name: holding.name || holding.description,
+                weight: weight,
+                beta: beta,
+                contribution: contribution
+            });
         });
     });
 
@@ -249,15 +247,14 @@ export const calculateMacroFactorExposures = (holdings, totalPortfolioValue) => 
         // AND maybe separate biggest detractors?
         // User asked for "Top 5 securities in each contributing to the weighting".
         // Let's maximize meaningfulness: Sort by absolute magnitude, but maybe prioritize positive if the net is positive?
-        // Simple approach: Sort by absolute contribution magnitude.
-        const topContributors = contributorMap[factorId]
-            .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
-            .slice(0, 5)
-            .map(c => ({
-                ...c,
-                contributionPercent: (c.contribution * 100).toFixed(2), // formatted string
-                weightPercent: (c.weight * 100).toFixed(1)
-            }));
+        // Sort by absolute contribution magnitude; return all for expand-in-UI.
+        const sorted = contributorMap[factorId]
+            .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+        const allContributors = sorted.map(c => ({
+            ...c,
+            contributionPercent: (c.contribution * 100).toFixed(2),
+            weightPercent: (c.weight * 100).toFixed(1)
+        }));
 
         return {
             subject: MACRO_FACTORS[key].label,
@@ -267,7 +264,8 @@ export const calculateMacroFactorExposures = (holdings, totalPortfolioValue) => 
             color: MACRO_FACTORS[key].color,
             description: MACRO_FACTORS[key].description,
             calculationMethod: MACRO_FACTORS[key].calculationMethod,
-            topContributors: topContributors
+            topContributors: allContributors.slice(0, 5), // legacy / summary
+            allContributors
         };
     });
 
