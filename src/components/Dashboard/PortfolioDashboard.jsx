@@ -610,24 +610,25 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: 0, // Always anchored to right
+          right: 0,
           width: showPortfolioMetrics
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Securities width (col-span-2) + gap + Portfolio Metrics content (reduced by another 20%)
-            : '40px', // Matches collapsed height of bottom tabs
+            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
+            : '40px',
           height: '100vh',
-          zIndex: showPortfolioMetrics ? 1100 : 1000, // Higher z-index when open to overlay Securities
-          backgroundColor: showPortfolioMetrics ? '#ffffff' : '#f9fafb', // Match bottom panels when expanded
-          borderLeft: showPortfolioMetrics ? '1px solid #e5e7eb' : 'none', // Left border when overlaying Securities
-          borderRight: '1px solid #e5e7eb', // Always right border
+          zIndex: showPortfolioMetrics ? 1100 : 1000,
+          backgroundColor: showPortfolioMetrics ? '#f8f6ef' : '#f3f0e6',
+          borderLeft: showPortfolioMetrics ? '1px solid #d6d0c3' : 'none',
+          borderRight: '1px solid #d6d0c3',
           borderTop: 'none',
           borderBottom: 'none',
-          borderRadius: showPortfolioMetrics ? '1rem 0 0 1rem' : '0.75rem 0 0 0.75rem', // Rounded left corners (top and bottom)
+          borderRadius: showPortfolioMetrics ? '1rem 0 0 1rem' : '0.75rem 0 0 0.75rem',
           boxShadow: showPortfolioMetrics
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
-            : '-2px 0 8px rgba(0, 0, 0, 0.1)',
+            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
+            : '-2px 0 8px rgba(0, 0, 0, 0.08)',
           transition: 'width 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: 'flex',
           flexDirection: 'column',
+          fontFamily: 'Georgia, "Times New Roman", serif',
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
@@ -638,7 +639,7 @@ const PortfolioDashboard = () => {
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            borderBottom: '1px solid #e5e7eb',
+            borderBottom: '1px solid #d6d0c3',
             minHeight: '120px',
           }}
           className="dark:border-gray-700"
@@ -646,7 +647,7 @@ const PortfolioDashboard = () => {
           {/* Night Mode Toggle */}
           <button
             onClick={toggleTheme}
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full"
+            className="rounded-md border border-[#d6d0c3] dark:border-gray-600 bg-[#f8f6ef] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 transition-colors w-full"
             style={{
               minWidth: '32px',
               height: '32px',
@@ -671,7 +672,7 @@ const PortfolioDashboard = () => {
           {/* X/Twitter Logo Button */}
           <button
             onClick={() => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer')}
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            className="rounded-md border border-[#d6d0c3] dark:border-gray-600 bg-[#f8f6ef] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{
               minWidth: '32px',
               height: '32px',
@@ -698,7 +699,7 @@ const PortfolioDashboard = () => {
           {/* The Pods Button */}
           <button
             onClick={() => setShowPeaPodWindow(!showPeaPodWindow)}
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            className="rounded-md border border-[#d6d0c3] dark:border-gray-600 bg-[#f8f6ef] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{
               minWidth: '32px',
               height: '32px',
@@ -736,7 +737,7 @@ const PortfolioDashboard = () => {
           <button
             ref={bookMenuRef}
             onClick={() => setShowBookMenu(!showBookMenu)}
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            className="rounded-md border border-[#d6d0c3] dark:border-gray-600 bg-[#f8f6ef] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{
               minWidth: '32px',
               height: '32px',
@@ -779,12 +780,13 @@ const PortfolioDashboard = () => {
                 top: `${bookMenuPosition.top}px`,
                 right: `${bookMenuPosition.right}px`,
                 minWidth: '180px',
-                backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                border: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                backgroundColor: theme === 'dark' ? '#1f2937' : '#f8f6ef',
+                border: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                 borderRadius: '0.375rem',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04)',
                 zIndex: 1000,
                 padding: '4px 0',
+                fontFamily: 'Georgia, "Times New Roman", serif',
               }}
             >
               {bookFiles.map((file, index) => (
@@ -796,14 +798,14 @@ const PortfolioDashboard = () => {
                     textAlign: 'left',
                     padding: '8px 12px',
                     fontSize: '14px',
-                    color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                    color: theme === 'dark' ? '#f3f4f6' : '#111',
                     backgroundColor: 'transparent',
                     border: 'none',
                     cursor: 'pointer',
                   }}
-                  className="hover:bg-gray-100 dark:hover:bg-gray-700"
+                  className="hover:bg-[#efe9dc] dark:hover:bg-gray-700"
                   onMouseEnter={(e) => {
-                    e.target.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
+                    e.target.style.backgroundColor = theme === 'dark' ? '#374151' : '#efe9dc';
                   }}
                   onMouseLeave={(e) => {
                     e.target.style.backgroundColor = 'transparent';
@@ -819,16 +821,16 @@ const PortfolioDashboard = () => {
           <div style={{
             width: '100%',
             height: '1px',
-            backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb',
+            backgroundColor: theme === 'dark' ? '#374151' : '#d6d0c3',
             margin: '12px 0 8px 0'
           }} />
 
           {/* Portfolio Breakdown Button */}
           <button
             onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
-            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showPortfolioBreakdown
-              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
-              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+            className={`rounded-md border transition-colors w-full ${showPortfolioBreakdown
+              ? 'bg-[#e6e0d2] border-[#c5bcac] dark:bg-blue-600 hover:bg-[#ddd6c6] dark:hover:bg-blue-700 text-[#111]'
+              : 'bg-[#f8f6ef] border-[#d6d0c3] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 dark:border-gray-600'
               }`}
             style={{
               minWidth: '32px',
@@ -845,7 +847,7 @@ const PortfolioDashboard = () => {
           >
             <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
               {portfolioBreakdownImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-[#111]" : "text-[#555] dark:text-gray-300"}>
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8" />
                   <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4" />
@@ -861,7 +863,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
+              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
                 Portfolio
               </span>
             )}
@@ -870,9 +872,9 @@ const PortfolioDashboard = () => {
           {/* Securities Universe Button */}
           <button
             onClick={() => setShowSecuritiesUniverse(!showSecuritiesUniverse)}
-            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showSecuritiesUniverse
-              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
-              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+            className={`rounded-md border transition-colors w-full ${showSecuritiesUniverse
+              ? 'bg-[#e6e0d2] border-[#c5bcac] dark:bg-blue-600 hover:bg-[#ddd6c6] dark:hover:bg-blue-700 text-[#111]'
+              : 'bg-[#f8f6ef] border-[#d6d0c3] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 dark:border-gray-600'
               }`}
             style={{
               minWidth: '32px',
@@ -889,7 +891,7 @@ const PortfolioDashboard = () => {
           >
             <div className="shrink-0 flex items-center justify-center w-6 h-6" style={{ width: '20px', flexShrink: 0 }}>
               {securitiesUniverseImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showSecuritiesUniverse ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showSecuritiesUniverse ? "text-[#111]" : "text-[#555] dark:text-gray-300"}>
                   <defs>
                     <radialGradient id="planetGradient" cx="0.4" cy="0.3">
                       <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9" />
@@ -921,7 +923,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showSecuritiesUniverse ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
+              <span className={`text-sm font-medium whitespace-nowrap ${showSecuritiesUniverse ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
                 Securities Universe
               </span>
             )}
@@ -930,9 +932,9 @@ const PortfolioDashboard = () => {
           {/* Performance Tracking Button */}
           <button
             onClick={() => setShowPerformanceTracking(!showPerformanceTracking)}
-            className={`rounded-md border border-gray-300 dark:border-gray-600 transition-colors w-full ${showPerformanceTracking
-              ? 'bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700 text-white'
-              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+            className={`rounded-md border transition-colors w-full ${showPerformanceTracking
+              ? 'bg-[#e6e0d2] border-[#c5bcac] dark:bg-blue-600 hover:bg-[#ddd6c6] dark:hover:bg-blue-700 text-[#111]'
+              : 'bg-[#f8f6ef] border-[#d6d0c3] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 dark:border-gray-600'
               }`}
             style={{
               minWidth: '32px',
@@ -949,7 +951,7 @@ const PortfolioDashboard = () => {
           >
             <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
               {performanceImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPerformanceTracking ? "text-white" : "text-gray-700 dark:text-gray-300"}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPerformanceTracking ? "text-[#111]" : "text-[#555] dark:text-gray-300"}>
                   <polyline points="22 6 13.5 15.5 8.5 10.5 2 17" />
                   <polyline points="16 6 22 6 22 12" />
                 </svg>
@@ -963,7 +965,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPerformanceTracking ? 'text-white' : 'text-gray-700 dark:text-gray-200'}`}>
+              <span className={`text-sm font-medium whitespace-nowrap ${showPerformanceTracking ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
                 Performance
               </span>
             )}
@@ -972,7 +974,7 @@ const PortfolioDashboard = () => {
           {/* Expand/Collapse Portfolio Bar Button */}
           <button
             onClick={() => setShowPortfolioMetrics(!showPortfolioMetrics)}
-            className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors mt-2 w-full"
+            className="rounded-md border border-[#d6d0c3] dark:border-gray-600 bg-[#f8f6ef] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 transition-colors mt-2 w-full"
             title={showPortfolioMetrics ? "Collapse Portfolio" : "Expand Portfolio"}
             style={{
               minWidth: '32px',
@@ -1023,7 +1025,7 @@ const PortfolioDashboard = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            borderTop: '1px solid #e5e7eb',
+            borderTop: '1px solid #d6d0c3',
           }}
           className="dark:border-gray-700"
         >
@@ -1040,8 +1042,8 @@ const PortfolioDashboard = () => {
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: '50%',
-              border: showWorkflowStatus ? '2px solid #3b82f6' : '2px solid #e5e7eb',
-              backgroundColor: '#ffffff',
+              border: showWorkflowStatus ? '2px solid #8b7e6a' : '2px solid #d6d0c3',
+              backgroundColor: '#f8f6ef',
               transition: 'all 0.2s ease-in-out',
             }}
             title="Analytics"
@@ -1072,12 +1074,12 @@ const PortfolioDashboard = () => {
             : '0px',
           height: '100vh',
           zIndex: showPeaPodWindow ? 1200 : -1, // Higher z-index than portfolio bar when open, hidden when closed
-          backgroundColor: '#f9fafb',
-          borderLeft: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
-          borderRight: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
+          backgroundColor: '#f8f6ef',
+          borderLeft: showPeaPodWindow ? '1px solid #d6d0c3' : 'none',
+          borderRight: showPeaPodWindow ? '1px solid #d6d0c3' : 'none',
           borderRadius: showPeaPodWindow ? '0.75rem 0 0 0' : '0',
           boxShadow: showPeaPodWindow
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
+            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPeaPodWindow ? 'flex' : 'none',
@@ -1095,7 +1097,8 @@ const PortfolioDashboard = () => {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
+                borderBottom: '1px solid #d6d0c3',
+                backgroundColor: '#f3f0e6',
                 cursor: 'pointer',
               }}
               className="dark:border-gray-700"
@@ -1106,9 +1109,10 @@ const PortfolioDashboard = () => {
                 style={{
                   fontSize: '18px',
                   fontWeight: 700,
-                  color: '#374151',
+                  color: '#000',
                   margin: 0,
                   userSelect: 'none',
+                  fontFamily: 'Georgia, "Times New Roman", serif',
                 }}
               >
                 The Pods
@@ -1169,11 +1173,11 @@ const PortfolioDashboard = () => {
                       podsSearchInputRef.current?.blur();
                     }
                   }}
-                  className="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 w-full"
+                  className="px-3 py-2 text-sm border border-[#d6d0c3] rounded-md bg-[#fcfaf5] dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#c9c3b6] min-w-0 w-full"
                 />
                 {podsShowSearchResults && podsFilteredSecurities.length > 0 && (
                   <div
-                    className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-lg max-h-60 overflow-y-auto"
+                    className="absolute z-50 w-full mt-1 bg-[#fcfaf5] dark:bg-gray-800 border border-[#d6d0c3] dark:border-gray-600 shadow-lg max-h-60 overflow-y-auto"
                     style={{ top: '100%' }}
                   >
                     {podsFilteredSecurities.map((security, index) => (
@@ -1181,8 +1185,8 @@ const PortfolioDashboard = () => {
                         key={security.ticker}
                         onClick={() => handlePodsSecuritySelect(security)}
                         className={`px-3 py-2 cursor-pointer text-sm ${index === podsHighlightedIndex
-                          ? 'bg-blue-100 dark:bg-blue-900/30'
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                          ? 'bg-[#efe9dc] dark:bg-blue-900/30'
+                          : 'hover:bg-[#efe9dc] dark:hover:bg-gray-700'
                           }`}
                         onMouseEnter={() => setPodsHighlightedIndex(index)}
                       >
@@ -1203,7 +1207,7 @@ const PortfolioDashboard = () => {
 
               {/* POD Calculations */}
               <div
-                className="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                className="mt-6 p-4 bg-[#f3f0e6] dark:bg-gray-800 rounded-lg border border-[#d6d0c3] dark:border-gray-700"
                 style={{ width: '100%', maxWidth: '400px' }}
               >
                 <Text className="text-sm font-semibold dark:text-white mb-4">
@@ -1212,7 +1216,7 @@ const PortfolioDashboard = () => {
 
                 <div className="space-y-4">
                   {/* POD1 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
+                  <div className="p-3 bg-[#fcfaf5] dark:bg-gray-700 rounded-md border border-[#d6d0c3] dark:border-gray-600">
                     <div className="flex items-center justify-between mb-2">
                       <Text className="text-sm font-semibold dark:text-white">
                         POD1
@@ -1232,7 +1236,7 @@ const PortfolioDashboard = () => {
                   </div>
 
                   {/* POD2 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
+                  <div className="p-3 bg-[#fcfaf5] dark:bg-gray-700 rounded-md border border-[#d6d0c3] dark:border-gray-600">
                     <div className="flex items-center justify-between mb-2">
                       <Text className="text-sm font-semibold dark:text-white">
                         POD2
@@ -1252,7 +1256,7 @@ const PortfolioDashboard = () => {
                   </div>
 
                   {/* POD3 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600">
+                  <div className="p-3 bg-[#fcfaf5] dark:bg-gray-700 rounded-md border border-[#d6d0c3] dark:border-gray-600">
                     <div className="flex items-center justify-between mb-2">
                       <Text className="text-sm font-semibold dark:text-white">
                         POD3
@@ -1275,7 +1279,7 @@ const PortfolioDashboard = () => {
 
               {/* Selected Security Display (Placeholder for future calculation) */}
               {podsSelectedSecurity && (
-                <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="mt-4 p-4 bg-[#f3f0e6] dark:bg-gray-800 rounded-lg border border-[#d6d0c3] dark:border-gray-700">
                   <Text className="text-sm font-semibold dark:text-white mb-2">
                     Selected Security
                   </Text>
@@ -1321,15 +1325,16 @@ const PortfolioDashboard = () => {
         >
           <div
             style={{
-              backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
+              backgroundColor: theme === 'dark' ? '#1f2937' : '#f8f6ef',
               borderRadius: '0.75rem',
               width: '90%',
               maxWidth: selectedTag ? '1400px' : '1200px',
               maxHeight: '90vh',
               display: 'flex',
               flexDirection: 'row',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
               transition: 'max-width 0.3s ease-in-out',
+              border: theme === 'dark' ? 'none' : '1px solid #d6d0c3',
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1338,10 +1343,10 @@ const PortfolioDashboard = () => {
               <div
                 style={{
                   width: '250px',
-                  borderRight: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                  borderRight: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                   display: 'flex',
                   flexDirection: 'column',
-                  backgroundColor: theme === 'dark' ? '#111827' : '#f9fafb',
+                  backgroundColor: theme === 'dark' ? '#111827' : '#f3f0e6',
                   transition: 'width 0.3s ease-in-out',
                 }}
               >
@@ -1349,7 +1354,7 @@ const PortfolioDashboard = () => {
                 <div
                   style={{
                     padding: '16px',
-                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -1392,17 +1397,17 @@ const PortfolioDashboard = () => {
                         marginBottom: '8px',
                         borderRadius: '0.375rem',
                         cursor: 'pointer',
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        border: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                        backgroundColor: theme === 'dark' ? '#1f2937' : '#fcfaf5',
+                        border: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                         transition: 'all 0.2s ease-in-out',
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
-                        e.currentTarget.style.borderColor = theme === 'dark' ? '#4b5563' : '#d1d5db';
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#efe9dc';
+                        e.currentTarget.style.borderColor = theme === 'dark' ? '#4b5563' : '#c9c3b6';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1f2937' : '#ffffff';
-                        e.currentTarget.style.borderColor = theme === 'dark' ? '#374151' : '#e5e7eb';
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1f2937' : '#fcfaf5';
+                        e.currentTarget.style.borderColor = theme === 'dark' ? '#374151' : '#d6d0c3';
                       }}
                     >
                       <div
@@ -1446,7 +1451,7 @@ const PortfolioDashboard = () => {
               <div
                 style={{
                   padding: '20px',
-                  borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                  borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
@@ -1457,7 +1462,8 @@ const PortfolioDashboard = () => {
                     fontSize: '24px',
                     fontWeight: 700,
                     margin: 0,
-                    color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                    color: theme === 'dark' ? '#f3f4f6' : '#000',
+                    fontFamily: 'Georgia, "Times New Roman", serif',
                   }}
                 >
                   {selectedBookTitle}
@@ -1480,11 +1486,11 @@ const PortfolioDashboard = () => {
                 <div
                   style={{
                     padding: '12px 20px',
-                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                     display: 'flex',
                     flexWrap: 'wrap',
                     gap: '8px',
-                    backgroundColor: theme === 'dark' ? '#111827' : '#f9fafb',
+                    backgroundColor: theme === 'dark' ? '#111827' : '#f3f0e6',
                   }}
                 >
                   {tags.map((tag) => {
@@ -1500,15 +1506,15 @@ const PortfolioDashboard = () => {
                           fontWeight: 500,
                           borderRadius: '0.375rem',
                           border: `1px solid ${isActive
-                            ? (theme === 'dark' ? '#3b82f6' : '#2563eb')
-                            : (theme === 'dark' ? '#374151' : '#d1d5db')
+                            ? (theme === 'dark' ? '#3b82f6' : '#c5bcac')
+                            : (theme === 'dark' ? '#374151' : '#d6d0c3')
                             }`,
                           backgroundColor: isActive
-                            ? (theme === 'dark' ? '#1e3a8a' : '#dbeafe')
-                            : (theme === 'dark' ? '#1f2937' : '#ffffff'),
+                            ? (theme === 'dark' ? '#1e3a8a' : '#e6e0d2')
+                            : (theme === 'dark' ? '#1f2937' : '#fcfaf5'),
                           color: isActive
-                            ? (theme === 'dark' ? '#93c5fd' : '#1e40af')
-                            : (theme === 'dark' ? '#f3f4f6' : '#111827'),
+                            ? (theme === 'dark' ? '#93c5fd' : '#111')
+                            : (theme === 'dark' ? '#f3f4f6' : '#111'),
                           cursor: 'pointer',
                           transition: 'all 0.2s ease-in-out',
                           display: 'flex',
@@ -1517,14 +1523,14 @@ const PortfolioDashboard = () => {
                         }}
                         onMouseEnter={(e) => {
                           if (!isActive) {
-                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
-                            e.currentTarget.style.borderColor = theme === 'dark' ? '#4b5563' : '#9ca3af';
+                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#efe9dc';
+                            e.currentTarget.style.borderColor = theme === 'dark' ? '#4b5563' : '#c9c3b6';
                           }
                         }}
                         onMouseLeave={(e) => {
                           if (!isActive) {
-                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1f2937' : '#ffffff';
-                            e.currentTarget.style.borderColor = theme === 'dark' ? '#374151' : '#d1d5db';
+                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1f2937' : '#fcfaf5';
+                            e.currentTarget.style.borderColor = theme === 'dark' ? '#374151' : '#d6d0c3';
                           }
                         }}
                       >
@@ -1555,9 +1561,9 @@ const PortfolioDashboard = () => {
                   padding: '24px',
                   overflowY: 'auto',
                   flex: 1,
-                  color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                  color: theme === 'dark' ? '#f3f4f6' : '#111',
                   lineHeight: '1.6',
-                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  fontFamily: 'Georgia, "Times New Roman", serif',
                 }}
               >
                 <ReactMarkdown
@@ -1573,9 +1579,9 @@ const PortfolioDashboard = () => {
                             fontWeight: 700,
                             marginTop: '2rem',
                             marginBottom: '1rem',
-                            borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                            borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                             paddingBottom: '0.5rem',
-                            color: theme === 'dark' ? '#f3f4f6' : '#111827',
+                            color: theme === 'dark' ? '#f3f4f6' : '#000',
                           }}
                           {...props}
                         >
@@ -1647,7 +1653,7 @@ const PortfolioDashboard = () => {
                         style={{
                           margin: '1.5rem 0',
                           border: 'none',
-                          borderTop: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                          borderTop: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                         }}
                         {...props}
                       />
@@ -1699,10 +1705,10 @@ const PortfolioDashboard = () => {
               <div
                 style={{
                   width: '220px',
-                  borderLeft: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                  borderLeft: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                   display: 'flex',
                   flexDirection: 'column',
-                  backgroundColor: theme === 'dark' ? '#111827' : '#f9fafb',
+                  backgroundColor: theme === 'dark' ? '#111827' : '#f3f0e6',
                   transition: 'width 0.3s ease-in-out',
                 }}
               >
@@ -1710,7 +1716,7 @@ const PortfolioDashboard = () => {
                 <div
                   style={{
                     padding: '16px',
-                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+                    borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`,
                   }}
                 >
                   <Text
@@ -1751,11 +1757,11 @@ const PortfolioDashboard = () => {
                           fontWeight: section.level === 2 ? 600 : section.level === 3 ? 500 : 400,
                           color: theme === 'dark' ? '#f3f4f6' : '#111827',
                           borderLeft: section.level === 2
-                            ? `2px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`
+                            ? `2px solid ${theme === 'dark' ? '#374151' : '#d6d0c3'}`
                             : 'none',
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
+                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#efe9dc';
                         }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.backgroundColor = 'transparent';
@@ -1786,13 +1792,13 @@ const PortfolioDashboard = () => {
               : 'calc((100vw - 16px) * (10/12) - 40px)')
             : '0px',
           height: '100vh',
-          backgroundColor: '#ffffff',
+          backgroundColor: '#f8f6ef',
           zIndex: showSecuritiesUniverse ? 1400 : -1,
-          borderLeft: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
-          borderRight: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
+          borderLeft: showSecuritiesUniverse ? '1px solid #d6d0c3' : 'none',
+          borderRight: showSecuritiesUniverse ? '1px solid #d6d0c3' : 'none',
           borderRadius: showSecuritiesUniverse ? '0.75rem 0 0 0' : '0',
           boxShadow: showSecuritiesUniverse
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
+            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showSecuritiesUniverse ? 'flex' : 'none',
@@ -1809,7 +1815,8 @@ const PortfolioDashboard = () => {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
+                borderBottom: '1px solid #d6d0c3',
+                backgroundColor: '#f3f0e6',
                 cursor: 'pointer',
               }}
               className="dark:border-gray-700"
@@ -1820,9 +1827,10 @@ const PortfolioDashboard = () => {
                 style={{
                   fontSize: '18px',
                   fontWeight: 700,
-                  color: '#374151',
+                  color: '#000',
                   margin: 0,
                   userSelect: 'none',
+                  fontFamily: 'Georgia, "Times New Roman", serif',
                 }}
               >
                 Securities Universe
@@ -1855,13 +1863,13 @@ const PortfolioDashboard = () => {
               : 'calc((100vw - 16px) * (9/12) - 40px)')
             : '0px',
           height: '100vh',
-          backgroundColor: '#ffffff',
+          backgroundColor: '#f8f6ef',
           zIndex: showPerformanceTracking ? 1500 : -1,
-          borderLeft: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
-          borderRight: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
+          borderLeft: showPerformanceTracking ? '1px solid #d6d0c3' : 'none',
+          borderRight: showPerformanceTracking ? '1px solid #d6d0c3' : 'none',
           borderRadius: showPerformanceTracking ? '0.75rem 0 0 0' : '0',
           boxShadow: showPerformanceTracking
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
+            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPerformanceTracking ? 'flex' : 'none',
@@ -1878,7 +1886,8 @@ const PortfolioDashboard = () => {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
+                borderBottom: '1px solid #d6d0c3',
+                backgroundColor: '#f3f0e6',
                 cursor: 'pointer',
               }}
               className="dark:border-gray-700"
@@ -1889,9 +1898,10 @@ const PortfolioDashboard = () => {
                 style={{
                   fontSize: '18px',
                   fontWeight: 700,
-                  color: '#374151',
+                  color: '#000',
                   margin: 0,
                   userSelect: 'none',
+                  fontFamily: 'Georgia, "Times New Roman", serif',
                 }}
               >
                 Performance Tracking
@@ -1924,13 +1934,13 @@ const PortfolioDashboard = () => {
               : 'calc((100vw - 16px) * (9/12) - 40px)')
             : '0px',
           height: '100vh',
-          backgroundColor: '#ffffff',
+          backgroundColor: '#f8f6ef',
           zIndex: showPortfolioBreakdown ? 1300 : -1,
-          borderLeft: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
-          borderRight: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
+          borderLeft: showPortfolioBreakdown ? '1px solid #d6d0c3' : 'none',
+          borderRight: showPortfolioBreakdown ? '1px solid #d6d0c3' : 'none',
           borderRadius: showPortfolioBreakdown ? '0.75rem 0 0 0' : '0',
           boxShadow: showPortfolioBreakdown
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1), 2px 0 8px rgba(0, 0, 0, 0.1)'
+            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: showPortfolioBreakdown ? 'flex' : 'none',
@@ -1959,18 +1969,18 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: 0, // Always anchored to right edge
+          right: 0,
           width: showWorkflowStatus
-            ? 'calc((100vw - 16px) * (5/12))' // Fixed width, independent of portfolio bar
+            ? 'calc((100vw - 16px) * (5/12))'
             : '0px',
           height: '100vh',
-          backgroundColor: '#ffffff',
+          backgroundColor: '#f8f6ef',
           zIndex: showWorkflowStatus ? 1600 : -1,
-          borderLeft: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
-          borderTop: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
-          borderBottom: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
+          borderLeft: showWorkflowStatus ? '1px solid #d6d0c3' : 'none',
+          borderTop: showWorkflowStatus ? '1px solid #d6d0c3' : 'none',
+          borderBottom: showWorkflowStatus ? '1px solid #d6d0c3' : 'none',
           boxShadow: showWorkflowStatus
-            ? '-2px 0 8px rgba(0, 0, 0, 0.1)'
+            ? '-2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',
           transition: 'width 0.3s ease-in-out',
           display: showWorkflowStatus ? 'flex' : 'none',
@@ -1990,8 +2000,8 @@ const PortfolioDashboard = () => {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                background: 'linear-gradient(to bottom, rgba(249, 250, 251, 0.8), rgba(243, 244, 246, 0.5))',
+                borderBottom: '1px solid #d6d0c3',
+                background: 'linear-gradient(to bottom, rgba(243, 240, 230, 0.9), rgba(248, 246, 239, 0.6))',
               }}
               className="dark:border-gray-700 dark:bg-gradient-to-b dark:from-gray-800/80 dark:to-gray-700/50"
             >
@@ -2003,10 +2013,11 @@ const PortfolioDashboard = () => {
                 style={{
                   fontSize: '14px',
                   fontWeight: 700,
-                  color: '#374151',
+                  color: '#000',
                   margin: 0,
                   userSelect: 'none',
                   cursor: 'pointer',
+                  fontFamily: 'Georgia, "Times New Roman", serif',
                 }}
                 onClick={() => setShowWorkflowStatus(false)}
               >
@@ -2034,8 +2045,8 @@ const PortfolioDashboard = () => {
                   transition: 'all 0.2s ease',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
-                  e.currentTarget.style.color = theme === 'dark' ? '#f3f4f6' : '#374151';
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#efe9dc';
+                  e.currentTarget.style.color = theme === 'dark' ? '#f3f4f6' : '#111';
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = 'transparent';

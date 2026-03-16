@@ -2,7 +2,19 @@
 .volatility-table {
   font-size: 10px;
   font-family: Inter, system-ui, sans-serif;
-  color: #000;
+  color: #111827;
+}
+
+.volatility-table {
+  --vol-grid-border: #d6d0c3;
+  --vol-grid-border-soft: #e7e3d9;
+  --vol-grid-sep: #b8b2a6;
+  --vol-series-col: 92px;
+  --vol-level-col: 76px;
+  --vol-roc-col: 72px;
+  /* Site-consistent red/green (matches MarketChartCard, MultiRegionMarketOverview, USDCorrelationMatrix) */
+  --vol-green: #16a34a;
+  --vol-red: #dc2626;
 }
 
 .volatility-table-loading {
@@ -13,30 +25,45 @@
 }
 
 .volatility-table-header {
-  display: flex;
-  align-items: center;
-  padding: 6px 8px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e5e7eb;
+  display: grid;
+  grid-template-columns:
+    var(--vol-series-col)
+    repeat(4, minmax(var(--vol-level-col), 1fr))
+    repeat(6, var(--vol-roc-col));
+  align-items: stretch;
+  padding: 0;
+  background: #efede6;
+  border-bottom: 1px solid var(--vol-grid-border);
   font-weight: 600;
-  color: #000;
+  color: #111827;
 }
 
 .volatility-table-header .vol-th {
-  flex: 1;
-  text-align: right;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 6px 8px;
+  border-right: 1px solid var(--vol-grid-border);
+  white-space: nowrap;
 }
 
 .volatility-table-header .vol-th-series {
-  flex: 0 0 70px;
   text-align: left;
+  align-items: flex-start;
 }
 
 .volatility-table-row {
-  display: flex;
-  align-items: center;
-  padding: 6px 8px;
-  border-bottom: 1px solid #f3f4f6;
+  display: grid;
+  grid-template-columns:
+    var(--vol-series-col)
+    repeat(4, minmax(var(--vol-level-col), 1fr))
+    repeat(6, var(--vol-roc-col));
+  align-items: stretch;
+  padding: 0;
+  border-bottom: 1px solid var(--vol-grid-border-soft);
+  background: #f8f6ef;
 }
 
 .volatility-table-row:last-child {
@@ -44,18 +71,23 @@
 }
 
 .vol-td {
-  flex: 1;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 6px 8px;
+  border-right: 1px solid var(--vol-grid-border-soft);
+  white-space: nowrap;
 }
 
 .vol-td-series {
-  flex: 0 0 70px;
   text-align: left;
   font-weight: 600;
-  color: #000;
+  color: #111827;
   display: flex;
   align-items: center;
   gap: 4px;
+  justify-content: flex-start;
 }
 
 .vol-td-series .vol-ranges-help-btn {
@@ -67,37 +99,168 @@
 }
 
 .vol-cell {
-  flex: 1;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 500;
-  padding: 2px 4px;
-  color: #000;
+  color: #111827;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
 }
 
 .vol-cell.green {
-  background: #dcfce7;
-  color: #000;
+  background: #fff8cc;
+  color: #111827;
 }
 
 .vol-cell.yellow {
-  background: #fef9c3;
-  color: #000;
+  background: #fff8cc;
+  color: #111827;
 }
 
 .vol-cell.blue {
-  background: #ffffff;
-  color: #000;
+  background: #e9f6f4;
+  color: #111827;
 }
 
 .vol-cell.red {
-  background: #fee2e2;
-  color: #000;
+  background: #fde5e5;
+  color: #111827;
+}
+
+/* Missing cells – same font, size, and color for all N/A (level and RoC columns) */
+.vol-cell-missing {
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #6b7280;
+}
+
+.vol-cell-missing > .vol-cell-pill {
+  background: transparent;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+/* RoC columns (DoD, VoV, MoM) */
+.vol-th-roc {
+  text-align: center;
+  font-weight: 600;
+}
+
+.vol-th-roc-label {
+  display: block;
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+.vol-th-roc-sub {
+  display: block;
+  font-size: 8px;
+  line-height: 1.1;
+  color: #6b7280;
+}
+
+.vol-roc-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: inherit;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* Inner pill inside each cell (so grid borders stay clean) */
+.vol-cell > .vol-cell-pill,
+.vol-roc-cell > .vol-cell-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: inherit;
+  padding: 2px 6px;
+  border-radius: 3px;
+  min-width: 0;
+}
+
+.vol-roc-positive {
+  background: transparent;
+  color: inherit;
+}
+
+.vol-roc-negative {
+  background: transparent;
+  color: inherit;
+}
+
+.vol-roc-neutral {
+  background: transparent;
+  color: inherit;
+}
+
+.vol-roc-missing {
+  background: transparent;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+/* RoC pills: site-consistent green/red font color only (no background) */
+.vol-roc-positive > .vol-cell-pill {
+  background: transparent;
+  color: var(--vol-green);
+}
+
+.vol-roc-negative > .vol-cell-pill {
+  background: transparent;
+  color: var(--vol-red);
+}
+
+.vol-roc-neutral > .vol-cell-pill {
+  background: transparent;
+  color: #111827;
+}
+
+.vol-roc-missing > .vol-cell-pill {
+  background: transparent;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+/* Visual separators between RoC groups and from history block */
+.vol-roc-group-start {
+  border-left: 1px solid var(--vol-grid-sep) !important;
+}
+
+.dark .volatility-table {
+  --vol-green: #22c55e;
+  --vol-red: #ef4444;
 }
 
 .dark .volatility-table,
 .dark .volatility-table-header,
 .dark .vol-td-series {
   color: #fff;
+}
+
+.dark .volatility-table-header .vol-th,
+.dark .volatility-table-header .vol-th-series {
+  border-right-color: #4b5563;
+}
+
+.dark .vol-td-series,
+.dark .vol-cell,
+.dark .vol-roc-cell {
+  border-right-color: #374151;
 }
 
 .dark .vol-cell.green {
@@ -120,6 +283,63 @@
   color: #fff;
 }
 
+.dark .vol-th-roc-sub {
+  color: #d1d5db;
+}
+
+.dark .vol-roc-cell {
+  background: transparent;
+}
+
+.dark .vol-roc-positive {
+  background: transparent;
+  color: var(--vol-green);
+}
+
+.dark .vol-roc-negative {
+  background: transparent;
+  color: var(--vol-red);
+}
+
+.dark .vol-roc-neutral {
+  background: transparent;
+  color: #e5e7eb;
+}
+
+.dark .vol-roc-missing {
+  background: transparent;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: 500;
+  color: #9ca3af;
+}
+
+.dark .vol-roc-missing > .vol-cell-pill {
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: 500;
+  color: #9ca3af;
+}
+
+.dark .vol-roc-positive > .vol-cell-pill {
+  background: transparent;
+  color: var(--vol-green);
+}
+
+.dark .vol-roc-negative > .vol-cell-pill {
+  background: transparent;
+  color: var(--vol-red);
+}
+
+.dark .vol-roc-neutral > .vol-cell-pill {
+  background: transparent;
+  color: #e5e7eb;
+}
+
+.dark .vol-roc-group-start {
+  border-left-color: #6b7280;
+}
+
 /* Volatility - header with tabs to the right of "Volatility" */
 .volatility-tabs {
   display: flex;
@@ -131,8 +351,8 @@
   display: flex;
   align-items: center;
   padding: 6px 12px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e5e7eb;
+  background: #f3f0e6;
+  border-bottom: 1px solid #d6d0c3;
   gap: 8px;
 }
 
@@ -182,8 +402,8 @@
   font-weight: 600;
   line-height: 1;
   border-radius: 50%;
-  border: 1px solid #9ca3af;
-  background: #f8fafc;
+  border: 1px solid #b8b2a6;
+  background: #f8f6ef;
   color: #6b7280;
   cursor: pointer;
   display: flex;
@@ -193,9 +413,9 @@
 }
 
 .vol-ranges-help-btn:hover {
-  background: #e5e7eb;
+  background: #ece8df;
   color: #374151;
-  border-color: #6b7280;
+  border-color: #9b9487;
 }
 
 /* Volatility ranges popover */

@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparklines, SparklinesLine } from 'react-sparklines';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { USDMarketService } from '../../services/api/usdMarketService';
 import MarketChartCard, { prefetchChartData } from './MarketChartCard';
 import MarketVolumeTable from './MarketVolumeTable';
 import { VolatilityTableWithTabs } from './VolatilityTable';
+import USDCorrelationMatrix from './USDCorrelationMatrix';
 import { US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, isMarketHoliday } from '../../constants/globalMarkets';
+import StatusDot from '../common/StatusDot';
+import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
+import { REFRESH_INTERVALS as USD_REFRESH_INTERVALS } from '../../constants/usdMarket';
 import './MultiRegionMarketOverview.css';
 
 // Helper to check if a date is a US market holiday
@@ -195,95 +199,11 @@ const CURRENCIES_CONFIG = {
   ]
 };
 
-// IndexCard component - displays individual market index (used for currencies)
-function IndexCard({ symbol, name, value, change, changePercent, sparklineData, loading, showStatus = true, region }) {
-  // Parse change to determine if positive/negative
-  const changeNum = change ? parseFloat(change.toString().replace(/[^0-9.-]/g, '')) : 0;
-  const isPositive = changeNum >= 0;
-
-  // Check if market is currently open
-  const [marketOpen, setMarketOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    const updateMarketStatus = () => {
-      setMarketOpen(isMarketOpen(region));
-    };
-
-    updateMarketStatus();
-    const interval = setInterval(updateMarketStatus, 60000);
-    return () => clearInterval(interval);
-  }, [region]);
-
-  // Check if data is being received
-  const hasData = !loading && value && value !== '--';
-
-  // Normalize sparkline data
-  const normalizedSparklineData = React.useMemo(() => {
-    if (!sparklineData || sparklineData.length === 0) return null;
-
-    const firstValue = sparklineData[0];
-    if (!firstValue || firstValue === 0) return sparklineData;
-
-    return sparklineData.map(price => ((price - firstValue) / firstValue) * 100);
-  }, [sparklineData]);
-
-  return (
-    <div className="index-card">
-      <div className="index-name-row">
-        <div className="index-name-with-status">
-          {showStatus && (
-            <span
-              className="market-status-emoji"
-              title={marketOpen && hasData ? 'Market open - receiving data' : marketOpen ? 'Market open - no data' : 'Market closed'}
-            >
-              {marketOpen && hasData ? '🟢' : '🔴'}
-            </span>
-          )}
-          <span className="index-name">{name}</span>
-        </div>
-        <div className="index-value">
-          {loading ? '...' : value || '--'}
-        </div>
-      </div>
-
-      {/* Sparkline Chart */}
-      {!loading && normalizedSparklineData && normalizedSparklineData.length > 0 && (
-        <div className="sparkline-container">
-          <Sparklines
-            data={normalizedSparklineData}
-            width={100}
-            height={35}
-            margin={8}
-          >
-            <SparklinesLine
-              color={isPositive ? '#16a34a' : '#dc2626'}
-              style={{ strokeWidth: 0.4, fill: 'none' }}
-            />
-          </Sparklines>
-        </div>
-      )}
-
-      {/* Change */}
-      {!loading && (
-        <div className={`index-change ${isPositive ? 'positive' : 'negative'}`}>
-          <span className="arrow">{isPositive ? '▲' : '▼'}</span>
-          <span>{change || '--'}</span>
-        </div>
-      )}
-
-      {/* Percent */}
-      {!loading && (
-        <div className={`index-percent ${isPositive ? 'positive' : 'negative'}`}>
-          {changePercent ? `${changePercent}%` : '--'}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // VolumeCard - standalone card (styled like region panels)
 function VolumeCard() {
   const [usStatus, setUsStatus] = React.useState('closed');
+  const [volLastUpdated, setVolLastUpdated] = React.useState(null);
+  const [volSources, setVolSources] = React.useState([]);
   React.useEffect(() => {
     const update = () => setUsStatus(getMarketStatus('US'));
     update();
@@ -296,11 +216,38 @@ function VolumeCard() {
 
   return (
     <div className="secondary-card volume-card">
-      <div className="macro-call-header macro-call-header-simple">
-        <span className="region-status-emoji" title={statusIndicator.title}>{statusIndicator.emoji}</span>
+      <div className="region-chart-header">
+        <StatusDot
+          updatedAt={volLastUpdated}
+          status={statusIndicator.emoji === '🟢' ? 'active' : 'inactive'}
+          size={10}
+          className="mr-1"
+          label="Volume"
+          emoji={statusIndicator.emoji}
+          sources={volSources}
+        />
         <span className="region-label">Volume</span>
       </div>
-      <MarketVolumeTable />
+      <MarketVolumeTable
+        onLastUpdatedChange={setVolLastUpdated}
+        onSourcesChange={setVolSources}
+      />
+    </div>
+  );
+}
+
+// USD Correlation card - same dimensions as Volatility card
+function USDCorrelationCard({ correlations, rollingStats, correlationsTimestamp, calculationDate, loading, error }) {
+  return (
+    <div className="secondary-card usd-correlation-card">
+      <USDCorrelationMatrix
+        correlations={correlations}
+        rollingStats={rollingStats}
+        correlationsTimestamp={correlationsTimestamp}
+        calculationDate={calculationDate}
+        loading={loading}
+        error={error}
+      />
     </div>
   );
 }
@@ -359,6 +306,34 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
 
   const statusIndicator = getStatusIndicator();
 
+  // Oldest timestamp across all quotes in this region
+  const regionLastUpdated = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const timestamps = data
+      .map((d) => d?.lastUpdated || d?.timestamp || d?.chartUpdatedAt)
+      .filter(Boolean);
+    return getMinTimestamp(timestamps);
+  }, [data]);
+
+  // Per-index source breakdown for this region (one entry per symbol)
+  const regionSources = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return [];
+    const interval = SOURCE_POLL_INTERVALS.multiRegionQuotes;
+    return indices
+      .map((idx) => {
+        const idxQuote = data.find(d => d.symbol === idx.symbol);
+        const ts = idxQuote?.lastUpdated || idxQuote?.timestamp || idxQuote?.chartUpdatedAt;
+        if (!ts) return null;
+        return {
+          id: idx.symbol,
+          label: `${idx.name} (${idx.symbol})`,
+          updatedAt: ts,
+          status: getSourceFreshness(ts, interval)
+        };
+      })
+      .filter(Boolean);
+  }, [data, indices]);
+
   // Helper to get change data for an index
   const getIndexChange = (symbol) => {
     const indexQuote = data?.find(d => d.symbol === symbol);
@@ -373,26 +348,38 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
   return (
     <div className="region-chart-panel">
       <div className="region-chart-header">
-        <span className="region-status-emoji" title={statusIndicator.title}>{statusIndicator.emoji}</span>
-        <span className="region-label">{label}</span>
-        <div className="index-tabs">
-          {indices.map((idx, i) => {
-            const change = getIndexChange(idx.symbol);
-            return (
-              <button
-                key={idx.symbol}
-                className={`index-tab ${i === selectedIndex ? 'active' : ''}`}
-                onClick={() => onSelectIndex(regionKey, i)}
-              >
-                <span className="index-tab-name">{idx.name}</span>
-                {change && (
-                  <span className={`index-tab-change ${change.isPositive ? 'positive' : 'negative'}`}>
-                    {change.isPositive ? '▲' : '▼'}{change.percent}%
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        <div className="region-header-left">
+          <StatusDot
+            updatedAt={regionLastUpdated}
+            status={statusIndicator.emoji === '🟢' ? 'active' : statusIndicator.emoji === '🔵' ? 'stale' : 'inactive'}
+            size={10}
+            className="mr-1"
+            label={`${label} region`}
+            emoji={statusIndicator.emoji}
+            sources={regionSources}
+          />
+          <span className="region-label">{label}</span>
+        </div>
+        <div className="region-header-right">
+          <div className="index-tabs">
+            {indices.map((idx, i) => {
+              const change = getIndexChange(idx.symbol);
+              return (
+                <button
+                  key={idx.symbol}
+                  className={`index-tab ${i === selectedIndex ? 'active' : ''}`}
+                  onClick={() => onSelectIndex(regionKey, i)}
+                >
+                  <span className="index-tab-name">{idx.name}</span>
+                  {change && (
+                    <span className={`index-tab-change ${change.isPositive ? 'positive' : 'negative'}`}>
+                      {change.isPositive ? '▲' : '▼'}{change.percent}%
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
       <MarketChartCard
@@ -410,32 +397,8 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
   );
 }
 
-// Time range options for currencies
-const CURRENCY_TIME_RANGES = [
-  { key: '1d', label: '1D' },
-  { key: '5d', label: '5D' },
-  { key: '1mo', label: '1M' },
-  { key: '3mo', label: '3M' },
-  { key: '6mo', label: '6M' },
-  { key: '1y', label: '1Y' }
-];
-
-// CurrenciesPanel component - displays mini currency cards
+// CurrenciesPanel component - table with Ticker, Price, 1-Day % Chg, MTD/QTD/YTD % Chg
 function CurrenciesPanel({ data, loading }) {
-  const [range, setRange] = React.useState('1d');
-
-  // Helper to get change data
-  const getIndexChange = (symbol) => {
-    const indexQuote = data?.find(d => d.symbol === symbol);
-    if (!indexQuote?.changePercent) return null;
-    const changeNum = parseFloat(indexQuote.changePercent.toString().replace(/[^0-9.-]/g, ''));
-    return {
-      percent: indexQuote.changePercent,
-      isPositive: changeNum >= 0
-    };
-  };
-
-  // Currencies (Forex) status - 24/5
   const [currenciesStatus, setCurrenciesStatus] = React.useState('closed');
   React.useEffect(() => {
     const update = () => setCurrenciesStatus(getMarketStatus('Currencies'));
@@ -443,61 +406,106 @@ function CurrenciesPanel({ data, loading }) {
     const interval = setInterval(update, 60000);
     return () => clearInterval(interval);
   }, []);
-  const currStatus = currenciesStatus === 'open' ? { emoji: '🟢', title: 'Market open' } : { emoji: '🔴', title: 'Market closed' };
+  const currStatus = currenciesStatus === 'open'
+    ? { emoji: '🟢', title: 'Market open' }
+    : { emoji: '🔴', title: 'Market closed' };
+
+  const currenciesLastUpdated = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const timestamps = data
+      .map((q) => q?.timestamp || q?.lastUpdated)
+      .filter(Boolean);
+    return getMinTimestamp(timestamps);
+  }, [data]);
+
+  const currencySources = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return [];
+    const interval = SOURCE_POLL_INTERVALS.currenciesQuotes || SOURCE_POLL_INTERVALS.multiRegionQuotes;
+    return CURRENCIES_CONFIG.indices
+      .map((idx) => {
+        const idxQuote = data.find(d => d.symbol === idx.symbol);
+        const ts = idxQuote?.lastUpdated || idxQuote?.timestamp;
+        if (!ts) return null;
+        return {
+          id: idx.symbol,
+          label: `${idx.name} (${idx.symbol})`,
+          updatedAt: ts,
+          status: getSourceFreshness(ts, interval)
+        };
+      })
+      .filter(Boolean);
+  }, [data]);
+
+  const formatPct = (val) => {
+    if (val == null || val === '' || val === '--') return '--';
+    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+    if (Number.isNaN(num)) return '--';
+    return `${num}%`;
+  };
 
   return (
     <div className="currencies-panel">
       <div className="currencies-header">
         <div className="currencies-header-left">
-          <span className="region-status-emoji" title={currStatus.title}>{currStatus.emoji}</span>
+        <StatusDot
+          updatedAt={currenciesLastUpdated}
+          status={currenciesStatus === 'open' ? 'active' : 'inactive'}
+          size={10}
+          className="mr-1"
+          label="Currencies"
+          emoji={currStatus.emoji}
+          sources={currencySources}
+        />
           <span className="currencies-title">Currencies</span>
-          <div className="currencies-header-indices">
-            {CURRENCIES_CONFIG.indices.map((idx) => {
-              const change = getIndexChange(idx.symbol);
-              return (
-                <div key={idx.symbol} className="currency-header-item">
-                  <span className="currency-header-name">{idx.name}</span>
-                  {change && (
-                    <span className={`currency-header-change ${change.isPositive ? 'positive' : 'negative'}`}>
-                      {change.isPositive ? '▲' : '▼'}{change.percent}%
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <div className="currencies-range-selector">
-          {CURRENCY_TIME_RANGES.map(({ key, label }) => (
-            <button
-              key={key}
-              className={`currency-range-btn ${range === key ? 'active' : ''}`}
-              onClick={() => setRange(key)}
-              title={`Show ${label} data`}
-            >
-              {label}
-            </button>
-          ))}
         </div>
       </div>
-      <div className="currencies-grid">
-        {CURRENCIES_CONFIG.indices.map((index) => {
-          const quote = data?.find(d => d.symbol === index.symbol);
-          return (
-            <IndexCard
-              key={index.symbol}
-              symbol={index.symbol}
-              name={index.name}
-              value={quote?.price}
-              change={quote?.change}
-              changePercent={quote?.changePercent}
-              sparklineData={quote?.sparklineData}
-              loading={loading}
-              showStatus={true}
-              region="Currencies"
-            />
-          );
-        })}
+      <div className="currencies-table-wrap">
+        <table className="currencies-table">
+          <thead>
+            <tr>
+              <th className="currencies-th currencies-th-ticker">Ticker</th>
+              <th className="currencies-th currencies-th-price">Price</th>
+              <th className="currencies-th currencies-th-pct">
+                <span className="currencies-th-split">1-Day %</span>
+                <span className="currencies-th-split">Chg</span>
+              </th>
+              <th className="currencies-th currencies-th-pct">
+                <span className="currencies-th-split">MTD %</span>
+                <span className="currencies-th-split">Chg</span>
+              </th>
+              <th className="currencies-th currencies-th-pct">
+                <span className="currencies-th-split">QTD %</span>
+                <span className="currencies-th-split">Chg</span>
+              </th>
+              <th className="currencies-th currencies-th-pct">
+                <span className="currencies-th-split">YTD %</span>
+                <span className="currencies-th-split">Chg</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {CURRENCIES_CONFIG.indices.map((index) => {
+              const quote = data?.find(d => d.symbol === index.symbol);
+              const price = loading ? '...' : (quote?.price != null ? String(quote.price) : '--');
+              const changePercent = quote?.changePercent;
+              const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
+              const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
+              const hasChange = Number.isFinite(parsedChange);
+              return (
+                <tr key={index.symbol} className="currencies-tr">
+                  <td className="currencies-td currencies-td-ticker">{index.name}</td>
+                  <td className="currencies-td currencies-td-price">{price}</td>
+                  <td className={`currencies-td currencies-td-pct ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}>
+                    {loading ? '...' : formatPct(changePercent)}
+                  </td>
+                  <td className="currencies-td currencies-td-pct">--</td>
+                  <td className="currencies-td currencies-td-pct">--</td>
+                  <td className="currencies-td currencies-td-pct">--</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -509,6 +517,15 @@ export default function MultiRegionMarketOverview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const prefetchedRef = useRef(false);
+  // USD correlation data for the USD Correlation card (right stack)
+  const [correlationData, setCorrelationData] = useState({
+    correlations: null,
+    rollingStats: null,
+    correlationsTimestamp: null,
+    calculationDate: null
+  });
+  const [correlationLoading, setCorrelationLoading] = useState(true);
+  const [correlationError, setCorrelationError] = useState(null);
   // Track which index is selected for each region (default to first index = 0)
   const [selectedIndices, setSelectedIndices] = useState({
     us: 0,
@@ -539,13 +556,43 @@ export default function MultiRegionMarketOverview() {
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 8000); // 8s polling (matches backend cache)
+    const interval = setInterval(fetchMarketData, 30000); // 30s polling to reduce provider throttling
     return () => clearInterval(interval);
+  }, []);
+
+  // Fetch USD correlation data for the USD Correlation card
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCorrelations = async () => {
+      try {
+        setCorrelationError(null);
+        const data = await USDMarketService.getCorrelations();
+        if (cancelled) return;
+        setCorrelationData({
+          correlations: data.correlations ?? null,
+          rollingStats: data.rollingStats ?? null,
+          correlationsTimestamp: data.timestamp ?? null,
+          calculationDate: data.calculationDate ?? null
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setCorrelationError(err.message || 'Failed to load correlation data');
+        }
+      } finally {
+        if (!cancelled) setCorrelationLoading(false);
+      }
+    };
+    fetchCorrelations();
+    const interval = setInterval(fetchCorrelations, USD_REFRESH_INTERVALS.CORRELATIONS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const fetchMarketData = async () => {
     try {
-      const data = await MarketDataService.getMultiRegionQuotes();
+      const data = await MarketDataService.getMultiRegionQuotes(null, false);
       setMarketData(data);
       setLoading(false);
       setError(null);
@@ -600,14 +647,24 @@ export default function MultiRegionMarketOverview() {
         ))}
       </div>
 
-      {/* Secondary Section - Currencies & Liquidity */}
+      {/* Secondary Section - Left: Currencies + Volume; Right: USD Correlations + Volatility */}
       <div className="secondary-markets-section">
-        <CurrenciesPanel
-          data={marketData.currencies}
-          loading={loading}
-        />
-        <div className="secondary-cards-stack">
+        <div className="secondary-left-column">
+          <CurrenciesPanel
+            data={marketData.currencies}
+            loading={loading}
+          />
           <VolumeCard />
+        </div>
+        <div className="secondary-cards-stack">
+          <USDCorrelationCard
+            correlations={correlationData.correlations}
+            rollingStats={correlationData.rollingStats}
+            correlationsTimestamp={correlationData.correlationsTimestamp}
+            calculationDate={correlationData.calculationDate}
+            loading={correlationLoading}
+            error={correlationError}
+          />
           <VolatilityCard />
         </div>
       </div>

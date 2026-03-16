@@ -9,6 +9,8 @@ import {
   ReferenceLine
 } from 'recharts';
 import { MarketDataService } from '../../services/api/marketDataService';
+import StatusDot from '../common/StatusDot';
+import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
 import './MarketChartCard.css';
 
 // Time range options
@@ -221,12 +223,63 @@ const MarketChartCard = ({
   const currentChange = chartData?.current?.change || initialData?.change || '--';
   const currentChangePercent = chartData?.current?.changePercent || initialData?.changePercent || '--';
 
+  const chartUpdatedAt = useMemo(() => {
+    if (chartData?.meta?.lastUpdated) {
+      return chartData.meta.lastUpdated;
+    }
+    if (chartData?.chartData && chartData.chartData.length > 0) {
+      const lastPoint = chartData.chartData[chartData.chartData.length - 1];
+      return lastPoint.timestamp;
+    }
+    return null;
+  }, [chartData]);
+
+  const quoteUpdatedAt = useMemo(() => {
+    return chartData?.current?.timestamp || null;
+  }, [chartData]);
+
+  const sources = useMemo(() => {
+    const result = [];
+    if (chartUpdatedAt) {
+      result.push({
+        id: 'chart',
+        label: 'Chart data',
+        updatedAt: chartUpdatedAt,
+        status: getSourceFreshness(chartUpdatedAt, SOURCE_POLL_INTERVALS.chartData)
+      });
+    }
+    if (quoteUpdatedAt) {
+      result.push({
+        id: 'quote',
+        label: 'Current quote',
+        updatedAt: quoteUpdatedAt,
+        status: getSourceFreshness(quoteUpdatedAt, SOURCE_POLL_INTERVALS.multiRegionQuotes)
+      });
+    }
+    return result;
+  }, [chartUpdatedAt, quoteUpdatedAt]);
+
+  const lastUpdated = useMemo(() => {
+    if (sources.length === 0) return null;
+    return getMinTimestamp(sources.map((s) => s.updatedAt));
+  }, [sources]);
+
   return (
     <div className={`market-chart-card ${isPositive ? 'positive' : 'negative'}`}>
       {/* Header */}
       <div className="chart-header">
         <div className="chart-header-left">
-          {!hideStatus && <span className="chart-status-emoji">{marketIsOpen ? '🟢' : '🔴'}</span>}
+          {!hideStatus && lastUpdated && (
+            <StatusDot
+              updatedAt={lastUpdated}
+              status={marketIsOpen ? 'active' : 'inactive'}
+              size={10}
+              className="mr-1"
+              label={name || symbol}
+              emoji={marketIsOpen ? '🟢' : '🔴'}
+              sources={sources}
+            />
+          )}
           <span className="chart-symbol">{name || symbol}</span>
         </div>
         <div className="chart-header-right">

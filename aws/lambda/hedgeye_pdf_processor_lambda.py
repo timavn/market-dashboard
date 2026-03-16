@@ -33,6 +33,8 @@ from parse_early_look import extract_early_look, save_to_dynamodb as save_early_
 from parse_portfolio_solutions import extract_portfolio_solutions, save_to_dynamodb as save_portfolio
 from parse_momo_tracker import extract_momo_tracker, save_to_dynamodb as save_momo
 from parse_signal_strength import extract_signal_strength, save_to_dynamodb as save_signal
+from parse_macro_show import extract_macro_show, save_to_dynamodb as save_macro_show
+from parse_the_call import extract_the_call, save_to_dynamodb as save_the_call
 
 # Initialize AWS clients
 s3 = boto3.client('s3')
@@ -53,6 +55,10 @@ def detect_pdf_type(filename):
         return 'momo-tracker'
     elif 'signal' in filename_lower or 'strength' in filename_lower:
         return 'signal-strength'
+    elif 'macro' in filename_lower and ('show' in filename_lower or 'summary' in filename_lower):
+        return 'the-macro-show'
+    elif 'call' in filename_lower and ('hedgeye' in filename_lower or 'summary' in filename_lower or 'replay' in filename_lower):
+        return 'the-call'
     else:
         return None
 
@@ -139,6 +145,20 @@ def lambda_handler(event, context):
                 save_signal(data, pdf_s3_key=s3_key, pdf_date=pdf_date)
             else:
                 print("❌ No data extracted from Signal Strength")
+
+        elif pdf_type == 'the-macro-show':
+            data = extract_macro_show(temp_pdf_path, s3_key=s3_key)
+            if data:
+                save_macro_show(data, pdf_s3_key=s3_key, pdf_date=pdf_date)
+            else:
+                print("❌ No data extracted from Macro Show")
+
+        elif pdf_type == 'the-call':
+            data = extract_the_call(temp_pdf_path, s3_key=s3_key)
+            if data:
+                save_the_call(data, pdf_s3_key=s3_key, pdf_date=pdf_date)
+            else:
+                print("❌ No data extracted from The Call")
 
         # Clean up temp file
         os.remove(temp_pdf_path)

@@ -193,7 +193,7 @@ export class MarketDataService {
   }
 
   // Get multi-region market quotes (US, Europe, Asia, Crypto, Rates)
-  static async getMultiRegionQuotes(regions = null, includeSparklines = true) {
+  static async getMultiRegionQuotes(regions = null, includeSparklines = false) {
     try {
       const params = {};
       if (regions) {
@@ -220,6 +220,22 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching volume data:', error);
+      throw error;
+    }
+  }
+
+  // Get Market Share Volume & Total Exchange Volume series
+  // Returns aligned daily volume arrays for:
+  // - totalMarket: proxied by VTI
+  // - totalExchange: proxied by SPY + QQQ + IWM combined
+  static async getMarketShareVolume(days = 365) {
+    try {
+      const response = await apiClient.get(ENDPOINTS.MARKET_SHARE_VOLUME, {
+        params: { days }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching market share volume data:', error);
       throw error;
     }
   }
@@ -335,6 +351,23 @@ export class MarketDataService {
       console.error('Error fetching all risk range history:', error);
       // Fallback to empty object
       return {};
+    }
+  }
+
+  // Get Hedgeye snapshot data by type (e.g. 'the-macro-show', 'the-call')
+  // Optional date format: YYYY-MM-DD
+  static async getHedgeyeSnapshot(snapshotType, date = null) {
+    try {
+      const params = date ? { date } : undefined;
+      const response = await apiClient.get(
+        `/api/hedgeye/snapshot/${encodeURIComponent(snapshotType)}`,
+        { params }
+      );
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) return null;
+      console.error(`Error fetching Hedgeye snapshot ${snapshotType}:`, error);
+      return null;
     }
   }
 

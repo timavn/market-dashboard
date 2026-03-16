@@ -144,23 +144,36 @@ describe('MarketChartCard Component', () => {
       expect(validRanges.length).toBe(6);
     });
 
-    test('should handle unavailable ranges for Treasury yields', async () => {
+    test('should support 1d and 5d ranges for Treasury yields', async () => {
       const treasuryResponse = {
         symbol: 'UST10Y',
         name: 'UST10Y',
-        error: 'Intraday data not available for Treasury yields',
-        availableRanges: ['1mo', '3mo', '6mo', '1y'],
-        chartData: []
+        source: 'yahoo',
+        current: {
+          price: '4.05',
+          change: '0.02',
+          changePercent: '0.50',
+          previousClose: '4.03'
+        },
+        chartData: [
+          { timestamp: 1705400400000, close: 4.01 },
+          { timestamp: 1705404000000, close: 4.03 },
+          { timestamp: 1705407600000, close: 4.05 }
+        ],
+        meta: {
+          range: '1d',
+          interval: '5m',
+          dataPoints: 3
+        },
+        availableRanges: ['1d', '5d', '1mo', '3mo', '6mo', '1y']
       };
 
       MarketDataService.getChartData.mockResolvedValue(treasuryResponse);
 
       const result = await MarketDataService.getChartData('UST10Y', '1d');
 
-      expect(result.error).toBeDefined();
-      expect(result.availableRanges).not.toContain('1d');
-      expect(result.availableRanges).not.toContain('5d');
-      expect(result.availableRanges).toContain('1mo');
+      expect(result.availableRanges).toContain('1d');
+      expect(result.availableRanges).toContain('5d');
     });
   });
 

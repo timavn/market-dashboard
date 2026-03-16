@@ -11,10 +11,10 @@ export const DATA_SOURCES = {
 };
 
 // Treasury Yield FRED Series IDs
+// Note: UST2Y, UST10Y, and UST30Y now use Yahoo Finance rate indices
+// for intraday/1D/5D chart support, so they are intentionally NOT
+// included here anymore.
 const FRED_SERIES = {
-  'UST30Y': 'DGS30',  // 30-Year Treasury Constant Maturity Rate
-  'UST10Y': 'DGS10',  // 10-Year Treasury Constant Maturity Rate
-  'UST2Y': 'DGS2',    // 2-Year Treasury Constant Maturity Rate
 };
 
 // Yahoo Finance ticker format mappings
@@ -64,6 +64,13 @@ const YAHOO_TICKER_MAP = {
   
   // Additional indices/commodities
   'CRB': '^CRB',       // CRB Commodity Index
+  // Rates (CBOE Treasury yield indices)
+  // Yahoo reports these as yield * 10 (e.g., 4.05% ≈ 40.5)
+  'UST10Y': '^TNX',    // 10-Year Treasury Yield Index
+  'UST30Y': '^TYX',    // 30-Year Treasury Yield Index
+  // For 2-year, we currently proxy with the 5-year index due to
+  // Yahoo symbol limitations; adjust if a dedicated 2Y index is added.
+  'UST2Y': '^FVX',
 };
 
 /**

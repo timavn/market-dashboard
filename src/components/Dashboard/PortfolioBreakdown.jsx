@@ -1581,9 +1581,9 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             position: 'sticky',
             top: 0,
             zIndex: 10,
-            backgroundColor: 'white',
+            backgroundColor: '#f8f6ef',
             padding: '6px 12px',
-            borderBottom: '1px solid #E5E7EB',
+            borderBottom: '1px solid #d6d0c3',
             marginBottom: '12px'
           }}
           className="dark:bg-gray-900 dark:border-gray-700"
@@ -1615,7 +1615,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
               </div>
               {showFactorExposureInfo && (
                 <div
-                  className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg"
+                  className="absolute z-50 mt-2 p-3 bg-[#fcfaf5] dark:bg-gray-800 border border-[#d6d0c3] dark:border-gray-700 rounded-lg shadow-lg"
                   style={{
                     maxWidth: '400px',
                     maxHeight: '500px',
@@ -1628,7 +1628,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   <Text className="text-xs font-semibold mb-2 block dark:text-white">Factor Definitions</Text>
                   <div className="space-y-3">
                     {Object.entries(FACTOR_DEFINITIONS.factors).map(([factorName, factorData]) => (
-                      <div key={factorName} className="border-b border-gray-200 dark:border-gray-700 pb-2 last:border-b-0">
+                      <div key={factorName} className="border-b border-[#d6d0c3] dark:border-gray-700 pb-2 last:border-b-0">
                         <Text className="text-xs font-semibold dark:text-white">{factorData.title || factorName}</Text>
                         <Text className="text-xs text-gray-600 dark:text-gray-400 mt-1 block">
                           {factorData.description}
@@ -1658,7 +1658,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             </div>
 
             {/* Middle Column - Basis Points */}
-            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-[#f3f0e6] dark:bg-gray-800 rounded border border-[#d6d0c3] dark:border-gray-700">
               <div className="font-medium text-gray-700 dark:text-gray-300" style={{ marginBottom: '2px' }}>Basis Points:</div>
               <div className="grid grid-cols-2 gap-x-2">
                 <div>25: ${Math.floor(totalValue * 0.0025).toLocaleString()}</div>
@@ -1711,7 +1711,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         <div style={{ marginBottom: '32px' }}>
           {/* Shared Header with Long/Short counts and net percentage */}
           <div
-            className="mb-4 rounded-lg p-4 bg-white dark:bg-gray-800"
+            className="mb-4 rounded-lg p-4 bg-[#fcfaf5] dark:bg-gray-800"
             style={{
               border: `1px solid ${netLongShortPercentage >= 0 ? '#10B981' : '#EF4444'}`,
               boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
@@ -1746,7 +1746,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
             {/* Longs Section */}
-            <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0 }}>
+            <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0, backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
               {/* Longs Banner */}
               <div style={{
                 textAlign: 'center',
@@ -1909,8 +1909,8 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                             border: '1px solid #d1d5db',
                             borderRadius: '4px',
                             cursor: 'pointer',
-                            backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
-                            color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
+                            backgroundColor: columnVisibility[col.key] ? '#8b7e6a' : '#f3f0e6',
+                            color: columnVisibility[col.key] ? '#fff' : '#6b7280',
                             fontWeight: columnVisibility[col.key] ? '600' : '400',
                             transition: 'all 0.2s',
                             outline: 'none'
@@ -1918,13 +1918,13 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                           className="dark:border-gray-600 hover:opacity-80"
                           onMouseEnter={(e) => {
                             if (!columnVisibility[col.key]) {
-                              e.target.style.backgroundColor = '#e5e7eb';
+                              e.target.style.backgroundColor = '#d6d0c3';
                               e.target.style.color = '#374151';
                             }
                           }}
                           onMouseLeave={(e) => {
                             if (!columnVisibility[col.key]) {
-                              e.target.style.backgroundColor = '#f3f4f6';
+                              e.target.style.backgroundColor = '#f3f0e6';
                               e.target.style.color = '#6b7280';
                             }
                           }}
@@ -1936,7 +1936,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
                     <thead>
-                      <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
+                      <tr style={{ borderBottom: '2px solid #d6d0c3' }} className="dark:border-gray-700">
                         <th
                           style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
                           className="dark:text-white"
@@ -1960,7 +1960,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                           <tr
                             key={index}
                             style={{
-                              borderBottom: '1px solid #e5e7eb'
+                              borderBottom: '1px solid #d6d0c3'
                             }}
                             className="dark:border-gray-700"
                           >
@@ -1991,7 +1991,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             </Card>
 
             {/* Shorts Section */}
-            <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0 }}>
+            <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0, backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
               {/* Shorts Banner */}
               <div style={{
                 textAlign: 'center',
@@ -2152,8 +2152,8 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                             border: '1px solid #d1d5db',
                             borderRadius: '4px',
                             cursor: 'pointer',
-                            backgroundColor: columnVisibility[col.key] ? '#3b82f6' : '#f3f4f6',
-                            color: columnVisibility[col.key] ? '#ffffff' : '#6b7280',
+                            backgroundColor: columnVisibility[col.key] ? '#8b7e6a' : '#f3f0e6',
+                            color: columnVisibility[col.key] ? '#fff' : '#6b7280',
                             fontWeight: columnVisibility[col.key] ? '600' : '400',
                             transition: 'all 0.2s',
                             outline: 'none'
@@ -2161,13 +2161,13 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                           className="dark:border-gray-600 hover:opacity-80"
                           onMouseEnter={(e) => {
                             if (!columnVisibility[col.key]) {
-                              e.target.style.backgroundColor = '#e5e7eb';
+                              e.target.style.backgroundColor = '#d6d0c3';
                               e.target.style.color = '#374151';
                             }
                           }}
                           onMouseLeave={(e) => {
                             if (!columnVisibility[col.key]) {
-                              e.target.style.backgroundColor = '#f3f4f6';
+                              e.target.style.backgroundColor = '#f3f0e6';
                               e.target.style.color = '#6b7280';
                             }
                           }}
@@ -2179,7 +2179,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
                     <thead>
-                      <tr style={{ borderBottom: '2px solid #e5e7eb' }} className="dark:border-gray-700">
+                      <tr style={{ borderBottom: '2px solid #d6d0c3' }} className="dark:border-gray-700">
                         <th
                           style={{ padding: '6px', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none', width: '12%', position: 'relative' }}
                           className="dark:text-white"
@@ -2203,7 +2203,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                           <tr
                             key={index}
                             style={{
-                              borderBottom: '1px solid #e5e7eb'
+                              borderBottom: '1px solid #d6d0c3'
                             }}
                             className="dark:border-gray-700"
                           >
@@ -2241,8 +2241,8 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         </div>
 
         {/* Portfolio performance chart: very bottom, full width */}
-        <div className="mt-6 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden" style={{ width: '100%' }}>
-          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+        <div className="mt-6 w-full min-w-0 rounded-lg border border-[#d6d0c3] dark:border-gray-700 bg-[#fcfaf5] dark:bg-gray-800 overflow-hidden" style={{ width: '100%' }}>
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-[#d6d0c3] dark:border-gray-700">
             {PERFORMANCE_RANGES.map((range) => (
               <button
                 key={range}
@@ -2250,8 +2250,8 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                 onClick={() => setPerformanceRange(range)}
                 className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
                   performanceRange === range
-                    ? 'bg-blue-600 text-white border-blue-600 dark:bg-blue-500'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    ? 'bg-[#8b7e6a] text-white border-[#8b7e6a] dark:bg-blue-500'
+                    : 'bg-[#fcfaf5] dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-[#d6d0c3] dark:border-gray-600 hover:bg-[#efe9dc] dark:hover:bg-gray-700'
                 }`}
               >
                 {range}

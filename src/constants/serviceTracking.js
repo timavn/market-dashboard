@@ -5,15 +5,51 @@ export const SERVICE_CONFIG = {
   // Internal API Endpoints
   internal: {
     quotes: {
-      name: 'Market Quotes API',
+      name: 'Signal Strength Quotes API',
       endpoint: '/api/quotes',
-      description: 'Real-time price quotes for securities',
-      updateFrequency: '8 seconds',
-      updateFrequencyMs: 8000,
-      estimatedCallsPerDay: 10800, // 8 seconds = 7.5 calls/min = 450 calls/hour = 10,800 calls/day (12 hours)
-      estimatedCallsPerMonth: 324000, // 10,800 * 30
+      description: 'Securities list spot quotes',
+      updateFrequency: '30 seconds',
+      updateFrequencyMs: 30000,
+      estimatedCallsPerDay: 1440, // 30 seconds = 2 calls/min = 120 calls/hour = 1,440 calls/day (12 hours)
+      estimatedCallsPerMonth: 43200, // 1,440 * 30
       costPerCall: 0,
       dataSource: 'Yahoo Finance / FRED',
+      status: 'active'
+    },
+    multiRegionQuotes: {
+      name: 'Multi-Region Overview API',
+      endpoint: '/api/multi-region-quotes',
+      description: 'Global markets + currencies overview panel',
+      updateFrequency: '30 seconds (sparklines off by default)',
+      updateFrequencyMs: 30000,
+      estimatedCallsPerDay: 1440, // 30 seconds = 120 calls/hour = 1,440 calls/day (12 hours)
+      estimatedCallsPerMonth: 43200, // 1,440 * 30
+      costPerCall: 0,
+      dataSource: 'Yahoo Finance / FRED',
+      status: 'active'
+    },
+    macroIndicators: {
+      name: 'Macro Indicators API',
+      endpoint: '/api/macro-indicators',
+      description: 'Top-row macro metrics (DXY, rates, commodities, indices)',
+      updateFrequency: '30 seconds',
+      updateFrequencyMs: 30000,
+      estimatedCallsPerDay: 1440,
+      estimatedCallsPerMonth: 43200,
+      costPerCall: 0,
+      dataSource: 'Yahoo Finance / FRED',
+      status: 'active'
+    },
+    volatilitySnapshot: {
+      name: 'Volatility Snapshot API',
+      endpoint: '/api/volatility-snapshot',
+      description: 'VIX/VVIX/RVX/VXN/GVZ/OVX/MOVE table snapshot',
+      updateFrequency: '1 minute',
+      updateFrequencyMs: 60 * 1000,
+      estimatedCallsPerDay: 1440,
+      estimatedCallsPerMonth: 43200,
+      costPerCall: 0,
+      dataSource: 'Yahoo Finance',
       status: 'active'
     },
     riskRanges: {
@@ -56,12 +92,24 @@ export const SERVICE_CONFIG = {
       name: 'USD Macro Dashboard API',
       endpoint: '/api/usd/*',
       description: 'DXY, currency pairs, correlations',
-      updateFrequency: '5 minutes (DXY), 15 minutes (Dashboard)',
-      updateFrequencyMs: 5 * 60 * 1000,
-      estimatedCallsPerDay: 288, // 5 min = 12 calls/hour * 24 hours
-      estimatedCallsPerMonth: 8640,
+      updateFrequency: '15 minutes (dashboard refresh)',
+      updateFrequencyMs: 15 * 60 * 1000,
+      estimatedCallsPerDay: 96, // 15 min = 4 calls/hour * 24 hours
+      estimatedCallsPerMonth: 2880,
       costPerCall: 0,
       dataSource: 'Yahoo Finance / FRED → DynamoDB',
+      status: 'active'
+    },
+    hedgeyeSnapshot: {
+      name: 'Hedgeye Snapshot API',
+      endpoint: '/api/hedgeye/snapshot/:type',
+      description: 'Latest Macro Show / The Call snapshot payloads',
+      updateFrequency: 'On load / On-demand',
+      updateFrequencyMs: null,
+      estimatedCallsPerDay: 20,
+      estimatedCallsPerMonth: 600,
+      costPerCall: 0,
+      dataSource: 'DynamoDB (HedgeyeDailySnapshot)',
       status: 'active'
     },
     workflowStatus: {
@@ -84,14 +132,14 @@ export const SERVICE_CONFIG = {
       name: 'Yahoo Finance',
       provider: 'Yahoo',
       description: 'Free market data (quotes, historical prices)',
-      updateFrequency: 'Real-time (via polling)',
+      updateFrequency: 'Polled (8s/30s/60s/15m depending on panel)',
       rateLimit: 'No official limit (be respectful)',
-      estimatedCallsPerDay: 10800, // Same as quotes API
-      estimatedCallsPerMonth: 324000,
+      estimatedCallsPerDay: 24156, // Aggregate estimate across active quote-heavy panels
+      estimatedCallsPerMonth: 724680,
       costPerCall: 0,
       costPerMonth: 0,
       status: 'active',
-      notes: 'Free, no API key required'
+      notes: 'Free, no API key required; keep cadence conservative to avoid throttling'
     },
     fred: {
       name: 'FRED (Federal Reserve)',

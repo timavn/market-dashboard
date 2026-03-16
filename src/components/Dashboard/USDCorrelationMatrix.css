@@ -1,337 +1,225 @@
-/* USD Correlation Matrix Styles - Neobrutalism */
+/* USD Correlations - light-mode report/table style */
+.usd-correlation-panel {
+  --vol-grid-border: #c9c3b6;
+  --vol-grid-border-soft: #ddd7cb;
+  --vol-grid-sep: #b7b1a4;
+  --vol-green: #16a34a;
+  --vol-red: #dc2626;
+  --usd-metric-col: 128px;
+  --usd-period-col: 66px;
+  --usd-rolling-col: 72px;
+  --usd-section-gap: 10px;
 
-.correlation-matrix-container {
-  background: #FFA500;
-  border: 6px solid #000000;
-  padding: 16px;
-  box-shadow: 8px 8px 0px 0px #000000;
-  margin-bottom: 16px;
-  border-radius: 0.5rem;
-}
-
-.correlation-matrix-header {
-  margin-bottom: 16px;
-  text-align: center;
-}
-
-.correlation-matrix-header h3 {
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 900;
-  color: #000000;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-}
-
-.correlation-matrix-header .subtitle {
-  margin: 0;
-  font-size: 11px;
-  color: #000000;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.correlation-matrix {
-  overflow-x: auto;
-  margin-bottom: 12px;
-}
-
-.correlation-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 11px;
-  min-width: 500px;
-  font-weight: 800;
-}
-
-.correlation-table th,
-.correlation-table td {
-  padding: 8px 6px;
-  text-align: center;
-  border: 3px solid #000000;
-}
-
-/* Header styling */
-.header-row th {
-  background-color: #000000;
-  font-weight: 900;
-  color: #FFFFFF;
+  background: #f8f6ef;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  border: 1px solid #d6d0c3;
+  min-width: 0;
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  color: #000;
 }
 
-.subheader-row th {
-  background-color: #FFFFFF;
-  font-weight: 900;
-  color: #000000;
-  font-size: 9px;
-  border-top: none;
-}
-
-.metric-column {
-  text-align: left !important;
-  font-weight: 900;
-  min-width: 70px;
-  background: #FFF9E6 !important;
-}
-
-.period-column {
-  min-width: 40px;
-}
-
-.rolling-header {
-  background-color: #000000 !important;
-  font-weight: 900;
-  color: #FFFFFF;
-}
-
-.rolling-subheader {
-  background-color: #FFFFFF !important;
-  font-weight: 900;
-  color: #000000;
-  min-width: 50px;
-}
-
-/* Data rows */
-.data-row {
-  background-color: #FFF9E6;
-}
-
-.data-row:nth-child(even) {
-  background-color: #FFFF00;
-}
-
-.data-row:hover {
-  background-color: #00FFFF;
-  transform: scale(1.02);
-}
-
-.metric-name {
-  text-align: left !important;
-  font-weight: 900;
-  color: #000000;
-  font-size: 10px;
-}
-
-/* Correlation cell styling */
-.correlation-cell {
-  font-weight: 900;
-  font-size: 10px;
-  cursor: pointer;
-  transition: all 0.1s ease;
-  border: 3px solid #000000;
-}
-
-.correlation-cell:hover {
-  transform: scale(1.1);
-  box-shadow: 4px 4px 0px 0px #000000;
-  z-index: 10;
-  position: relative;
-}
-
-/* Color coding for correlations - Bright Neobrutalism Colors */
-.correlation-cell.positive-strong {
-  background-color: #00FF00;
-  color: #000000;
-  border-color: #000000;
-}
-
-.correlation-cell.positive-weak {
-  background-color: #FFFF00;
-  color: #000000;
-  border-color: #000000;
-}
-
-.correlation-cell.neutral {
-  background-color: #FFF9E6;
-  color: #000000;
-  border-color: #000000;
-}
-
-.correlation-cell.negative-weak {
-  background-color: #FFA500;
-  color: #000000;
-  border-color: #000000;
-}
-
-.correlation-cell.negative-medium {
-  background-color: #FF00FF;
-  color: #000000;
-  border-color: #000000;
-}
-
-.correlation-cell.negative-strong {
-  background-color: #FF0000;
-  color: #FFFFFF;
-  border-color: #000000;
-}
-
-/* Rolling statistics */
-.rolling-stat {
-  font-size: 9px;
-  font-weight: 900;
-}
-
-.rolling-stat.high {
-  color: #000000;
-  background: #00FF00;
-  padding: 2px 4px;
-  border: 2px solid #000000;
-}
-
-.rolling-stat.low {
-  color: #FFFFFF;
-  background: #FF0000;
-  padding: 2px 4px;
-  border: 2px solid #000000;
-}
-
-.rolling-stat.percent-positive {
-  color: #000000;
-  background: #00FF00;
-  padding: 2px 4px;
-  border: 2px solid #000000;
-}
-
-.rolling-stat.percent-negative {
-  color: #FFFFFF;
-  background: #FF0000;
-  padding: 2px 4px;
-  border: 2px solid #000000;
-}
-
-/* Legend */
-.correlation-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 4px solid #000000;
-}
-
-.legend-item {
+.usd-correlation-header {
   display: flex;
   align-items: center;
+  padding: 10px 12px 8px;
+  background: #f8f6ef;
+  border-bottom: 1px solid #d6d0c3;
   gap: 6px;
-  font-size: 9px;
-  color: #000000;
-  font-weight: 800;
-  padding: 4px 8px;
-  border: 3px solid #000000;
-  background: #FFF9E6;
+  flex-wrap: wrap;
 }
 
-.legend-color {
-  width: 16px;
-  height: 16px;
-  border: 3px solid #000000;
+.usd-correlation-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #111;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
-.legend-color.positive-strong {
-  background-color: #00FF00;
+.usd-correlation-rolling-label {
+  width: 100%;
+  padding-left: 22px;
+  margin-top: -2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2a2a2a;
 }
 
-.legend-color.positive-weak {
-  background-color: #FFFF00;
+.usd-correlation-subtitle {
+  margin-left: auto;
+  font-size: 10px;
+  color: #5a5a5a;
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
 }
 
-.legend-color.neutral {
-  background-color: #FFF9E6;
+.usd-correlation-table-wrap {
+  padding: 0;
+  overflow-x: auto;
 }
 
-.legend-color.negative-weak {
-  background-color: #FFA500;
+.usd-correlation-grid {
+  display: block;
+  min-width: 0;
 }
 
-.legend-color.negative-medium {
-  background-color: #FF00FF;
+.usd-correlation-header-row {
+  display: grid;
+  grid-template-columns:
+    var(--usd-metric-col)
+    repeat(5, minmax(var(--usd-period-col), 1fr))
+    repeat(4, var(--usd-rolling-col));
+  align-items: stretch;
+  padding: 0;
+  background: #f8f6ef;
+  border-bottom: 1px solid var(--vol-grid-border);
+  font-weight: 700;
+  color: #000;
 }
 
-.legend-color.negative-strong {
-  background-color: #FF0000;
-}
-
-/* Loading and error states */
-.loading-state,
-.error-state,
-.no-data-state {
+.usd-correlation-header-row .usd-correlation-th {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
   text-align: center;
-  padding: 40px 20px;
-  color: #000000;
-  font-weight: 900;
-  border: 6px solid #000000;
-  background: #FFF9E6;
+  padding: 6px 8px;
+  border-right: 1px solid var(--vol-grid-border);
+  white-space: nowrap;
+  font-size: 12px;
 }
 
-.spinner {
-  width: 30px;
-  height: 30px;
-  border: 4px solid #000000;
-  border-top: 4px solid #FF00FF;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 12px;
+.usd-correlation-th-metric {
+  text-align: left;
+  align-items: flex-start;
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+.usd-correlation-th-rolling-start {
+  margin-left: var(--usd-section-gap);
+  border-left: 1px solid var(--vol-grid-border-soft);
+  border-top-left-radius: 4px;
+  background: #f0ede3;
 }
 
-.error-state {
-  color: #000000;
-  background: #FF0000;
+.usd-correlation-row {
+  display: grid;
+  grid-template-columns:
+    var(--usd-metric-col)
+    repeat(5, minmax(var(--usd-period-col), 1fr))
+    repeat(4, var(--usd-rolling-col));
+  align-items: stretch;
+  padding: 0;
+  border-bottom: 1px solid var(--vol-grid-border-soft);
+  background: #fcfaf5;
 }
 
-/* Responsive design */
-@media (max-width: 768px) {
-  .correlation-matrix-container {
-    padding: 12px;
-  }
-  
-  .correlation-table {
-    font-size: 10px;
-  }
-  
-  .correlation-table th,
-  .correlation-table td {
-    padding: 6px 4px;
-  }
-  
-  .correlation-legend {
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-  }
-  
-  .legend-item {
-    font-size: 10px;
-  }
+.usd-correlation-row:last-child {
+  border-bottom: none;
 }
 
-@media (max-width: 480px) {
-  .correlation-matrix-container {
-    padding: 10px;
-  }
-  
-  .correlation-table {
-    font-size: 9px;
-    min-width: 500px;
-  }
-  
-  .correlation-table th,
-  .correlation-table td {
-    padding: 4px 2px;
-  }
-  
-  .metric-column {
-    min-width: 70px;
-  }
-  
-  .period-column {
-    min-width: 45px;
+.usd-correlation-td {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 7px 8px;
+  border-right: 1px solid var(--vol-grid-border-soft);
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.usd-correlation-td-metric {
+  text-align: left;
+  font-weight: 700;
+  color: #000;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.usd-metric-icon {
+  width: 14px;
+  display: inline-flex;
+  justify-content: center;
+  opacity: 0.9;
+  font-size: 13px;
+}
+
+.usd-correlation-cell {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.usd-correlation-rolling-start {
+  margin-left: var(--usd-section-gap);
+  border-left: 1px solid var(--vol-grid-border-soft);
+}
+
+.usd-correlation-right-header {
+  color: #000;
+  background: #f0ede3;
+}
+
+.usd-correlation-header-row .usd-correlation-th:last-child {
+  border-top-right-radius: 4px;
+}
+
+.usd-correlation-right-value {
+  border-top: 1px solid var(--vol-grid-border-soft);
+  border-bottom: 1px solid var(--vol-grid-border-soft);
+  background: #f7f3e8;
+}
+
+.usd-correlation-row .usd-correlation-right-value:last-child {
+  border-right: 1px solid var(--vol-grid-border-soft);
+}
+
+.usd-correlation-right-value .usd-cell-pill {
+  color: #000;
+}
+
+.usd-cell-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 3px;
+  min-width: 0;
+  background: transparent;
+}
+
+/* Font-only positive/negative (no background) – match Volatility */
+.usd-positive .usd-cell-pill {
+  color: var(--vol-green);
+}
+
+.usd-negative .usd-cell-pill {
+  color: var(--vol-red);
+}
+
+.usd-neutral .usd-cell-pill {
+  color: #111827;
+}
+
+.usd-correlation-state {
+  text-align: center;
+  font-size: 11px;
+  color: #374151;
+  padding: 20px 8px;
+}
+
+.usd-correlation-state.error {
+  color: #dc2626;
+}
+
+.usd-correlation-state.loading {
+  color: #1d4ed8;
+}
+
+/* Dark mode */
+@media (max-width: 900px) {
+  .usd-correlation-grid {
+    min-width: 760px;
   }
 }

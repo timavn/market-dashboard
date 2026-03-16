@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Card, Text, Title } from '@tremor/react';
+import { Text } from '@tremor/react';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
 import './SecuritiesList.css';
@@ -214,7 +214,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     return formatted;
   };
 
-  // Poll for prices every 8 seconds
+  // Poll for prices every 30 seconds
   useEffect(() => {
     const isDev = process.env.NODE_ENV === 'development';
 
@@ -344,10 +344,10 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     }
     fetchPricesData();
 
-    // Set up polling interval (8 seconds)
+    // Set up polling interval (30 seconds)
     const interval = setInterval(() => {
       fetchPricesData();
-    }, 8000);
+    }, 30000);
 
     return () => {
       if (isDev) {
@@ -535,48 +535,35 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   }, [showDotLegend]);
 
   return (
-    <Card className="relative securities-card dark:bg-gray-800 rounded-lg" style={{ overflow: 'hidden' }}>
-      <div className="relative">
-        <div className="flex items-center justify-center w-full relative">
-          <Title className="inline-block text-center">
-            Signal Strength
-          </Title>
-          {onExpandToggle && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onExpandToggle();
-              }}
-              className="absolute right-0 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-              title={isExpanded ? "Collapse Signal Strength" : "Expand Signal Strength"}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '28px',
-                height: '28px',
-                padding: '0'
-              }}
+    <div className="relative securities-card" style={{ overflow: 'hidden' }}>
+      <div className="securities-card-header">
+        <span className="securities-card-title">Signal Strength</span>
+        {onExpandToggle && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onExpandToggle();
+            }}
+            className="securities-expand-btn"
+            title={isExpanded ? "Collapse Signal Strength" : "Expand Signal Strength"}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                className="text-gray-700 dark:text-gray-300"
-              >
-                <path
-                  d={isExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
+              <path
+                d={isExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Top Movers Section - Compact Table Format */}
@@ -925,7 +912,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           ))}
         </div>
       </div>
-    </Card>
+    </div>
   );
 };
 

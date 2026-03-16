@@ -126,24 +126,6 @@ code {
   background-color: rgb(55 65 81) !important;
 }
 
-/* Macro Dashboard title styling */
-.macro-dashboard-card {
-  padding-top: 0 !important;
-}
-
-.macro-dashboard-card > div {
-  padding-top: 0 !important;
-}
-
-/* Remove bottom padding for timezone bar Card to eliminate white space */
-.macro-dashboard-card:has(.timezone-clock-bar) {
-  padding-bottom: 0 !important;
-}
-
-.macro-dashboard-card:has(.timezone-clock-bar) > div {
-  padding-bottom: 0 !important;
-}
-
 .macro-dashboard-title-container {
   text-align: center !important;
   padding-top: 0 !important;

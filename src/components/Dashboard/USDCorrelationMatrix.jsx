@@ -1,135 +1,192 @@
-import React from 'react';
-import { Card, Title, Text, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Badge } from '@tremor/react';
-import { USD_METRICS, CORRELATION_PERIODS } from '../../constants/usdMarket';
+import React, { useMemo } from 'react';
+import StatusDot from '../common/StatusDot';
+import { getSourceFreshness } from '../../utils/timeUtils';
+import { USD_METRICS, CORRELATION_PERIODS, REFRESH_INTERVALS } from '../../constants/usdMarket';
 import { CorrelationHelpers } from '../../services/api/usdMarketService';
+import './USDCorrelationMatrix.css';
 
-const USDCorrelationMatrix = ({ correlations, rollingStats, loading, error }) => {
-  if (loading) {
-    return (
-      <Card className="rounded-lg">
-        <Title className="mb-2">$USD Correlations</Title>
-        <Text className="text-xs text-gray-500 mb-4">*Days = Trading Days*</Text>
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-2"></div>
-          <Text>Loading correlation data...</Text>
-        </div>
-      </Card>
-    );
+const toDateValue = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatNumeric = (value, digits = 3) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(digits) : '--';
+};
+
+const METRIC_ICONS = {
+  SPX: '📈',
+  BRENT: '💧',
+  CRB: '⚖',
+  GOLD: '◈',
+  BTC: '₿'
+};
+
+/** Positive / negative / neutral by correlation value (font-only styling) */
+const getSignClass = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 'usd-neutral';
   }
+  const numeric = Number(value);
+  if (numeric >= 0.5) return 'usd-positive';
+  if (numeric <= -0.5) return 'usd-negative';
+  return 'usd-neutral';
+};
 
-  if (error) {
-    return (
-      <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800 rounded-lg">
-        <Title className="mb-2 dark:text-red-400">$USD Correlations</Title>
-        <Text className="text-red-600 dark:text-red-400">Error loading correlation data: {error}</Text>
-      </Card>
-    );
-  }
+const USDCorrelationMatrix = ({
+  correlations,
+  rollingStats,
+  correlationsTimestamp,
+  calculationDate,
+  loading,
+  error
+}) => {
+  const hasData = Boolean(correlations && rollingStats);
 
-  if (!correlations || !rollingStats) {
-    return (
-      <Card className="rounded-lg">
-        <Title className="mb-2">$USD Correlations</Title>
-        <Text className="text-center py-8">No correlation data available</Text>
-      </Card>
-    );
-  }
+  const calculationDateTime = useMemo(() => {
+    if (!calculationDate) return null;
+    return toDateValue(`${calculationDate}T00:00:00Z`);
+  }, [calculationDate]);
 
-  const getCorrelationStyle = (correlation) => {
-    if (correlation === null || correlation === undefined) {
-      return { text: 'text-black', border: 'border-black' };
+  const effectiveUpdatedAt = useMemo(() => {
+    const timestampDate = toDateValue(correlationsTimestamp);
+    return timestampDate || calculationDateTime;
+  }, [correlationsTimestamp, calculationDateTime]);
+
+  const freshness = useMemo(
+    () =>
+      effectiveUpdatedAt
+        ? getSourceFreshness(effectiveUpdatedAt, REFRESH_INTERVALS.CORRELATIONS, 1.25, 2.5)
+        : 'defective',
+    [effectiveUpdatedAt]
+  );
+
+  const statusState = useMemo(() => {
+    if (error || (!loading && !hasData)) return 'inactive';
+    if (loading) return 'stale';
+    if (freshness === 'current') return 'active';
+    if (freshness === 'stale') return 'stale';
+    return 'inactive';
+  }, [error, loading, hasData, freshness]);
+
+  const statusEmoji = statusState === 'active' ? '🟢' : statusState === 'stale' ? '🟡' : '🔴';
+
+  const statusSources = useMemo(() => {
+    const sources = [];
+    if (effectiveUpdatedAt) {
+      sources.push({
+        id: 'correlations-snapshot',
+        label: 'Correlation Snapshot',
+        updatedAt: effectiveUpdatedAt,
+        status: freshness
+      });
     }
-    if (correlation >= 0.5) {
-      return { text: 'text-green-500', border: 'border-green-500' };
+    if (calculationDateTime) {
+      sources.push({
+        id: 'calculation-date',
+        label: `Calculation Date (${calculationDate || 'N/A'})`,
+        updatedAt: calculationDateTime,
+        status: freshness
+      });
     }
-    if (correlation <= -0.5) {
-      return { text: 'text-red-500', border: 'border-red-500' };
-    }
-    return { text: 'text-black', border: 'border-black' };
-  };
+    return sources;
+  }, [effectiveUpdatedAt, freshness, calculationDateTime, calculationDate]);
 
   return (
-    <Card>
-      <Title className="mb-2">$USD Correlations</Title>
-      <Text className="text-xs text-gray-500 mb-4">*Days = Trading Days*</Text>
-      
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeaderCell>Metric</TableHeaderCell>
-              {CORRELATION_PERIODS.map(period => (
-                <TableHeaderCell key={period}>{period}D</TableHeaderCell>
+    <div className="usd-correlation-panel">
+      <div className="usd-correlation-header">
+        <StatusDot
+          updatedAt={effectiveUpdatedAt}
+          status={statusState}
+          size={10}
+          className="mr-1"
+          label="USD Correlations"
+          emoji={statusEmoji}
+          sources={statusSources}
+        />
+        <span className="usd-correlation-title">Reports &amp; Insights Style</span>
+        <span className="usd-correlation-rolling-label">30-Week Rolling Performance Metrics</span>
+        <span className="usd-correlation-subtitle">*Days = Trading Days</span>
+      </div>
+
+      <div className="usd-correlation-table-wrap">
+        {loading ? (
+          <div className="usd-correlation-state loading">Loading correlation data...</div>
+        ) : null}
+        {!loading && error ? (
+          <div className="usd-correlation-state error">Error loading correlation data: {error}</div>
+        ) : null}
+        {!loading && !error && !hasData ? (
+          <div className="usd-correlation-state">No correlation data available</div>
+        ) : null}
+
+        {!loading && !error && hasData ? (
+          <div className="usd-correlation-grid">
+            <div className="usd-correlation-header-row">
+              <div className="usd-correlation-th usd-correlation-th-metric">Metric</div>
+              {CORRELATION_PERIODS.map((period) => (
+                <div key={period} className="usd-correlation-th">
+                  {period}D
+                </div>
               ))}
-              <TableHeaderCell colSpan={4}>52-Wk Rolling 30D Correlation</TableHeaderCell>
-            </TableRow>
-            <TableRow>
-              <TableHeaderCell></TableHeaderCell>
-              {CORRELATION_PERIODS.map(period => (
-                <TableHeaderCell key={period}></TableHeaderCell>
-              ))}
-              <TableHeaderCell>High</TableHeaderCell>
-              <TableHeaderCell>Low</TableHeaderCell>
-              <TableHeaderCell>% Time Pos</TableHeaderCell>
-              <TableHeaderCell>% Time Neg</TableHeaderCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {USD_METRICS.map(metric => {
+              <div className="usd-correlation-th usd-correlation-th-rolling-start usd-correlation-right-header">High</div>
+              <div className="usd-correlation-th usd-correlation-right-header">Low</div>
+              <div className="usd-correlation-th usd-correlation-right-header">% Time Pos</div>
+              <div className="usd-correlation-th usd-correlation-right-header">% Time Neg</div>
+            </div>
+            {USD_METRICS.map((metric) => {
               const metricCorrelations = correlations[metric.symbol] || {};
               const metricRollingStats = rollingStats[metric.symbol] || {};
-              const highStyle = getCorrelationStyle(metricRollingStats.high);
-              const lowStyle = getCorrelationStyle(metricRollingStats.low);
-              
               return (
-                <TableRow key={metric.symbol}>
-                  <TableCell>
-                    <Text className="font-semibold text-xs">{metric.name}</Text>
-                  </TableCell>
-                  
-                  {/* Correlation periods */}
-                  {CORRELATION_PERIODS.map(period => {
+                <div key={metric.symbol} className="usd-correlation-row">
+                  <div className="usd-correlation-td usd-correlation-td-metric">
+                    <span className="usd-metric-icon" aria-hidden="true">
+                      {METRIC_ICONS[metric.symbol] || '•'}
+                    </span>
+                    <span>{metric.name}</span>
+                  </div>
+                  {CORRELATION_PERIODS.map((period) => {
                     const correlation = metricCorrelations[`${period}D`];
                     const displayValue = CorrelationHelpers.formatCorrelation(correlation);
-                    const style = getCorrelationStyle(correlation);
-                    
+                    const signClass = getSignClass(correlation);
                     return (
-                      <TableCell key={period}>
-                        <div className={`inline-block px-1 py-0.5 border rounded ${style.border} ${style.text} text-xs`}>
-                          {displayValue}
-                        </div>
-                      </TableCell>
+                      <div
+                        key={period}
+                        className={`usd-correlation-td usd-correlation-cell ${signClass}`}
+                      >
+                        <span className="usd-cell-pill">{displayValue}</span>
+                      </div>
                     );
                   })}
-                  
-                  {/* Rolling statistics */}
-                  <TableCell>
-                    <div className={`inline-block px-1 py-0.5 border rounded ${highStyle.border} ${highStyle.text} text-xs`}>
-                      {metricRollingStats.high?.toFixed(3) || '--'}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className={`inline-block px-1 py-0.5 border rounded ${lowStyle.border} ${lowStyle.text} text-xs`}>
-                      {metricRollingStats.low?.toFixed(3) || '--'}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge color="emerald" size="xs">
-                      {metricRollingStats.percentPositive?.toFixed(1) || '--'}%
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge color="red" size="xs">
-                      {metricRollingStats.percentNegative?.toFixed(1) || '--'}%
-                    </Badge>
-                  </TableCell>
-                </TableRow>
+                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-rolling-start usd-correlation-right-value">
+                    <span className="usd-cell-pill">
+                      {formatNumeric(metricRollingStats.high, 2)}
+                    </span>
+                  </div>
+                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value">
+                    <span className="usd-cell-pill">
+                      {formatNumeric(metricRollingStats.low, 2)}
+                    </span>
+                  </div>
+                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value">
+                    <span className="usd-cell-pill">
+                      {formatNumeric(metricRollingStats.percentPositive, 2)}%
+                    </span>
+                  </div>
+                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value">
+                    <span className="usd-cell-pill">
+                      {formatNumeric(metricRollingStats.percentNegative, 2)}%
+                    </span>
+                  </div>
+                </div>
               );
             })}
-          </TableBody>
-        </Table>
+          </div>
+        ) : null}
       </div>
-    </Card>
+    </div>
   );
 };
 

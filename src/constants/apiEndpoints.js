@@ -24,6 +24,7 @@ export const ENDPOINTS = {
   VIX: '/api/indicators/vix',
   VOLATILITY: '/api/indicators/volatility',
   VOLUME: '/api/indicators/volume',
+  MARKET_SHARE_VOLUME: '/api/volume/market-share',
 
   // Risk ranges
   RISK_RANGES: '/api/risk-ranges',

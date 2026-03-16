@@ -209,7 +209,7 @@ const PerformanceTracking = () => {
   if (loading) {
     return (
       <div className="p-6">
-        <Card className="rounded-lg">
+        <Card className="rounded-lg" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text>Loading performance data...</Text>
         </Card>
       </div>
@@ -219,7 +219,7 @@ const PerformanceTracking = () => {
   if (error) {
     return (
       <div className="p-6">
-        <Card className="rounded-lg">
+        <Card className="rounded-lg" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Title>Performance Tracking</Title>
           <Text className="text-red-500 mt-4">Error: {error}</Text>
           <Text className="text-sm text-gray-600 dark:text-gray-400 mt-4">
@@ -238,7 +238,7 @@ const PerformanceTracking = () => {
   if (!equityCurve || equityCurve.dates.length === 0) {
     return (
       <div className="p-6">
-        <Card className="rounded-lg">
+        <Card className="rounded-lg" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Title>Performance Tracking</Title>
           <Text className="mt-4">
             No performance data available yet.
@@ -262,7 +262,7 @@ const PerformanceTracking = () => {
   }
 
   return (
-    <div className="p-2 space-y-3" style={{ backgroundColor: isDark ? '#111827' : '#f9fafb', minHeight: '100vh' }}>
+    <div className="p-2 space-y-3" style={{ backgroundColor: isDark ? '#111827' : '#f8f6ef', minHeight: '100vh' }}>
       {/* Header */}
       <div className="flex justify-between items-center">
         <Title className="text-base">Performance Tracking</Title>
@@ -280,21 +280,21 @@ const PerformanceTracking = () => {
 
       {/* Key Metrics */}
       <Grid numItems={2} numItemsSm={4} numItemsLg={4} className="gap-2">
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Sharpe Ratio</Text>
           <Metric className="text-lg">{metrics?.sharpeRatio?.toFixed(2) || 'N/A'}</Metric>
         </Card>
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Max Drawdown</Text>
           <Metric className={`text-lg ${getValueColor(metrics?.maxDrawdown)}`}>
             {metrics?.maxDrawdown ? formatPercent(metrics.maxDrawdown) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Volatility</Text>
           <Metric className="text-lg">{metrics?.volatility ? `${metrics.volatility.toFixed(2)}%` : 'N/A'}</Metric>
         </Card>
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Win Rate</Text>
           <Metric className="text-lg">{metrics?.winRate ? `${metrics.winRate.toFixed(1)}%` : 'N/A'}</Metric>
         </Card>
@@ -302,25 +302,25 @@ const PerformanceTracking = () => {
 
       {/* Additional Metrics */}
       <Grid numItems={2} numItemsSm={4} numItemsLg={4} className="gap-2">
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Avg Daily Return</Text>
           <Metric className={`text-lg ${getValueColor(metrics?.avgDailyReturn)}`}>
             {metrics?.avgDailyReturn ? formatPercent(metrics.avgDailyReturn) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Best Day</Text>
           <Metric className={`text-lg ${getValueColor(metrics?.bestDay)}`}>
             {metrics?.bestDay ? formatPercent(metrics.bestDay) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Worst Day</Text>
           <Metric className={`text-lg ${getValueColor(metrics?.worstDay)}`}>
             {metrics?.worstDay ? formatPercent(metrics.worstDay) : 'N/A'}
           </Metric>
         </Card>
-        <Card className="rounded-lg p-2">
+        <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Text className="text-xs">Current Value</Text>
           <Metric className="text-lg">
             {equityCurve?.values?.length > 0
@@ -332,20 +332,20 @@ const PerformanceTracking = () => {
 
       {/* Rolling Returns */}
       {metrics?.rollingReturns && Object.keys(metrics.rollingReturns).length > 0 && (
-        <Card className="rounded-lg p-3">
+        <Card className="rounded-lg p-3" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Title className="text-sm">Rolling Returns</Title>
           <ResponsiveContainer width="100%" height={150}>
             <BarChart data={Object.entries(metrics.rollingReturns).map(([period, value]) => ({
               period: period.toUpperCase(),
               return: value
             }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#d6d0c3'} />
               <XAxis dataKey="period" stroke={isDark ? '#9ca3af' : '#6b7280'} tick={{ fontSize: 10 }} />
               <YAxis stroke={isDark ? '#9ca3af' : '#6b7280'} tick={{ fontSize: 10 }} />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: isDark ? '#1f2937' : '#fff',
-                  border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                  backgroundColor: isDark ? '#1f2937' : '#fcfaf5',
+                  border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
                   borderRadius: '6px',
                   fontSize: '10px'
                 }}
@@ -358,11 +358,11 @@ const PerformanceTracking = () => {
       )}
 
       {/* Equity Curve with Drawdown */}
-      <Card className="p-3">
+      <Card className="p-3" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
         <Title className="text-sm">Equity Curve</Title>
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={equityChartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
+            <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#d6d0c3'} />
             <XAxis
               dataKey="date"
               stroke={isDark ? '#9ca3af' : '#6b7280'}
@@ -386,8 +386,8 @@ const PerformanceTracking = () => {
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: isDark ? '#1f2937' : '#fff',
-                border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                backgroundColor: isDark ? '#1f2937' : '#fcfaf5',
+                border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
                 borderRadius: '6px'
               }}
               formatter={(value, name) => {
@@ -420,11 +420,11 @@ const PerformanceTracking = () => {
 
       {/* Performance vs Benchmarks */}
       {benchmarkChartData.length > 0 && (
-        <Card className="rounded-lg p-3">
+        <Card className="rounded-lg p-3" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Title className="text-sm">Performance vs Benchmarks</Title>
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={benchmarkChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#d6d0c3'} />
               <XAxis
                 dataKey="date"
                 stroke={isDark ? '#9ca3af' : '#6b7280'}
@@ -440,8 +440,8 @@ const PerformanceTracking = () => {
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: isDark ? '#1f2937' : '#fff',
-                  border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                  backgroundColor: isDark ? '#1f2937' : '#fcfaf5',
+                  border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
                   borderRadius: '6px'
                 }}
                 formatter={(value) => formatPercent(value)}
@@ -475,11 +475,11 @@ const PerformanceTracking = () => {
 
       {/* Daily Returns Distribution */}
       {returnsHistogram.length > 0 && (
-        <Card className="rounded-lg p-3">
+        <Card className="rounded-lg p-3" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Title className="text-sm">Daily Returns Distribution</Title>
           <ResponsiveContainer width="100%" height={150}>
             <BarChart data={returnsHistogram}>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} />
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#d6d0c3'} />
               <XAxis
                 dataKey="range"
                 stroke={isDark ? '#9ca3af' : '#6b7280'}
@@ -491,8 +491,8 @@ const PerformanceTracking = () => {
               <YAxis stroke={isDark ? '#9ca3af' : '#6b7280'} />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: isDark ? '#1f2937' : '#fff',
-                  border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                  backgroundColor: isDark ? '#1f2937' : '#fcfaf5',
+                  border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
                   borderRadius: '6px'
                 }}
               />
@@ -504,7 +504,7 @@ const PerformanceTracking = () => {
 
       {/* Benchmark Comparison Table */}
       {metrics?.vsBenchmark && Object.keys(metrics.vsBenchmark).length > 0 && (
-        <Card className="rounded-lg p-3">
+        <Card className="rounded-lg p-3" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <Title className="text-sm">Benchmark Comparison</Title>
           <div className="overflow-x-auto mt-2">
             <table className="w-full text-xs">
@@ -537,7 +537,7 @@ const PerformanceTracking = () => {
 
       {/* Statement Archive */}
       {statements.length > 0 && (
-        <Card className="rounded-lg p-3">
+        <Card className="rounded-lg p-3" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
           <div className="flex justify-between items-center mb-2">
             <Title className="text-sm">Statement Archive</Title>
             <Select
@@ -576,23 +576,23 @@ const PerformanceTracking = () => {
                   })}
                 </Text>
                 <Grid numItems={2} numItemsSm={4} numItemsLg={4} className="gap-2">
-                  <Card className="rounded-lg p-2">
+                  <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
                     <Text className="text-xs">Total Value</Text>
                     <Metric className="text-lg">{formatCurrency(selectedStatement.summary?.totalValue || 0)}</Metric>
                   </Card>
-                  <Card className="rounded-lg p-2">
+                  <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
                     <Text className="text-xs">Day Change</Text>
                     <Metric className={`text-lg ${getValueColor(parseFloat(selectedStatement.summary?.totalDayChangePercent || 0))}`}>
                       {formatCurrency(selectedStatement.summary?.totalDayChange || 0)} ({selectedStatement.summary?.totalDayChangePercent || '0.00'}%)
                     </Metric>
                   </Card>
-                  <Card className="rounded-lg p-2">
+                  <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
                     <Text className="text-xs">Gain/Loss</Text>
                     <Metric className={`text-lg ${getValueColor(parseFloat(selectedStatement.summary?.totalGainLossPercent || 0))}`}>
                       {formatCurrency(selectedStatement.summary?.totalGainLoss || 0)} ({selectedStatement.summary?.totalGainLossPercent || '0.00'}%)
                     </Metric>
                   </Card>
-                  <Card className="rounded-lg p-2">
+                  <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
                     <Text className="text-xs">Positions</Text>
                     <Metric className="text-lg">{selectedStatement.summary?.positionCount || 0}</Metric>
                   </Card>
@@ -601,7 +601,7 @@ const PerformanceTracking = () => {
 
               {/* Performance Metrics */}
               {selectedStatement.performance && (
-                <Card className="rounded-lg p-2">
+                <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
                   <Title className="mb-2 text-xs">Performance Metrics</Title>
                   <Grid numItems={3} className="gap-2">
                     <div>
@@ -626,7 +626,7 @@ const PerformanceTracking = () => {
 
               {/* Asset Allocation */}
               {selectedStatement.assetAllocation && Object.keys(selectedStatement.assetAllocation).length > 0 && (
-                <Card className="rounded-lg p-2">
+                <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
                   <Title className="mb-2 text-xs">Asset Allocation</Title>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {Object.entries(selectedStatement.assetAllocation).map(([asset, percent]) => (
@@ -641,7 +641,7 @@ const PerformanceTracking = () => {
 
               {/* Holdings Table */}
               {selectedStatement.holdings && selectedStatement.holdings.length > 0 && (
-                <Card className="rounded-lg p-2">
+                <Card className="rounded-lg p-2" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
                   <Title className="mb-2 text-xs">Holdings</Title>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -661,7 +661,7 @@ const PerformanceTracking = () => {
                         {selectedStatement.holdings.map((holding, idx) => (
                           <tr
                             key={`${holding.symbol}-${idx}`}
-                            className="border-b hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                            className="border-b hover:bg-[#efe9dc] dark:hover:bg-gray-800 cursor-pointer transition-colors"
                             onClick={() => handleSecurityClick(holding.symbol)}
                           >
                             <td className="p-1 font-medium text-blue-500 hover:text-blue-700">{holding.symbol}</td>

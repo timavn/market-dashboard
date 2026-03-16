@@ -822,7 +822,7 @@ const MarketDetailModal = ({ market, now, isOpen, onClose, anchorElement }) => {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: -10 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="fixed bg-white border border-gray-200 rounded-lg shadow-2xl z-[9999] p-6 min-w-[320px] max-w-md"
+          className="fixed bg-[#f8f6ef] border border-[#d6d0c3] rounded-lg shadow-2xl z-[9999] p-6 min-w-[320px] max-w-md"
           style={{
             top: `${position.top}px`,
             left: `${position.left}px`,
@@ -832,15 +832,15 @@ const MarketDetailModal = ({ market, now, isOpen, onClose, anchorElement }) => {
         >
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">{market.name}</h3>
+                <h3 className="text-lg font-semibold text-black mb-1" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>{market.name}</h3>
                 <div className="flex items-center gap-2">
                   <StatusDot status={status} />
-                  <span className="text-sm text-gray-600 capitalize">{status.replace('-', ' ')}</span>
+                  <span className="text-sm text-black capitalize">{status.replace('-', ' ')}</span>
                 </div>
               </div>
               <button
                 onClick={onClose}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-gray-500 hover:text-black transition-colors"
               >
                 <X size={20} />
               </button>
@@ -848,40 +848,40 @@ const MarketDetailModal = ({ market, now, isOpen, onClose, anchorElement }) => {
 
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-600">Local Time</span>
-                <span className="text-gray-900 font-mono">{localTime}</span>
+                <span className="text-[#4b5563]">Local Time</span>
+                <span className="text-black font-mono">{localTime}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-600">UTC Offset</span>
-                <span className="text-gray-900">{utcOffset}</span>
+                <span className="text-[#4b5563]">UTC Offset</span>
+                <span className="text-black">{utcOffset}</span>
               </div>
-              <div className="border-t border-gray-200 pt-3 mt-3">
-                <div className="text-gray-600 mb-2">Trading Hours</div>
+              <div className="border-t border-[#d6d0c3] pt-3 mt-3">
+                <div className="text-[#4b5563] mb-2">Trading Hours</div>
                 {market.preMarketOpen && (
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-amber-400">Pre-market</span>
-                    <span className="text-gray-900 font-mono">
+                    <span className="text-black font-mono">
                       {formatTime(market.preMarketOpen)} - {formatTime(market.marketOpen)}
                     </span>
                   </div>
                 )}
                 <div className="flex justify-between text-xs mb-1">
                   <span className="text-emerald-600">Regular Hours</span>
-                  <span className="text-gray-900 font-mono">
+                  <span className="text-black font-mono">
                     {formatTime(market.marketOpen)} - {formatTime(market.marketClose)}
                   </span>
                 </div>
                 {market.postMarketClose && (
                   <div className="flex justify-between text-xs">
                     <span className="text-orange-600">Post-market</span>
-                    <span className="text-gray-900 font-mono">
+                    <span className="text-black font-mono">
                       {formatTime(market.marketClose)} - {formatTime(market.postMarketClose)}
                     </span>
                   </div>
                 )}
               </div>
               {countdown && (
-                <div className="border-t border-gray-200 pt-3 mt-3">
+                <div className="border-t border-[#d6d0c3] pt-3 mt-3">
                   <div className={`text-sm ${status === 'open' ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {countdown}
                   </div>
@@ -913,17 +913,17 @@ const CityNode = ({ market, now, onClick }) => {
   // Determine styling based on day offset
   const dayIndicatorStyle = useMemo(() => {
     if (dayOffset === -1) {
-      return 'text-gray-500 bg-gray-100'; // Yesterday - muted
+      return 'text-[#6b7280] bg-[#f2efe7] border border-[#d6d0c3]'; // Yesterday - muted
     } else if (dayOffset === 0) {
-      return 'text-gray-700 bg-blue-50 border border-blue-200'; // Today - highlighted
+      return 'text-black bg-[#f2efe7] border border-[#c9c3b6]'; // Today - highlighted
     } else {
-      return 'text-gray-500 bg-purple-50 border border-purple-200'; // Tomorrow - subtle highlight
+      return 'text-[#6b7280] bg-[#f2efe7] border border-[#d6d0c3]'; // Tomorrow - subtle highlight
     }
   }, [dayOffset]);
 
   return (
     <motion.div
-      className="flex flex-col items-center cursor-pointer relative px-3"
+      className="flex flex-col items-center cursor-pointer relative px-3 py-1 rounded-md border border-transparent hover:border-[#d6d0c3] hover:bg-[#f7f3e8]"
       onClick={handleClick}
       whileHover={{ scale: 1.05 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
@@ -937,7 +937,7 @@ const CityNode = ({ market, now, onClick }) => {
       </div>
 
       {/* Local Time (monospace) */}
-      <span className="font-mono text-sm text-gray-900 tabular-nums">
+      <span className="font-mono text-sm text-black tabular-nums">
         {localTime}
       </span>
 
@@ -947,7 +947,7 @@ const CityNode = ({ market, now, onClick }) => {
       </div>
 
       {/* UTC Offset */}
-      <span className="text-[9px] text-gray-600 mt-0.5">
+      <span className="text-[9px] text-[#4b5563] mt-0.5">
         {utcOffset}
       </span>
     </motion.div>
@@ -1018,15 +1018,15 @@ const GlobalMarketDayCycleHeader = () => {
 
   return (
     <div className="w-full mb-4">
-      <div className="relative overflow-hidden rounded-lg bg-white shadow-lg border border-gray-200">
+      <div className="relative overflow-hidden rounded-lg bg-[#f8f6ef] shadow-[0_2px_10px_rgba(0,0,0,0.08)] border border-[#d6d0c3]">
         {/* Header Bar - Reduced thickness by 33% */}
-        <div className="px-5 py-1.5 flex items-center justify-between border-b border-gray-200">
+        <div className="px-5 py-2 flex items-center justify-between border-b border-[#d6d0c3] bg-[#f3f0e6]">
           <div className="flex items-center gap-4">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-600">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-black" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>
               Global Market Day-Cycle
             </h2>
             {stats.openCount > 0 && (
-              <div className="flex items-center gap-1.5 text-[11px] text-gray-700">
+              <div className="flex items-center gap-1.5 text-[11px] text-black">
                 <span className="text-[8px] leading-none">🟢</span>
                 <span>{stats.openCount} market{stats.openCount !== 1 ? 's' : ''} open</span>
               </div>
@@ -1034,18 +1034,18 @@ const GlobalMarketDayCycleHeader = () => {
           </div>
           <div className="flex items-center gap-4">
             {stats.nextEvent && (
-              <div className="text-[11px] text-blue-600">
+              <div className="text-[11px] text-black">
                 Next: {stats.nextEvent.marketName} ({stats.nextEvent.market}) {stats.nextEvent.action} in {stats.nextEvent.timeStr}
               </div>
             )}
-            <div className="text-[11px] text-gray-600 font-mono tracking-wide">
+            <div className="text-[11px] text-black font-mono tracking-wide">
               UTC {utcTime}
             </div>
           </div>
         </div>
 
         {/* Timeline Container */}
-        <div className="relative h-28" style={{ overflowX: 'hidden', overflowY: 'visible' }}>
+        <div className="relative h-28 bg-[#fcfaf5]" style={{ overflowX: 'hidden', overflowY: 'visible' }}>
           {/* Living Sky Ribbon - Celestial layer with animated Sun and Moon */}
           <LivingSkyRibbon now={now} />
 

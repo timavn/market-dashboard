@@ -70,6 +70,20 @@ const YIELD_CURVE_DATA = [
   }
 ];
 
+// Credit spread data - hardcoded for now
+const CREDIT_SPREAD_DATA = [
+  {
+    series: '10yr Spread',
+    last: '0.94',
+    '1d': '0.96',
+    '1w': '0.95',
+    '4w': '0.81',
+    dod: { value: '-2 bps', percent: '-2.1%', isPositive: true },
+    vov: { value: '-1 bps', percent: '-0.7%', isPositive: true },
+    mom: { value: '13 bps', percent: '16.6%', isPositive: false }
+  }
+];
+
 // Volatility matrix data - hardcoded for now
 const VOLATILITY_DATA = [
   {
@@ -353,6 +367,82 @@ const YieldCurveTable = () => {
   );
 };
 
+// Credit Spread Table Component
+const CreditSpreadTable = () => {
+  return (
+    <div style={{
+      fontSize: '9px',
+      border: '1px solid #E5E7EB',
+      borderRadius: '4px',
+      overflow: 'hidden',
+      marginTop: '8px',
+    }}
+    className="dark:border-gray-600">
+      {/* Title Ribbon */}
+      <div style={{
+        backgroundColor: '#047857',
+        color: '#FFFFFF',
+        padding: '4px 8px',
+        fontSize: '10px',
+        fontWeight: 600,
+        textAlign: 'center',
+        letterSpacing: '0.5px',
+      }}>
+        RATES - SPREADS
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <thead>
+          <tr style={{ backgroundColor: '#F9FAFB' }} className="dark:bg-gray-800">
+            <th style={{ padding: '4px 6px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:text-gray-200 dark:border-gray-600">Series</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">Last Px</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1D Ago</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1W Ago</th>
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">4W Ago</th>
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
+              <div>DoD</div>
+              <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
+                <span>Δ</span>
+                <span>%Δ</span>
+              </div>
+            </th>
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
+              <div>VoV</div>
+              <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
+                <span>Δ</span>
+                <span>%Δ</span>
+              </div>
+            </th>
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#FECACA', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-red-900/20 dark:border-gray-600">
+              <div>MoM</div>
+              <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
+                <span>Δ</span>
+                <span>%Δ</span>
+              </div>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {CREDIT_SPREAD_DATA.map((row, index) => (
+            <tr key={index} style={{ borderBottom: index < CREDIT_SPREAD_DATA.length - 1 ? '1px solid #E5E7EB' : 'none' }} className="dark:border-gray-700">
+              <td style={{ padding: '4px 6px', fontWeight: 600 }} className="dark:text-gray-200">{row.series}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', color: '#1E40AF' }} className="dark:text-blue-400">{row.last}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1d']}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1w']}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['4w']}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.vov.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.vov.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.vov.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.vov.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FECACA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-red-900/20">{row.mom.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FECACA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-red-900/20">{row.mom.percent}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 // Volatility Matrix Table Component
 const VolatilityTable = () => {
   return (
@@ -478,11 +568,11 @@ const StaticMetricBar = () => {
     fetchLiquidityIndicators();
   }, []);
 
-  // Set up polling interval (every 8 seconds, similar to SecuritiesList)
+  // Set up polling interval (every 30 seconds, aligned with dashboard polling)
   useEffect(() => {
     const interval = setInterval(() => {
       fetchMacroIndicators();
-    }, 8000);
+    }, 30000);
 
     return () => clearInterval(interval);
   }, []);
@@ -541,6 +631,7 @@ const StaticMetricBar = () => {
         {/* Right: Yield Curve and Volatility Tables */}
         <div>
           <YieldCurveTable />
+          <CreditSpreadTable />
           <VolatilityTable />
         </div>
       </div>

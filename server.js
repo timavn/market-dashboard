@@ -69,7 +69,7 @@ app.use('/api/performance', performanceRoutes);
 
 // In-memory cache for quotes (5-10 second TTL)
 const quotesCache = new Map();
-const CACHE_TTL = parseInt(process.env.QUOTES_CACHE_TTL || '8000'); // 8 seconds default
+const CACHE_TTL = parseInt(process.env.QUOTES_CACHE_TTL || '30000'); // 30 seconds default
 
 // Cache for historical data (1 hour TTL - changes daily)
 const historicalCache = new Map();
@@ -84,11 +84,11 @@ const intradayCache = new Map();
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // FRED Series IDs for Treasury Yields and Rates
+// Note: UST2Y, UST10Y, and UST30Y are now sourced from Yahoo
+// Finance Treasury yield indices to support intraday/1D/5D
+// charts, so they are intentionally NOT included here.
 const FRED_SERIES = {
-  'UST30Y': 'DGS30',
-  'UST10Y': 'DGS10',
   'UST5Y': 'DGS5',
-  'UST2Y': 'DGS2',
   'UST13W': 'DGS3MO',
   'SOFR': 'SOFR',
   'FEDFUNDS': 'DFF',  // Federal Funds Effective Rate
@@ -127,6 +127,12 @@ const YAHOO_TICKER_MAP = {
   // Indices - Other
   'MOVE': '^MOVE',
   'TNX': '^TNX',
+  // Treasury yield indices used as rate proxies
+  'UST10Y': '^TNX',
+  'UST30Y': '^TYX',
+  // For 2-year, we currently proxy with the 5-year index; adjust
+  // if a dedicated 2Y yield index symbol is added.
+  'UST2Y': '^FVX',
 
   // Currency pairs
   'EUR/USD': 'EURUSD=X',
@@ -140,6 +146,9 @@ const YAHOO_TICKER_MAP = {
   'USDCAD': 'CADUSD=X',
   'AUDUSD': 'AUDUSD=X',
   'USDMXN': 'MXN=X',
+  'USDCHF': 'CHF=X',
+  'NZDUSD': 'NZDUSD=X',
+  'EURGBP': 'EURGBP=X',
   'USDCNY': 'CNY=X',
   'CNY=X': 'CNY=X',
   'USD': 'DX-Y.NYB',
@@ -260,10 +269,16 @@ const MARKET_REGIONS = {
     indices: [
       { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X' },
       { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X' },
-      { symbol: 'GBPUSD', name: 'USD/GBP', yahooSymbol: 'GBPUSD=X' },
-      { symbol: 'AUDUSD', name: 'USD/AUD', yahooSymbol: 'AUDUSD=X' },
+      { symbol: 'GBPUSD', name: 'GBP/USD', yahooSymbol: 'GBPUSD=X' },
+      { symbol: 'AUDUSD', name: 'AUD/USD', yahooSymbol: 'AUDUSD=X' },
       { symbol: 'USDCAD', name: 'USD/CAD', yahooSymbol: 'CADUSD=X' },
-      { symbol: 'USDMXN', name: 'USD/MXN', yahooSymbol: 'MXN=X' }
+      { symbol: 'USDMXN', name: 'USD/MXN', yahooSymbol: 'MXN=X' },
+      { symbol: 'USDCHF', name: 'USD/CHF', yahooSymbol: 'CHF=X' },
+      { symbol: 'NZDUSD', name: 'NZD/USD', yahooSymbol: 'NZDUSD=X' },
+      { symbol: 'USDCNY', name: 'USD/CNY', yahooSymbol: 'CNY=X' },
+      { symbol: 'EURGBP', name: 'EUR/GBP', yahooSymbol: 'EURGBP=X' },
+      { symbol: 'USD', name: 'DXY', yahooSymbol: 'DX-Y.NYB' },
+      { symbol: 'UUP', name: 'UUP', yahooSymbol: 'UUP' }
     ]
   }
 };
@@ -553,7 +568,10 @@ async function getIntradayData(symbol, range = '1d') {
   console.log(`[IntradayCache] Miss for ${cacheKey}, fetching...`);
 
   try {
-    // Get the Yahoo ticker mapping
+    const upperSymbol = symbol.toUpperCase();
+    const isRateProxy = upperSymbol === 'UST2Y' || upperSymbol === 'UST10Y' || upperSymbol === 'UST30Y';
+
+    // Get the Yahoo/FRED ticker mapping
     const mapping = getTickerMapping(symbol);
     const yahooSymbol = mapping.source === 'yahoo' ? mapping.ticker : symbol;
 
@@ -639,7 +657,10 @@ const generateOptionsData = () => ([
 
 // Real volatility index data from Yahoo Finance (VIX, VVIX, RVX, etc.)
 const fetchVolatilityData = async (yahooTicker) => {
-  const fallbackCurrent = { '^VIX': '18.42', '^VVIX': '90', '^RVX': '22' }[yahooTicker] || '18.42';
+  // Only use a hardcoded fallback for the most common series to avoid
+  // showing misleading values for thinner / less reliable tickers like RVX.
+  const fallbackMap = { '^VIX': '18.42', '^VVIX': '90' };
+  const fallbackCurrent = fallbackMap[yahooTicker] ?? null;
   try {
     const encoded = encodeURIComponent(yahooTicker);
     const response = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encoded}`, {
@@ -653,15 +674,18 @@ const fetchVolatilityData = async (yahooTicker) => {
       const result = data.chart.result[0];
       const meta = result.meta;
 
-      const latestPrice = meta.regularMarketPrice || meta.previousClose || 0;
-      const previousClose = meta.previousClose || 0;
-      const change = latestPrice - previousClose;
-      const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+      const latestPrice = meta.regularMarketPrice ?? meta.previousClose ?? null;
+      const previousClose = meta.previousClose ?? null;
+      const hasPrices = latestPrice != null && previousClose != null;
+      const change = hasPrices ? latestPrice - previousClose : null;
+      const changePercent = hasPrices && previousClose !== 0
+        ? (change / previousClose) * 100
+        : null;
 
       return {
-        current: latestPrice.toFixed(2),
-        change: change.toFixed(2),
-        changePercent: changePercent.toFixed(2),
+        current: latestPrice != null ? latestPrice.toFixed(2) : null,
+        change: change != null ? change.toFixed(2) : null,
+        changePercent: changePercent != null ? changePercent.toFixed(2) : null,
         timestamp: new Date().toISOString(),
         high: meta.regularMarketDayHigh || 0,
         low: meta.regularMarketDayLow || 0,
@@ -672,8 +696,8 @@ const fetchVolatilityData = async (yahooTicker) => {
 
     return {
       current: fallbackCurrent,
-      change: '0.00',
-      changePercent: '0.00',
+      change: fallbackCurrent != null ? '0.00' : null,
+      changePercent: fallbackCurrent != null ? '0.00' : null,
       timestamp: new Date().toISOString(),
       high: 0,
       low: 0,
@@ -684,8 +708,8 @@ const fetchVolatilityData = async (yahooTicker) => {
     console.error(`Error fetching volatility data for ${yahooTicker}:`, error);
     return {
       current: fallbackCurrent,
-      change: '0.00',
-      changePercent: '0.00',
+      change: fallbackCurrent != null ? '0.00' : null,
+      changePercent: fallbackCurrent != null ? '0.00' : null,
       timestamp: new Date().toISOString(),
       high: 0,
       low: 0,
@@ -844,7 +868,9 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
     const mapping = getTickerMapping(symbol);
 
     // Check if this is a FRED symbol (Treasury yields)
-    if (mapping.source === 'fred') {
+    // For UST2Y/UST10Y/UST30Y we always want to use Yahoo
+    // rate indices instead, so skip the FRED path for those.
+    if (mapping.source === 'fred' && !isRateProxy) {
       // For FRED data, we only have daily data, so disable intraday ranges
       if (range === '1d' || range === '5d') {
         return res.json({
@@ -900,19 +926,23 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
     const timestamps = result.timestamp || [];
     const quote = result.indicators?.quote?.[0] || {};
 
+    const scaleFactor = isRateProxy ? 0.1 : 1;
+
     // Build chart data array
     const chartData = timestamps.map((ts, i) => ({
       timestamp: ts * 1000, // Convert to milliseconds
-      open: quote.open?.[i] ?? null,
-      high: quote.high?.[i] ?? null,
-      low: quote.low?.[i] ?? null,
-      close: quote.close?.[i] ?? null,
+      open: quote.open?.[i] != null ? quote.open[i] * scaleFactor : null,
+      high: quote.high?.[i] != null ? quote.high[i] * scaleFactor : null,
+      low: quote.low?.[i] != null ? quote.low[i] * scaleFactor : null,
+      close: quote.close?.[i] != null ? quote.close[i] * scaleFactor : null,
       volume: quote.volume?.[i] ?? null
     })).filter(d => d.close !== null); // Filter out null closes
 
     // Get current day's OHLC from meta
-    const currentPrice = meta.regularMarketPrice ?? meta.previousClose;
-    const previousClose = meta.chartPreviousClose ?? meta.previousClose;
+    const currentPriceRaw = meta.regularMarketPrice ?? meta.previousClose;
+    const previousCloseRaw = meta.chartPreviousClose ?? meta.previousClose;
+    const currentPrice = currentPriceRaw != null ? currentPriceRaw * scaleFactor : null;
+    const previousClose = previousCloseRaw != null ? previousCloseRaw * scaleFactor : null;
     const change = currentPrice && previousClose ? currentPrice - previousClose : null;
     const changePercent = currentPrice && previousClose ? ((change / previousClose) * 100) : null;
 
@@ -924,16 +954,28 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
       name: meta.shortName || meta.symbol || symbol.toUpperCase(),
       source: 'yahoo',
       current: {
-        price: currentPrice?.toFixed(2) ?? null,
-        change: change?.toFixed(2) ?? null,
-        changePercent: changePercent?.toFixed(2) ?? null,
-        previousClose: previousClose?.toFixed(2) ?? null
+        price: currentPrice != null ? currentPrice.toFixed(2) : null,
+        change: change != null ? change.toFixed(2) : null,
+        changePercent: changePercent != null ? changePercent.toFixed(2) : null,
+        previousClose: previousClose != null ? previousClose.toFixed(2) : null
       },
       ohlc: {
-        open: (meta.regularMarketOpen ?? todayData?.open)?.toFixed(2) ?? null,
-        high: (meta.regularMarketDayHigh ?? todayData?.high)?.toFixed(2) ?? null,
-        low: (meta.regularMarketDayLow ?? todayData?.low)?.toFixed(2) ?? null,
-        close: currentPrice?.toFixed(2) ?? null
+        open: (() => {
+          const raw = meta.regularMarketOpen ?? todayData?.open ?? null;
+          if (raw == null) return null;
+          return (raw * (isRateProxy && meta.regularMarketOpen != null ? scaleFactor : 1)).toFixed(2);
+        })(),
+        high: (() => {
+          const raw = meta.regularMarketDayHigh ?? todayData?.high ?? null;
+          if (raw == null) return null;
+          return (raw * (isRateProxy && meta.regularMarketDayHigh != null ? scaleFactor : 1)).toFixed(2);
+        })(),
+        low: (() => {
+          const raw = meta.regularMarketDayLow ?? todayData?.low ?? null;
+          if (raw == null) return null;
+          return (raw * (isRateProxy && meta.regularMarketDayLow != null ? scaleFactor : 1)).toFixed(2);
+        })(),
+        close: currentPrice != null ? currentPrice.toFixed(2) : null
       },
       chartData,
       meta: {
@@ -1270,7 +1312,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions'];
+    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call'];
 
     for (const snapshotType of snapshotTypes) {
       try {
@@ -1303,6 +1345,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
           // Use explicit count fields if available
           if (latestSnapshot.riskRangeCount) itemCount = latestSnapshot.riskRangeCount;
+          else if (latestSnapshot.positionCount) itemCount = latestSnapshot.positionCount;
           else if (latestSnapshot.stockCount) itemCount = latestSnapshot.stockCount;
           else if (latestSnapshot.cryptoCount) itemCount = latestSnapshot.cryptoCount + (latestSnapshot.stockCount || 0);
           else if (latestSnapshot.rankingCount) itemCount = latestSnapshot.rankingCount;
@@ -1311,6 +1354,8 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
           if (itemCount === 0 && latestSnapshot.data) {
             if (snapshotType === 'bitcoin-trend-tracker' && latestSnapshot.data.cryptos) {
               itemCount = Object.keys(latestSnapshot.data.cryptos).length + Object.keys(latestSnapshot.data.stocks || {}).length;
+            } else if (Array.isArray(latestSnapshot.data.longs) || Array.isArray(latestSnapshot.data.shorts)) {
+              itemCount = (latestSnapshot.data.longs?.length || 0) + (latestSnapshot.data.shorts?.length || 0);
             } else if (Array.isArray(latestSnapshot.data)) {
               itemCount = latestSnapshot.data.length;
             } else if (Array.isArray(latestSnapshot.data.stocks)) {
@@ -1927,7 +1972,9 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
       'bitcoin-trend-tracker',
       'momo-tracker',
       'signal-strength',
-      'portfolio-solutions'
+      'portfolio-solutions',
+      'the-macro-show',
+      'the-call'
     ];
 
     const results = {};
@@ -2031,6 +2078,8 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             return (snapshot.data.stocks || []).map(s => s.ticker);
           } else if (type === 'portfolio-solutions') {
             return (snapshot.data.rankings || []).map(r => r.ticker);
+          } else if (type === 'the-macro-show' || type === 'the-call') {
+            return [...(snapshot.data.longs || []), ...(snapshot.data.shorts || [])];
           }
           return [];
         };
@@ -2220,6 +2269,12 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           console.log('[Changelog] Bitcoin Tracker - Crypto trend changes:',
             results[type].cryptoTrendChanges.length,
             'ETF trend changes:', results[type].etfTrendChanges.length);
+        }
+
+        // Pass through current longs/shorts for macro-show and the-call
+        if (type === 'the-macro-show' || type === 'the-call') {
+          results[type].currentLongs = current.data?.longs || [];
+          results[type].currentShorts = current.data?.shorts || [];
         }
 
         // Calculate trendChanges for early-look by comparing trends
@@ -2968,13 +3023,20 @@ app.get('/api/volatility-snapshot', async (req, res) => {
     });
     const result = response.data?.chart?.result?.[0];
     const meta = result?.meta || {};
-    const closes = result?.indicators?.quote?.[0]?.close || [];
+    const quote = result?.indicators?.quote?.[0];
+    const closes = quote?.close || [];
     // Filter nulls then reverse so index 0 = most recent trading day
     const valid = closes.filter(v => v != null).reverse();
     const lastPx = meta.regularMarketPrice ?? valid[0] ?? null;
     const day1Ago = meta.previousClose ?? valid[1] ?? null;
     if (lastPx == null) {
-      console.warn(`[volatility-snapshot] ${name} has no lastPx (result=${!!result}, meta=${!!meta}, quote=${!!(result?.indicators?.quote?.[0])})`);
+      const baseMsg = `[volatility-snapshot] ${name} has no lastPx`;
+      const detail = `result=${!!result}, meta=${!!meta}, quote=${!!quote}, closesLen=${closes.length}, validLen=${valid.length}, hasRegMktPrice=${meta.regularMarketPrice != null}, hasPrevClose=${meta.previousClose != null}`;
+      if (name === 'RVX') {
+        console.warn(`${baseMsg} (RVX-specific; ${detail})`);
+      } else {
+        console.warn(`${baseMsg} (${detail})`);
+      }
     }
     return {
       name,
@@ -3003,6 +3065,14 @@ app.get('/api/volatility-snapshot', async (req, res) => {
     if (!snapshot[name] || snapshot[name].lastPx == null) {
       try {
         const data = await fetchVolatilityData(VOL_TICKERS[name]);
+        if (data.current == null || data.change == null || Number.isNaN(Number(data.current)) || Number.isNaN(Number(data.change))) {
+          // If we still don't have a reliable price, leave this series as missing
+          // rather than showing a hardcoded or misleading value.
+          console.warn(
+            `[volatility-snapshot] fallback for ${name} returned invalid data; leaving series missing to avoid misleading values (current=${data.current}, change=${data.change})`
+          );
+          continue;
+        }
         const prev = (parseFloat(data.current) - parseFloat(data.change)).toFixed(2);
         const existing = snapshot[name] || {};
         snapshot[name] = {
@@ -3036,23 +3106,158 @@ app.get('/api/volatility-snapshot', async (req, res) => {
   res.json(snapshot);
 });
 
-app.get('/api/indicators/volume', (req, res) => {
-  const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ'];
-  const data = generateMockData();
-  const volumeData = {};
+// Market Share Volume & Total Exchange Volume endpoint
+// Returns aligned daily volume series for:
+// - Total Market Volume: proxied by VTI (Vanguard Total Stock Market ETF)
+// - Total Exchange Volume: proxied by combined volume of SPY + QQQ + IWM
+//
+// The frontend computes % differences vs prior day and trailing averages
+// to mirror the Hedgeye “Market Share Volume & Total Value Traded” slide.
+async function fetchSymbolVolumesFromYahoo(symbol, days) {
+  const range = days <= 7 ? '5d' : days <= 30 ? '1mo' : days <= 90 ? '3mo' : days <= 180 ? '6mo' : '1y';
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+  try {
+    const response = await axios.get(url, {
+      params: { range, interval: '1d', includePrePost: 'false' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 10000
+    });
+    const result = response.data?.chart?.result?.[0];
+    const timestamps = result?.timestamp || [];
+    const quotes = result?.indicators?.quote?.[0];
+    if (!quotes?.volume || timestamps.length === 0) return [];
 
-  symbols.forEach(symbol => {
-    if (data[symbol]) {
-      volumeData[symbol] = {
-        symbol,
-        volume: data[symbol].volume,
-        avgVolume: Math.floor(data[symbol].volume * (0.8 + Math.random() * 0.4)),
-        timestamp: data[symbol].timestamp
-      };
+    const out = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      const vol = quotes.volume?.[i];
+      if (vol == null) continue;
+      const date = new Date(timestamps[i] * 1000);
+      const dateStr = date.toISOString().split('T')[0];
+      out.push({ date: dateStr, volume: Number(vol) });
     }
-  });
+    out.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return out;
+  } catch (err) {
+    console.warn(`[API] Yahoo Finance fallback for ${symbol} failed:`, err?.message);
+    return [];
+  }
+}
 
-  res.json(volumeData);
+async function getSymbolVolumes(symbol, days) {
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - parseInt(days, 10));
+
+  const startDateStr = startDate.toISOString().split('T')[0];
+  const endDateStr = endDate.toISOString().split('T')[0];
+
+  const params = {
+    TableName: 'MarketPriceHistory',
+    KeyConditionExpression: 'symbol = :symbol AND #date BETWEEN :startDate AND :endDate',
+    ExpressionAttributeNames: {
+      '#date': 'date'
+    },
+    ExpressionAttributeValues: {
+      ':symbol': symbol,
+      ':startDate': startDateStr,
+      ':endDate': endDateStr
+    },
+    ScanIndexForward: false // Newest first
+  };
+
+  try {
+    const result = await dynamodb.query(params).promise();
+
+    let rows = [];
+    if (result.Items && result.Items.length > 0) {
+      rows = result.Items
+        .map((item) => ({
+          date: item.date,
+          volume: item.volume != null ? Number(item.volume) : null
+        }))
+        .filter((row) => row.volume != null);
+    }
+
+    if (rows.length === 0) {
+      console.log(`[API] No volume data in DB for ${symbol}, trying Yahoo Finance fallback...`);
+      rows = await fetchSymbolVolumesFromYahoo(symbol, days);
+    }
+
+    return rows;
+  } catch (err) {
+    console.error(`[API] Error querying MarketPriceHistory for ${symbol}:`, err);
+    return await fetchSymbolVolumesFromYahoo(symbol, days);
+  }
+}
+
+app.get('/api/volume/market-share', async (req, res) => {
+  const startTime = Date.now();
+  const daysParam = req.query.days || '365';
+  const days = Number.isNaN(Number(daysParam)) ? 365 : parseInt(daysParam, 10);
+
+  try {
+    const marketProxySymbol = 'VTI';
+    const exchangeSymbols = ['SPY', 'QQQ', 'IWM'];
+
+    const [marketSeries, spySeries, qqqSeries, iwmSeries] = await Promise.all([
+      getSymbolVolumes(marketProxySymbol, days),
+      getSymbolVolumes('SPY', days),
+      getSymbolVolumes('QQQ', days),
+      getSymbolVolumes('IWM', days)
+    ]);
+
+    // Build lookup maps for exchange proxies keyed by date
+    const toMap = (series) => {
+      const map = new Map();
+      series.forEach((row) => {
+        if (row.date && row.volume != null) {
+          map.set(row.date, row.volume);
+        }
+      });
+      return map;
+    };
+
+    const spyMap = toMap(spySeries);
+    const qqqMap = toMap(qqqSeries);
+    const iwmMap = toMap(iwmSeries);
+
+    // Align combined exchange volumes on VTI's trading calendar
+    const totalExchange = [];
+    marketSeries.forEach((row) => {
+      const { date } = row;
+      const spyVol = spyMap.get(date);
+      const qqqVol = qqqMap.get(date);
+      const iwmVol = iwmMap.get(date);
+
+      if (spyVol != null && qqqVol != null && iwmVol != null) {
+        totalExchange.push({
+          date,
+          volume: spyVol + qqqVol + iwmVol
+        });
+      }
+    });
+
+    const response = {
+      asOf: marketSeries.length > 0 ? marketSeries[0].date : null,
+      totalMarket: marketSeries,
+      totalExchange
+    };
+
+    const totalTime = Date.now() - startTime;
+    console.log(
+      `[API] /api/volume/market-share completed in ${totalTime}ms (days=${days}, market=${marketSeries.length}, exchange=${totalExchange.length})`
+    );
+
+    res.json(response);
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error('[API] Error in /api/volume/market-share:', error);
+    res.status(500).json({
+      error: 'Failed to fetch market share volume data',
+      details: error.message,
+      elapsedMs: totalTime
+    });
+  }
 });
 
 // USD Macro Dashboard API Endpoints
