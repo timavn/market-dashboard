@@ -2079,7 +2079,11 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           } else if (type === 'portfolio-solutions') {
             return (snapshot.data.rankings || []).map(r => r.ticker);
           } else if (type === 'the-macro-show' || type === 'the-call') {
-            return [...(snapshot.data.longs || []), ...(snapshot.data.shorts || [])];
+            return [
+              ...(snapshot.data.longs || []),
+              ...(snapshot.data.shorts || []),
+              ...(snapshot.data.neutrals || [])
+            ];
           }
           return [];
         };
@@ -2271,10 +2275,11 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             'ETF trend changes:', results[type].etfTrendChanges.length);
         }
 
-        // Pass through current longs/shorts for macro-show and the-call
+        // Pass through current longs/shorts/neutrals for macro-show and the-call
         if (type === 'the-macro-show' || type === 'the-call') {
           results[type].currentLongs = current.data?.longs || [];
           results[type].currentShorts = current.data?.shorts || [];
+          results[type].currentNeutrals = current.data?.neutrals || [];
         }
 
         // Calculate trendChanges for early-look by comparing trends

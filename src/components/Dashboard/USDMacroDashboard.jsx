@@ -268,7 +268,12 @@ const USDMacroDashboard = () => {
       neutral: snapshot?.data?.neutrals
     };
     const values = valuesBySide[side];
-    if (!Array.isArray(values) || values.length === 0) {
+    if (!Array.isArray(values)) {
+      // Missing data vs known-empty list; treat as N/A so UI can highlight it.
+      return 'N/A';
+    }
+    if (values.length === 0) {
+      // Explicitly empty list: show that there are no names for this side.
       return side === 'neutral' ? 'None' : 'No securities listed';
     }
 
@@ -280,6 +285,24 @@ const USDMacroDashboard = () => {
       const longs = getSideDisplayText(row, 'long');
       const shorts = getSideDisplayText(row, 'short');
       const neutrals = getSideDisplayText(row, 'neutral');
+      const snapshot = row?.snapshot;
+
+      if (
+        snapshot?.snapshotType === 'the-call' &&
+        Array.isArray(snapshot?.data?.longs) &&
+        snapshot.data.longs.length > 0 &&
+        (!Array.isArray(snapshot?.data?.neutrals) || snapshot.data.neutrals.length === 0)
+      ) {
+        // Helpful console trace if we ever see a non-empty longs list but no neutrals
+        // for The Call, which would indicate a parsing/storage mismatch.
+        // eslint-disable-next-line no-console
+        console.warn('[USDMacroDashboard] The Call snapshot has longs but empty neutrals', {
+          date: snapshot.date,
+          longs: snapshot.data.longs,
+          neutrals: snapshot.data.neutrals
+        });
+      }
+
       const isLongNA = longs === 'N/A';
       const isShortNA = shorts === 'N/A';
       const isNeutralNA = neutrals === 'N/A';

@@ -16,7 +16,18 @@ from date_utils import extract_date_from_pdf
 
 def _extract_section_text(text, label, stop_labels):
     """Extract free-form text under a section label until the next known label."""
-    stop_pattern = "|".join(re.escape(item) for item in stop_labels)
+    # Normalize stop labels to handle minor template changes (case/spacing)
+    normalized_stops = set(stop_labels)
+    # Add common variants we have seen in PDFs around the HEDGEYE POSITIONS box
+    extra_variants = [
+        "TOP 5 MOST ACTIONABLE",
+        "Top 5 Most Actionable",
+        "TOP 5 MOST",
+        "Top 5 Most",
+    ]
+    normalized_stops.update(extra_variants)
+
+    stop_pattern = "|".join(re.escape(item) for item in normalized_stops)
     pattern = rf"{re.escape(label)}\s*[:\-]\s*(.+?)(?=\n\s*(?:{stop_pattern})\b|$)"
     match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else ""
@@ -110,7 +121,7 @@ def extract_the_call(pdf_path, s3_key=None):
     neutral_raw = _extract_section_text(
         text,
         "NEUTRAL",
-        ["TOP", "Positioning", "CLICK", "MAIN SUMMARY"]
+        ["TOP", "Positioning", "CLICK", "MAIN SUMMARY", "TOP 5 MOST ACTIONABLE"]
     )
     if neutral_raw:
         neutrals = _extract_symbols(neutral_raw)
@@ -219,6 +230,14 @@ if __name__ == '__main__':
     print(f"📅 PDF Date: {pdf_date}\n")
 
     data = extract_the_call(pdf_path)
+
+    print("\nParsed data preview:")
+    print(f"  LONGS   ({len(data.get('longs', []))}): {', '.join(data.get('longs', []))}")
+    print(f"  SHORTS  ({len(data.get('shorts', []))}): {', '.join(data.get('shorts', []))}")
+    print(f"  NEUTRAL ({len(data.get('neutrals', []))}): {', '.join(data.get('neutrals', []))}")
+
+    if not data.get('neutrals'):
+        print("⚠️  WARNING: No NEUTRAL positions parsed. Check PDF layout/labels.")
 
     pdf_s3_key = upload_pdf_to_s3(pdf_path, pdf_date)
     save_to_dynamodb(data, pdf_s3_key, pdf_date)

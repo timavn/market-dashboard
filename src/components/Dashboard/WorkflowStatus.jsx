@@ -1158,7 +1158,7 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
-                        {/* THE CALL & THE MACRO SHOW: Longs/Shorts display */}
+                        {/* THE CALL & THE MACRO SHOW: Longs/Shorts/Neutrals display */}
                         {(key === 'the-call' || key === 'the-macro-show') && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {diff && diff.available ? (
@@ -1171,6 +1171,32 @@ const WorkflowStatus = () => {
                                     {diff.currentLongs?.length > 0 ? (
                                       diff.currentLongs.map(t => (
                                         <span key={t} style={{ fontSize: '10px', color: '#16a34a', backgroundColor: isDark ? 'rgba(22, 163, 74, 0.1)' : 'rgba(22, 163, 74, 0.08)', padding: '2px 5px', borderRadius: '3px', fontWeight: 500 }}>{t}</span>
+                                      ))
+                                    ) : (
+                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
+                                    NEUTRALS
+                                  </div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    {diff.currentNeutrals?.length > 0 ? (
+                                      diff.currentNeutrals.map(t => (
+                                        <span
+                                          key={t}
+                                          style={{
+                                            fontSize: '10px',
+                                            color: isDark ? '#e5e7eb' : '#111827',
+                                            backgroundColor: isDark ? 'rgba(249, 250, 251, 0.06)' : 'rgba(17, 24, 39, 0.03)',
+                                            padding: '2px 5px',
+                                            borderRadius: '3px',
+                                            fontWeight: 500
+                                          }}
+                                        >
+                                          {t}
+                                        </span>
                                       ))
                                     ) : (
                                       <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>
