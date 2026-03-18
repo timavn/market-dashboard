@@ -6,6 +6,9 @@
   padding: 0;
   border-radius: 8px;
   overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
 }
 
 /* Timezone Clock Bar - Timeline Design - Standalone */
@@ -350,7 +353,7 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
 }
 
 .index-tabs {
@@ -398,6 +401,22 @@
 
 .index-tab-name {
   /* Name text inherits color from parent */
+}
+
+.index-tab-price {
+  font-size: 9px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "lnum" 1, "tnum" 1;
+  color: #111827;
+}
+
+.index-tab-price.positive {
+  color: #16a34a;
+}
+
+.index-tab-price.negative {
+  color: #dc2626;
 }
 
 .index-tab-change {
@@ -601,19 +620,29 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
 }
 
 .region-chart-panel .chart-price {
   color: #111;
   font-size: 28px;
   font-weight: 700;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "lnum" 1, "tnum" 1;
+  line-height: 1;
+  font-kerning: normal;
 }
 
 .region-chart-panel .chart-change {
   margin-bottom: 7px;
   font-size: 11px;
+}
+
+.region-chart-panel .change-value,
+.region-chart-panel .change-percent {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "lnum" 1, "tnum" 1;
 }
 
 .region-chart-panel .chart-change .change-period {
@@ -738,7 +767,7 @@
   color: #111;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
 }
 
 .currencies-timestamp {

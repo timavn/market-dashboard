@@ -794,7 +794,7 @@ const WorkflowStatus = () => {
                       <Card key={key} className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem', padding: 0, backgroundColor: isDark ? undefined : '#fcfaf5' }}>
                         {/* Card Title - Centered for all cards */}
                         <div style={{ textAlign: 'center', padding: '8px 10px', backgroundColor: isDark ? undefined : '#f3f0e6', borderBottom: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem 0.5rem 0 0' }}>
-                          <Text style={{ fontSize: '10px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: 'Georgia, "Times New Roman", serif' }}>
+                          <Text style={{ fontSize: '10px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                             {key === 'risk-ranges' ? 'Risk Ranges (TREND)' : label}
                           </Text>
                         </div>
@@ -2359,4 +2359,3 @@ const WorkflowStatus = () => {
 };
 
 export default WorkflowStatus;
-

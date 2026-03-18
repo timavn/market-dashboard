@@ -832,7 +832,7 @@ const MarketDetailModal = ({ market, now, isOpen, onClose, anchorElement }) => {
         >
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="text-lg font-semibold text-black mb-1" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>{market.name}</h3>
+                <h3 className="text-lg font-semibold text-black mb-1">{market.name}</h3>
                 <div className="flex items-center gap-2">
                   <StatusDot status={status} />
                   <span className="text-sm text-black capitalize">{status.replace('-', ' ')}</span>
@@ -1022,7 +1022,7 @@ const GlobalMarketDayCycleHeader = () => {
         {/* Header Bar - Reduced thickness by 33% */}
         <div className="px-5 py-2 flex items-center justify-between border-b border-[#d6d0c3] bg-[#f3f0e6]">
           <div className="flex items-center gap-4">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-black" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-black">
               Global Market Day-Cycle
             </h2>
             {stats.openCount > 0 && (

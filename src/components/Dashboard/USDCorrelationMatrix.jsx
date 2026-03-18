@@ -16,12 +16,67 @@ const formatNumeric = (value, digits = 3) => {
   return Number.isFinite(numeric) ? numeric.toFixed(digits) : '--';
 };
 
-const METRIC_ICONS = {
-  SPX: '📈',
-  BRENT: '💧',
-  CRB: '⚖',
-  GOLD: '◈',
-  BTC: '₿'
+const formatPercentValue = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  const scaled = Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
+  return `${Math.round(scaled)}%`;
+};
+
+const MetricIcon = ({ symbol }) => {
+  switch (symbol) {
+    case 'CRB':
+      return (
+        <span className="usd-metric-badge usd-metric-badge-crb" aria-hidden="true">
+          CRB
+        </span>
+      );
+    case 'GOLD':
+      return (
+        <svg
+          className="usd-metric-goldbar"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <defs>
+            <linearGradient id="goldBarGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#FDE68A" />
+              <stop offset="55%" stopColor="#F4B400" />
+              <stop offset="100%" stopColor="#B45309" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M5 9.5 8.5 6h9L19 9.5v7L15.5 20h-9L5 16.5Z"
+            fill="url(#goldBarGradient)"
+            stroke="#8A5A00"
+            strokeWidth="1.2"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M8.5 6 12 9.5h7"
+            fill="none"
+            stroke="rgba(255,255,255,0.65)"
+            strokeWidth="1"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 9.5v7"
+            fill="none"
+            stroke="rgba(120,72,0,0.35)"
+            strokeWidth="1"
+          />
+        </svg>
+      );
+    case 'BTC':
+      return (
+        <span className="usd-metric-btc" aria-hidden="true">
+          <span className="usd-metric-btc-symbol">₿</span>
+        </span>
+      );
+    default:
+      return <span aria-hidden="true">{symbol === 'BRENT' ? '💧' : '📈'}</span>;
+  }
 };
 
 /** Positive / negative / neutral by correlation value (font-only styling) */
@@ -33,6 +88,16 @@ const getSignClass = (value) => {
   if (numeric >= 0.5) return 'usd-positive';
   if (numeric <= -0.5) return 'usd-negative';
   return 'usd-neutral';
+};
+
+const getHeatClass = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 'usd-heat-neutral';
+  if (numeric >= 0.75) return 'usd-heat-positive-strong';
+  if (numeric >= 0.5) return 'usd-heat-positive-medium';
+  if (numeric <= -0.75) return 'usd-heat-negative-strong';
+  if (numeric <= -0.5) return 'usd-heat-negative-medium';
+  return 'usd-heat-neutral';
 };
 
 const USDCorrelationMatrix = ({
@@ -97,18 +162,20 @@ const USDCorrelationMatrix = ({
   return (
     <div className="usd-correlation-panel">
       <div className="usd-correlation-header">
-        <StatusDot
-          updatedAt={effectiveUpdatedAt}
-          status={statusState}
-          size={10}
-          className="mr-1"
-          label="USD Correlations"
-          emoji={statusEmoji}
-          sources={statusSources}
-        />
-        <span className="usd-correlation-title">Reports &amp; Insights Style</span>
-        <span className="usd-correlation-rolling-label">30-Week Rolling Performance Metrics</span>
-        <span className="usd-correlation-subtitle">*Days = Trading Days</span>
+        <div className="usd-correlation-header-left">
+          <StatusDot
+            updatedAt={effectiveUpdatedAt}
+            status={statusState}
+            size={10}
+            className="mr-1"
+            label="USD Correlations"
+            emoji={statusEmoji}
+            sources={statusSources}
+          />
+          <span className="usd-correlation-title">Key $USD Correlations*</span>
+        </div>
+        <span className="usd-correlation-days-note">*Days = Trading Days</span>
+        <span className="usd-correlation-rolling-title">52-Wk Rolling 30D Correlation</span>
       </div>
 
       <div className="usd-correlation-table-wrap">
@@ -125,7 +192,7 @@ const USDCorrelationMatrix = ({
         {!loading && !error && hasData ? (
           <div className="usd-correlation-grid">
             <div className="usd-correlation-header-row">
-              <div className="usd-correlation-th usd-correlation-th-metric">Metric</div>
+              <div className="usd-correlation-th usd-correlation-th-metric">METRIC</div>
               {CORRELATION_PERIODS.map((period) => (
                 <div key={period} className="usd-correlation-th">
                   {period}D
@@ -133,7 +200,7 @@ const USDCorrelationMatrix = ({
               ))}
               <div className="usd-correlation-th usd-correlation-th-rolling-start usd-correlation-right-header">High</div>
               <div className="usd-correlation-th usd-correlation-right-header">Low</div>
-              <div className="usd-correlation-th usd-correlation-right-header">% Time Pos</div>
+              <div className="usd-correlation-th usd-correlation-right-header usd-correlation-right-stats-start">% Time Pos</div>
               <div className="usd-correlation-th usd-correlation-right-header">% Time Neg</div>
             </div>
             {USD_METRICS.map((metric) => {
@@ -143,7 +210,7 @@ const USDCorrelationMatrix = ({
                 <div key={metric.symbol} className="usd-correlation-row">
                   <div className="usd-correlation-td usd-correlation-td-metric">
                     <span className="usd-metric-icon" aria-hidden="true">
-                      {METRIC_ICONS[metric.symbol] || '•'}
+                      <MetricIcon symbol={metric.symbol} />
                     </span>
                     <span>{metric.name}</span>
                   </div>
@@ -154,7 +221,7 @@ const USDCorrelationMatrix = ({
                     return (
                       <div
                         key={period}
-                        className={`usd-correlation-td usd-correlation-cell ${signClass}`}
+                        className={`usd-correlation-td usd-correlation-cell ${signClass} ${getHeatClass(correlation)}`}
                       >
                         <span className="usd-cell-pill">{displayValue}</span>
                       </div>
@@ -170,14 +237,14 @@ const USDCorrelationMatrix = ({
                       {formatNumeric(metricRollingStats.low, 2)}
                     </span>
                   </div>
-                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value">
+                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value usd-correlation-right-stats-start">
                     <span className="usd-cell-pill">
-                      {formatNumeric(metricRollingStats.percentPositive, 2)}%
+                      {formatPercentValue(metricRollingStats.percentPositive)}
                     </span>
                   </div>
                   <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value">
                     <span className="usd-cell-pill">
-                      {formatNumeric(metricRollingStats.percentNegative, 2)}%
+                      {formatPercentValue(metricRollingStats.percentNegative)}
                     </span>
                   </div>
                 </div>

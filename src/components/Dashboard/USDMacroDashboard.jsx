@@ -354,15 +354,17 @@ const USDMacroDashboard = () => {
         {/* Left: MACRO SHOW */}
         <div className="flex-1 macro-call-card">
           <div className="region-chart-header">
-            <StatusDot
-              updatedAt={latestMacroScrapedAt}
-              status={latestMacroScrapedAt ? 'active' : undefined}
-              size={10}
-              className="mr-1"
-              label="Macro Show"
-              emoji={latestMacroScrapedAt ? '🟢' : '⚪'}
-            />
-            <span className="region-label dark:text-white">MACRO SHOW</span>
+            <div className="region-header-left">
+              <StatusDot
+                updatedAt={latestMacroScrapedAt}
+                status={latestMacroScrapedAt ? 'active' : undefined}
+                size={10}
+                className="mr-1"
+                label="Macro Show"
+                emoji={latestMacroScrapedAt ? '🟢' : '⚪'}
+              />
+              <span className="region-label dark:text-white">MACRO SHOW</span>
+            </div>
           </div>
           <div className="macro-call-body macro-call-body-days">
             {renderShowRows(macroShowRows.length > 0 ? macroShowRows : marketDays.map((day) => ({ ...day, snapshot: null })))}
@@ -372,15 +374,17 @@ const USDMacroDashboard = () => {
         {/* Right: THE CALL */}
         <div className="flex-1 macro-call-card">
           <div className="region-chart-header">
-            <StatusDot
-              updatedAt={latestCallScrapedAt}
-              status={latestCallScrapedAt ? 'active' : undefined}
-              size={10}
-              className="mr-1"
-              label="The Call"
-              emoji={latestCallScrapedAt ? '🟢' : '⚪'}
-            />
-            <span className="region-label dark:text-white">THE CALL</span>
+            <div className="region-header-left">
+              <StatusDot
+                updatedAt={latestCallScrapedAt}
+                status={latestCallScrapedAt ? 'active' : undefined}
+                size={10}
+                className="mr-1"
+                label="The Call"
+                emoji={latestCallScrapedAt ? '🟢' : '⚪'}
+              />
+              <span className="region-label dark:text-white">THE CALL</span>
+            </div>
           </div>
           <div className="macro-call-body macro-call-body-days">
             {renderShowRows(theCallRows.length > 0 ? theCallRows : marketDays.map((day) => ({ ...day, snapshot: null })))}

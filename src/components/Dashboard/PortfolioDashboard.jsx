@@ -628,7 +628,7 @@ const PortfolioDashboard = () => {
           transition: 'width 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: 'flex',
           flexDirection: 'column',
-          fontFamily: 'Georgia, "Times New Roman", serif',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
@@ -786,7 +786,7 @@ const PortfolioDashboard = () => {
                 boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04)',
                 zIndex: 1000,
                 padding: '4px 0',
-                fontFamily: 'Georgia, "Times New Roman", serif',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
               }}
             >
               {bookFiles.map((file, index) => (
@@ -1112,7 +1112,7 @@ const PortfolioDashboard = () => {
                   color: '#000',
                   margin: 0,
                   userSelect: 'none',
-                  fontFamily: 'Georgia, "Times New Roman", serif',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
               >
                 The Pods
@@ -1463,7 +1463,7 @@ const PortfolioDashboard = () => {
                     fontWeight: 700,
                     margin: 0,
                     color: theme === 'dark' ? '#f3f4f6' : '#000',
-                    fontFamily: 'Georgia, "Times New Roman", serif',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                   }}
                 >
                   {selectedBookTitle}
@@ -1563,7 +1563,7 @@ const PortfolioDashboard = () => {
                   flex: 1,
                   color: theme === 'dark' ? '#f3f4f6' : '#111',
                   lineHeight: '1.6',
-                  fontFamily: 'Georgia, "Times New Roman", serif',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
               >
                 <ReactMarkdown
@@ -1830,7 +1830,7 @@ const PortfolioDashboard = () => {
                   color: '#000',
                   margin: 0,
                   userSelect: 'none',
-                  fontFamily: 'Georgia, "Times New Roman", serif',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
               >
                 Securities Universe
@@ -1901,7 +1901,7 @@ const PortfolioDashboard = () => {
                   color: '#000',
                   margin: 0,
                   userSelect: 'none',
-                  fontFamily: 'Georgia, "Times New Roman", serif',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
               >
                 Performance Tracking
@@ -2017,7 +2017,7 @@ const PortfolioDashboard = () => {
                   margin: 0,
                   userSelect: 'none',
                   cursor: 'pointer',
-                  fontFamily: 'Georgia, "Times New Roman", serif',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
                 onClick={() => setShowWorkflowStatus(false)}
               >

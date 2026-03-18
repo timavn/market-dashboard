@@ -278,6 +278,20 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
   const currentIndex = indices[selectedIndex];
   const quote = data?.find(d => d.symbol === currentIndex.symbol);
 
+  const formatTabPrice = React.useCallback((rawPrice) => {
+    if (rawPrice == null || rawPrice === '' || rawPrice === '--') return null;
+    const num =
+      typeof rawPrice === 'number'
+        ? rawPrice
+        : parseFloat(String(rawPrice).replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(num)) return null;
+
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(num);
+  }, []);
+
   // Track market status with updates
   const [marketStatus, setMarketStatus] = React.useState('closed');
 
@@ -339,14 +353,24 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
     const indexQuote = data?.find(d => d.symbol === symbol);
     if (!indexQuote?.changePercent) return null;
     const changeNum = parseFloat(indexQuote.changePercent.toString().replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(changeNum)) return null;
+    const formatted = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(changeNum);
     return {
-      percent: indexQuote.changePercent,
+      percent: formatted,
       isPositive: changeNum >= 0
     };
   };
 
+  const getIndexPrice = (symbol) => {
+    const indexQuote = data?.find(d => d.symbol === symbol);
+    return formatTabPrice(indexQuote?.price);
+  };
+
   return (
-    <div className="region-chart-panel">
+    <div className={`region-chart-panel region-chart-panel--${regionKey}`}>
       <div className="region-chart-header">
         <div className="region-header-left">
           <StatusDot
@@ -364,6 +388,7 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
           <div className="index-tabs">
             {indices.map((idx, i) => {
               const change = getIndexChange(idx.symbol);
+              const price = getIndexPrice(idx.symbol);
               return (
                 <button
                   key={idx.symbol}
@@ -371,6 +396,11 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
                   onClick={() => onSelectIndex(regionKey, i)}
                 >
                   <span className="index-tab-name">{idx.name}</span>
+                  {price && (
+                    <span className={`index-tab-price ${change ? (change.isPositive ? 'positive' : 'negative') : ''}`}>
+                      {price}
+                    </span>
+                  )}
                   {change && (
                     <span className={`index-tab-change ${change.isPositive ? 'positive' : 'negative'}`}>
                       {change.isPositive ? '▲' : '▼'}{change.percent}%
