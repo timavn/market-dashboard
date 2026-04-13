@@ -50,6 +50,8 @@
     "eject": "react-scripts eject",
     "server": "node server.js",
     "dev": "concurrently \"npm run server\" \"npm start\"",
+    "collect:market-structure": "node scripts/collect_market_structure_daily.js",
+    "report:market-structure": "node scripts/collect_market_structure_daily.js --report-only",
     "lint": "eslint src --ext .js,.jsx",
     "lint:fix": "eslint src --ext .js,.jsx --fix",
     "format": "prettier --write src/**/*.{js,jsx,json,css,md}"

@@ -1178,6 +1178,20 @@ const WorkflowStatus = () => {
                                   </div>
                                 </div>
                                 <div>
+                                  <div style={{ fontSize: '10px', fontWeight: 600, color: '#dc2626', marginBottom: '4px' }}>
+                                    SHORTS
+                                  </div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    {diff.currentShorts?.length > 0 ? (
+                                      diff.currentShorts.map(t => (
+                                        <span key={t} style={{ fontSize: '10px', color: '#dc2626', backgroundColor: isDark ? 'rgba(220, 38, 38, 0.1)' : 'rgba(220, 38, 38, 0.08)', padding: '2px 5px', borderRadius: '3px', fontWeight: 500 }}>{t}</span>
+                                      ))
+                                    ) : (
+                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div>
                                   <div style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
                                     NEUTRALS
                                   </div>
@@ -1197,20 +1211,6 @@ const WorkflowStatus = () => {
                                         >
                                           {t}
                                         </span>
-                                      ))
-                                    ) : (
-                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div style={{ fontSize: '10px', fontWeight: 600, color: '#dc2626', marginBottom: '4px' }}>
-                                    SHORTS
-                                  </div>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                    {diff.currentShorts?.length > 0 ? (
-                                      diff.currentShorts.map(t => (
-                                        <span key={t} style={{ fontSize: '10px', color: '#dc2626', backgroundColor: isDark ? 'rgba(220, 38, 38, 0.1)' : 'rgba(220, 38, 38, 0.08)', padding: '2px 5px', borderRadius: '3px', fontWeight: 500 }}>{t}</span>
                                       ))
                                     ) : (
                                       <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>

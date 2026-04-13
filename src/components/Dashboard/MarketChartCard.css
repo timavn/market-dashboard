@@ -98,6 +98,27 @@
   margin-left: 2px;
 }
 
+/* Main row: chart + optional vertical timeframe rail */
+.market-chart-card-main {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  min-height: 0;
+}
+
+.market-chart-card--vertical-ranges .market-chart-card-main {
+  flex: 1;
+  min-height: 140px;
+}
+
+.market-chart-card--vertical-ranges .chart-container {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: 140px;
+}
+
 /* Time range tabs */
 .chart-tabs {
   display: flex;
@@ -105,6 +126,59 @@
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid #e5e7eb;
+}
+
+.chart-tabs--vertical {
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 32px;
+  margin: 0 0 0 4px;
+  padding: 4px 0 4px 6px;
+  border-bottom: none;
+  border-left: 1px solid #e5e7eb;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+}
+
+.chart-tabs--vertical .chart-tab {
+  padding: 5px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 0;
+  border: none;
+  border-right: 3px solid transparent;
+  color: #6b7280;
+  text-align: right;
+  line-height: 1.1;
+}
+
+.chart-tabs--vertical .chart-tab.active {
+  background: transparent;
+  color: #111827;
+  border-right-color: #111827;
+}
+
+.chart-tabs--vertical .chart-tab:hover:not(.disabled) {
+  background: #f9fafb;
+  color: #374151;
+}
+
+.market-chart-card--compact {
+  min-height: 0;
+  padding: 8px 10px 10px;
+}
+
+.market-chart-card--compact:not(.market-chart-card--vertical-ranges) .chart-container {
+  height: 120px;
+}
+
+.market-chart-card--vertical-ranges.market-chart-card--compact {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 6px 4px 8px 8px;
 }
 
 .chart-tab {

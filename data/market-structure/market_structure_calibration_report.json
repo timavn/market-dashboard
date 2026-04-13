@@ -1,0 +1,260 @@
+{
+  "generatedAt": "2026-03-20T02:49:09.166Z",
+  "selected": {
+    "id": "market-structure-cboe-consolidated-v1",
+    "label": "Cboe consolidated shares",
+    "totalKey": "totalMarketVolume",
+    "exchangeKey": "totalExchangeVolume",
+    "summary": {
+      "benchmarkCount": 1,
+      "evaluatedCount": 1,
+      "exactMatchCount": 0,
+      "exactMatchRate": 0,
+      "maxAbsoluteError": 9,
+      "meanAbsoluteError": 6.75
+    },
+    "benchmarks": [
+      {
+        "date": "2026-03-18",
+        "expected": {
+          "totalMarket_priorDay": 8,
+          "totalMarket_1M": 10,
+          "totalMarket_3M": 13,
+          "totalMarket_1Y": 15,
+          "totalExchange_priorDay": 15,
+          "totalExchange_1M": 1,
+          "totalExchange_3M": 4,
+          "totalExchange_1Y": 8
+        },
+        "actual": {
+          "totalMarket_priorDay": 15,
+          "totalMarket_1M": 1,
+          "totalMarket_3M": 5,
+          "totalMarket_1Y": 8,
+          "totalExchange_priorDay": 22,
+          "totalExchange_1M": 4,
+          "totalExchange_3M": 9,
+          "totalExchange_1Y": 16
+        },
+        "exactMatch": false,
+        "comparableFieldCount": 8,
+        "absoluteErrors": [
+          7,
+          9,
+          8,
+          7,
+          7,
+          3,
+          5,
+          8
+        ]
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "id": "market-structure-cboe-consolidated-v1",
+      "label": "Cboe consolidated shares",
+      "totalKey": "totalMarketVolume",
+      "exchangeKey": "totalExchangeVolume",
+      "summary": {
+        "benchmarkCount": 1,
+        "evaluatedCount": 1,
+        "exactMatchCount": 0,
+        "exactMatchRate": 0,
+        "maxAbsoluteError": 9,
+        "meanAbsoluteError": 6.75
+      },
+      "benchmarks": [
+        {
+          "date": "2026-03-18",
+          "expected": {
+            "totalMarket_priorDay": 8,
+            "totalMarket_1M": 10,
+            "totalMarket_3M": 13,
+            "totalMarket_1Y": 15,
+            "totalExchange_priorDay": 15,
+            "totalExchange_1M": 1,
+            "totalExchange_3M": 4,
+            "totalExchange_1Y": 8
+          },
+          "actual": {
+            "totalMarket_priorDay": 15,
+            "totalMarket_1M": 1,
+            "totalMarket_3M": 5,
+            "totalMarket_1Y": 8,
+            "totalExchange_priorDay": 22,
+            "totalExchange_1M": 4,
+            "totalExchange_3M": 9,
+            "totalExchange_1Y": 16
+          },
+          "exactMatch": false,
+          "comparableFieldCount": 8,
+          "absoluteErrors": [
+            7,
+            9,
+            8,
+            7,
+            7,
+            3,
+            5,
+            8
+          ]
+        }
+      ]
+    },
+    {
+      "id": "market-structure-cboe-total-volume-exchange-notional-v1",
+      "label": "Cboe total volume + exchange notional",
+      "totalKey": "totalMarketVolume",
+      "exchangeKey": "totalExchangeNotional",
+      "summary": {
+        "benchmarkCount": 1,
+        "evaluatedCount": 1,
+        "exactMatchCount": 0,
+        "exactMatchRate": 0,
+        "maxAbsoluteError": 10,
+        "meanAbsoluteError": 6.75
+      },
+      "benchmarks": [
+        {
+          "date": "2026-03-18",
+          "expected": {
+            "totalMarket_priorDay": 8,
+            "totalMarket_1M": 10,
+            "totalMarket_3M": 13,
+            "totalMarket_1Y": 15,
+            "totalExchange_priorDay": 15,
+            "totalExchange_1M": 1,
+            "totalExchange_3M": 4,
+            "totalExchange_1Y": 8
+          },
+          "actual": {
+            "totalMarket_priorDay": 15,
+            "totalMarket_1M": 1,
+            "totalMarket_3M": 5,
+            "totalMarket_1Y": 8,
+            "totalExchange_priorDay": 14,
+            "totalExchange_1M": -9,
+            "totalExchange_3M": -5,
+            "totalExchange_1Y": 11
+          },
+          "exactMatch": false,
+          "comparableFieldCount": 8,
+          "absoluteErrors": [
+            7,
+            9,
+            8,
+            7,
+            1,
+            10,
+            9,
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "id": "market-structure-cboe-consolidated-notional-v1",
+      "label": "Cboe consolidated notional",
+      "totalKey": "totalMarketNotional",
+      "exchangeKey": "totalExchangeNotional",
+      "summary": {
+        "benchmarkCount": 1,
+        "evaluatedCount": 1,
+        "exactMatchCount": 0,
+        "exactMatchRate": 0,
+        "maxAbsoluteError": 19,
+        "meanAbsoluteError": 8.5
+      },
+      "benchmarks": [
+        {
+          "date": "2026-03-18",
+          "expected": {
+            "totalMarket_priorDay": 8,
+            "totalMarket_1M": 10,
+            "totalMarket_3M": 13,
+            "totalMarket_1Y": 15,
+            "totalExchange_priorDay": 15,
+            "totalExchange_1M": 1,
+            "totalExchange_3M": 4,
+            "totalExchange_1Y": 8
+          },
+          "actual": {
+            "totalMarket_priorDay": 8,
+            "totalMarket_1M": -9,
+            "totalMarket_3M": -6,
+            "totalMarket_1Y": 8,
+            "totalExchange_priorDay": 14,
+            "totalExchange_1M": -9,
+            "totalExchange_3M": -5,
+            "totalExchange_1Y": 11
+          },
+          "exactMatch": false,
+          "comparableFieldCount": 8,
+          "absoluteErrors": [
+            0,
+            19,
+            19,
+            7,
+            1,
+            10,
+            9,
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "id": "market-structure-cboe-total-notional-exchange-volume-v1",
+      "label": "Cboe total notional + exchange volume",
+      "totalKey": "totalMarketNotional",
+      "exchangeKey": "totalExchangeVolume",
+      "summary": {
+        "benchmarkCount": 1,
+        "evaluatedCount": 1,
+        "exactMatchCount": 0,
+        "exactMatchRate": 0,
+        "maxAbsoluteError": 19,
+        "meanAbsoluteError": 8.5
+      },
+      "benchmarks": [
+        {
+          "date": "2026-03-18",
+          "expected": {
+            "totalMarket_priorDay": 8,
+            "totalMarket_1M": 10,
+            "totalMarket_3M": 13,
+            "totalMarket_1Y": 15,
+            "totalExchange_priorDay": 15,
+            "totalExchange_1M": 1,
+            "totalExchange_3M": 4,
+            "totalExchange_1Y": 8
+          },
+          "actual": {
+            "totalMarket_priorDay": 8,
+            "totalMarket_1M": -9,
+            "totalMarket_3M": -6,
+            "totalMarket_1Y": 8,
+            "totalExchange_priorDay": 22,
+            "totalExchange_1M": 4,
+            "totalExchange_3M": 9,
+            "totalExchange_1Y": 16
+          },
+          "exactMatch": false,
+          "comparableFieldCount": 8,
+          "absoluteErrors": [
+            0,
+            19,
+            19,
+            7,
+            7,
+            3,
+            5,
+            8
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -162,7 +162,7 @@ const USDCorrelationMatrix = ({
   return (
     <div className="usd-correlation-panel">
       <div className="usd-correlation-header">
-        <div className="usd-correlation-header-left">
+        <div className="usd-correlation-header-main">
           <StatusDot
             updatedAt={effectiveUpdatedAt}
             status={statusState}
@@ -172,8 +172,10 @@ const USDCorrelationMatrix = ({
             emoji={statusEmoji}
             sources={statusSources}
           />
-          <span className="usd-correlation-title">Key $USD Correlations*</span>
+          <span className="region-label">Key USD Correlations</span>
         </div>
+      </div>
+      <div className="usd-correlation-subheader">
         <span className="usd-correlation-days-note">*Days = Trading Days</span>
         <span className="usd-correlation-rolling-title">52-Wk Rolling 30D Correlation</span>
       </div>

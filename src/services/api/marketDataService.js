@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { API_BASE_URL, ENDPOINTS, EXTERNAL_APIS } from '../../constants/apiEndpoints';
+import { ENDPOINTS, EXTERNAL_APIS } from '../../constants/apiEndpoints';
 import { PortfolioAnalytics } from '../portfolioAnalytics';
 
 // Create axios instance with default config
@@ -193,7 +193,7 @@ export class MarketDataService {
   }
 
   // Get multi-region market quotes (US, Europe, Asia, Crypto, Rates)
-  static async getMultiRegionQuotes(regions = null, includeSparklines = false) {
+  static async getMultiRegionQuotes(regions = null, includeSparklines = false, includePeriodReturns = false) {
     try {
       const params = {};
       if (regions) {
@@ -201,6 +201,9 @@ export class MarketDataService {
       }
       if (includeSparklines !== undefined) {
         params.includeSparklines = includeSparklines.toString();
+      }
+      if (includePeriodReturns) {
+        params.includePeriodReturns = 'true';
       }
 
       const response = await apiClient.get('/api/multi-region-quotes', { params });
@@ -224,10 +227,10 @@ export class MarketDataService {
     }
   }
 
-  // Get Market Share Volume & Total Exchange Volume series
-  // Returns aligned daily volume arrays for:
-  // - totalMarket: proxied by VTI
-  // - totalExchange: proxied by SPY + QQQ + IWM combined
+  // Get persisted market-structure daily series for the Volume card
+  // Returns aligned daily arrays for:
+  // - totalMarket: consolidated market-wide share volume
+  // - totalExchange: listed exchange share volume
   static async getMarketShareVolume(days = 365) {
     try {
       const response = await apiClient.get(ENDPOINTS.MARKET_SHARE_VOLUME, {

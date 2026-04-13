@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { USDMarketService } from '../../services/api/usdMarketService';
-import MarketChartCard, { prefetchChartData } from './MarketChartCard';
 import MarketVolumeTable from './MarketVolumeTable';
 import { VolatilityTableWithTabs } from './VolatilityTable';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
@@ -97,11 +96,26 @@ const getMarketStatus = (region) => {
   }
 };
 
-// Legacy helper for components that just need boolean
-const isMarketOpen = (region) => {
-  const status = getMarketStatus(region);
-  return status === 'open' || status === 'extended';
-};
+/** Intensity 0–1 for heatmap backgrounds (day % now; weekly/monthly/ytd later). */
+const HEAT_CAP_PCT = 15;
+
+function pctHeatProps(pctNum) {
+  if (!Number.isFinite(pctNum)) {
+    return { className: 'region-mw-heat--na', style: {} };
+  }
+  const sign = pctNum >= 0 ? 'pos' : 'neg';
+  const intensity = Math.min(Math.abs(pctNum) / HEAT_CAP_PCT, 1);
+  return {
+    className: `region-mw-heat--${sign}`,
+    style: { '--heat': intensity }
+  };
+}
+
+function formatPeriodPct(val) {
+  if (val == null || !Number.isFinite(Number(val))) return '—';
+  const n = Number(val);
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+}
 
 // Main market regions configuration (for 3x2 grid with full charts)
 const MAIN_MARKET_REGIONS = {
@@ -201,36 +215,30 @@ const CURRENCIES_CONFIG = {
 
 // VolumeCard - standalone card (styled like region panels)
 function VolumeCard() {
-  const [usStatus, setUsStatus] = React.useState('closed');
   const [volLastUpdated, setVolLastUpdated] = React.useState(null);
-  const [volSources, setVolSources] = React.useState([]);
-  React.useEffect(() => {
-    const update = () => setUsStatus(getMarketStatus('US'));
-    update();
-    const interval = setInterval(update, 60000);
-    return () => clearInterval(interval);
+  const [volStatus, setVolStatus] = React.useState('defective');
+
+  const handleVolumeSourcesChange = React.useCallback((sources) => {
+    const primarySource = Array.isArray(sources) ? sources[0] : null;
+    setVolStatus(primarySource?.status || 'defective');
   }, []);
-  const statusIndicator = usStatus === 'open' || usStatus === 'extended'
-    ? { emoji: '🟢', title: usStatus === 'open' ? 'Market open' : 'Extended hours' }
-    : { emoji: '🔴', title: 'Market closed' };
 
   return (
     <div className="secondary-card volume-card">
       <div className="region-chart-header">
         <StatusDot
           updatedAt={volLastUpdated}
-          status={statusIndicator.emoji === '🟢' ? 'active' : 'inactive'}
+          status={volStatus}
           size={10}
           className="mr-1"
           label="Volume"
-          emoji={statusIndicator.emoji}
-          sources={volSources}
+          showDateOnly
         />
         <span className="region-label">Volume</span>
       </div>
       <MarketVolumeTable
         onLastUpdatedChange={setVolLastUpdated}
-        onSourcesChange={setVolSources}
+        onSourcesChange={handleVolumeSourcesChange}
       />
     </div>
   );
@@ -272,25 +280,30 @@ function VolatilityCard() {
   );
 }
 
-// RegionChartPanel component - displays a single full chart for a region with index tabs
-function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectIndex }) {
+// RegionChartPanel — full-width metrics table (charts may return later)
+function RegionChartPanel({ region, regionKey, data, loading }) {
   const { label, indices, regionKey: marketRegionKey } = region;
-  const currentIndex = indices[selectedIndex];
-  const quote = data?.find(d => d.symbol === currentIndex.symbol);
+  const tableIndices = React.useMemo(() => indices.slice(0, 12), [indices]);
+  const isRates = marketRegionKey === 'Rates';
 
-  const formatTabPrice = React.useCallback((rawPrice) => {
-    if (rawPrice == null || rawPrice === '' || rawPrice === '--') return null;
-    const num =
-      typeof rawPrice === 'number'
-        ? rawPrice
-        : parseFloat(String(rawPrice).replace(/[^0-9.-]/g, ''));
-    if (!Number.isFinite(num)) return null;
+  const formatTablePrice = React.useCallback(
+    (rawPrice, { suffix = '' } = {}) => {
+      if (rawPrice == null || rawPrice === '' || rawPrice === '--') return '—';
+      const num =
+        typeof rawPrice === 'number'
+          ? rawPrice
+          : parseFloat(String(rawPrice).replace(/[^0-9.-]/g, ''));
+      if (!Number.isFinite(num)) return '—';
 
-    return new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(num);
-  }, []);
+      return (
+        new Intl.NumberFormat('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        }).format(num) + suffix
+      );
+    },
+    []
+  );
 
   // Track market status with updates
   const [marketStatus, setMarketStatus] = React.useState('closed');
@@ -333,7 +346,7 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
   const regionSources = React.useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) return [];
     const interval = SOURCE_POLL_INTERVALS.multiRegionQuotes;
-    return indices
+    return tableIndices
       .map((idx) => {
         const idxQuote = data.find(d => d.symbol === idx.symbol);
         const ts = idxQuote?.lastUpdated || idxQuote?.timestamp || idxQuote?.chartUpdatedAt;
@@ -346,32 +359,57 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
         };
       })
       .filter(Boolean);
-  }, [data, indices]);
+  }, [data, tableIndices]);
 
-  // Helper to get change data for an index
-  const getIndexChange = (symbol) => {
-    const indexQuote = data?.find(d => d.symbol === symbol);
-    if (!indexQuote?.changePercent) return null;
-    const changeNum = parseFloat(indexQuote.changePercent.toString().replace(/[^0-9.-]/g, ''));
-    if (!Number.isFinite(changeNum)) return null;
-    const formatted = new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(changeNum);
+  const getRowMetrics = (symbol) => {
+    const indexQuote = data?.find((d) => d.symbol === symbol);
+    const pctRaw = indexQuote?.changePercent;
+    const pctNum = parseFloat(String(pctRaw ?? '').replace(/[^0-9.-]/g, ''));
+    const chgRaw = indexQuote?.change;
+    const chgNum = parseFloat(String(chgRaw ?? '').replace(/[^0-9.-]/g, ''));
+    const hasPct = Number.isFinite(pctNum);
+    const hasChg = Number.isFinite(chgNum);
+    const isPositive = hasPct ? pctNum >= 0 : hasChg ? chgNum >= 0 : null;
+    const priceStr = formatTablePrice(indexQuote?.price, {
+      suffix: isRates ? '%' : ''
+    });
+    const pctStr = hasPct
+      ? `${pctNum > 0 ? '+' : ''}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(pctNum)}%`
+      : '—';
+    const dayDisplay =
+      hasChg && isPositive != null
+        ? `${isPositive ? '▲' : '▼'} ${new Intl.NumberFormat('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 4
+          }).format(Math.abs(chgNum))}`
+        : '—';
+
+    const w = indexQuote?.weekChangePct;
+    const mo = indexQuote?.monthChangePct;
+    const ytd = indexQuote?.ytdChangePct;
+    const weekNum = w == null || w === '' ? NaN : Number(w);
+    const monthNum = mo == null || mo === '' ? NaN : Number(mo);
+    const ytdNum = ytd == null || ytd === '' ? NaN : Number(ytd);
+
     return {
-      percent: formatted,
-      isPositive: changeNum >= 0
+      priceStr,
+      pctStr,
+      dayDisplay,
+      pctNum,
+      isPositive,
+      indexQuote,
+      weekStr: formatPeriodPct(w),
+      monthStr: formatPeriodPct(mo),
+      ytdStr: formatPeriodPct(ytd),
+      weekNum: Number.isFinite(weekNum) ? weekNum : null,
+      monthNum: Number.isFinite(monthNum) ? monthNum : null,
+      ytdNum: Number.isFinite(ytdNum) ? ytdNum : null
     };
   };
 
-  const getIndexPrice = (symbol) => {
-    const indexQuote = data?.find(d => d.symbol === symbol);
-    return formatTabPrice(indexQuote?.price);
-  };
-
   return (
-    <div className={`region-chart-panel region-chart-panel--${regionKey}`}>
-      <div className="region-chart-header">
+    <div className={`region-chart-panel region-chart-panel--${regionKey} region-chart-panel--mw`}>
+      <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
           <StatusDot
             updatedAt={regionLastUpdated}
@@ -384,45 +422,102 @@ function RegionChartPanel({ region, regionKey, data, selectedIndex, onSelectInde
           />
           <span className="region-label">{label}</span>
         </div>
-        <div className="region-header-right">
-          <div className="index-tabs">
-            {indices.map((idx, i) => {
-              const change = getIndexChange(idx.symbol);
-              const price = getIndexPrice(idx.symbol);
-              return (
-                <button
-                  key={idx.symbol}
-                  className={`index-tab ${i === selectedIndex ? 'active' : ''}`}
-                  onClick={() => onSelectIndex(regionKey, i)}
-                >
-                  <span className="index-tab-name">{idx.name}</span>
-                  {price && (
-                    <span className={`index-tab-price ${change ? (change.isPositive ? 'positive' : 'negative') : ''}`}>
-                      {price}
-                    </span>
-                  )}
-                  {change && (
-                    <span className={`index-tab-change ${change.isPositive ? 'positive' : 'negative'}`}>
-                      {change.isPositive ? '▲' : '▼'}{change.percent}%
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+      </div>
+      <div className="region-mw-body">
+        <div className="region-mw-table-wrap">
+          <table className="region-mw-quotes-table">
+            <thead>
+              <tr>
+                <th className="region-mw-th region-mw-th-trend" aria-hidden="true" />
+                <th className="region-mw-th region-mw-th-name" scope="col" />
+                <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
+                  {isRates ? 'YIELD' : 'PRICE'}
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-day" scope="col">
+                  DAY
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  WEEKLY
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  MONTHLY
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  YTD
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {tableIndices.map((idx) => {
+                const m = getRowMetrics(idx.symbol);
+                const dirUp = m.isPositive === true;
+                const dirDown = m.isPositive === false;
+                const pctHeat = loading
+                  ? { className: 'region-mw-heat--na', style: {} }
+                  : pctHeatProps(m.pctNum);
+                const weekHeat = loading
+                  ? { className: 'region-mw-heat--na', style: {} }
+                  : pctHeatProps(m.weekNum);
+                const monthHeat = loading
+                  ? { className: 'region-mw-heat--na', style: {} }
+                  : pctHeatProps(m.monthNum);
+                const ytdHeat = loading
+                  ? { className: 'region-mw-heat--na', style: {} }
+                  : pctHeatProps(m.ytdNum);
+                return (
+                  <tr key={idx.symbol} className="region-mw-tr">
+                    <td className="region-mw-td region-mw-td-trend" aria-hidden="true">
+                      {m.isPositive != null && (
+                        <span className={dirUp ? 'mw-trend-up' : 'mw-trend-down'}>
+                          {dirUp ? '▲' : '▼'}
+                        </span>
+                      )}
+                    </td>
+                    <td className="region-mw-td region-mw-td-name">{idx.name}</td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-price ${loading ? '' : m.indexQuote?.price != null ? (dirUp ? 'positive' : dirDown ? 'negative' : '') : ''}`}
+                    >
+                      {loading ? '…' : m.priceStr}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-day ${loading ? '' : m.isPositive != null ? (dirUp ? 'positive' : 'negative') : ''}`}
+                    >
+                      {loading ? '…' : m.dayDisplay}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${pctHeat.className}`}
+                      style={pctHeat.style}
+                    >
+                      {loading ? '…' : m.pctStr}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${weekHeat.className}`}
+                      style={weekHeat.style}
+                    >
+                      {loading ? '…' : m.weekStr}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${monthHeat.className}`}
+                      style={monthHeat.style}
+                    >
+                      {loading ? '…' : m.monthStr}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
+                      style={ytdHeat.style}
+                    >
+                      {loading ? '…' : m.ytdStr}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
-      <MarketChartCard
-        key={currentIndex.symbol}
-        symbol={currentIndex.symbol}
-        name={currentIndex.name}
-        initialData={{
-          price: quote?.price,
-          change: quote?.change,
-          changePercent: quote?.changePercent
-        }}
-        hideStatus={true}
-      />
     </div>
   );
 }
@@ -546,7 +641,6 @@ export default function MultiRegionMarketOverview() {
   const [marketData, setMarketData] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const prefetchedRef = useRef(false);
   // USD correlation data for the USD Correlation card (right stack)
   const [correlationData, setCorrelationData] = useState({
     correlations: null,
@@ -556,33 +650,6 @@ export default function MultiRegionMarketOverview() {
   });
   const [correlationLoading, setCorrelationLoading] = useState(true);
   const [correlationError, setCorrelationError] = useState(null);
-  // Track which index is selected for each region (default to first index = 0)
-  const [selectedIndices, setSelectedIndices] = useState({
-    us: 0,
-    europe: 0,
-    asia: 0,
-    crypto: 0,
-    rates: 0,
-    commodities: 0
-  });
-
-  // Prefetch chart data for default indices on mount
-  useEffect(() => {
-    if (prefetchedRef.current) return;
-    prefetchedRef.current = true;
-
-    // Prefetch the first index of each region (shown by default)
-    const defaultSymbols = Object.values(MAIN_MARKET_REGIONS).map(
-      region => region.indices[0].symbol
-    );
-
-    // Stagger prefetch requests to avoid overwhelming the server
-    defaultSymbols.forEach((symbol, idx) => {
-      setTimeout(() => {
-        prefetchChartData(symbol);
-      }, idx * 100); // 100ms stagger between requests
-    });
-  }, []);
 
   useEffect(() => {
     fetchMarketData();
@@ -622,7 +689,7 @@ export default function MultiRegionMarketOverview() {
 
   const fetchMarketData = async () => {
     try {
-      const data = await MarketDataService.getMultiRegionQuotes(null, false);
+      const data = await MarketDataService.getMultiRegionQuotes(null, false, true);
       setMarketData(data);
       setLoading(false);
       setError(null);
@@ -646,14 +713,6 @@ export default function MultiRegionMarketOverview() {
     return marketData[keyMap[regionKey]];
   };
 
-  // Handle index tab selection
-  const handleSelectIndex = (regionKey, index) => {
-    setSelectedIndices(prev => ({
-      ...prev,
-      [regionKey]: index
-    }));
-  };
-
   return (
     <div className="multi-region-overview">
 
@@ -671,8 +730,7 @@ export default function MultiRegionMarketOverview() {
             region={MAIN_MARKET_REGIONS[regionKey]}
             regionKey={regionKey}
             data={getRegionData(regionKey)}
-            selectedIndex={selectedIndices[regionKey]}
-            onSelectIndex={handleSelectIndex}
+            loading={loading}
           />
         ))}
       </div>

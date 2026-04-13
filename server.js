@@ -1,10 +1,23 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const AWS = require('aws-sdk');
 const axios = require('axios');
+const {
+  DEFAULT_CACHE_PATH,
+  DEFAULT_CALIBRATION_REPORT_PATH,
+  DEFAULT_MARKET_STRUCTURE_TABLE,
+  MARKET_STRUCTURE_SERIES_ID,
+  buildMarketShareVolumeResponse,
+  normalizeMarketStructureRecord,
+  sortRecordsDescending
+} = require('./src/utils/marketStructureVolume.cjs');
+const {
+  buildHedgeyeVolumeSnapshotResponse
+} = require('./src/utils/hedgeyeVolumeSnapshot.cjs');
 
 const app = express();
 // In development, use port 3001 so React dev server can use 3000
@@ -346,6 +359,8 @@ async function fetchYahooQuote(yahooTicker) {
       return null;
     }
     const meta = result.meta || {};
+    const isRateProxyTicker = yahooTicker === '^FVX' || yahooTicker === '^TNX' || yahooTicker === '^TYX';
+    const scaleFactor = isRateProxyTicker ? 0.1 : 1;
 
     // Log available price fields for debugging
     const availablePriceFields = Object.keys(meta).filter(key =>
@@ -395,6 +410,8 @@ async function fetchYahooQuote(yahooTicker) {
         previousClose = currentPrice;
       }
 
+      currentPrice *= scaleFactor;
+      previousClose *= scaleFactor;
       const change = currentPrice - previousClose;
       const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
 
@@ -428,12 +445,55 @@ async function fetchYahooQuote(yahooTicker) {
   }
 }
 
+async function fetchFredQuoteFromCsv(seriesId) {
+  try {
+    const response = await axios.get('https://fred.stlouisfed.org/graph/fredgraph.csv', {
+      params: { id: seriesId },
+      timeout: 10000
+    });
+
+    const rows = String(response.data || '')
+      .trim()
+      .split('\n')
+      .slice(1)
+      .map((line) => {
+        const [date, value] = line.split(',');
+        const parsed = value != null ? parseFloat(value) : NaN;
+        return {
+          date,
+          value: Number.isFinite(parsed) ? parsed : null
+        };
+      })
+      .filter((row) => row.value != null);
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const latest = rows[rows.length - 1];
+    const previous = rows[rows.length - 2] ?? latest;
+    const change = latest.value - previous.value;
+    const changePercent = previous.value > 0 ? (change / previous.value) * 100 : 0;
+
+    return {
+      price: latest.value.toFixed(2),
+      change: change.toFixed(2),
+      changePercent: changePercent.toFixed(2),
+      timestamp: latest.date ? new Date(`${latest.date}T00:00:00Z`).toISOString() : new Date().toISOString()
+    };
+  } catch (error) {
+    console.error(`[FRED] CSV fallback failed for ${seriesId}:`, error.message);
+    return null;
+  }
+}
+
 // Fetch from FRED API
 async function fetchFredQuote(seriesId) {
   try {
     const apiKey = process.env.FRED_API_KEY || '';
     if (!apiKey) {
-      console.warn(`[FRED] Warning: FRED_API_KEY environment variable is not set. FRED API now requires an API key. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html`);
+      console.warn(`[FRED] Warning: FRED_API_KEY environment variable is not set. Falling back to fredgraph CSV for ${seriesId}.`);
+      return await fetchFredQuoteFromCsv(seriesId);
     }
 
     const url = 'https://api.stlouisfed.org/fred/series/observations';
@@ -494,7 +554,7 @@ async function fetchFredQuote(seriesId) {
         }
       }
     }
-    return null;
+    return await fetchFredQuoteFromCsv(seriesId);
   }
 }
 
@@ -826,7 +886,7 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
   const { range = '1d' } = req.query;
 
   // Validate range parameter
-  const validRanges = ['1d', '5d', '1mo', '3mo', '6mo', '1y'];
+  const validRanges = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'];
   if (!validRanges.includes(range)) {
     return res.status(400).json({ error: `Invalid range. Must be one of: ${validRanges.join(', ')}` });
   }
@@ -838,7 +898,8 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
     '1mo': '1h',
     '3mo': '1d',
     '6mo': '1d',
-    '1y': '1d'
+    '1y': '1d',
+    '2y': '1d'
   };
   const interval = intervalMap[range];
 
@@ -850,7 +911,8 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
     '1mo': 15 * 60 * 1000,  // 15 minutes (client caches 5 min)
     '3mo': 30 * 60 * 1000,  // 30 minutes (client caches 5 min)
     '6mo': 60 * 60 * 1000,  // 1 hour (client caches 10 min)
-    '1y': 60 * 60 * 1000    // 1 hour (client caches 10 min)
+    '1y': 60 * 60 * 1000,   // 1 hour (client caches 10 min)
+    '2y': 60 * 60 * 1000    // 1 hour
   };
   const cacheTTL = cacheTTLMap[range];
 
@@ -866,6 +928,9 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
   try {
     // Get the Yahoo ticker mapping
     const mapping = getTickerMapping(symbol);
+    const upperSym = symbol.toUpperCase();
+    const isRateProxy =
+      upperSym === 'UST2Y' || upperSym === 'UST10Y' || upperSym === 'UST30Y';
 
     // Check if this is a FRED symbol (Treasury yields)
     // For UST2Y/UST10Y/UST30Y we always want to use Yahoo
@@ -877,7 +942,7 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
           symbol: symbol.toUpperCase(),
           name: symbol.toUpperCase(),
           error: 'Intraday data not available for Treasury yields',
-          availableRanges: ['1mo', '3mo', '6mo', '1y'],
+          availableRanges: ['1mo', '3mo', '6mo', '1y', '2y'],
           chartData: []
         });
       }
@@ -1019,6 +1084,7 @@ async function fetchFREDHistorical(seriesId, range) {
       case '3mo': startDate.setMonth(startDate.getMonth() - 3); break;
       case '6mo': startDate.setMonth(startDate.getMonth() - 6); break;
       case '1y': startDate.setFullYear(startDate.getFullYear() - 1); break;
+      case '2y': startDate.setFullYear(startDate.getFullYear() - 2); break;
       default: startDate.setMonth(startDate.getMonth() - 1);
     }
 
@@ -1058,6 +1124,131 @@ async function fetchFREDHistorical(seriesId, range) {
     console.error(`[FRED] Error fetching historical for ${seriesId}:`, error.message);
     return null;
   }
+}
+
+// Period returns (weekly / monthly / YTD) for multi-region table — one daily series per symbol, cached
+const periodReturnsCache = new Map();
+const PERIOD_RETURNS_CACHE_TTL = parseInt(process.env.PERIOD_RETURNS_CACHE_TTL_MS || '30000', 10);
+
+function symbolIsYahooRateProxy(upperSym) {
+  return upperSym === 'UST2Y' || upperSym === 'UST10Y' || upperSym === 'UST30Y';
+}
+
+function computePeriodPercentsFromCloses(closes) {
+  if (!closes || closes.length < 2) return null;
+  const n = closes.length;
+  const last = closes[n - 1].close;
+  if (last == null || !Number.isFinite(last) || last === 0) return null;
+
+  const weekIdx = Math.max(0, n - 1 - 5);
+  const monthIdx = Math.max(0, n - 1 - 21);
+  const weekRef = closes[weekIdx].close;
+  const monthRef = closes[monthIdx].close;
+
+  const yNow = new Date().getUTCFullYear();
+  let ytdRef = null;
+  for (let i = 0; i < n; i++) {
+    if (new Date(closes[i].t).getUTCFullYear() === yNow) {
+      ytdRef = closes[i].close;
+      break;
+    }
+  }
+  if (ytdRef == null || !Number.isFinite(ytdRef) || ytdRef === 0) {
+    ytdRef = closes[0].close;
+  }
+
+  const pct = (ref) =>
+    ref != null && Number.isFinite(ref) && ref !== 0
+      ? Math.round((((last / ref) - 1) * 100) * 100) / 100
+      : null;
+
+  return {
+    weekChangePct: pct(weekRef),
+    monthChangePct: pct(monthRef),
+    ytdChangePct: pct(ytdRef)
+  };
+}
+
+async function fetchYahooDailyClosesSeries(symbol) {
+  const upperSym = symbol.toUpperCase();
+  const isRateProxy = symbolIsYahooRateProxy(upperSym);
+  const mapping = getTickerMapping(symbol);
+  if (mapping.source === 'fred' && !isRateProxy) return null;
+
+  const yahooSymbol = mapping.source === 'yahoo' ? mapping.ticker : symbol;
+  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=1y&interval=1d&includePrePost=false`;
+
+  const response = await axios.get(url, {
+    timeout: 12000,
+    headers: { 'User-Agent': 'Mozilla/5.0' }
+  });
+  const result = response.data?.chart?.result?.[0];
+  if (!result) return null;
+  const timestamps = result.timestamp || [];
+  const quote = result.indicators?.quote?.[0] || {};
+  const scaleFactor = isRateProxy ? 0.1 : 1;
+  const out = [];
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = quote.close?.[i];
+    if (c == null || c === undefined) continue;
+    out.push({ t: timestamps[i] * 1000, close: c * scaleFactor });
+  }
+  return out.length >= 2 ? out : null;
+}
+
+async function fetchFredDailyClosesSeries(seriesId) {
+  const apiKey = process.env.FRED_API_KEY || '';
+  if (!apiKey) return null;
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - 520);
+  const url = 'https://api.stlouisfed.org/fred/series/observations';
+  const response = await axios.get(url, {
+    params: {
+      series_id: seriesId,
+      api_key: apiKey,
+      file_type: 'json',
+      observation_start: startDate.toISOString().split('T')[0],
+      observation_end: endDate.toISOString().split('T')[0],
+      sort_order: 'asc'
+    },
+    timeout: 12000
+  });
+  const observations = response.data?.observations || [];
+  const out = observations
+    .filter((obs) => obs.value && obs.value !== '.')
+    .map((obs) => ({
+      t: new Date(obs.date).getTime(),
+      close: parseFloat(obs.value)
+    }))
+    .filter((row) => Number.isFinite(row.close));
+  return out.length >= 2 ? out : null;
+}
+
+async function computePeriodReturnsForSymbol(symbol) {
+  const mapping = getTickerMapping(symbol);
+  const upperSym = symbol.toUpperCase();
+  const isRateProxy = symbolIsYahooRateProxy(upperSym);
+  let closes = null;
+  if (mapping.source === 'fred' && !isRateProxy) {
+    closes = await fetchFredDailyClosesSeries(mapping.ticker);
+  } else {
+    closes = await fetchYahooDailyClosesSeries(symbol);
+  }
+  if (!closes || closes.length < 2) return null;
+  return computePeriodPercentsFromCloses(closes);
+}
+
+async function getPeriodReturnsCached(symbol) {
+  const key = symbol.toUpperCase();
+  const now = Date.now();
+  const hit = periodReturnsCache.get(key);
+  if (hit && now - hit.ts < PERIOD_RETURNS_CACHE_TTL) {
+    return hit.data;
+  }
+  const data = await computePeriodReturnsForSymbol(symbol);
+  periodReturnsCache.set(key, { data, ts: now });
+  return data;
 }
 
 // Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
@@ -1312,7 +1503,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call'];
+    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'volume'];
 
     for (const snapshotType of snapshotTypes) {
       try {
@@ -1974,7 +2165,8 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
       'signal-strength',
       'portfolio-solutions',
       'the-macro-show',
-      'the-call'
+      'the-call',
+      'volume'
     ];
 
     const results = {};
@@ -2387,10 +2579,12 @@ app.get('/api/macro-indicators', async (req, res) => {
 app.get('/api/multi-region-quotes', async (req, res) => {
   const startTime = Date.now();
   try {
-    const { regions, includeSparklines = 'true' } = req.query;
+    const { regions, includeSparklines = 'true', includePeriodReturns = 'false' } = req.query;
     const requestedRegions = regions ? regions.split(',') : Object.keys(MARKET_REGIONS);
+    const wantPeriodReturns =
+      includePeriodReturns === 'true' || includePeriodReturns === true || includePeriodReturns === '1';
 
-    console.log(`[API] /api/multi-region-quotes called for regions: ${requestedRegions.join(', ')}, sparklines: ${includeSparklines}`);
+    console.log(`[API] /api/multi-region-quotes called for regions: ${requestedRegions.join(', ')}, sparklines: ${includeSparklines}, periodReturns: ${wantPeriodReturns}`);
 
     const results = {};
 
@@ -2407,15 +2601,29 @@ app.get('/api/multi-region-quotes', async (req, res) => {
       const quotes = await Promise.all(
         region.indices.map(async (index) => {
           try {
-            // Use yahooSymbol or fredSymbol as appropriate
-            const symbol = index.yahooSymbol || index.fredSymbol;
-            const quote = await getQuote(symbol);
+            const quote = await getQuote(index.symbol);
+            const mapping = getTickerMapping(index.symbol);
 
             // Fetch sparkline data if requested (default: true)
             let sparklineData = [];
-            if (includeSparklines === 'true' && index.yahooSymbol) {
-              // Only fetch sparklines for Yahoo symbols (not FRED)
-              sparklineData = await getIntradayData(symbol);
+            if (includeSparklines === 'true' && mapping.source === 'yahoo') {
+              sparklineData = await getIntradayData(index.symbol);
+            }
+
+            let weekChangePct = null;
+            let monthChangePct = null;
+            let ytdChangePct = null;
+            if (wantPeriodReturns) {
+              try {
+                const periods = await getPeriodReturnsCached(index.symbol);
+                if (periods) {
+                  weekChangePct = periods.weekChangePct;
+                  monthChangePct = periods.monthChangePct;
+                  ytdChangePct = periods.ytdChangePct;
+                }
+              } catch (periodErr) {
+                console.warn(`[API] Period returns failed for ${index.symbol}:`, periodErr.message);
+              }
             }
 
             return {
@@ -2425,7 +2633,10 @@ app.get('/api/multi-region-quotes', async (req, res) => {
               change: quote?.change || null,
               changePercent: quote?.changePercent || null,
               timestamp: quote?.timestamp || new Date().toISOString(),
-              sparklineData
+              sparklineData,
+              weekChangePct,
+              monthChangePct,
+              ytdChangePct
             };
           } catch (error) {
             console.error(`[API] Error fetching ${index.symbol}:`, error.message);
@@ -2433,7 +2644,10 @@ app.get('/api/multi-region-quotes', async (req, res) => {
               symbol: index.symbol,
               name: index.name,
               price: null,
-              error: 'Failed to fetch quote'
+              error: 'Failed to fetch quote',
+              weekChangePct: null,
+              monthChangePct: null,
+              ytdChangePct: null
             };
           }
         })
@@ -3111,88 +3325,126 @@ app.get('/api/volatility-snapshot', async (req, res) => {
   res.json(snapshot);
 });
 
-// Market Share Volume & Total Exchange Volume endpoint
-// Returns aligned daily volume series for:
-// - Total Market Volume: proxied by VTI (Vanguard Total Stock Market ETF)
-// - Total Exchange Volume: proxied by combined volume of SPY + QQQ + IWM
-//
-// The frontend computes % differences vs prior day and trailing averages
-// to mirror the Hedgeye “Market Share Volume & Total Value Traded” slide.
-async function fetchSymbolVolumesFromYahoo(symbol, days) {
-  const range = days <= 7 ? '5d' : days <= 30 ? '1mo' : days <= 90 ? '3mo' : days <= 180 ? '6mo' : '1y';
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
-  try {
-    const response = await axios.get(url, {
-      params: { range, interval: '1d', includePrePost: 'false' },
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      timeout: 10000
-    });
-    const result = response.data?.chart?.result?.[0];
-    const timestamps = result?.timestamp || [];
-    const quotes = result?.indicators?.quote?.[0];
-    if (!quotes?.volume || timestamps.length === 0) return [];
+function loadLocalMarketStructureBundle() {
+  const filePath = path.join(__dirname, DEFAULT_CACHE_PATH);
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
 
-    const out = [];
-    for (let i = 0; i < timestamps.length; i++) {
-      const vol = quotes.volume?.[i];
-      if (vol == null) continue;
-      const date = new Date(timestamps[i] * 1000);
-      const dateStr = date.toISOString().split('T')[0];
-      out.push({ date: dateStr, volume: Number(vol) });
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (Array.isArray(parsed)) {
+      return {
+        meta: {},
+        records: parsed
+      };
     }
-    out.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return out;
-  } catch (err) {
-    console.warn(`[API] Yahoo Finance fallback for ${symbol} failed:`, err?.message);
-    return [];
+
+    return {
+      meta: parsed.meta || {},
+      records: Array.isArray(parsed.records) ? parsed.records : []
+    };
+  } catch (error) {
+    console.error('[API] Failed to parse local market-structure cache:', error.message);
+    return null;
   }
 }
 
-async function getSymbolVolumes(symbol, days) {
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - parseInt(days, 10));
+function loadLocalMarketStructureCalibrationReport() {
+  const filePath = path.join(__dirname, DEFAULT_CALIBRATION_REPORT_PATH);
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
 
-  const startDateStr = startDate.toISOString().split('T')[0];
-  const endDateStr = endDate.toISOString().split('T')[0];
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    console.error('[API] Failed to parse local market-structure calibration report:', error.message);
+    return null;
+  }
+}
 
+async function getPersistedMarketStructureRecords(days) {
+  const limit = Math.max(parseInt(days, 10) || 365, 260);
   const params = {
-    TableName: 'MarketPriceHistory',
-    KeyConditionExpression: 'symbol = :symbol AND #date BETWEEN :startDate AND :endDate',
+    TableName: process.env.MARKET_STRUCTURE_TABLE || DEFAULT_MARKET_STRUCTURE_TABLE,
+    KeyConditionExpression: '#seriesId = :seriesId',
     ExpressionAttributeNames: {
-      '#date': 'date'
+      '#seriesId': 'seriesId'
     },
     ExpressionAttributeValues: {
-      ':symbol': symbol,
-      ':startDate': startDateStr,
-      ':endDate': endDateStr
+      ':seriesId': MARKET_STRUCTURE_SERIES_ID
     },
-    ScanIndexForward: false // Newest first
+    ScanIndexForward: false,
+    Limit: limit
   };
 
   try {
     const result = await dynamodb.query(params).promise();
+    const records = sortRecordsDescending(
+      (result.Items || [])
+        .map((item) => normalizeMarketStructureRecord(item))
+        .filter(Boolean)
+    );
 
-    let rows = [];
-    if (result.Items && result.Items.length > 0) {
-      rows = result.Items
-        .map((item) => ({
-          date: item.date,
-          volume: item.volume != null ? Number(item.volume) : null
-        }))
-        .filter((row) => row.volume != null);
+    if (records.length > 0) {
+      return {
+        storage: 'dynamodb',
+        meta: {},
+        records,
+        calibrationReport: loadLocalMarketStructureCalibrationReport()
+      };
     }
-
-    if (rows.length === 0) {
-      console.log(`[API] No volume data in DB for ${symbol}, trying Yahoo Finance fallback...`);
-      rows = await fetchSymbolVolumesFromYahoo(symbol, days);
-    }
-
-    return rows;
-  } catch (err) {
-    console.error(`[API] Error querying MarketPriceHistory for ${symbol}:`, err);
-    return await fetchSymbolVolumesFromYahoo(symbol, days);
+  } catch (error) {
+    console.warn('[API] MarketStructureDaily query failed, falling back to local cache:', error.message);
   }
+
+  const bundle = loadLocalMarketStructureBundle();
+  if (bundle && bundle.records.length > 0) {
+    return {
+      storage: 'local-cache',
+      meta: bundle.meta || {},
+      records: sortRecordsDescending(
+        bundle.records
+          .map((record) => normalizeMarketStructureRecord(record, bundle.meta || {}))
+          .filter(Boolean)
+      ),
+      calibrationReport: loadLocalMarketStructureCalibrationReport()
+    };
+  }
+
+  return {
+    storage: 'missing',
+    meta: { status: 'missing' },
+    records: [],
+    calibrationReport: loadLocalMarketStructureCalibrationReport()
+  };
+}
+
+async function getLatestHedgeyeVolumeSnapshot(maxLookbackDays = 7) {
+  for (let i = 0; i < maxLookbackDays; i += 1) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toLocaleDateString('en-CA', {
+      timeZone: 'America/New_York'
+    });
+
+    const result = await dynamodb
+      .get({
+        TableName: 'HedgeyeDailySnapshot',
+        Key: {
+          date: dateStr,
+          snapshotType: 'volume'
+        }
+      })
+      .promise();
+
+    if (result.Item) {
+      return result.Item;
+    }
+  }
+
+  return null;
 }
 
 app.get('/api/volume/market-share', async (req, res) => {
@@ -3201,56 +3453,45 @@ app.get('/api/volume/market-share', async (req, res) => {
   const days = Number.isNaN(Number(daysParam)) ? 365 : parseInt(daysParam, 10);
 
   try {
-    const marketProxySymbol = 'VTI';
-    const exchangeSymbols = ['SPY', 'QQQ', 'IWM'];
+    const volumeSnapshot = await getLatestHedgeyeVolumeSnapshot();
+    if (volumeSnapshot) {
+      const response = buildHedgeyeVolumeSnapshotResponse(volumeSnapshot);
+      const totalTime = Date.now() - startTime;
+      console.log(
+        `[API] /api/volume/market-share completed in ${totalTime}ms (source=hedgeye-volume-snapshot, asOf=${response.asOf}, uploadDate=${response.meta.uploadDate})`
+      );
+      return res.json(response);
+    }
 
-    const [marketSeries, spySeries, qqqSeries, iwmSeries] = await Promise.all([
-      getSymbolVolumes(marketProxySymbol, days),
-      getSymbolVolumes('SPY', days),
-      getSymbolVolumes('QQQ', days),
-      getSymbolVolumes('IWM', days)
-    ]);
+    const dataset = await getPersistedMarketStructureRecords(days);
+    const response = buildMarketShareVolumeResponse(dataset.records, {
+      days,
+      fetchedAt: dataset.meta?.fetchedAt || dataset.meta?.generatedAt || null,
+      methodologyVersion: dataset.meta?.methodologyVersion || null,
+      sourceBreakdown: dataset.meta?.sourceBreakdown || null,
+      status: dataset.meta?.status || null,
+      calibrationReport: dataset.calibrationReport || null
+    });
+    response.meta.storage = dataset.storage;
+    response.meta.calibration = response.meta.calibration || dataset.meta?.calibration || null;
+    response.meta.sourceType = 'market-structure-fallback';
 
-    // Build lookup maps for exchange proxies keyed by date
-    const toMap = (series) => {
-      const map = new Map();
-      series.forEach((row) => {
-        if (row.date && row.volume != null) {
-          map.set(row.date, row.volume);
+    if (response.totalMarket.length < 2 || response.totalExchange.length < 2) {
+      const totalTime = Date.now() - startTime;
+      return res.status(503).json({
+        error: 'Market structure daily dataset is unavailable',
+        elapsedMs: totalTime,
+        ...response,
+        meta: {
+          ...response.meta,
+          status: response.meta.status || 'missing'
         }
       });
-      return map;
-    };
-
-    const spyMap = toMap(spySeries);
-    const qqqMap = toMap(qqqSeries);
-    const iwmMap = toMap(iwmSeries);
-
-    // Align combined exchange volumes on VTI's trading calendar
-    const totalExchange = [];
-    marketSeries.forEach((row) => {
-      const { date } = row;
-      const spyVol = spyMap.get(date);
-      const qqqVol = qqqMap.get(date);
-      const iwmVol = iwmMap.get(date);
-
-      if (spyVol != null && qqqVol != null && iwmVol != null) {
-        totalExchange.push({
-          date,
-          volume: spyVol + qqqVol + iwmVol
-        });
-      }
-    });
-
-    const response = {
-      asOf: marketSeries.length > 0 ? marketSeries[0].date : null,
-      totalMarket: marketSeries,
-      totalExchange
-    };
+    }
 
     const totalTime = Date.now() - startTime;
     console.log(
-      `[API] /api/volume/market-share completed in ${totalTime}ms (days=${days}, market=${marketSeries.length}, exchange=${totalExchange.length})`
+      `[API] /api/volume/market-share completed in ${totalTime}ms (days=${days}, storage=${dataset.storage}, market=${response.totalMarket.length}, exchange=${response.totalExchange.length})`
     );
 
     res.json(response);

@@ -313,29 +313,175 @@
   border: 1px solid #d6d0c3;
 }
 
+.region-chart-panel--mw {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* Region Chart Header with Index Tabs */
 .region-chart-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 7px 12px;
   background: #f3f0e6;
   border-bottom: 1px solid #d6d0c3;
-  gap: 8px;
+  gap: 12px;
   min-height: 44px;
+}
+
+.region-chart-header--mw {
+  border-bottom: 1px solid #d8d2c5;
+  min-height: 36px;
+  padding: 6px 10px;
+}
+
+/* Full-width metrics table (no side chart) */
+.region-mw-body {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.region-mw-table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.region-mw-quotes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #111827;
+}
+
+.region-mw-th {
+  text-align: right;
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  padding: 6px 8px 4px 4px;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.region-mw-th-trend {
+  width: 22px;
+  padding-left: 6px;
+  padding-right: 0;
+}
+
+.region-mw-th-name {
+  text-align: left;
+  width: 1%;
+}
+
+.region-mw-th-metric {
+  text-align: center;
+}
+
+/* PRICE / YIELD and DAY: left-aligned (all six region cards share this table) */
+.region-mw-quotes-table .region-mw-th-price,
+.region-mw-quotes-table .region-mw-th-day {
+  text-align: left;
+}
+
+.region-mw-quotes-table .region-mw-td-price.region-mw-td-num,
+.region-mw-quotes-table .region-mw-td-day.region-mw-td-num {
+  text-align: left;
+}
+
+.region-mw-tr {
+  transition: background 0.12s ease;
+}
+
+.region-mw-tr:hover {
+  background: #f9fafb;
+}
+
+.region-mw-td {
+  padding: 5px 8px 5px 4px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.region-mw-td-trend {
+  width: 22px;
+  text-align: center;
+  padding-left: 6px;
+  padding-right: 0;
+  font-size: 9px;
+}
+
+.region-mw-td-name {
+  text-align: left;
+  font-weight: 600;
+  color: #111827;
+  padding-right: 6px;
+}
+
+.region-mw-td-num {
+  text-align: right;
+  font-weight: 500;
+  color: #111827;
+}
+
+.mw-trend-up {
+  color: #15803d;
+}
+
+.mw-trend-down {
+  color: #b91c1c;
+}
+
+.region-mw-td-num.positive {
+  color: #15803d;
+}
+
+.region-mw-td-num.negative {
+  color: #b91c1c;
+}
+
+/* Heatmap cells: --heat in [0, 1] scales tint (day % today; extend for weekly/monthly/ytd later) */
+.region-mw-td.region-mw-td-heat {
+  text-align: center;
+}
+
+.region-mw-td.region-mw-td-heat.region-mw-heat--pos {
+  color: #111827;
+  background-color: rgba(22, 163, 74, calc(0.06 + var(--heat, 0) * 0.36));
+}
+
+.region-mw-td.region-mw-td-heat.region-mw-heat--neg {
+  color: #111827;
+  background-color: rgba(220, 38, 38, calc(0.06 + var(--heat, 0) * 0.34));
+}
+
+.region-mw-td.region-mw-td-heat.region-mw-heat--na {
+  color: #9ca3af;
+  background-color: #fafafa;
 }
 
 .region-header-left {
   display: flex;
   align-items: center;
   gap: 6px;
+  align-self: center;
 }
 
 .region-header-right {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex: 1;
+  justify-content: flex-start;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Region status emoji - shows market open/extended/closed status */
@@ -358,17 +504,22 @@
 
 .index-tabs {
   display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
-  flex: 1;
-  justify-content: flex-end;
+  align-items: stretch;
+  gap: 1px;
+  width: 100%;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .index-tab {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 3px 6px;
+  justify-content: center;
+  gap: 1px;
+  min-height: 36px;
+  padding: 4px 2px;
   font-size: 9px;
   font-weight: 600;
   background: #f7f4eb;
@@ -377,7 +528,10 @@
   color: #374151;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap;
+  text-align: center;
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-inline-size: 0;
 }
 
 .index-tab:focus,
@@ -400,12 +554,21 @@
 }
 
 .index-tab-name {
-  /* Name text inherits color from parent */
+  display: block;
+  width: 100%;
+  font-size: 8px;
+  line-height: 1.05;
+  text-align: center;
+  white-space: normal;
 }
 
 .index-tab-price {
-  font-size: 9px;
+  display: block;
+  width: 100%;
+  font-size: 8px;
   font-weight: 600;
+  line-height: 1.05;
+  text-align: center;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "lnum" 1, "tnum" 1;
   color: #111827;
@@ -420,8 +583,12 @@
 }
 
 .index-tab-change {
-  font-size: 8px;
+  display: block;
+  width: 100%;
+  font-size: 7px;
   font-weight: 600;
+  line-height: 1.05;
+  text-align: center;
 }
 
 .index-tab-change.positive {
@@ -430,6 +597,16 @@
 
 .index-tab-change.negative {
   color: #dc2626;
+}
+
+.region-chart-panel:not(.region-chart-panel--crypto) .index-tab {
+  flex: 1 1 0;
+  min-inline-size: 0;
+}
+
+.region-chart-panel--crypto .index-tab {
+  flex: 1 1 0;
+  min-inline-size: 0;
 }
 
 /* Macro / THE CALL card wrapper */
@@ -598,107 +775,6 @@
   letter-spacing: 0.5px;
   background: #f8fafc;
   border-bottom: 1px solid #e5e7eb;
-}
-
-/* Override MarketChartCard styling when inside region panel */
-.region-chart-panel .market-chart-card {
-  border-radius: 0;
-  box-shadow: none;
-  border: none;
-  background: #fcfaf5;
-  padding: 10px 12px 12px;
-}
-
-.region-chart-panel .chart-header {
-  margin-bottom: 2px;
-  min-height: 56px;
-}
-
-.region-chart-panel .chart-symbol {
-  color: #111;
-  font-size: 18px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0;
-  font-family: inherit;
-}
-
-.region-chart-panel .chart-price {
-  color: #111;
-  font-size: 28px;
-  font-weight: 700;
-  font-family: inherit;
-  font-variant-numeric: lining-nums tabular-nums;
-  font-feature-settings: "lnum" 1, "tnum" 1;
-  line-height: 1;
-  font-kerning: normal;
-}
-
-.region-chart-panel .chart-change {
-  margin-bottom: 7px;
-  font-size: 11px;
-}
-
-.region-chart-panel .change-value,
-.region-chart-panel .change-percent {
-  font-variant-numeric: lining-nums tabular-nums;
-  font-feature-settings: "lnum" 1, "tnum" 1;
-}
-
-.region-chart-panel .chart-change .change-period {
-  color: #6b7280;
-}
-
-.region-chart-panel .chart-tabs {
-  gap: 4px;
-  margin-bottom: 8px;
-  padding: 2px 0 8px;
-  border-bottom: 1px solid #d8d2c5;
-}
-
-.region-chart-panel .chart-tab {
-  padding: 2px 6px;
-  font-size: 9px;
-  font-weight: 600;
-  background: #f2efe6;
-  border: 1px solid #e0dbcf;
-  border-radius: 3px;
-  color: #4b5563;
-}
-
-.region-chart-panel .chart-tab:focus,
-.region-chart-panel .chart-tab:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 1px #c9c3b6;
-}
-
-.region-chart-panel .chart-tab:hover:not(.disabled) {
-  background: #ebe5d8;
-  border-color: #cdc5b5;
-  color: #111827;
-}
-
-.region-chart-panel .chart-tab.active {
-  background: #e6e0d2;
-  border-color: #c5bcac;
-  color: #111827;
-}
-
-.region-chart-panel .chart-tab.disabled {
-  color: #9ca3af;
-  background: #f7f4eb;
-  border-color: #ece8df;
-}
-
-.region-chart-panel .chart-container {
-  border-top: 1px solid #ece7dc;
-  padding-top: 8px;
-}
-
-.region-chart-panel .chart-error,
-.region-chart-panel .chart-no-data {
-  color: #7c2d12;
-  font-size: 11px;
 }
 
 /* Secondary Markets Section - Left: Currencies + Volume; Right: USD Corr + Volatility */
@@ -942,15 +1018,17 @@
   margin-top: 8px;
   font-size: 10px;
   color: #111827;
+  min-width: 0;
 }
 
 .volume-ribbon {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   background: #010a84;
   color: #fff;
-  padding: 4px 8px;
+  padding: 4px 6px;
   border-radius: 2px 2px 0 0;
   letter-spacing: 0.2px;
 }
@@ -958,7 +1036,7 @@
 .volume-ribbon-left,
 .volume-ribbon-label,
 .volume-ribbon-date {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -966,19 +1044,23 @@
 .volume-ribbon-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  text-align: right;
 }
 
 .volume-columns,
 .volume-row {
   display: grid;
-  grid-template-columns: minmax(160px, 2fr) repeat(4, minmax(55px, 1fr));
+  grid-template-columns: minmax(126px, 1.8fr) repeat(4, minmax(0, 1fr));
   align-items: center;
-  column-gap: 8px;
+  column-gap: 4px;
 }
 
 .volume-columns {
-  padding: 4px 8px;
+  padding: 4px 6px;
   background: #f0eee7;
   border-bottom: 1px solid #ddd7ca;
 }
@@ -986,9 +1068,11 @@
 .volume-col {
   text-align: right;
   text-transform: uppercase;
-  font-size: 8px;
+  font-size: 7px;
   font-weight: 700;
   color: #6b7280;
+  white-space: normal;
+  line-height: 1.15;
 }
 
 .volume-col-name {
@@ -996,7 +1080,7 @@
 }
 
 .volume-row {
-  padding: 8px;
+  padding: 8px 6px;
   border-bottom: 1px dotted #c8c1b1;
   background: #f8f6ef;
 }
@@ -1008,12 +1092,15 @@
 .volume-name {
   font-weight: 700;
   color: #111827;
+  min-width: 0;
+  line-height: 1.2;
 }
 
 .volume-value {
   text-align: right;
   font-weight: 600;
   color: #1f2937;
+  min-width: 0;
 }
 
 .volume-value.positive {
@@ -1024,15 +1111,29 @@
   color: #dc2626;
 }
 
+.volume-error-state {
+  padding: 10px 6px;
+  border: 1px dashed #d6d0c3;
+  border-radius: 4px;
+  color: #92400e;
+  background: #faf5e9;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
 .volume-footnotes {
   margin-top: 8px;
-  padding: 2px 8px 0;
+  padding: 2px 6px 0;
   color: #6b7280;
-  font-size: 8px;
+  font-size: 7px;
   font-style: italic;
   line-height: 1.35;
   display: grid;
   gap: 3px;
+}
+
+.volume-footnote-status {
+  color: #92400e;
 }
 
 /* Stack Volume and Volatility vertically (same width as original combined card) */

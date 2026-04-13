@@ -80,7 +80,7 @@ describe('MarketChartCard Component', () => {
     test('should call getChartData with different ranges', async () => {
       MarketDataService.getChartData.mockResolvedValue(mockChartData);
 
-      const ranges = ['1d', '5d', '1mo', '3mo', '6mo', '1y'];
+      const ranges = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'];
 
       for (const range of ranges) {
         await MarketDataService.getChartData('SPY', range);
@@ -139,9 +139,9 @@ describe('MarketChartCard Component', () => {
   });
 
   describe('Time Range Handling', () => {
-    test('should have 6 valid time ranges', () => {
-      const validRanges = ['1d', '5d', '1mo', '3mo', '6mo', '1y'];
-      expect(validRanges.length).toBe(6);
+    test('should have 7 valid time ranges', () => {
+      const validRanges = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'];
+      expect(validRanges.length).toBe(7);
     });
 
     test('should support 1d and 5d ranges for Treasury yields', async () => {
@@ -165,7 +165,7 @@ describe('MarketChartCard Component', () => {
           interval: '5m',
           dataPoints: 3
         },
-        availableRanges: ['1d', '5d', '1mo', '3mo', '6mo', '1y']
+        availableRanges: ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y']
       };
 
       MarketDataService.getChartData.mockResolvedValue(treasuryResponse);

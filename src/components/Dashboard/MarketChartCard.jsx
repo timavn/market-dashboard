@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   AreaChart,
   Area,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -13,31 +15,33 @@ import StatusDot from '../common/StatusDot';
 import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
 import './MarketChartCard.css';
 
-// Time range options
+// Time range options (keep in sync with /api/chart-data validRanges)
 const TIME_RANGES = [
   { key: '1d', label: '1D' },
   { key: '5d', label: '5D' },
   { key: '1mo', label: '1M' },
   { key: '3mo', label: '3M' },
   { key: '6mo', label: '6M' },
-  { key: '1y', label: '1Y' }
+  { key: '1y', label: '1Y' },
+  { key: '2y', label: '2Y' }
 ];
 
+const MW_LINE_STROKE = '#2563eb';
+const MW_PREV_CLOSE_STROKE = '#dc2626';
+
 // Client-side chart data cache with TTL
-// Cache TTLs vary by time range (intraday needs fresher data)
 const CACHE_TTL = {
-  '1d': 30 * 1000,      // 30 seconds for intraday
-  '5d': 60 * 1000,      // 1 minute for 5-day
-  '1mo': 5 * 60 * 1000, // 5 minutes for monthly
-  '3mo': 5 * 60 * 1000, // 5 minutes for 3-month
-  '6mo': 10 * 60 * 1000, // 10 minutes for 6-month
-  '1y': 10 * 60 * 1000   // 10 minutes for yearly
+  '1d': 30 * 1000,
+  '5d': 60 * 1000,
+  '1mo': 5 * 60 * 1000,
+  '3mo': 5 * 60 * 1000,
+  '6mo': 10 * 60 * 1000,
+  '1y': 10 * 60 * 1000,
+  '2y': 15 * 60 * 1000
 };
 
-// Shared cache across all MarketChartCard instances
 const chartDataCache = new Map();
 
-// Get cached data if still valid
 const getCachedData = (symbol, range) => {
   const key = `${symbol}:${range}`;
   const cached = chartDataCache.get(key);
@@ -51,7 +55,6 @@ const getCachedData = (symbol, range) => {
   return cached.data;
 };
 
-// Store data in cache
 const setCachedData = (symbol, range, data) => {
   const key = `${symbol}:${range}`;
   chartDataCache.set(key, {
@@ -60,25 +63,21 @@ const setCachedData = (symbol, range, data) => {
   });
 };
 
-// Prefetch chart data for a symbol (all common ranges)
+/** Prefetch a single symbol (default 1D only — avoids load spikes). */
 export const prefetchChartData = async (symbol) => {
-  const rangesToPrefetch = ['1d', '1mo']; // Prefetch most common ranges
-
-  for (const range of rangesToPrefetch) {
-    if (!getCachedData(symbol, range)) {
-      try {
-        const data = await MarketDataService.getChartData(symbol, range);
-        if (data && !data.error) {
-          setCachedData(symbol, range, data);
-        }
-      } catch (err) {
-        // Silently fail prefetch - user will see loading on demand
+  const range = '1d';
+  if (!getCachedData(symbol, range)) {
+    try {
+      const data = await MarketDataService.getChartData(symbol, range);
+      if (data && !data.error) {
+        setCachedData(symbol, range, data);
       }
+    } catch (err) {
+      // Silently fail — user fetch will retry
     }
   }
 };
 
-// Format timestamp based on range
 const formatXAxis = (timestamp, range) => {
   const date = new Date(timestamp);
 
@@ -93,20 +92,19 @@ const formatXAxis = (timestamp, range) => {
     case '6mo':
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     case '1y':
+    case '2y':
       return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
     default:
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 };
 
-// Custom tooltip component
 const CustomTooltip = ({ active, payload, range }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   const data = payload[0].payload;
   const date = new Date(data.timestamp);
 
-  // Format date based on range
   let dateStr;
   if (range === '1d') {
     dateStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -125,26 +123,30 @@ const CustomTooltip = ({ active, payload, range }) => {
   );
 };
 
-// Main MarketChartCard component
 const MarketChartCard = ({
   symbol,
   name,
-  initialData = null, // Initial data from parent (current price, change, etc.)
+  initialData = null,
   onClose,
   isOpen: marketIsOpen = false,
-  hideStatus = false // Hide the status indicator (shown at region level instead)
+  hideStatus = false,
+  /** Embedded in region panel: tighter layout, optional MW line chart */
+  compact = false,
+  verticalTimeRanges = false,
+  hideOhlc = false,
+  lineChart = false,
+  hideHeaderSummary = false,
+  chartHeight = null
 }) => {
   const [range, setRange] = useState('1d');
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [availableRanges, setAvailableRanges] = useState(TIME_RANGES.map(r => r.key));
+  const [availableRanges, setAvailableRanges] = useState(TIME_RANGES.map((r) => r.key));
 
-  // Fetch chart data when symbol or range changes (with caching)
   const fetchChartData = useCallback(async () => {
     if (!symbol) return;
 
-    // Check cache first
     const cached = getCachedData(symbol, range);
     if (cached) {
       setChartData(cached);
@@ -158,17 +160,14 @@ const MarketChartCard = ({
     try {
       const data = await MarketDataService.getChartData(symbol, range);
 
-      // Check if this range is not available (e.g., intraday for FRED data)
       if (data.error && data.availableRanges) {
         setAvailableRanges(data.availableRanges);
-        // Auto-switch to first available range
         if (!data.availableRanges.includes(range)) {
           setRange(data.availableRanges[0]);
-          return; // Will re-fetch with new range
+          return;
         }
       }
 
-      // Cache the successful response
       if (data && !data.error) {
         setCachedData(symbol, range, data);
       }
@@ -186,23 +185,26 @@ const MarketChartCard = ({
     fetchChartData();
   }, [fetchChartData]);
 
-  // Calculate if price is up or down
   const isPositive = useMemo(() => {
-    if (!chartData?.current?.change) return true;
-    return parseFloat(chartData.current.change) >= 0;
-  }, [chartData]);
+    if (chartData?.current?.change != null && chartData.current.change !== '') {
+      return parseFloat(chartData.current.change) >= 0;
+    }
+    if (initialData?.change != null && initialData.change !== '') {
+      const n = parseFloat(String(initialData.change).replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(n) ? n >= 0 : true;
+    }
+    return true;
+  }, [chartData, initialData]);
 
-  // Get gradient colors based on positive/negative
   const gradientColor = isPositive ? '#16a34a' : '#dc2626';
   const gradientId = `chartGradient-${symbol}-${isPositive ? 'up' : 'down'}`;
 
-  // Calculate Y-axis domain with padding
   const yDomain = useMemo(() => {
     if (!chartData?.chartData || chartData.chartData.length === 0) {
       return ['auto', 'auto'];
     }
 
-    const prices = chartData.chartData.map(d => d.close).filter(p => p != null);
+    const prices = chartData.chartData.map((d) => d.close).filter((p) => p != null);
     if (prices.length === 0) return ['auto', 'auto'];
 
     const min = Math.min(...prices);
@@ -212,13 +214,11 @@ const MarketChartCard = ({
     return [min - padding, max + padding];
   }, [chartData]);
 
-  // Get previous close for reference line
   const previousClose = useMemo(() => {
     if (!chartData?.current?.previousClose) return null;
     return parseFloat(chartData.current.previousClose);
   }, [chartData]);
 
-  // Current data (from fetched data or initial data)
   const currentPrice = chartData?.current?.price || initialData?.price || '--';
   const currentChange = chartData?.current?.change || initialData?.change || '--';
   const currentChangePercent = chartData?.current?.changePercent || initialData?.changePercent || '--';
@@ -264,132 +264,192 @@ const MarketChartCard = ({
     return getMinTimestamp(sources.map((s) => s.updatedAt));
   }, [sources]);
 
-  return (
-    <div className={`market-chart-card ${isPositive ? 'positive' : 'negative'}`}>
-      {/* Header */}
-      <div className="chart-header">
-        <div className="chart-header-left">
-          {!hideStatus && lastUpdated && (
-            <StatusDot
-              updatedAt={lastUpdated}
-              status={marketIsOpen ? 'active' : 'inactive'}
-              size={10}
-              className="mr-1"
-              label={name || symbol}
-              emoji={marketIsOpen ? '🟢' : '🔴'}
-              sources={sources}
+  const resolvedChartHeight = chartHeight ?? (compact ? 160 : 120);
+
+  const rangeButtons = TIME_RANGES.map(({ key, label }) => {
+    const isDisabled = !availableRanges.includes(key);
+    return (
+      <button
+        key={key}
+        type="button"
+        className={`chart-tab ${range === key ? 'active' : ''} ${isDisabled ? 'disabled' : ''}`}
+        onClick={() => !isDisabled && setRange(key)}
+        disabled={isDisabled}
+        title={isDisabled ? 'Data not available for this time range' : `Show ${label} data`}
+      >
+        {label}
+      </button>
+    );
+  });
+
+  const chartMargins = compact
+    ? { top: 4, right: 4, left: 0, bottom: 4 }
+    : { top: 5, right: 5, left: 5, bottom: 5 };
+
+  const showPrevCloseLine = previousClose != null && Number.isFinite(previousClose) && range === '1d';
+
+  const chartInner =
+    loading ? (
+      <div className="chart-skeleton">
+        <div className="skeleton-chart-area" />
+        <div className="skeleton-axis-labels">
+          <div className="skeleton-line skeleton-axis-label" />
+          <div className="skeleton-line skeleton-axis-label" />
+          <div className="skeleton-line skeleton-axis-label" />
+        </div>
+      </div>
+    ) : error ? (
+      <div className="chart-error">{error}</div>
+    ) : chartData?.chartData && chartData.chartData.length > 0 ? (
+      <ResponsiveContainer width="100%" height={resolvedChartHeight}>
+        {lineChart ? (
+          <LineChart data={chartData.chartData} margin={chartMargins}>
+            <XAxis
+              dataKey="timestamp"
+              tickFormatter={(ts) => formatXAxis(ts, range)}
+              tick={{ fontSize: 9, fill: '#6b7280' }}
+              axisLine={{ stroke: '#e5e7eb' }}
+              tickLine={false}
+              interval="preserveStartEnd"
+              minTickGap={40}
             />
-          )}
-          <span className="chart-symbol">{name || symbol}</span>
-        </div>
-        <div className="chart-header-right">
-          <span className="chart-price">{currentPrice}</span>
-          {onClose && (
-            <button className="chart-close-btn" onClick={onClose} title="Close">
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Price change */}
-      <div className={`chart-change ${isPositive ? 'positive' : 'negative'}`}>
-        <span className="change-arrow">{isPositive ? '▲' : '▼'}</span>
-        <span className="change-value">{currentChange}</span>
-        <span className="change-percent">({currentChangePercent}%)</span>
-        <span className="change-period">today</span>
-      </div>
-
-      {/* Time range tabs */}
-      <div className="chart-tabs">
-        {TIME_RANGES.map(({ key, label }) => {
-          const isDisabled = !availableRanges.includes(key);
-          return (
-            <button
-              key={key}
-              className={`chart-tab ${range === key ? 'active' : ''} ${isDisabled ? 'disabled' : ''}`}
-              onClick={() => !isDisabled && setRange(key)}
-              disabled={isDisabled}
-              title={isDisabled ? 'Data not available for this time range' : `Show ${label} data`}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Chart area */}
-      <div className="chart-container">
-        {loading ? (
-          <div className="chart-skeleton">
-            <div className="skeleton-chart-area" />
-            <div className="skeleton-axis-labels">
-              <div className="skeleton-line skeleton-axis-label" />
-              <div className="skeleton-line skeleton-axis-label" />
-              <div className="skeleton-line skeleton-axis-label" />
-            </div>
-          </div>
-        ) : error ? (
-          <div className="chart-error">{error}</div>
-        ) : chartData?.chartData && chartData.chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={120}>
-            <AreaChart data={chartData.chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-              <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={gradientColor} stopOpacity={0.3} />
-                  <stop offset="100%" stopColor={gradientColor} stopOpacity={0.05} />
-                </linearGradient>
-              </defs>
-
-              <XAxis
-                dataKey="timestamp"
-                tickFormatter={(ts) => formatXAxis(ts, range)}
-                tick={{ fontSize: 9, fill: '#6b7280' }}
-                axisLine={{ stroke: '#e5e7eb' }}
-                tickLine={false}
-                interval="preserveStartEnd"
-                minTickGap={40}
+            <YAxis
+              orientation="right"
+              domain={yDomain}
+              tick={{ fontSize: 9, fill: '#6b7280' }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(value) => value.toFixed(2)}
+              width={44}
+            />
+            {showPrevCloseLine && (
+              <ReferenceLine
+                y={previousClose}
+                stroke={MW_PREV_CLOSE_STROKE}
+                strokeWidth={1}
               />
+            )}
+            <Tooltip content={<CustomTooltip range={range} />} />
+            <Line
+              type="monotone"
+              dataKey="close"
+              stroke={MW_LINE_STROKE}
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 3, fill: MW_LINE_STROKE }}
+            />
+          </LineChart>
+        ) : (
+          <AreaChart data={chartData.chartData} margin={chartMargins}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={gradientColor} stopOpacity={0.3} />
+                <stop offset="100%" stopColor={gradientColor} stopOpacity={0.05} />
+              </linearGradient>
+            </defs>
 
-              <YAxis
-                domain={yDomain}
-                tick={{ fontSize: 9, fill: '#6b7280' }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(value) => value.toFixed(2)}
-                width={45}
+            <XAxis
+              dataKey="timestamp"
+              tickFormatter={(ts) => formatXAxis(ts, range)}
+              tick={{ fontSize: 9, fill: '#6b7280' }}
+              axisLine={{ stroke: '#e5e7eb' }}
+              tickLine={false}
+              interval="preserveStartEnd"
+              minTickGap={40}
+            />
+
+            <YAxis
+              domain={yDomain}
+              tick={{ fontSize: 9, fill: '#6b7280' }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(value) => value.toFixed(2)}
+              width={45}
+            />
+
+            {showPrevCloseLine && (
+              <ReferenceLine
+                y={previousClose}
+                stroke="#9ca3af"
+                strokeDasharray="3 3"
+                strokeWidth={1}
               />
+            )}
 
-              {/* Previous close reference line */}
-              {previousClose && range === '1d' && (
-                <ReferenceLine
-                  y={previousClose}
-                  stroke="#9ca3af"
-                  strokeDasharray="3 3"
-                  strokeWidth={1}
+            <Tooltip content={<CustomTooltip range={range} />} />
+
+            <Area
+              type="monotone"
+              dataKey="close"
+              stroke={gradientColor}
+              strokeWidth={1.5}
+              fill={`url(#${gradientId})`}
+              dot={false}
+              activeDot={{ r: 3, fill: gradientColor }}
+            />
+          </AreaChart>
+        )}
+      </ResponsiveContainer>
+    ) : (
+      <div className="chart-no-data">No data available</div>
+    );
+
+  return (
+    <div
+      className={[
+        'market-chart-card',
+        isPositive ? 'positive' : 'negative',
+        compact ? 'market-chart-card--compact' : '',
+        verticalTimeRanges ? 'market-chart-card--vertical-ranges' : '',
+        lineChart ? 'market-chart-card--line' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {!hideHeaderSummary && (
+        <>
+          <div className="chart-header">
+            <div className="chart-header-left">
+              {!hideStatus && lastUpdated && (
+                <StatusDot
+                  updatedAt={lastUpdated}
+                  status={marketIsOpen ? 'active' : 'inactive'}
+                  size={10}
+                  className="mr-1"
+                  label={name || symbol}
+                  emoji={marketIsOpen ? '🟢' : '🔴'}
+                  sources={sources}
                 />
               )}
+              <span className="chart-symbol">{name || symbol}</span>
+            </div>
+            <div className="chart-header-right">
+              <span className="chart-price">{currentPrice}</span>
+              {onClose && (
+                <button type="button" className="chart-close-btn" onClick={onClose} title="Close">
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
 
-              <Tooltip content={<CustomTooltip range={range} />} />
+          <div className={`chart-change ${isPositive ? 'positive' : 'negative'}`}>
+            <span className="change-arrow">{isPositive ? '▲' : '▼'}</span>
+            <span className="change-value">{currentChange}</span>
+            <span className="change-percent">({currentChangePercent}%)</span>
+            <span className="change-period">today</span>
+          </div>
+        </>
+      )}
 
-              <Area
-                type="monotone"
-                dataKey="close"
-                stroke={gradientColor}
-                strokeWidth={1.5}
-                fill={`url(#${gradientId})`}
-                dot={false}
-                activeDot={{ r: 3, fill: gradientColor }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="chart-no-data">No data available</div>
-        )}
+      {!verticalTimeRanges && <div className="chart-tabs">{rangeButtons}</div>}
+
+      <div className="market-chart-card-main">
+        <div className="chart-container">{chartInner}</div>
+        {verticalTimeRanges && <div className="chart-tabs chart-tabs--vertical">{rangeButtons}</div>}
       </div>
 
-      {/* OHLC data */}
-      {chartData?.ohlc && (
+      {!hideOhlc && chartData?.ohlc && (
         <div className="chart-ohlc">
           <div className="ohlc-item">
             <span className="ohlc-label">Open</span>

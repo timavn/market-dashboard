@@ -28,15 +28,22 @@ def _split_exact_items(raw_text):
     if not raw_text:
         return []
 
-    normalized_text = re.sub(r"\s+", " ", raw_text).strip()
+    # Preserve actual newlines; only normalize spaces/tabs.
+    normalized_text = re.sub(r"[ \t]+", " ", raw_text).strip()
     if not normalized_text:
         return []
+
+    # Some extracted PDFs contain literal "\n" sequences in words (e.g. "Germa\ny").
+    # Repair those when they clearly appear inside words; treat remaining "\n" as delimiters.
+    normalized_text = re.sub(r"(?<=[A-Za-z])\\n(?=[A-Za-z])", "n", normalized_text)
+    normalized_text = re.sub(r"(?<=[A-Za-z])\\n(?=\s|$|[;:,.])", "n", normalized_text)
+    normalized_text = normalized_text.replace("\\n", "\n")
 
     # Macro Show typically uses semicolons; fall back to commas/newlines when needed.
     if ";" in normalized_text:
         chunks = [part.strip() for part in normalized_text.split(";")]
     else:
-        chunks = [part.strip() for part in re.split(r"[,\\n]+", normalized_text)]
+        chunks = [part.strip() for part in re.split(r"[,\n]+", normalized_text)]
 
     items = []
     for chunk in chunks:

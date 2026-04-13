@@ -1,3 +1,5 @@
+import { getTradingDaysCount, isTradingDay } from './marketHolidays';
+
 export const formatLastUpdated = (updatedAt) => {
   if (!updatedAt) {
     return {
@@ -22,6 +24,19 @@ export const formatLastUpdated = (updatedAt) => {
     localeString,
     relativeLabel: ''
   };
+};
+
+export const formatDateOnly = (updatedAt) => {
+  if (!updatedAt) return 'Unknown';
+
+  const updated =
+    updatedAt instanceof Date ? updatedAt : new Date(updatedAt);
+
+  if (Number.isNaN(updated.getTime())) {
+    return 'Invalid date';
+  }
+
+  return updated.toLocaleDateString();
 };
 
 /** Default poll intervals (ms) for status-dot freshness. */
@@ -53,6 +68,51 @@ export const getSourceFreshness = (
   const errorThreshold = pollIntervalMs * errorMultiplier;
   if (ageMs <= warnThreshold) return 'current';
   if (ageMs <= errorThreshold) return 'stale';
+  return 'defective';
+};
+
+const normalizeDate = (dateLike) => {
+  let date;
+  if (dateLike instanceof Date) {
+    date = new Date(dateLike);
+  } else if (typeof dateLike === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateLike)) {
+    const [yearText, monthText, dayText] = dateLike.split('-');
+    date = new Date(Number(yearText), Number(monthText) - 1, Number(dayText));
+  } else {
+    date = new Date(dateLike);
+  }
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+export const getMostRecentTradingDay = (referenceDate = new Date()) => {
+  const current = normalizeDate(referenceDate);
+
+  while (!isTradingDay(current)) {
+    current.setDate(current.getDate() - 1);
+  }
+
+  return current;
+};
+
+export const getMarketDayFreshness = (updatedAt, referenceDate = new Date()) => {
+  if (!updatedAt) return 'defective';
+
+  const updatedDate = normalizeDate(updatedAt);
+  if (Number.isNaN(updatedDate.getTime())) return 'defective';
+
+  const expectedTradingDay = getMostRecentTradingDay(referenceDate);
+  if (updatedDate >= expectedTradingDay) {
+    return 'current';
+  }
+
+  const latenessInTradingDays = Math.max(
+    getTradingDaysCount(updatedDate, expectedTradingDay) - 1,
+    0
+  );
+
+  if (latenessInTradingDays === 0) return 'current';
+  if (latenessInTradingDays <= 2) return 'stale';
   return 'defective';
 };
 
@@ -108,5 +168,3 @@ export const formatLastUpdatedForSources = (sources) => {
     perSource
   };
 };
-
-

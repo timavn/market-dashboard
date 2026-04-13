@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { formatLastUpdated, formatLastUpdatedForSources } from '../../utils/timeUtils';
+import {
+  formatDateOnly,
+  formatLastUpdated,
+  formatLastUpdatedForSources
+} from '../../utils/timeUtils';
 
 /**
  * StatusDot
@@ -16,6 +20,7 @@ import { formatLastUpdated, formatLastUpdatedForSources } from '../../utils/time
  * - emoji: string – optional emoji to render for shiny-dot style
  * - sources: optional array of sub-sources to show in popup
  * - overallLabel: optional override label for overall line
+ * - showDateOnly: optional boolean to show only the update date
  */
 const StatusDot = ({
   updatedAt,
@@ -25,7 +30,8 @@ const StatusDot = ({
   label,
   emoji,
   sources,
-  overallLabel
+  overallLabel,
+  showDateOnly = false
 }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
@@ -37,9 +43,9 @@ const StatusDot = ({
   const hoursAgo = updatedDate ? (now - updatedDate) / (1000 * 60 * 60) : null;
 
   let colorClass = 'bg-gray-400';
-  if (status === 'active') {
+  if (status === 'active' || status === 'current') {
     colorClass = 'bg-green-500';
-  } else if (status === 'inactive') {
+  } else if (status === 'inactive' || status === 'defective') {
     colorClass = 'bg-red-500';
   } else if (status === 'stale') {
     colorClass = 'bg-yellow-500';
@@ -169,10 +175,11 @@ const StatusDot = ({
           ) : (
             (() => {
               const { localeString } = formatLastUpdated(updatedDate || null);
+              const dateOnly = formatDateOnly(updatedDate || null);
               return (
                 <>
                   <div className="font-semibold">
-                    Last updated: {localeString}
+                    {showDateOnly ? `Updated: ${dateOnly}` : `Last updated: ${localeString}`}
                   </div>
                   {label && (
                     <div className="text-gray-400 mt-0.5">
@@ -190,4 +197,3 @@ const StatusDot = ({
 };
 
 export default StatusDot;
-
