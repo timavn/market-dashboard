@@ -820,6 +820,19 @@
   min-width: 0;
 }
 
+.currencies-panel--mw {
+  /* Use Rates panel chrome via `region-chart-panel` on the same node */
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.currencies-mw-table {
+  /* Keep currencies readable without forcing horizontal scroll */
+  min-width: 0;
+}
+
 .currencies-header {
   display: flex;
   justify-content: space-between;
@@ -1013,6 +1026,16 @@
   flex-direction: column;
 }
 
+/* VolumeCard now uses region-chart-panel chrome; ensure table fills the card */
+.secondary-left-column .volume-card {
+  max-height: none;
+}
+
+.secondary-left-column .volume-card .market-volume-table {
+  flex: 1;
+  min-height: 0;
+}
+
 /* Volume table - reports & insights style */
 .market-volume-table {
   margin-top: 8px;
@@ -1163,7 +1186,7 @@
   overflow: hidden;
 }
 
-.secondary-cards-stack .usd-correlation-card .usd-correlation-table-wrap {
+.secondary-cards-stack .usd-correlation-card .usd-corr-table-wrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -1173,6 +1196,9 @@
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 @media (max-width: 768px) {

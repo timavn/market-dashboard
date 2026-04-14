@@ -455,7 +455,7 @@ const VolatilityTableWithTabs = ({ statusIndicator }) => {
 
   return (
     <div className="volatility-tabs">
-      <div className="volatility-header-with-tabs">
+      <div className="region-chart-header region-chart-header--mw volatility-header-with-tabs">
         <StatusDot
           updatedAt={lastUpdated}
           status={derivedStatus}

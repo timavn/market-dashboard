@@ -23,6 +23,15 @@ const formatPercentValue = (value) => {
   return `${Math.round(scaled)}%`;
 };
 
+const corrHeatProps = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
+  const sign = numeric >= 0 ? 'pos' : 'neg';
+  // Correlations are in [-1, 1]. Keep tints subtle and consistent with Rates intensity scaling.
+  const intensity = Math.min(Math.abs(numeric), 1);
+  return { className: `region-mw-heat--${sign}`, style: { '--heat': intensity } };
+};
+
 const MetricIcon = ({ symbol }) => {
   switch (symbol) {
     case 'CRB':
@@ -77,27 +86,6 @@ const MetricIcon = ({ symbol }) => {
     default:
       return <span aria-hidden="true">{symbol === 'BRENT' ? '💧' : '📈'}</span>;
   }
-};
-
-/** Positive / negative / neutral by correlation value (font-only styling) */
-const getSignClass = (value) => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return 'usd-neutral';
-  }
-  const numeric = Number(value);
-  if (numeric >= 0.5) return 'usd-positive';
-  if (numeric <= -0.5) return 'usd-negative';
-  return 'usd-neutral';
-};
-
-const getHeatClass = (value) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 'usd-heat-neutral';
-  if (numeric >= 0.75) return 'usd-heat-positive-strong';
-  if (numeric >= 0.5) return 'usd-heat-positive-medium';
-  if (numeric <= -0.75) return 'usd-heat-negative-strong';
-  if (numeric <= -0.5) return 'usd-heat-negative-medium';
-  return 'usd-heat-neutral';
 };
 
 const USDCorrelationMatrix = ({
@@ -160,9 +148,9 @@ const USDCorrelationMatrix = ({
   }, [effectiveUpdatedAt, freshness, calculationDateTime, calculationDate]);
 
   return (
-    <div className="usd-correlation-panel">
-      <div className="usd-correlation-header">
-        <div className="usd-correlation-header-main">
+    <div className="usd-correlation-panel region-chart-panel--mw">
+      <div className="region-chart-header region-chart-header--mw usd-correlation-header--mw">
+        <div className="region-header-left">
           <StatusDot
             updatedAt={effectiveUpdatedAt}
             status={statusState}
@@ -174,86 +162,101 @@ const USDCorrelationMatrix = ({
           />
           <span className="region-label">Key USD Correlations</span>
         </div>
-      </div>
-      <div className="usd-correlation-subheader">
-        <span className="usd-correlation-days-note">*Days = Trading Days</span>
-        <span className="usd-correlation-rolling-title">52-Wk Rolling 30D Correlation</span>
+        <div className="usd-correlation-header-note">
+          <span className="usd-correlation-header-note-item">*Days = Trading Days</span>
+          <span className="usd-correlation-header-note-sep" aria-hidden="true">
+            •
+          </span>
+          <span className="usd-correlation-header-note-item">52-Wk Rolling 30D Correlation</span>
+        </div>
       </div>
 
-      <div className="usd-correlation-table-wrap">
-        {loading ? (
-          <div className="usd-correlation-state loading">Loading correlation data...</div>
-        ) : null}
-        {!loading && error ? (
-          <div className="usd-correlation-state error">Error loading correlation data: {error}</div>
-        ) : null}
-        {!loading && !error && !hasData ? (
-          <div className="usd-correlation-state">No correlation data available</div>
-        ) : null}
+      <div className="region-mw-body usd-corr-body">
+        <div className="region-mw-table-wrap usd-corr-table-wrap">
+          {loading ? (
+            <div className="usd-correlation-state loading">Loading correlation data...</div>
+          ) : null}
+          {!loading && error ? (
+            <div className="usd-correlation-state error">Error loading correlation data: {error}</div>
+          ) : null}
+          {!loading && !error && !hasData ? (
+            <div className="usd-correlation-state">No correlation data available</div>
+          ) : null}
 
-        {!loading && !error && hasData ? (
-          <div className="usd-correlation-grid">
-            <div className="usd-correlation-header-row">
-              <div className="usd-correlation-th usd-correlation-th-metric">METRIC</div>
-              {CORRELATION_PERIODS.map((period) => (
-                <div key={period} className="usd-correlation-th">
-                  {period}D
-                </div>
-              ))}
-              <div className="usd-correlation-th usd-correlation-th-rolling-start usd-correlation-right-header">High</div>
-              <div className="usd-correlation-th usd-correlation-right-header">Low</div>
-              <div className="usd-correlation-th usd-correlation-right-header usd-correlation-right-stats-start">% Time Pos</div>
-              <div className="usd-correlation-th usd-correlation-right-header">% Time Neg</div>
-            </div>
-            {USD_METRICS.map((metric) => {
-              const metricCorrelations = correlations[metric.symbol] || {};
-              const metricRollingStats = rollingStats[metric.symbol] || {};
-              return (
-                <div key={metric.symbol} className="usd-correlation-row">
-                  <div className="usd-correlation-td usd-correlation-td-metric">
-                    <span className="usd-metric-icon" aria-hidden="true">
-                      <MetricIcon symbol={metric.symbol} />
-                    </span>
-                    <span>{metric.name}</span>
-                  </div>
-                  {CORRELATION_PERIODS.map((period) => {
-                    const correlation = metricCorrelations[`${period}D`];
-                    const displayValue = CorrelationHelpers.formatCorrelation(correlation);
-                    const signClass = getSignClass(correlation);
-                    return (
-                      <div
-                        key={period}
-                        className={`usd-correlation-td usd-correlation-cell ${signClass} ${getHeatClass(correlation)}`}
-                      >
-                        <span className="usd-cell-pill">{displayValue}</span>
-                      </div>
-                    );
-                  })}
-                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-rolling-start usd-correlation-right-value">
-                    <span className="usd-cell-pill">
-                      {formatNumeric(metricRollingStats.high, 2)}
-                    </span>
-                  </div>
-                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value">
-                    <span className="usd-cell-pill">
-                      {formatNumeric(metricRollingStats.low, 2)}
-                    </span>
-                  </div>
-                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value usd-correlation-right-stats-start">
-                    <span className="usd-cell-pill">
-                      {formatPercentValue(metricRollingStats.percentPositive)}
-                    </span>
-                  </div>
-                  <div className="usd-correlation-td usd-correlation-cell usd-correlation-right-value">
-                    <span className="usd-cell-pill">
-                      {formatPercentValue(metricRollingStats.percentNegative)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+          {!loading && !error && hasData ? (
+            <table className="region-mw-quotes-table usd-corr-table">
+              <thead>
+                <tr>
+                  <th className="region-mw-th region-mw-th-name usd-corr-th-metric" scope="col">
+                    METRIC
+                  </th>
+                  {CORRELATION_PERIODS.map((period) => (
+                    <th key={period} className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                      {period}D
+                    </th>
+                  ))}
+                  <th className="region-mw-th region-mw-th-num region-mw-th-metric usd-corr-sep-left" scope="col">
+                    High
+                  </th>
+                  <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                    Low
+                  </th>
+                  <th
+                    className="region-mw-th region-mw-th-num region-mw-th-metric usd-corr-sep-left"
+                    scope="col"
+                  >
+                    % Time Pos
+                  </th>
+                  <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                    % Time Neg
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {USD_METRICS.map((metric) => {
+                  const metricCorrelations = correlations[metric.symbol] || {};
+                  const metricRollingStats = rollingStats[metric.symbol] || {};
+                  return (
+                    <tr key={metric.symbol} className="region-mw-tr">
+                      <td className="region-mw-td region-mw-td-name usd-corr-td-metric">
+                        <span className="usd-metric-icon" aria-hidden="true">
+                          <MetricIcon symbol={metric.symbol} />
+                        </span>
+                        <span className="usd-corr-metric-name">{metric.name}</span>
+                      </td>
+                      {CORRELATION_PERIODS.map((period) => {
+                        const correlation = metricCorrelations[`${period}D`];
+                        const displayValue = CorrelationHelpers.formatCorrelation(correlation);
+                        const heat = corrHeatProps(correlation);
+                        return (
+                          <td
+                            key={period}
+                            className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} usd-corr-td-center`}
+                            style={heat.style}
+                          >
+                            {displayValue}
+                          </td>
+                        );
+                      })}
+                      <td className="region-mw-td region-mw-td-num usd-corr-td-center usd-corr-sep-left">
+                        {formatNumeric(metricRollingStats.high, 2)}
+                      </td>
+                      <td className="region-mw-td region-mw-td-num usd-corr-td-center">
+                        {formatNumeric(metricRollingStats.low, 2)}
+                      </td>
+                      <td className="region-mw-td region-mw-td-num usd-corr-td-center usd-corr-sep-left">
+                        {formatPercentValue(metricRollingStats.percentPositive)}
+                      </td>
+                      <td className="region-mw-td region-mw-td-num usd-corr-td-center">
+                        {formatPercentValue(metricRollingStats.percentNegative)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : null}
+        </div>
       </div>
     </div>
   );

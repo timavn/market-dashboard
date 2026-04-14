@@ -224,8 +224,8 @@ function VolumeCard() {
   }, []);
 
   return (
-    <div className="secondary-card volume-card">
-      <div className="region-chart-header">
+    <div className="region-chart-panel region-chart-panel--mw volume-card">
+      <div className="region-chart-header region-chart-header--mw">
         <StatusDot
           updatedAt={volLastUpdated}
           status={volStatus}
@@ -247,7 +247,7 @@ function VolumeCard() {
 // USD Correlation card - same dimensions as Volatility card
 function USDCorrelationCard({ correlations, rollingStats, correlationsTimestamp, calculationDate, loading, error }) {
   return (
-    <div className="secondary-card usd-correlation-card">
+    <div className="region-chart-panel region-chart-panel--mw usd-correlation-card">
       <USDCorrelationMatrix
         correlations={correlations}
         rollingStats={rollingStats}
@@ -274,7 +274,7 @@ function VolatilityCard() {
     : { emoji: '🔴', title: 'Market closed' };
 
   return (
-    <div className="secondary-card volatility-card">
+    <div className="region-chart-panel region-chart-panel--mw volatility-card">
       <VolatilityTableWithTabs statusIndicator={statusIndicator} />
     </div>
   );
@@ -376,6 +376,7 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
     const pctStr = hasPct
       ? `${pctNum > 0 ? '+' : ''}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(pctNum)}%`
       : '—';
+
     const dayDisplay =
       hasChg && isPositive != null
         ? `${isPositive ? '▲' : '▼'} ${new Intl.NumberFormat('en-US', {
@@ -561,6 +562,17 @@ function CurrenciesPanel({ data, loading }) {
       .filter(Boolean);
   }, [data]);
 
+  const pctHeat = (val) => {
+    const numeric = Number(String(val ?? '').replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
+    // FX day moves are typically small; cap at 2% for readable tint scaling.
+    const intensity = Math.min(Math.abs(numeric) / 2, 1);
+    return {
+      className: `region-mw-heat--${numeric >= 0 ? 'pos' : 'neg'}`,
+      style: { '--heat': intensity }
+    };
+  };
+
   const formatPct = (val) => {
     if (val == null || val === '' || val === '--') return '--';
     const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
@@ -569,68 +581,74 @@ function CurrenciesPanel({ data, loading }) {
   };
 
   return (
-    <div className="currencies-panel">
-      <div className="currencies-header">
-        <div className="currencies-header-left">
-        <StatusDot
-          updatedAt={currenciesLastUpdated}
-          status={currenciesStatus === 'open' ? 'active' : 'inactive'}
-          size={10}
-          className="mr-1"
-          label="Currencies"
-          emoji={currStatus.emoji}
-          sources={currencySources}
-        />
-          <span className="currencies-title">Currencies</span>
+    <div className="region-chart-panel region-chart-panel--mw currencies-panel currencies-panel--mw">
+      <div className="region-chart-header region-chart-header--mw">
+        <div className="region-header-left">
+          <StatusDot
+            updatedAt={currenciesLastUpdated}
+            status={currenciesStatus === 'open' ? 'active' : 'inactive'}
+            size={10}
+            className="mr-1"
+            label="Currencies"
+            emoji={currStatus.emoji}
+            sources={currencySources}
+          />
+          <span className="region-label">Currencies</span>
         </div>
       </div>
-      <div className="currencies-table-wrap">
-        <table className="currencies-table">
-          <thead>
-            <tr>
-              <th className="currencies-th currencies-th-ticker">Ticker</th>
-              <th className="currencies-th currencies-th-price">Price</th>
-              <th className="currencies-th currencies-th-pct">
-                <span className="currencies-th-split">1-Day %</span>
-                <span className="currencies-th-split">Chg</span>
-              </th>
-              <th className="currencies-th currencies-th-pct">
-                <span className="currencies-th-split">MTD %</span>
-                <span className="currencies-th-split">Chg</span>
-              </th>
-              <th className="currencies-th currencies-th-pct">
-                <span className="currencies-th-split">QTD %</span>
-                <span className="currencies-th-split">Chg</span>
-              </th>
-              <th className="currencies-th currencies-th-pct">
-                <span className="currencies-th-split">YTD %</span>
-                <span className="currencies-th-split">Chg</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {CURRENCIES_CONFIG.indices.map((index) => {
-              const quote = data?.find(d => d.symbol === index.symbol);
-              const price = loading ? '...' : (quote?.price != null ? String(quote.price) : '--');
-              const changePercent = quote?.changePercent;
-              const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
-              const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
-              const hasChange = Number.isFinite(parsedChange);
-              return (
-                <tr key={index.symbol} className="currencies-tr">
-                  <td className="currencies-td currencies-td-ticker">{index.name}</td>
-                  <td className="currencies-td currencies-td-price">{price}</td>
-                  <td className={`currencies-td currencies-td-pct ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}>
-                    {loading ? '...' : formatPct(changePercent)}
-                  </td>
-                  <td className="currencies-td currencies-td-pct">--</td>
-                  <td className="currencies-td currencies-td-pct">--</td>
-                  <td className="currencies-td currencies-td-pct">--</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="region-mw-body">
+        <div className="region-mw-table-wrap">
+          <table className="region-mw-quotes-table currencies-mw-table">
+            <thead>
+              <tr>
+                <th className="region-mw-th region-mw-th-name" scope="col">
+                  Ticker
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
+                  Price
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  1D %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  MTD %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  QTD %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  YTD %
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {CURRENCIES_CONFIG.indices.map((index) => {
+                const quote = data?.find(d => d.symbol === index.symbol);
+                const price = loading ? '…' : (quote?.price != null ? String(quote.price) : '—');
+                const changePercent = quote?.changePercent;
+                const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
+                const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
+                const hasChange = Number.isFinite(parsedChange);
+                const heat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeat(changePercent);
+                return (
+                  <tr key={index.symbol} className="region-mw-tr">
+                    <td className="region-mw-td region-mw-td-name">{index.name}</td>
+                    <td className="region-mw-td region-mw-td-num region-mw-td-price">{price}</td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}
+                      style={heat.style}
+                    >
+                      {loading ? '…' : formatPct(changePercent)}
+                    </td>
+                    <td className="region-mw-td region-mw-td-num region-mw-td-heat region-mw-heat--na">—</td>
+                    <td className="region-mw-td region-mw-td-num region-mw-td-heat region-mw-heat--na">—</td>
+                    <td className="region-mw-td region-mw-td-num region-mw-td-heat region-mw-heat--na">—</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
