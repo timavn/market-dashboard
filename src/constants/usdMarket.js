@@ -1,10 +1,10 @@
 // USD Market Data Constants
 
 export const USD_METRICS = [
-  { symbol: 'SPX', name: 'SPX', yahooTicker: '^GSPC' },
-  { symbol: 'BRENT', name: 'BRENT Oil', yahooTicker: 'BZ=F' },
+  { symbol: 'SPX', name: 'S&P 500', yahooTicker: '^GSPC' },
+  { symbol: 'BRENT', name: 'Brent', yahooTicker: 'BZ=F' },
   { symbol: 'CRB', name: 'CRB Index', yahooTicker: '^CRB' },
-  { symbol: 'GOLD', name: 'GOLD', yahooTicker: 'GC=F' },
+  { symbol: 'GOLD', name: 'Gold', yahooTicker: 'GC=F' },
   { symbol: 'BTC', name: 'Bitcoin', yahooTicker: 'BTC-USD' }
 ];
 

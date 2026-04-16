@@ -44,21 +44,44 @@
   min-width: 980px;
 }
 
+.usd-corr-table .region-mw-td {
+  line-height: 1.2;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.usd-corr-table .region-mw-td-num {
+  text-align: center !important;
+}
+
 .usd-corr-td-metric {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.usd-corr-metric-symbol {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .usd-corr-metric-name {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .usd-corr-td-center {
-  text-align: center;
+  text-align: center !important;
 }
 
 .usd-corr-sep-left {
-  border-left: 2px dotted #b8b2a6;
+  border-left: none;
   padding-left: 14px !important;
 }
 

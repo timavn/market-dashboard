@@ -1,0 +1,39 @@
+/* Market Volume (MW table variant) - keep theme consistent, enforce uniform alignment */
+.market-volume-table--mw {
+  margin-top: 0;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
+.market-volume-table--mw .region-mw-body {
+  background: #ffffff;
+  flex: 0 0 auto;
+}
+
+.volume-mw-table .region-mw-td {
+  line-height: 1.2;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.volume-mw-table .region-mw-td-num {
+  text-align: center !important;
+}
+
+.volume-mw-table .region-mw-th {
+  text-align: center;
+}
+
+.volume-mw-table .region-mw-th-name,
+.volume-mw-table .region-mw-td-name {
+  text-align: left;
+}
+
+.market-volume-table--mw .volume-footnotes {
+  background: #ffffff;
+  margin-top: 0;
+  padding: 8px 10px 10px;
+}
+

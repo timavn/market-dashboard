@@ -360,6 +360,34 @@
   color: #111827;
 }
 
+/* Region cards only: keep index names on one line; trim metric columns evenly */
+.region-mw-quotes-table:not(.currencies-mw-table) {
+  table-layout: fixed;
+}
+
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-name,
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td-name {
+  width: 30%;
+  white-space: nowrap;
+}
+
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-price,
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td-price {
+  width: 18%;
+}
+
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-metric,
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td.region-mw-td-heat {
+  width: 12.5%;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th.region-mw-th-metric {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
 .region-mw-th {
   text-align: right;
   font-weight: 700;
@@ -379,7 +407,6 @@
 
 .region-mw-th-name {
   text-align: left;
-  width: 1%;
 }
 
 .region-mw-th-metric {
@@ -500,6 +527,17 @@
   letter-spacing: 0.5px;
   flex-shrink: 0;
   font-family: inherit;
+}
+
+.mw-card-header-note {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 600;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
 }
 
 .index-tabs {
@@ -818,14 +856,6 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   border: 1px solid #d6d0c3;
   min-width: 0;
-}
-
-.currencies-panel--mw {
-  /* Use Rates panel chrome via `region-chart-panel` on the same node */
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 .currencies-mw-table {

@@ -2052,6 +2052,27 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
   }
 });
 
+// Hedgeye ETF Pro endpoint - serves latest parsed snapshot from local disk
+app.get('/api/hedgeye/etfpro', (req, res) => {
+  try {
+    const latestPath = path.join(__dirname, 'data', 'hedgeye', 'etfpro', 'latest.json');
+    if (!fs.existsSync(latestPath)) {
+      return res.status(404).json({
+        error: 'ETF Pro snapshot not found',
+        hint: 'Run: npm run collect:etfpro',
+        path: latestPath
+      });
+    }
+
+    const raw = fs.readFileSync(latestPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return res.json(parsed);
+  } catch (error) {
+    console.error('[API] Error in /api/hedgeye/etfpro:', error);
+    return res.status(500).json({ error: 'Failed to load ETF Pro snapshot', details: error.message });
+  }
+});
+
 // Hedgeye Snapshot Data endpoint - returns full extracted data for any snapshot type
 app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
   const startTime = Date.now();

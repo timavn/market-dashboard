@@ -385,6 +385,16 @@ export class MarketDataService {
     }
   }
 
+  static async getHedgeyeEtfPro() {
+    try {
+      const response = await apiClient.get('/api/hedgeye/etfpro');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching ETF Pro snapshot:', error);
+      throw error;
+    }
+  }
+
   // Get historical price data for a symbol
   static async getHistoricalData(symbol, days = 30) {
     try {

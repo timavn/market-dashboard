@@ -217,6 +217,7 @@ const CURRENCIES_CONFIG = {
 function VolumeCard() {
   const [volLastUpdated, setVolLastUpdated] = React.useState(null);
   const [volStatus, setVolStatus] = React.useState('defective');
+  const [volHeaderNote, setVolHeaderNote] = React.useState('');
 
   const handleVolumeSourcesChange = React.useCallback((sources) => {
     const primarySource = Array.isArray(sources) ? sources[0] : null;
@@ -235,10 +236,16 @@ function VolumeCard() {
           showDateOnly
         />
         <span className="region-label">Volume</span>
+        {volHeaderNote ? (
+          <span className="mw-card-header-note" title={volHeaderNote}>
+            {volHeaderNote}
+          </span>
+        ) : null}
       </div>
       <MarketVolumeTable
         onLastUpdatedChange={setVolLastUpdated}
         onSourcesChange={handleVolumeSourcesChange}
+        onHeaderNoteChange={setVolHeaderNote}
       />
     </div>
   );
@@ -365,25 +372,14 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
     const indexQuote = data?.find((d) => d.symbol === symbol);
     const pctRaw = indexQuote?.changePercent;
     const pctNum = parseFloat(String(pctRaw ?? '').replace(/[^0-9.-]/g, ''));
-    const chgRaw = indexQuote?.change;
-    const chgNum = parseFloat(String(chgRaw ?? '').replace(/[^0-9.-]/g, ''));
     const hasPct = Number.isFinite(pctNum);
-    const hasChg = Number.isFinite(chgNum);
-    const isPositive = hasPct ? pctNum >= 0 : hasChg ? chgNum >= 0 : null;
+    const isPositive = hasPct ? pctNum >= 0 : null;
     const priceStr = formatTablePrice(indexQuote?.price, {
       suffix: isRates ? '%' : ''
     });
     const pctStr = hasPct
       ? `${pctNum > 0 ? '+' : ''}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(pctNum)}%`
       : '—';
-
-    const dayDisplay =
-      hasChg && isPositive != null
-        ? `${isPositive ? '▲' : '▼'} ${new Intl.NumberFormat('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 4
-          }).format(Math.abs(chgNum))}`
-        : '—';
 
     const w = indexQuote?.weekChangePct;
     const mo = indexQuote?.monthChangePct;
@@ -395,7 +391,6 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
     return {
       priceStr,
       pctStr,
-      dayDisplay,
       pctNum,
       isPositive,
       indexQuote,
@@ -433,9 +428,6 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
                 <th className="region-mw-th region-mw-th-name" scope="col" />
                 <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
                   {isRates ? 'YIELD' : 'PRICE'}
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-day" scope="col">
-                  DAY
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
                   %
@@ -482,11 +474,6 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
                       className={`region-mw-td region-mw-td-num region-mw-td-price ${loading ? '' : m.indexQuote?.price != null ? (dirUp ? 'positive' : dirDown ? 'negative' : '') : ''}`}
                     >
                       {loading ? '…' : m.priceStr}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-day ${loading ? '' : m.isPositive != null ? (dirUp ? 'positive' : 'negative') : ''}`}
-                    >
-                      {loading ? '…' : m.dayDisplay}
                     </td>
                     <td
                       className={`region-mw-td region-mw-td-num region-mw-td-heat ${pctHeat.className}`}
@@ -581,7 +568,7 @@ function CurrenciesPanel({ data, loading }) {
   };
 
   return (
-    <div className="region-chart-panel region-chart-panel--mw currencies-panel currencies-panel--mw">
+    <div className="region-chart-panel region-chart-panel--mw currencies-panel">
       <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
           <StatusDot

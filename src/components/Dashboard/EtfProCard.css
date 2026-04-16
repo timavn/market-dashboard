@@ -1,0 +1,159 @@
+.etfpro-body {
+  padding: 10px 12px 12px;
+}
+
+.etfpro-upload-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #d6d0c3;
+}
+
+.etfpro-upload-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.etfpro-source {
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+  text-align: right;
+}
+
+.etfpro-upload-meta-line {
+  font-size: 12px;
+  color: #111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.etfpro-upload-meta-line.subtle {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.etfpro-error {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #ef4444;
+  background: #fef2f2;
+  color: #991b1b;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.etfpro-empty {
+  margin-top: 12px;
+  padding: 18px 10px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.etfpro-table-scroll {
+  margin-top: 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: calc(100vh - 210px);
+}
+
+.etfpro-table-scroll.expanded {
+  overflow-x: auto;
+}
+
+.etfpro-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.etfpro-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f3f0e6;
+  border-bottom: 1px solid #d6d0c3;
+  font-size: 11px;
+  font-weight: 800;
+  color: #111;
+  padding: 8px 6px;
+  text-align: left;
+  z-index: 1;
+}
+
+.etfpro-table tbody td {
+  border-bottom: 1px solid rgba(214, 208, 195, 0.65);
+  padding: 8px 6px;
+  font-size: 12px;
+  color: #111;
+  vertical-align: middle;
+}
+
+.etfpro-table tbody tr:hover td {
+  background: rgba(239, 233, 220, 0.6);
+}
+
+.etfpro-table .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+}
+
+.etfpro-table .wrap {
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.etfpro-table .right {
+  text-align: right;
+}
+
+.etfpro-table .clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.etfpro-table .pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #d6d0c3;
+  background: #f8f6ef;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.etfpro-table .pill.long {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.etfpro-table .pill.short {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.etfpro-table .pos {
+  color: #065f46;
+  font-weight: 800;
+}
+
+.etfpro-table .neg {
+  color: #991b1b;
+  font-weight: 800;
+}
+

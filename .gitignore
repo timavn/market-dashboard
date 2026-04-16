@@ -50,3 +50,6 @@ server.log
 .antigravity
 server.js.bak
 aws/lambda/*.png
+
+# Local Hedgeye ETF Pro snapshots
+/data/hedgeye/etfpro/*.json

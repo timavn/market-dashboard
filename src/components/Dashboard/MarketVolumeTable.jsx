@@ -5,6 +5,7 @@ import {
   getVolumeCardHeaderDate
 } from '../../utils/volumeCardUtils';
 import { getMarketDayFreshness } from '../../utils/timeUtils';
+import './MarketVolumeTable.css';
 
 export { calculateVolumeMetrics, getVolumeCardHeaderDate };
 
@@ -19,11 +20,24 @@ const EMPTY_VOLUME_METRICS = {
   pct1Y: null
 };
 
-const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange }) => {
+const HEAT_CAP_PCT = 50;
+
+const pctHeatProps = (val) => {
+  if (val == null || Number.isNaN(val)) return { className: 'region-mw-heat--na', style: {} };
+  const numeric = Number(val);
+  if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
+  const sign = numeric >= 0 ? 'pos' : 'neg';
+  const intensity = Math.min(Math.abs(numeric) / HEAT_CAP_PCT, 1);
+  return { className: `region-mw-heat--${sign}`, style: { '--heat': intensity } };
+};
+
+const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange, onHeaderNoteChange }) => {
   const onLastUpdatedRef = useRef(onLastUpdatedChange);
   const onSourcesRef = useRef(onSourcesChange);
+  const onHeaderNoteRef = useRef(onHeaderNoteChange);
   onLastUpdatedRef.current = onLastUpdatedChange;
   onSourcesRef.current = onSourcesChange;
+  onHeaderNoteRef.current = onHeaderNoteChange;
 
   const [loading, setLoading] = useState(true);
   const [metrics, setMetrics] = useState({
@@ -77,7 +91,7 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange }) => {
         setErrorMessage('');
 
         if (slideMetrics?.totalMarket && slideMetrics?.exchange) {
-          setMetrics({
+          const nextMetrics = {
             date: getVolumeCardHeaderDate({
               asOf,
               totalMarket: totalMarketSeries,
@@ -85,7 +99,12 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange }) => {
             }),
             totalMarket: slideMetrics.totalMarket,
             exchange: slideMetrics.exchange
-          });
+          };
+          setMetrics(nextMetrics);
+
+          if (onHeaderNoteRef.current) {
+            onHeaderNoteRef.current(nextMetrics.date || '');
+          }
 
           if (onLastUpdatedRef.current) {
             onLastUpdatedRef.current(effectiveTimestamp);
@@ -173,6 +192,10 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange }) => {
           totalMarket: totalMarketMetrics,
           exchange: exchangeMetrics
         });
+
+        if (onHeaderNoteRef.current) {
+          onHeaderNoteRef.current(formattedDate || '');
+        }
 
         if (onLastUpdatedRef.current) {
           onLastUpdatedRef.current(effectiveTimestamp);
@@ -277,70 +300,83 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange }) => {
   };
 
   return (
-    <div className="market-volume-table">
-      {errorMessage ? (
-        <div className="volume-error-state">
-          {errorMessage}
+    <div className="market-volume-table market-volume-table--mw">
+      {errorMessage ? <div className="volume-error-state">{errorMessage}</div> : null}
+
+      <div className="region-mw-body">
+        <div className="region-mw-table-wrap">
+          <table className="region-mw-quotes-table volume-mw-table">
+            <thead>
+              <tr>
+                <th className="region-mw-th region-mw-th-trend" aria-hidden="true" />
+                <th className="region-mw-th region-mw-th-name" scope="col">
+                  METRIC
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  Prior Day
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  1M Avg
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  3M Avg
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  1Y Avg
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { key: 'totalMarket', label: 'Total Market Volume*', values: metrics.totalMarket },
+                { key: 'exchange', label: 'Total Exchange Volume**', values: metrics.exchange }
+              ].map((row) => {
+                const a = row.values;
+                const cols = [
+                  { v: a.pctPriorDay },
+                  { v: a.pct1M },
+                  { v: a.pct3M },
+                  { v: a.pct1Y }
+                ];
+                const trendValue = cols.find((c) => c.v != null && !Number.isNaN(c.v))?.v;
+                const isPos = trendValue == null ? null : trendValue >= 0;
+                return (
+                  <tr key={row.key} className="region-mw-tr">
+                    <td className="region-mw-td region-mw-td-trend" aria-hidden="true">
+                      {isPos != null ? (
+                        <span className={isPos ? 'mw-trend-up' : 'mw-trend-down'}>{isPos ? '▲' : '▼'}</span>
+                      ) : null}
+                    </td>
+                    <td className="region-mw-td region-mw-td-name">{row.label}</td>
+                    {cols.map((c, idx) => {
+                      const heat = pctHeatProps(c.v);
+                      const pctClass = getPctClass(c.v);
+                      const toneClass = pctClass.includes('positive')
+                        ? 'positive'
+                        : pctClass.includes('negative')
+                        ? 'negative'
+                        : '';
+                      return (
+                        <td
+                          key={idx}
+                          className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${toneClass}`}
+                          style={heat.style}
+                        >
+                          {formatPct(c.v)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      ) : (
-        <>
-          <div className="volume-ribbon">
-            <div className="volume-ribbon-left">Index/Security</div>
-            <div className="volume-ribbon-right">
-              <span className="volume-ribbon-label">Volume:</span>
-              <span className="volume-ribbon-date">{metrics.date} vs.</span>
-            </div>
-          </div>
-
-          <div className="volume-columns">
-            <div className="volume-col volume-col-name" />
-            <div className="volume-col">Prior Day</div>
-            <div className="volume-col">1M Ave</div>
-            <div className="volume-col">3M Ave</div>
-            <div className="volume-col">1Y Ave</div>
-          </div>
-
-          <div className="volume-row">
-            <div className="volume-name">Total Market Volume*</div>
-            <div className={getPctClass(metrics.totalMarket.pctPriorDay)}>
-              {formatPct(metrics.totalMarket.pctPriorDay)}
-            </div>
-            <div className={getPctClass(metrics.totalMarket.pct1M)}>
-              {formatPct(metrics.totalMarket.pct1M)}
-            </div>
-            <div className={getPctClass(metrics.totalMarket.pct3M)}>
-              {formatPct(metrics.totalMarket.pct3M)}
-            </div>
-            <div className={getPctClass(metrics.totalMarket.pct1Y)}>
-              {formatPct(metrics.totalMarket.pct1Y)}
-            </div>
-          </div>
-
-          <div className="volume-row volume-row-last">
-            <div className="volume-name">Total Exchange Volume**</div>
-            <div className={getPctClass(metrics.exchange.pctPriorDay)}>
-              {formatPct(metrics.exchange.pctPriorDay)}
-            </div>
-            <div className={getPctClass(metrics.exchange.pct1M)}>
-              {formatPct(metrics.exchange.pct1M)}
-            </div>
-            <div className={getPctClass(metrics.exchange.pct3M)}>
-              {formatPct(metrics.exchange.pct3M)}
-            </div>
-            <div className={getPctClass(metrics.exchange.pct1Y)}>
-              {formatPct(metrics.exchange.pct1Y)}
-            </div>
-          </div>
-        </>
-      )}
+      </div>
 
       <div className="volume-footnotes">
-        <p>
-          *{totalMarketFootnote}
-        </p>
-        <p>
-          **{totalExchangeFootnote}
-        </p>
+        <p>*{totalMarketFootnote}</p>
+        <p>**{totalExchangeFootnote}</p>
         {calibrationNote ? <p className="volume-footnote-status">{calibrationNote}</p> : null}
       </div>
     </div>

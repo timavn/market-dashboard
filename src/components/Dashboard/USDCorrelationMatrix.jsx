@@ -222,6 +222,7 @@ const USDCorrelationMatrix = ({
                         <span className="usd-metric-icon" aria-hidden="true">
                           <MetricIcon symbol={metric.symbol} />
                         </span>
+                        <span className="usd-corr-metric-symbol">{metric.symbol}</span>
                         <span className="usd-corr-metric-name">{metric.name}</span>
                       </td>
                       {CORRELATION_PERIODS.map((period) => {
