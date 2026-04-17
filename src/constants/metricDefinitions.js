@@ -109,6 +109,21 @@ export const METRIC_DEFINITIONS = {
     source: 'The Process, Section 3: The GIP Model & Quads'
   },
 
+  'atr': {
+    name: 'ATR (Average True Range)',
+    definition: 'The 14-day moving average of True Range. True Range is the greatest of: (1) Current High minus Current Low, (2) |Current High minus Previous Close|, (3) |Current Low minus Previous Close|. The ATR % shows ATR as a percentage of the current price.',
+    range: 'ATR % < 2% = low volatility (green), 2-5% = moderate (yellow), > 5% = high volatility (red)',
+    interpretation: [
+      'Vol-Adjusted Stop: Industry standard is 2.0x ATR below entry price',
+      'If a stock moves more than 2x ATR against you, the trend has likely changed',
+      'Example: Price $40, ATR $2.00 → Stop at $40 - (2 × $2.00) = $36.00',
+      'As price rises, recalculate and trail the stop up — never move it down',
+      'Higher ATR % = more volatile security, requiring wider stops and smaller position sizes'
+    ],
+    source: 'Volatility-Adjusted Position Management',
+    calculation: 'ATR = SMA(14, True Range); ATR % = ATR / Close × 100'
+  },
+
   'riskRange': {
     name: 'Risk Range',
     definition: 'Probable trading range for an asset based on the PVV model (Price, Volume, Volatility). Generated using fractional calculus to predict trading ranges.',

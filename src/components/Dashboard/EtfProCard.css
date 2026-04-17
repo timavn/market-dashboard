@@ -1,44 +1,5 @@
 .etfpro-body {
-  padding: 10px 12px 12px;
-}
-
-.etfpro-upload-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: center;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #d6d0c3;
-}
-
-.etfpro-upload-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow: hidden;
-}
-
-.etfpro-source {
-  font-size: 11px;
-  color: #6b7280;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 170px;
-  text-align: right;
-}
-
-.etfpro-upload-meta-line {
-  font-size: 12px;
-  color: #111;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.etfpro-upload-meta-line.subtle {
-  font-size: 11px;
-  color: #6b7280;
+  padding: 6px 12px 12px;
 }
 
 .etfpro-error {
@@ -60,15 +21,61 @@
   font-size: 12px;
 }
 
-.etfpro-table-scroll {
+/* Side-by-side Longs / Shorts layout */
+.etfpro-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   margin-top: 10px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  max-height: calc(100vh - 210px);
 }
 
-.etfpro-table-scroll.expanded {
+.etfpro-pane {
+  min-width: 0;
+}
+
+.etfpro-pane-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 8px;
+  border-radius: 4px 4px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.etfpro-pane-title.long {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.1);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.etfpro-pane-title.short {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.etfpro-pane-count {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.etfpro-pane-scroll {
+  overflow-x: hidden;
+}
+
+.etfpro-pane-scroll.expanded {
   overflow-x: auto;
+}
+
+.etfpro-pane-empty {
+  text-align: center;
+  color: #6b7280;
+  padding: 12px 6px;
+  font-size: 11px;
 }
 
 .etfpro-table {
@@ -155,5 +162,66 @@
 .etfpro-table .neg {
   color: #991b1b;
   font-weight: 800;
+}
+
+/* Day-over-day changes: Added / Removed sections */
+.etfpro-changes {
+  padding: 4px 6px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid #d6d0c3;
+  background: #fcfaf5;
+}
+
+.etfpro-change-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.etfpro-change-header {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 3px 4px 2px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.etfpro-change-header.add {
+  color: #065f46;
+}
+
+.etfpro-change-header.remove {
+  color: #991b1b;
+}
+
+.etfpro-change-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.etfpro-change-ticker {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.etfpro-change-ticker.add {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.etfpro-change-ticker.remove {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.06);
+  text-decoration: line-through;
+}
+
+/* Row highlighting for newly added positions */
+.etfpro-table tbody tr.row-added td {
+  background: rgba(16, 185, 129, 0.08);
 }
 

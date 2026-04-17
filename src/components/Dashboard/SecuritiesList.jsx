@@ -11,6 +11,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
+  const [etfProFresh, setEtfProFresh] = useState(null);
   const [activeView, setActiveView] = useState(() => {
     const saved = localStorage.getItem(VIEW_KEY);
     return saved === 'etfpro' ? 'etfpro' : 'signal';
@@ -545,6 +546,12 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     localStorage.setItem(VIEW_KEY, activeView);
   }, [activeView]);
 
+  const handleEtfProFreshness = useCallback((fresh) => {
+    setEtfProFresh(fresh);
+  }, []);
+
+  const ssFresh = !loading && Object.keys(prices).length > 0;
+
   return (
     <div className="relative securities-card" style={{ overflow: 'hidden' }}>
       <div className="securities-card-header">
@@ -560,6 +567,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
               className={activeView === 'signal' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('signal')}
             >
+              <span className={`status-dot ${ssFresh ? 'fresh' : 'stale'}`} />
               SS
             </button>
             <button
@@ -569,6 +577,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
               className={activeView === 'etfpro' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('etfpro')}
             >
+              <span className={`status-dot ${etfProFresh === true ? 'fresh' : etfProFresh === false ? 'stale' : ''}`} />
               ETFP
             </button>
           </div>
@@ -602,7 +611,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
       </div>
 
       {activeView === 'etfpro' ? (
-        <EtfProCard isExpanded={isExpanded} />
+        <EtfProCard isExpanded={isExpanded} onFreshness={handleEtfProFreshness} />
       ) : (
         <>
           {/* Top Movers Section - Compact Table Format */}

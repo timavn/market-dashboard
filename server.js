@@ -2053,9 +2053,11 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
 });
 
 // Hedgeye ETF Pro endpoint - serves latest parsed snapshot from local disk
+// Also computes day-over-day changes (adds/removes) for Longs and Shorts
 app.get('/api/hedgeye/etfpro', (req, res) => {
   try {
-    const latestPath = path.join(__dirname, 'data', 'hedgeye', 'etfpro', 'latest.json');
+    const etfproDir = path.join(__dirname, 'data', 'hedgeye', 'etfpro');
+    const latestPath = path.join(etfproDir, 'latest.json');
     if (!fs.existsSync(latestPath)) {
       return res.status(404).json({
         error: 'ETF Pro snapshot not found',
@@ -2066,6 +2068,53 @@ app.get('/api/hedgeye/etfpro', (req, res) => {
 
     const raw = fs.readFileSync(latestPath, 'utf-8');
     const parsed = JSON.parse(raw);
+    const todayDate = parsed.meta?.snapshotDate;
+
+    // Find previous day's snapshot for diffing
+    let changes = null;
+    try {
+      const dated = fs.readdirSync(etfproDir)
+        .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+        .map(f => f.replace('.json', ''))
+        .filter(d => d !== todayDate)
+        .sort()
+        .reverse();
+
+      if (dated.length > 0) {
+        const prevPath = path.join(etfproDir, `${dated[0]}.json`);
+        const prevParsed = JSON.parse(fs.readFileSync(prevPath, 'utf-8'));
+
+        const classify = (rows) => {
+          const longs = new Set();
+          const shorts = new Set();
+          for (const r of rows) {
+            const ticker = String(r.ticker || '').trim().toUpperCase();
+            if (!ticker) continue;
+            if (String(r.call).toLowerCase() === 'short') {
+              shorts.add(ticker);
+            } else {
+              longs.add(ticker);
+            }
+          }
+          return { longs, shorts };
+        };
+
+        const today = classify(parsed.rows || []);
+        const prev = classify(prevParsed.rows || []);
+
+        changes = {
+          previousDate: dated[0],
+          addedLongs: [...today.longs].filter(t => !prev.longs.has(t)),
+          removedLongs: [...prev.longs].filter(t => !today.longs.has(t)),
+          addedShorts: [...today.shorts].filter(t => !prev.shorts.has(t)),
+          removedShorts: [...prev.shorts].filter(t => !today.shorts.has(t)),
+        };
+      }
+    } catch (diffErr) {
+      console.warn('[API] Could not compute ETF Pro day-over-day diff:', diffErr.message);
+    }
+
+    parsed.changes = changes;
     return res.json(parsed);
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/etfpro:', error);
@@ -4318,5 +4367,84 @@ if (process.env.ENABLE_WS_BROADCAST === 'true') {
     broadcastToChannel('quotes', quotes);
   }, 2000);
 }
+
+// Periodic cache eviction. Module-scope Maps are storing entries keyed by
+// either `timestamp` (most caches) or `ts` (periodReturnsCache). Without
+// eviction + a hard size ceiling, a long-running dev session lets these
+// Maps grow until V8 hits --max-old-space-size and aborts the process
+// (npm surfaces that as "npm run server exited with code 1").
+const CACHE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const CACHE_MAX_ENTRIES = parseInt(process.env.CACHE_MAX_ENTRIES || '5000', 10);
+
+const getEntryTimestamp = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.timestamp === 'number') return value.timestamp;
+  if (typeof value.ts === 'number') return value.ts;
+  return null;
+};
+
+const sweepTtlCache = (cache, ttlMs, label) => {
+  if (!cache || typeof cache.entries !== 'function') return;
+  const now = Date.now();
+  let removed = 0;
+
+  for (const [key, value] of cache.entries()) {
+    const ts = getEntryTimestamp(value);
+    if (ts === null) continue;
+    if (now - ts > ttlMs) {
+      cache.delete(key);
+      removed++;
+    }
+  }
+
+  // Hard cap: if still oversized, drop oldest entries (Map preserves insert
+  // order, so iterating from the start gives us the oldest first).
+  if (cache.size > CACHE_MAX_ENTRIES) {
+    const overflow = cache.size - CACHE_MAX_ENTRIES;
+    let dropped = 0;
+    for (const key of cache.keys()) {
+      if (dropped >= overflow) break;
+      cache.delete(key);
+      dropped++;
+    }
+    if (dropped > 0) {
+      console.log(`[CacheSweep] ${label}: capped at ${CACHE_MAX_ENTRIES}, dropped ${dropped} oldest`);
+    }
+  }
+
+  if (removed > 0) {
+    console.log(`[CacheSweep] ${label}: evicted ${removed} expired entries (remaining: ${cache.size})`);
+  }
+};
+
+setInterval(() => {
+  try {
+    sweepTtlCache(quotesCache, CACHE_TTL, 'quotesCache');
+    sweepTtlCache(historicalCache, HISTORICAL_CACHE_TTL, 'historicalCache');
+    sweepTtlCache(riskRangesCache, RISK_RANGES_CACHE_TTL, 'riskRangesCache');
+    // chartDataCache uses per-range TTL; use the longest (1h) as upper bound
+    sweepTtlCache(chartDataCache, 60 * 60 * 1000, 'chartDataCache');
+    sweepTtlCache(periodReturnsCache, PERIOD_RETURNS_CACHE_TTL, 'periodReturnsCache');
+  } catch (err) {
+    console.warn('[CacheSweep] error:', err.message);
+  }
+}, CACHE_SWEEP_INTERVAL_MS).unref();
+
+// Global error handlers — without these, a single stray rejected promise
+// (e.g. a transient Yahoo Finance axios failure outside a try/catch) will
+// terminate the Node process with exit code 1, killing the dev server.
+// We log and keep running; real request errors are still surfaced by the
+// per-route try/catch blocks that return 5xx to clients.
+process.on('unhandledRejection', (reason, promise) => {
+  const msg = reason && reason.stack ? reason.stack : String(reason);
+  console.error('[FATAL-GUARD] Unhandled promise rejection:', msg);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL-GUARD] Uncaught exception:', err && err.stack ? err.stack : err);
+  // Deliberately do not exit — in dev we prefer a live server with a
+  // logged error over a crashed one. If the process is truly wedged,
+  // the user will restart manually.
+});
 
 module.exports = app;

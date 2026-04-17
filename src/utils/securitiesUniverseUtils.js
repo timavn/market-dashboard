@@ -295,6 +295,64 @@ export const filterSecurities = (securities, query) => {
 };
 
 /**
+ * Calculate Average True Range (ATR) from price history
+ * ATR is the 14-day simple moving average of True Range, where True Range is:
+ *   max(high - low, |high - prevClose|, |low - prevClose|)
+ * @param {Array} priceHistory - Array of {date, close, high, low} objects sorted chronologically
+ * @param {number} period - ATR lookback period (default: 14)
+ * @returns {{ atr: number, atrPercent: number } | null} ATR value and ATR as % of latest close, or null if insufficient data
+ */
+export const calculateATR = (priceHistory, period = 14) => {
+  if (!priceHistory || !Array.isArray(priceHistory) || priceHistory.length < period + 1) {
+    return null;
+  }
+
+  const sorted = [...priceHistory].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const trueRanges = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const close = parseFloat(sorted[i].close);
+    const prevClose = parseFloat(sorted[i - 1].close);
+
+    if (isNaN(close) || isNaN(prevClose) || close === 0 || prevClose === 0) {
+      continue;
+    }
+
+    const high = parseFloat(sorted[i].high);
+    const low = parseFloat(sorted[i].low);
+    const hasValidHL = !isNaN(high) && !isNaN(low) && high > 0 && low > 0
+      && !(high === close && low === close);
+
+    let tr;
+    if (hasValidHL) {
+      tr = Math.max(
+        high - low,
+        Math.abs(high - prevClose),
+        Math.abs(low - prevClose)
+      );
+    } else {
+      tr = Math.abs(close - prevClose);
+    }
+    trueRanges.push(tr);
+  }
+
+  if (trueRanges.length < period) {
+    return null;
+  }
+
+  const recentTRs = trueRanges.slice(-period);
+  const atr = recentTRs.reduce((sum, tr) => sum + tr, 0) / period;
+
+  const latestClose = parseFloat(sorted[sorted.length - 1].close);
+  if (isNaN(latestClose) || latestClose === 0) return null;
+
+  return {
+    atr,
+    atrPercent: (atr / latestClose) * 100
+  };
+};
+
+/**
  * Format Z-score for display
  * @param {number|null} zScore - Z-score value
  * @returns {string} Formatted string

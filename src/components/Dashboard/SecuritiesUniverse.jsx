@@ -7,6 +7,7 @@ import {
   getBenchmark,
   getGicsSector,
   calculateZScore,
+  calculateATR,
   calculatePriceChanges,
   formatPriceChange,
   getPriceChangeColor,
@@ -210,8 +211,8 @@ const SecuritiesUniverse = () => {
         const fetchWithDelay = async (ticker, delay) => {
           await new Promise(resolve => setTimeout(resolve, delay));
           try {
-            // We only need last 10-15 days, fetching 20 to be safe
-            const history = await MarketDataService.getHistoricalData(ticker, 20);
+            // Fetch 30 days to give ATR(14) enough valid data points
+            const history = await MarketDataService.getHistoricalData(ticker, 30);
             if (history && history.data && Array.isArray(history.data)) {
               historyData[ticker] = history.data;
             }
@@ -246,6 +247,34 @@ const SecuritiesUniverse = () => {
       fetchPriceHistory();
     }
   }, [loading]);
+
+  // Format a Date as a local YYYY-MM-DD key (matches how Lambda stores `date`
+  // for Risk Range items in DynamoDB, e.g. aws/lambda/parse_hedgeye_pdf.py).
+  const toDateKey = (d) => {
+    if (!d) return null;
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Build the 10 visible trading-day columns (t-9 .. t), anchored on the
+  // latest business day at/before today. Memoized so the enrichedSecurities
+  // memo doesn't invalidate every render.
+  const tradingDays = useMemo(() => {
+    const days = [];
+    const currentDate = new Date();
+    while (days.length < 10) {
+      const dayOfWeek = currentDate.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        days.unshift(new Date(currentDate));
+      }
+      currentDate.setDate(currentDate.getDate() - 1);
+    }
+    return days;
+  }, []);
+  const tradingDayKeys = useMemo(() => tradingDays.map(toDateKey), [tradingDays]);
+  const dayLabels = ['t-9', 't-8', 't-7', 't-6', 't-5', 't-4', 't-3', 't-2', 't-1', 't'];
 
   // Combine securities with price data and calculated metrics
   const enrichedSecurities = useMemo(() => {
@@ -288,33 +317,42 @@ const SecuritiesUniverse = () => {
       // Get risk range for this security
       // riskRanges is now { ticker: [ { date, lrr, hrr, trend... } ] }
       const historyItems = riskRanges[security.ticker] || riskRanges[security.ticker.toUpperCase()] || [];
-      const riskData = historyItems.length > 0 ? historyItems[historyItems.length - 1] : null;
 
-      // Map history to arrays for sparkline
-      // Limit to last 10 days to match the table headers (t-9 to t)
-      let recentHistory = historyItems.slice(-10);
+      // Align RR data to the visible trading-day columns by date. Any column
+      // without a matching uploaded item stays null and renders as '--'.
+      const byDate = new Map();
+      for (const it of historyItems) {
+        if (it && it.date) byDate.set(it.date, it);
+      }
+      const aligned = tradingDayKeys.map(key => byDate.get(key) || null);
 
-      // If we have fewer than 10 items, we need to pad with placeholder/zeros 
-      // so that the latest data aligns with the rightmost 't' column
-      if (recentHistory.length < 10) {
-        const paddingCount = 10 - recentHistory.length;
-        // Use 0 for hrr/lrr so they render as '--' in getRiskRangeColor/renderRiskRangeCell (logic handles value > 0)
-        const padding = Array(paddingCount).fill({ hrr: 0, lrr: 0, date: null });
-        recentHistory = [...padding, ...recentHistory];
+      // "Current" risk data only counts if there's an upload within the
+      // visible window. Use the latest such item (rightmost non-null column).
+      let riskData = null;
+      for (let i = aligned.length - 1; i >= 0; i--) {
+        if (aligned[i]) { riskData = aligned[i]; break; }
+      }
+
+      const rrPrices = aligned.map(item => (item && item.close ? item.close : null));
+      // Fall back to the live quote price for the "t" column (last entry)
+      if (rrPrices[rrPrices.length - 1] === null && currentPrice) {
+        rrPrices[rrPrices.length - 1] = currentPrice;
       }
 
       const securityRiskRangeHistory = {
-        hrr: recentHistory.map(item => item.hrr),
-        lrr: recentHistory.map(item => item.lrr),
-        // Use the proper close price from the risk range data itself
-        prices: recentHistory.map(item => item.close || 0),
-        dates: recentHistory.map(item => item.date),
+        hrr: aligned.map(item => (item ? item.hrr : null)),
+        lrr: aligned.map(item => (item ? item.lrr : null)),
+        prices: rrPrices,
+        dates: aligned.map(item => (item ? item.date : null)),
         ath: 0,
         current: riskData || null
       };
 
       // Get volatility metrics for this security
       const volMetrics = getVolatilityMetrics(security.ticker);
+
+      // Calculate ATR from price history (needs high/low/close)
+      const atrResult = calculateATR(history);
 
       return {
         ...security,
@@ -330,10 +368,12 @@ const SecuritiesUniverse = () => {
         quadRanking,
         signal: riskData?.trend || '--', // Use Trend from risk ranges if available
         riskRangeHistory: securityRiskRangeHistory,
-        volatilityMetrics: volMetrics
+        volatilityMetrics: volMetrics,
+        atr: atrResult?.atr ?? null,
+        atrPercent: atrResult?.atrPercent ?? null
       };
     });
-  }, [prices, priceHistory, riskRanges]);
+  }, [prices, priceHistory, riskRanges, tradingDayKeys]);
 
   // Filter securities based on search query and active filters
   const filteredSecurities = useMemo(() => {
@@ -650,28 +690,6 @@ const SecuritiesUniverse = () => {
     return '#6b7280'; // Gray for equal values
   };
 
-  // Calculate trading days (skip weekends) going back from today
-  const getTradingDays = () => {
-    const tradingDays = [];
-    const today = new Date();
-    let currentDate = new Date(today);
-
-    // We need 10 trading days (t-9, t-8, t-7, t-6, t-5, t-4, t-3, t-2, t-1, t)
-    while (tradingDays.length < 10) {
-      const dayOfWeek = currentDate.getDay();
-      // Skip Saturday (6) and Sunday (0)
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        tradingDays.unshift(new Date(currentDate)); // Add to beginning
-      }
-      currentDate.setDate(currentDate.getDate() - 1);
-    }
-
-    return tradingDays;
-  };
-
-  const tradingDays = getTradingDays();
-  const dayLabels = ['t-9', 't-8', 't-7', 't-6', 't-5', 't-4', 't-3', 't-2', 't-1', 't'];
-
   // Format date for tooltip
   const formatTradingDate = (date) => {
     return date.toLocaleDateString('en-US', {
@@ -724,17 +742,17 @@ const SecuritiesUniverse = () => {
     });
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px' }}>
         {/* ATH Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>ATH</span>
-          <span style={{ fontWeight: 600, color: '#3b82f6', fontSize: '9px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '28px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>ATH</span>
+          <span style={{ fontWeight: 600, color: '#3b82f6', fontSize: '8px' }}>
             {ath > 0 ? ath.toFixed(2) : '--'}
           </span>
         </div>
         {/* Day Labels Row (date + t label stacked) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: '36px' }}></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '28px' }}></span>
           <div style={{ display: 'flex' }}>
             {dayLabels.map((label, index) => (
               <div
@@ -781,8 +799,8 @@ const SecuritiesUniverse = () => {
           </div>
         </div>
         {/* HRR Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>HRR</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '28px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>HRR</span>
           <div style={{ display: 'flex' }}>
             {hrr.map((value, index) => (
               <span
@@ -796,8 +814,8 @@ const SecuritiesUniverse = () => {
           </div>
         </div>
         {/* Closing Prices Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>Price</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '28px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>Price</span>
           <div style={{ display: 'flex' }}>
             {closingPrices.map((price, index) => (
               <span
@@ -813,8 +831,8 @@ const SecuritiesUniverse = () => {
           </div>
         </div>
         {/* LRR Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{ width: '36px', color: '#6b7280', fontWeight: 500, fontSize: '9px' }}>LRR</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <span style={{ width: '28px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>LRR</span>
           <div style={{ display: 'flex' }}>
             {lrr.map((value, index) => (
               <span
@@ -831,7 +849,7 @@ const SecuritiesUniverse = () => {
   };
 
   return (
-    <div style={{ padding: '8px 12px', overflowY: 'auto', height: '100%' }}>
+    <div style={{ padding: '8px 12px', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* Search Bar centered, summary underneath centered */}
       <div className="flex flex-col items-center mb-2">
         <div style={{ width: '100%', maxWidth: '400px' }}>
@@ -1012,34 +1030,35 @@ const SecuritiesUniverse = () => {
       </div>
 
       {/* Data Table */}
-      <Card className="dark:bg-gray-800 p-0 rounded-lg overflow-hidden" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3' }}>
-        <div style={{ overflowX: 'auto' }}>
+      <Card className="dark:bg-gray-800 p-0 rounded-lg overflow-hidden" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
             <thead className="bg-[#f3f0e6] text-slate-800">
               <tr style={{ borderTop: '1px solid #c9c3b6', borderBottom: '1px solid #c9c3b6' }}>
                 {[
-                  { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'center', width: '60px' },
-                  { key: 'name', label: 'Name', icon: <AlignLeft size={18} className="text-blue-500" />, align: 'center', width: '100px' },
+                  { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'center', width: '45px' },
+                  { key: 'name', label: 'Name', icon: <AlignLeft size={14} className="text-blue-500" />, align: 'center', width: '75px' },
                   {
                     key: 'assetClass', label: 'Asset Class', icon: (
-                      <svg width="18" height="18" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="14" height="14" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 2 L12 12 L22 12" />
                       </svg>
-                    ), align: 'center', width: '70px'
+                    ), align: 'center', width: '55px'
                   },
-                  { key: 'sector', label: 'Sector', icon: <LayoutGrid size={18} className="text-blue-500" />, align: 'center', width: '90px' },
-                  { key: 'factorExposure', label: 'Factor Exposure', icon: <SlidersHorizontal size={18} className="text-blue-500" />, align: 'center', width: '80px' },
+                  { key: 'sector', label: 'Sector', icon: <LayoutGrid size={14} className="text-blue-500" />, align: 'center', width: '68px' },
+                  { key: 'factorExposure', label: 'Factor Exposure', icon: <SlidersHorizontal size={14} className="text-blue-500" />, align: 'center', width: '60px' },
                   {
                     key: 'bias', label: 'Bias', icon: (
-                      <svg width="18" height="18" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="14" height="14" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M7 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h2" />
                         <line x1="12" y1="4" x2="12" y2="20" />
                         <path d="M17 4h2c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2h-2" />
                       </svg>
-                    ), align: 'center', infoParams: 'trend', width: '80px'
+                    ), align: 'center', infoParams: 'trend', width: '60px'
                   },
                   { key: 'riskRangeHistory', label: 'Risk Range', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">RR</div>, align: 'center', infoParams: 'riskRange', width: '400px' },
+                  { key: 'atr', label: 'ATR', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">ATR</div>, align: 'center', infoParams: 'atr', width: '70px' },
                   { key: 'ivolPrem', label: 'IVOL Prem', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolPrem', width: '65px' },
                   { key: 'ttmZScore', label: 'TTM Z-Score', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'ttmZScore', width: '55px' },
                   { key: 'ivolZScore', label: 'IVOL High', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolZScore', width: '60px' },
@@ -1053,7 +1072,7 @@ const SecuritiesUniverse = () => {
                   <th
                     key={col.key}
                     style={{
-                      padding: '4px 6px',
+                      padding: '2px 3px',
                       textAlign: col.align,
                       verticalAlign: 'middle',
                       background: '#f3f0e6',
@@ -1063,12 +1082,16 @@ const SecuritiesUniverse = () => {
                       borderBottom: '1px solid #c9c3b6',
                       width: col.width,
                       minWidth: col.width,
-                      maxWidth: col.width
+                      maxWidth: col.width,
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 10,
+                      boxShadow: 'inset 0 -1px 0 #c9c3b6'
                     }}
                     className="group hover:bg-[#efe9dc] transition-colors"
                     onClick={() => handleSort(col.key)}
                   >
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px', cursor: 'pointer' }}>
                       <span
                         onClick={(e) => {
                           if (col.infoParams) {
@@ -1117,7 +1140,7 @@ const SecuritiesUniverse = () => {
             <tbody>
               {sortedSecurities.length === 0 ? (
                 <tr>
-                  <td colSpan="15" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
+                  <td colSpan="16" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
                     {searchQuery
                       ? `No securities found matching "${searchQuery}"`
                       : 'No securities available'}
@@ -1139,24 +1162,24 @@ const SecuritiesUniverse = () => {
                       }}
                       className="dark:border-gray-700 dark:bg-gray-800"
                     >
-                      <td style={{ padding: '4px 6px', fontWeight: '600', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-white">
+                      <td style={{ padding: '2px 3px', fontWeight: '600', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-white">
                         {security.ticker}
                       </td>
-                      <td style={{ padding: '4px 6px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
                         <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <TruncatedSecurityName name={security.name} maxLength={18} />
+                          <TruncatedSecurityName name={security.name} maxLength={14} />
                         </div>
                       </td>
-                      <td style={{ padding: '4px 6px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
                         {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
                       </td>
-                      <td style={{ padding: '4px 6px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
                         {security.sector || 'N/A'}
                       </td>
-                      <td style={{ padding: '4px 6px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
                         {security.factorExposure}
                       </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
                         <span style={{
                           color: security.bias === 'BULLISH' ? '#10b981' :
                             security.bias === 'BEARISH' ? '#ef4444' : '#6b7280'
@@ -1164,7 +1187,7 @@ const SecuritiesUniverse = () => {
                           {security.bias}
                         </span>
                       </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
                         <div style={{ display: 'flex', justifyContent: 'center' }}>
                           {renderRiskRangeCell(security.riskRangeHistory, security.priceHistory)}
                         </div>
@@ -1172,7 +1195,46 @@ const SecuritiesUniverse = () => {
 
                       <td
                         style={{
-                          padding: '4px 6px',
+                          padding: '2px 3px',
+                          textAlign: 'center',
+                          fontWeight: 600,
+                          borderRight: '1px solid #d6d0c3'
+                        }}
+                        className="dark:text-white"
+                      >
+                        {security.atr !== null ? (
+                          <div style={{
+                            display: 'inline-grid',
+                            gridTemplateColumns: 'auto auto',
+                            columnGap: '3px',
+                            rowGap: '1px',
+                            fontSize: '9px',
+                            justifyContent: 'center',
+                            alignItems: 'center'
+                          }}>
+                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>Spot:</span>
+                            <span style={{ color: '#374151', textAlign: 'left', fontWeight: 600 }}>
+                              {security.price !== null && security.price !== undefined
+                                ? formatPrice(security.price, security.ticker)
+                                : '--'}
+                            </span>
+                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>Abs:</span>
+                            <span style={{ color: '#374151', textAlign: 'left' }}>{security.atr.toFixed(2)}</span>
+                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>%:</span>
+                            <span style={{
+                              color: security.atrPercent > 5 ? '#ef4444' :
+                                security.atrPercent > 2 ? '#f59e0b' : '#10b981',
+                              textAlign: 'left'
+                            }}>
+                              {security.atrPercent.toFixed(1)}%
+                            </span>
+                          </div>
+                        ) : '--'}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: '2px 3px',
                           textAlign: 'center',
                           color: volMetrics ? getIvolPremColor(volMetrics.ivolPrem) : '#6b7280',
                           fontWeight: 600,
@@ -1184,7 +1246,7 @@ const SecuritiesUniverse = () => {
                       </td>
                       <td
                         style={{
-                          padding: '4px 6px',
+                          padding: '2px 3px',
                           textAlign: 'center',
                           color: volMetrics ? getTTMZScoreColor(volMetrics.ttmZScore) : '#6b7280',
                           fontWeight: 600,
@@ -1196,7 +1258,7 @@ const SecuritiesUniverse = () => {
                       </td>
                       <td
                         style={{
-                          padding: '4px 6px',
+                          padding: '2px 3px',
                           textAlign: 'center',
                           color: volMetrics ? getIOVRPercentileColor(volMetrics.iovrPercentile) : '#6b7280',
                           fontWeight: 600,
@@ -1206,7 +1268,7 @@ const SecuritiesUniverse = () => {
                       >
                         {volMetrics ? formatVolatilityMetric(volMetrics.iovrPercentile, true) : '--'}
                       </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-white">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-white">
                         {(() => {
                           const zScoreColors = getZScoreColor(security.zScore);
                           return (
@@ -1231,11 +1293,11 @@ const SecuritiesUniverse = () => {
                           );
                         })()}
                       </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
                         {security.beta}
                       </td>
 
-                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }}>
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }}>
                         {security.quadRanking && security.quadRanking !== '--' ? (
                           <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'center' }}>
                             {security.quadRanking.split('/').map((quadNum, index, array) => {
@@ -1262,8 +1324,8 @@ const SecuritiesUniverse = () => {
                           <span className="dark:text-gray-400">--</span>
                         )}
                       </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '7px', alignItems: 'center' }}>
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', fontSize: '7px', alignItems: 'center' }}>
                           <span
                             style={{
                               color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#10b981' :
@@ -1293,7 +1355,7 @@ const SecuritiesUniverse = () => {
                           </span>
                         </div>
                       </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
                         {security.signal}
                       </td>
                     </tr>
