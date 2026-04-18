@@ -959,5 +959,128 @@ Let winners run. Do not sell ALL of a winner "on valuation" if its signals (#tra
 - **The Asymmetry (1M vs 3M RV):** Setup showed **1M RV << 3M RV** after the "vol cluster"; call was that as **3M RV falls**, **#volcontrol** would mechanically **add**, fueling **higher ATHs**—and that's what happened.
     
 - **Today's Read:** **SPX above #flipline; #gamma Throttle positive (~+7.83)** = supportive flows if dips; **Retail Sales** decent print with upward revision; **Consumer Sentiment** later = another high-impact check on short-dated vol.
+`,
+  'Stop Losses': `## Core Rule
+
+**Every trade has a stop set at 2 × ATR from entry.** That distance is the maximum loss per unit of position. No exceptions, no "I'll see how it trades," no moving the line after the fact. #stoploss
+
+The stop is defined *before* the trade is on. If the math doesn't work at 2 × ATR, the trade doesn't happen.
+
+---
+
+### 1. Volatility Is the Input, Not the Output
+
+**ATR (Average True Range)** is the volatility proxy. Not percentages. Not gut feel. Not round numbers on the chart. #atr #volatility
+
+- Calculated over a **fixed lookback (default 14 periods)**
+- Captures **gaps** (true range includes the prior close), so overnight risk is priced in
+- Updates daily, so stops **adapt automatically** as the regime shifts
+
+Percentage stops ("I'll risk 5%") punish low-vol assets and under-protect high-vol ones. ATR removes that asymmetry by speaking in the asset's own language.
+
+---
+
+### 2. Stop Distance = 2 × ATR
+
+The math is trivial, the consequences are not:
+
+\`\`\`
+Stop Distance = 2 × ATR(14)
+\`\`\`
+
+- **High volatility** → wider stops (you need room to breathe)
+- **Low volatility** → tighter stops (noise is smaller, so risk-per-share is smaller)
+
+The **2×** multiplier is the buffer against normal noise. Most single-day moves will not exceed it; genuine trend breaks will.
+
+---
+
+### 3. Stop Placement
+
+Two formulas. That's the entire rulebook for placement:
+
+- **Longs:**  \`Stop = Entry − (2 × ATR)\`
+- **Shorts:** \`Stop = Entry + (2 × ATR)\`
+
+No discretionary shading, no "just below the recent low." The level is mechanical. #exitrules
+
+---
+
+### 4. Risk Is Defined First, Size Is Derived
+
+This is the inversion most traders get backwards. You do **not** pick a position size and then figure out where the stop goes. You pick your risk, then solve for size. #positionsizing
+
+\`\`\`
+Risk per Share   = 2 × ATR
+Position Size    = (Account Risk $) / (2 × ATR)
+Total Trade Risk = Position Size × Stop Distance
+\`\`\`
+
+Fix the dollar risk per trade (e.g., **50 bps of the book**), and the ATR tells you how many shares you're allowed to own. Size falls out of the math.
+
+---
+
+### 5. Worked Example
+
+**Given:**
+
+- Account: **$1,000,000**
+- Per-trade risk budget: **50 bps = $5,000**
+- Ticker: NVDA
+- Entry: **$131**
+- ATR(14): **$4.00**
+
+**Math:**
+
+- Stop Distance = 2 × $4.00 = **$8.00**
+- Stop Price (long) = $131 − $8.00 = **$123**  *(coincidentally right on #trendsignal)*
+- Risk per Share = **$8.00**
+- Position Size = $5,000 / $8.00 = **625 shares**
+- Notional = 625 × $131 = **$81,875** (~8.2% of book)
+- Max Loss if stopped = 625 × $8.00 = **$5,000** ✓
+
+**Key Lesson:** You didn't choose to own 625 shares. The volatility chose the size. Your only decisions were the entry and the 50 bps risk budget.
+
+---
+
+### 6. Volatility-Normalized Risk
+
+Because every stop is **2 × ATR**, every trade risks the same dollar amount regardless of the underlying's personality:
+
+- A **calm bond ETF** (ATR = $0.30) → tight stop → *larger* share count, same $ risk
+- A **high-vol single stock** (ATR = $6.00) → wide stop → *smaller* share count, same $ risk
+
+Result: **no overexposure to high-vol names, no under-allocation to low-vol names.** The book is normalized. #positionsizing
+
+This is what makes ATR stops compatible with the #riskrange framework — both scale to the asset's own volatility rather than imposing a fixed percentage.
+
+---
+
+### 7. Relationship to the Signals
+
+The ATR stop is a **hard backstop**, not the primary exit. The primary exit is a signal break. #exitrules
+
+- **#tradesignal / #trendsignal break** → trim or exit per The Playbook
+- **#riskrange LRR/TRR** → incremental adds/trims
+- **2 × ATR stop** → the line that can't be crossed, the backstop for when price **gaps** past a signal and there's no chance to react
+
+In practice: signal breaks get you out first. The ATR stop exists so that a single overnight gap can never take out more than your pre-defined risk budget.
+
+---
+
+### 8. What This Removes
+
+- **Discretionary stop placement** — no "let me give it a little more room"
+- **Arbitrary percentages** — 5%, 8%, 10% all ignore what the asset actually does
+- **Position-first thinking** — sizing is the *output*, not the *input*
+- **Hope** — the exit is scheduled before the trade begins
+
+---
+
+## Key Principle
+
+**Risk is defined first (via ATR). Position size is derived from it — not the other way around.**
+
+You don't decide how big to trade and then hope the stop works out. You decide how much you're willing to lose, let **2 × ATR** tell you the per-share risk, and divide. The market's volatility sizes the position. Your job is to respect the line. #stoploss #positionsizing
 `
 };

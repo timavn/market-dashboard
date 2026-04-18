@@ -246,7 +246,8 @@ const PortfolioDashboard = () => {
   const bookFiles = [
     { name: 'The Coach', path: 'main/The Coach.md' },
     { name: 'The Process', path: 'main/The Process.md' },
-    { name: 'The Playbook', path: 'main/The Playbook.md' }
+    { name: 'The Playbook', path: 'main/The Playbook.md' },
+    { name: 'Stop Losses', path: 'main/Stop Losses.md' }
   ];
 
   const openBookFile = (fileName) => {
