@@ -177,35 +177,53 @@ async function main() {
     );
   }
 
-  const latest = getLatestByMtime(candidates);
-  if (!latest) throw new Error('Unable to stat any candidate ETF Pro files.');
+  // Parse every candidate, sorted oldest -> newest by mtime so the newest
+  // mtime is the last one written and becomes `latest.json`. If two files
+  // resolve to the same snapshotDate, the newer one overwrites.
+  const withStats = candidates
+    .map((p) => {
+      try {
+        return { path: p, stat: fs.statSync(p) };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.stat.mtimeMs ?? 0) - (b.stat.mtimeMs ?? 0));
 
-  console.log(`[ETFPRO] Using source: ${latest.path}`);
-  const rows = await parseWorkbookFromPath(latest.path);
-
-  const parsedAt = new Date().toISOString();
-  const fileMtime = latest.stat.mtime.toISOString();
-  const snapshotDate = determineSnapshotDate(rows, fileMtime);
-
-  const payload = {
-    meta: {
-      snapshotDate,
-      parsedAt,
-      sourceFile: latest.path,
-      sourceFileMtime: fileMtime,
-      rowCount: rows.length,
-    },
-    rows,
-  };
+  if (withStats.length === 0) throw new Error('Unable to stat any candidate ETF Pro files.');
 
   const latestPath = path.join(outDir, 'latest.json');
-  const datedPath = path.join(outDir, `${snapshotDate}.json`);
+  let latestPayload = null;
 
-  fs.writeFileSync(latestPath, JSON.stringify(payload, null, 2));
-  fs.writeFileSync(datedPath, JSON.stringify(payload, null, 2));
+  for (const { path: xlsxPath, stat } of withStats) {
+    console.log(`[ETFPRO] Using source: ${xlsxPath}`);
+    const rows = await parseWorkbookFromPath(xlsxPath);
 
-  console.log(`[ETFPRO] Wrote ${latestPath}`);
-  console.log(`[ETFPRO] Wrote ${datedPath}`);
+    const parsedAt = new Date().toISOString();
+    const fileMtime = stat.mtime.toISOString();
+    const snapshotDate = determineSnapshotDate(rows, fileMtime);
+
+    const payload = {
+      meta: {
+        snapshotDate,
+        parsedAt,
+        sourceFile: xlsxPath,
+        sourceFileMtime: fileMtime,
+        rowCount: rows.length,
+      },
+      rows,
+    };
+
+    const datedPath = path.join(outDir, `${snapshotDate}.json`);
+    fs.writeFileSync(datedPath, JSON.stringify(payload, null, 2));
+    console.log(`[ETFPRO] Wrote ${datedPath}`);
+
+    latestPayload = payload;
+  }
+
+  fs.writeFileSync(latestPath, JSON.stringify(latestPayload, null, 2));
+  console.log(`[ETFPRO] Wrote ${latestPath} (snapshotDate=${latestPayload.meta.snapshotDate})`);
 }
 
 main().catch((err) => {
