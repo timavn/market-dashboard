@@ -1,10 +1,10 @@
 .etfpro-body {
-  padding: 6px 12px 12px;
+  padding: 3px 6px 6px;
 }
 
 .etfpro-error {
-  margin-top: 10px;
-  padding: 10px;
+  margin-top: 5px;
+  padding: 5px;
   border: 1px solid #ef4444;
   background: #fef2f2;
   color: #991b1b;
@@ -14,53 +14,68 @@
 }
 
 .etfpro-empty {
-  margin-top: 12px;
-  padding: 18px 10px;
+  margin-top: 6px;
+  padding: 9px 5px;
   text-align: center;
   color: #6b7280;
   font-size: 12px;
 }
 
-/* Side-by-side Longs / Shorts layout */
-.etfpro-split {
+/* Side-by-side Longs / Shorts: each column is one bordered stack (title → changes → table) */
+.etfpro-split-stack {
+  margin-top: 5px;
+}
+
+.etfpro-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 4px;
+  align-items: start;
+}
+
+.etfpro-column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 4px;
+}
+
+.etfpro-column-long {
+  border: 1px solid rgba(5, 95, 70, 0.45);
+}
+
+.etfpro-column-short {
+  border: 1px solid rgba(153, 27, 27, 0.45);
 }
 
 .etfpro-pane {
   min-width: 0;
 }
 
+/* Match .etfpro-table thead th */
 .etfpro-pane-title {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 4px 8px;
-  border-radius: 4px 4px 0 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 3px;
+  background: #f3f0e6;
+  border-bottom: 1px solid #d6d0c3;
+  font-size: 11px;
+  font-weight: 800;
+  color: #111;
 }
 
-.etfpro-pane-title.long {
-  color: #065f46;
-  background: rgba(16, 185, 129, 0.1);
-  border-bottom: 1px solid rgba(16, 185, 129, 0.25);
-}
-
-.etfpro-pane-title.short {
-  color: #991b1b;
-  background: rgba(239, 68, 68, 0.1);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+.etfpro-pane-title-label {
+  text-align: left;
 }
 
 .etfpro-pane-count {
-  font-size: 10px;
-  font-weight: 600;
-  opacity: 0.7;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 800;
+  color: #111;
 }
 
 .etfpro-pane-scroll {
@@ -74,7 +89,7 @@
 .etfpro-pane-empty {
   text-align: center;
   color: #6b7280;
-  padding: 12px 6px;
+  padding: 6px 3px;
   font-size: 11px;
 }
 
@@ -92,14 +107,14 @@
   font-size: 11px;
   font-weight: 800;
   color: #111;
-  padding: 8px 6px;
+  padding: 4px 3px;
   text-align: left;
   z-index: 1;
 }
 
 .etfpro-table tbody td {
   border-bottom: 1px solid rgba(214, 208, 195, 0.65);
-  padding: 8px 6px;
+  padding: 4px 3px;
   font-size: 12px;
   color: #111;
   vertical-align: middle;
@@ -134,7 +149,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px 8px;
+  padding: 1px 4px;
   border-radius: 999px;
   border: 1px solid #d6d0c3;
   background: #f8f6ef;
@@ -166,12 +181,24 @@
 
 /* Day-over-day changes: Added / Removed sections */
 .etfpro-changes {
-  padding: 4px 6px 6px;
+  padding: 2px 3px 3px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   border-bottom: 1px solid #d6d0c3;
   background: #fcfaf5;
+}
+
+/* Per-column changes (inside long/short bordered stack) */
+.etfpro-changes.etfpro-changes-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.etfpro-change-list-cell {
+  min-width: 0;
+  width: 100%;
 }
 
 .etfpro-change-section {
@@ -180,20 +207,28 @@
 }
 
 .etfpro-change-header {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding: 3px 4px 2px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  letter-spacing: 0.55px;
+  padding: 2px 3px 1px;
+  border-radius: 2px 2px 0 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  align-self: start;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .etfpro-change-header.add {
   color: #065f46;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(5, 95, 70, 0.12);
 }
 
 .etfpro-change-header.remove {
   color: #991b1b;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(153, 27, 27, 0.12);
 }
 
 .etfpro-change-list {
@@ -202,9 +237,9 @@
 }
 
 .etfpro-change-ticker {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 2px 6px;
+  padding: 1px 3px;
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -217,7 +252,13 @@
 .etfpro-change-ticker.remove {
   color: #991b1b;
   background: rgba(239, 68, 68, 0.06);
-  text-decoration: line-through;
+}
+
+.etfpro-change-empty {
+  font-size: 10px;
+  font-style: italic;
+  color: #6b7280;
+  padding: 2px 3px;
 }
 
 /* Row highlighting for newly added positions */

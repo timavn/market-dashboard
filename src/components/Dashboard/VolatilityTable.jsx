@@ -3,69 +3,70 @@ import StatusDot from '../common/StatusDot';
 import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
 import './VolatilityTable.css';
 
-// Volatility ranges from The Process (bookContent.js) - VIX explicit; others use similar framework
+// Volatility ranges from The Process (bookContent.js) - VIX explicit; others use similar framework.
+// Ranges are contiguous half-open intervals: [min, max). The upper bucket (max == null) extends to +∞.
 const VOL_RANGES = {
   VIX: {
     name: 'VIX (S&P 500 Implied Vol)',
     source: 'The Process',
     ranges: [
-      { min: 9, max: 19, label: 'Investable', color: 'green', desc: 'Buy dips, normal risk' },
-      { min: 20, max: 29, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges, be aggressive on longs' },
-      { min: 29, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive, preserve capital' }
+      { min: 0,  max: 19,   label: 'Investable',   color: 'green',  desc: 'Buy dips, normal risk' },
+      { min: 19, max: 29,   label: 'Chop bucket',  color: 'yellow', desc: 'Trade ranges, be aggressive on longs' },
+      { min: 29, max: null, label: 'Uninvestable', color: 'red',    desc: 'Defensive, preserve capital' }
     ]
   },
   RVX: {
     name: 'RVX (Russell 2000 Implied Vol)',
     source: 'Similar framework to VIX',
     ranges: [
-      { min: 12, max: 24, label: 'Investable', color: 'green', desc: 'Typically ~1.2x VIX' },
-      { min: 24, max: 36, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' },
-      { min: 36, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
+      { min: 0,  max: 24,   label: 'Investable',   color: 'green',  desc: 'Typically ~1.2x VIX' },
+      { min: 24, max: 36,   label: 'Chop bucket',  color: 'yellow', desc: 'Trade ranges' },
+      { min: 36, max: null, label: 'Uninvestable', color: 'red',    desc: 'Defensive' }
     ]
   },
   NazVol: {
     name: 'NazVol / VXN (Nasdaq Implied Vol)',
     source: 'Similar framework to VIX',
     ranges: [
-      { min: 12, max: 24, label: 'Investable', color: 'green', desc: 'Typically ~1.2x VIX' },
-      { min: 24, max: 36, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' },
-      { min: 36, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
+      { min: 0,  max: 24,   label: 'Investable',   color: 'green',  desc: 'Typically ~1.2x VIX' },
+      { min: 24, max: 36,   label: 'Chop bucket',  color: 'yellow', desc: 'Trade ranges' },
+      { min: 36, max: null, label: 'Uninvestable', color: 'red',    desc: 'Defensive' }
     ]
   },
   GVZ: {
     name: 'GVZ (Gold Implied Vol)',
     source: 'The Process (Gold vol uses Chop Bucket framework)',
     ranges: [
-      { min: 12, max: 24, label: 'Investable', color: 'green', desc: 'Low vol regime' },
-      { min: 24, max: 36, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' },
-      { min: 36, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
+      { min: 0,  max: 24,   label: 'Investable',   color: 'green',  desc: 'Low vol regime' },
+      { min: 24, max: 36,   label: 'Chop bucket',  color: 'yellow', desc: 'Trade ranges' },
+      { min: 36, max: null, label: 'Uninvestable', color: 'red',    desc: 'Defensive' }
     ]
   },
   OVX: {
     name: 'OVX (Oil Implied Vol)',
     source: 'Similar framework',
     ranges: [
-      { min: 25, max: 40, label: 'Investable', color: 'green', desc: 'Lower vol regime' },
-      { min: 40, max: 55, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' },
-      { min: 55, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
+      { min: 0,  max: 40,   label: 'Investable',   color: 'green',  desc: 'Lower vol regime' },
+      { min: 40, max: 55,   label: 'Chop bucket',  color: 'yellow', desc: 'Trade ranges' },
+      { min: 55, max: null, label: 'Uninvestable', color: 'red',    desc: 'Defensive' }
     ]
   },
   MOVE: {
     name: 'MOVE (Bond Market Implied Vol)',
     source: 'Different scale - Treasury options',
     ranges: [
-      { min: 70, max: 100, label: 'Investable', color: 'green', desc: 'Lower vol regime' },
-      { min: 100, max: 120, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' },
-      { min: 120, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
+      { min: 0,   max: 100,  label: 'Investable',   color: 'green',  desc: 'Lower vol regime' },
+      { min: 100, max: 120,  label: 'Chop bucket',  color: 'yellow', desc: 'Trade ranges' },
+      { min: 120, max: null, label: 'Uninvestable', color: 'red',    desc: 'Defensive' }
     ]
   },
   VVIX: {
     name: 'VVIX (VIX of VIX – Vol of Vol)',
     source: 'CBOE – similar framework to VIX',
     ranges: [
-      { min: 70, max: 95, label: 'Investable', color: 'green', desc: 'Lower vol-of-vol' },
-      { min: 95, max: 115, label: 'Chop bucket', color: 'yellow', desc: 'Elevated vol-of-vol' },
-      { min: 115, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }
+      { min: 0,   max: 95,   label: 'Investable',   color: 'green',  desc: 'Lower vol-of-vol' },
+      { min: 95,  max: 115,  label: 'Chop bucket',  color: 'yellow', desc: 'Elevated vol-of-vol' },
+      { min: 115, max: null, label: 'Uninvestable', color: 'red',    desc: 'Defensive' }
     ]
   }
 };
@@ -82,15 +83,16 @@ const ALL_SERIES = [
 ];
 
 // Value-based bucket from VOL_RANGES (green/yellow/red). Returns null for missing/invalid value or unknown series.
-// Iterate ranges in reverse so upper buckets (e.g. red 29+) take precedence on boundary values.
+// Ranges are half-open [min, max); the upper bucket (max == null) extends to +∞, so every numeric value
+// lands in exactly one bucket and shared boundaries belong to the higher tier.
 const getBucketForSeries = (seriesName, value) => {
   if (value == null || value === '' || Number.isNaN(Number(value))) return null;
   const config = VOL_RANGES[seriesName];
   if (!config?.ranges?.length) return null;
   const v = parseFloat(value);
-  for (let i = config.ranges.length - 1; i >= 0; i--) {
+  for (let i = 0; i < config.ranges.length; i++) {
     const r = config.ranges[i];
-    const inRange = v >= r.min && (r.max == null || v <= r.max);
+    const inRange = v >= r.min && (r.max == null || v < r.max);
     if (inRange) return r.color;
   }
   return null;
@@ -123,13 +125,13 @@ const calculateRocChange = (current, prior) => {
 
 const formatRocBps = (bps) => {
   if (bps == null) return '--';
-  return `${bps} bps`;
+  return `${bps}`;
 };
 
 const formatRocPercent = (percent) => {
   if (percent == null) return '--';
   const sign = percent > 0 ? '+' : '';
-  return `${sign}${percent.toFixed(1)}%`;
+  return `${sign}${percent.toFixed(1)}`;
 };
 
 const VolatilityTable = ({ onIndicatorHelp, onLastUpdatedChange, onSourcesChange }) => {
@@ -237,22 +239,22 @@ const VolatilityTable = ({ onIndicatorHelp, onLastUpdatedChange, onSourcesChange
                   4W Ago
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric vol-mw-sep-left" scope="col">
-                  DoD bps
+                  DoD (bps)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  DoD %
+                  DoD (%)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric vol-mw-sep-left" scope="col">
-                  VoV bps
+                  VoV (bps)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  VoV %
+                  VoV (%)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric vol-mw-sep-left" scope="col">
-                  MoM bps
+                  MoM (bps)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  MoM %
+                  MoM (%)
                 </th>
               </tr>
             </thead>
@@ -286,16 +288,18 @@ const VolatilityTable = ({ onIndicatorHelp, onLastUpdatedChange, onSourcesChange
 
                 return (
                   <tr key={s.name} className="region-mw-tr">
-                    <td className="region-mw-td region-mw-td-name">
-                      <button
-                        type="button"
-                        className="vol-ranges-help-btn"
-                        onClick={() => onIndicatorHelp?.(s.name)}
-                        title={`View ${s.name} ranges`}
-                        aria-label={`View ${s.name} ranges`}
-                      >
-                        ?
-                      </button>
+                    <td className="region-mw-td region-mw-td-name vol-mw-td-metric">
+                      <span className="vol-mw-metric-icon" aria-hidden="true">
+                        <button
+                          type="button"
+                          className="vol-ranges-help-btn"
+                          onClick={() => onIndicatorHelp?.(s.name)}
+                          title={`View ${s.name} ranges`}
+                          aria-label={`View ${s.name} ranges`}
+                        >
+                          ?
+                        </button>
+                      </span>
                       <span className="vol-mw-series-symbol">{s.symbol}</span>
                     </td>
 
@@ -405,15 +409,22 @@ const VolRangesPopover = ({ indicatorKey, onClose }) => {
         <div className="vol-ranges-popover-body">
           <div className="vol-ranges-indicator-source">Source: {info.source}</div>
           <div className="vol-ranges-ranges">
-            {info.ranges.map((r, i) => (
-              <div key={i} className={`vol-ranges-range vol-ranges-range-${r.color}`}>
-                <span className="vol-ranges-range-label">{r.label}:</span>
-                <span className="vol-ranges-range-math">
-                  {r.max != null ? `${r.min}–${r.max}` : `${r.min}+`}
-                </span>
-                <span className="vol-ranges-range-desc">— {r.desc}</span>
-              </div>
-            ))}
+            {info.ranges.map((r, i) => {
+              const isFirst = i === 0;
+              const math =
+                r.max == null
+                  ? `${r.min}+`
+                  : isFirst
+                  ? `<${r.max}`
+                  : `${r.min}–${r.max}`;
+              return (
+                <div key={i} className={`vol-ranges-range vol-ranges-range-${r.color}`}>
+                  <span className="vol-ranges-range-label">{r.label}:</span>
+                  <span className="vol-ranges-range-math">{math}</span>
+                  <span className="vol-ranges-range-desc">— {r.desc}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

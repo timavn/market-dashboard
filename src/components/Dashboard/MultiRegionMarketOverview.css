@@ -283,21 +283,16 @@
   font-size: 13px;
 }
 
-/* Main Markets Grid - 3x2 layout for full Google Finance-style charts */
+/* Main Markets Grid - 2x3 layout (2 cards per row, 3 rows) so each card is
+   wider and the table text inside can render larger via useAutoFitTable. */
 .main-markets-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   padding: 12px 0;
 }
 
-/* Responsive: Adjust grid on smaller screens */
-@media (max-width: 1200px) {
-  .main-markets-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
+/* Responsive: collapse to a single column on narrow screens. */
 @media (max-width: 768px) {
   .main-markets-grid {
     grid-template-columns: 1fr;
@@ -348,14 +343,17 @@
 .region-mw-table-wrap {
   width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: visible;
 }
 
 .region-mw-quotes-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  /* font-size is scaled by the useAutoFitTable hook via --mw-scale so the
+     whole table shrinks uniformly when any cell would otherwise overflow.
+     Default scale of 1 keeps the original 11px baseline. */
+  font-size: calc(11px * var(--mw-scale, 1));
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   color: #111827;
 }
@@ -367,20 +365,29 @@
 
 .region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-name,
 .region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td-name {
-  width: 30%;
+  width: 14%;
   white-space: nowrap;
 }
 
 .region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-price,
 .region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td-price {
-  width: 18%;
+  width: 16%;
+  white-space: nowrap;
 }
 
 .region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-metric,
 .region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td.region-mw-td-heat {
-  width: 12.5%;
+  width: 11.6%;
   padding-left: 4px;
   padding-right: 4px;
+  white-space: nowrap;
+}
+
+/* Auto-fit safety net: clip rather than bleed if content still won't shrink
+   enough to fit (rare — the useAutoFitTable hook handles this for us). */
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td,
+.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th {
+  overflow: hidden;
 }
 
 .region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th.region-mw-th-metric {
@@ -391,7 +398,7 @@
 .region-mw-th {
   text-align: right;
   font-weight: 700;
-  font-size: 9px;
+  font-size: calc(9px * var(--mw-scale, 1));
   letter-spacing: 0.04em;
   color: #6b7280;
   padding: 6px 8px 4px 4px;
@@ -444,7 +451,7 @@
   text-align: center;
   padding-left: 6px;
   padding-right: 0;
-  font-size: 9px;
+  font-size: calc(9px * var(--mw-scale, 1));
 }
 
 .region-mw-td-name {
@@ -538,6 +545,60 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 60%;
+}
+
+/* Rates card — tab strip inside the panel header. */
+.rates-card-header {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rates-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.rates-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.rates-tab:hover {
+  background: #ece7d8;
+  color: #111827;
+}
+
+.rates-tab--active,
+.rates-tab--active:hover {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #d6d0c3;
+}
+
+.rates-tab-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+.rates-tab-empty-message {
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
 }
 
 .index-tabs {

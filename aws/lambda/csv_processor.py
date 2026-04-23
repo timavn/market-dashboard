@@ -1,6 +1,7 @@
 import json
 import boto3
 import csv
+import hashlib
 from datetime import datetime, timedelta
 from decimal import Decimal
 import os
@@ -29,6 +30,7 @@ HOLDINGS_TABLE = os.environ.get('HOLDINGS_TABLE', 'Holdings')
 LOGS_TABLE = os.environ.get('LOGS_TABLE', 'ProcessingLogs')
 PERFORMANCE_TABLE = os.environ.get('PERFORMANCE_TABLE', 'PerformanceHistory')
 POSITION_PERFORMANCE_TABLE = os.environ.get('POSITION_PERFORMANCE_TABLE', 'PositionPerformance')
+REALIZED_GAIN_LOSS_TABLE = os.environ.get('REALIZED_GAIN_LOSS_TABLE', 'RealizedGainLoss')
 
 def lambda_handler(event, context):
     """
@@ -66,8 +68,14 @@ def lambda_handler(event, context):
                 trading_date = (upload_time - timedelta(days=1)).strftime('%Y-%m-%d')
             print(f"Could not extract date from filename, using: {trading_date}")
 
-        # Check if it's a Transactions CSV or Positions CSV
-        if is_transactions_csv(csv_content):
+        # Check Realized G/L (Lot Details) first — also has Symbol, must precede positions parser
+        if is_schwab_realized_lot_details_csv(csv_content):
+            print("Detected Realized Gain/Loss Lot Details CSV")
+            lots = parse_schwab_realized_lot_details_csv(csv_content)
+            store_realized_gain_loss_lots(lots)
+            message = f"Processed {len(lots)} realized gain/loss lots"
+            snapshot_id = "realized_gl_" + datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        elif is_transactions_csv(csv_content):
             print("Detected Transactions CSV format")
             transactions = parse_schwab_transactions_csv(csv_content)
             process_transaction_history(transactions)
@@ -507,7 +515,6 @@ def store_transactions(transactions):
                 
                 # Generate SK: Date#Action#Quantity (Simple deduplication key)
                 # We add a hash to ensure uniqueness
-                import hashlib
                 raw_id = f"{date}_{symbol}_{action}_{qty}_{price}"
                 tx_hash = hashlib.md5(raw_id.encode()).hexdigest()[:8]
                 sort_key = f"{date}#{tx_hash}"
@@ -647,6 +654,126 @@ def log_processing(bucket, key, status, snapshot_id=None, error=None):
     except Exception as e:
         # Don't fail the whole function if logging fails
         print(f"Warning: Could not log to ProcessingLogs: {str(e)}")
+
+
+def is_schwab_realized_lot_details_csv(csv_content):
+    """Schwab export: Realized Gain/Loss – Lot Details (closed lots)."""
+    head = csv_content[:2500] if len(csv_content) > 2500 else csv_content
+    if 'Realized Gain/Loss' in head and 'Lot Details' in head:
+        return True
+    for line in csv_content.strip().split('\n')[:20]:
+        if 'Symbol' in line and 'Closed Date' in line and 'Gain/Loss ($)' in line:
+            return True
+    return False
+
+
+def _parse_mmddyyyy_to_iso(date_str):
+    if not date_str or not str(date_str).strip():
+        return None
+    raw = str(date_str).split(' as of')[0].strip()
+    try:
+        return datetime.strptime(raw, '%m/%d/%Y').strftime('%Y-%m-%d')
+    except ValueError:
+        return None
+
+
+def parse_schwab_realized_lot_details_csv(csv_content):
+    """
+    Parse Schwab Realized Gain/Loss – Lot Details CSV.
+    Row 0: title; row 1: blank; row 2: headers; data follows.
+    """
+    lines = csv_content.strip().split('\n')
+    header_index = -1
+    for i, line in enumerate(lines):
+        if 'Symbol' in line and 'Closed Date' in line and 'Gain/Loss ($)' in line:
+            header_index = i
+            break
+    if header_index == -1:
+        raise ValueError("Could not find Realized Gain/Loss Lot Details header row")
+
+    csv_data = '\n'.join(lines[header_index:])
+    reader = csv.DictReader(StringIO(csv_data))
+    lots = []
+
+    for row in reader:
+        try:
+            symbol = (row.get('Symbol') or '').strip()
+            if not symbol:
+                continue
+
+            closed = _parse_mmddyyyy_to_iso(row.get('Closed Date', ''))
+            if not closed:
+                continue
+
+            opened = _parse_mmddyyyy_to_iso(row.get('Opened Date', '')) or ''
+            qty = parse_number(row.get('Quantity', '0'))
+            proceeds = parse_number(row.get('Proceeds', '0'))
+            cost_basis = parse_number(row.get('Cost Basis (CB)', '0'))
+            gl_dollar = parse_number(row.get('Gain/Loss ($)', '0'))
+            gl_pct = parse_number(row.get('Gain/Loss (%)', '0'))
+            name = (row.get('Name') or '').strip()
+            term = (row.get('Term') or '').strip()
+            wash = (row.get('Wash Sale?') or '').strip()
+            disallowed = parse_number(row.get('Disallowed Loss', '0'))
+
+            raw_id = f"{symbol}|{closed}|{qty}|{proceeds}|{cost_basis}"
+            lot_id = hashlib.md5(raw_id.encode('utf-8')).hexdigest()
+
+            lots.append({
+                'lotId': lot_id,
+                'symbol': symbol,
+                'name': name,
+                'closedDate': closed,
+                'openedDate': opened,
+                'quantity': qty,
+                'proceeds': proceeds,
+                'costBasis': cost_basis,
+                'gainLossDollar': gl_dollar,
+                'gainLossPercent': gl_pct,
+                'term': term,
+                'washSale': wash,
+                'disallowedLoss': disallowed,
+            })
+        except Exception as e:
+            print(f"Error parsing realized lot row: {e}")
+            continue
+
+    lots.sort(key=lambda x: x['closedDate'])
+    return lots
+
+
+def store_realized_gain_loss_lots(lots):
+    """Upsert lot rows into RealizedGainLoss DynamoDB table."""
+    if not lots:
+        print("No realized gain/loss lots to store")
+        return
+    try:
+        table = dynamodb.Table(REALIZED_GAIN_LOSS_TABLE)
+        ingested = datetime.utcnow().isoformat()
+        with table.batch_writer() as batch:
+            for lot in lots:
+                item = {
+                    'lotId': lot['lotId'],
+                    'symbol': lot['symbol'],
+                    'name': lot['name'],
+                    'closedDate': lot['closedDate'],
+                    'openedDate': lot['openedDate'],
+                    'quantity': convert_floats_to_decimals(lot['quantity']),
+                    'proceeds': convert_floats_to_decimals(lot['proceeds']),
+                    'costBasis': convert_floats_to_decimals(lot['costBasis']),
+                    'gainLossDollar': convert_floats_to_decimals(lot['gainLossDollar']),
+                    'gainLossPercent': convert_floats_to_decimals(lot['gainLossPercent']),
+                    'term': lot['term'] or '—',
+                    'washSale': lot['washSale'] or '—',
+                    'disallowedLoss': convert_floats_to_decimals(lot['disallowedLoss']),
+                    'ingestedAt': ingested,
+                }
+                item = {k: v for k, v in item.items() if v is not None}
+                batch.put_item(Item=item)
+        print(f"Stored {len(lots)} lots in {REALIZED_GAIN_LOSS_TABLE}")
+    except Exception as e:
+        print(f"Error storing realized gain/loss: {e}")
+        raise e
 
 
 def is_transactions_csv(csv_content):

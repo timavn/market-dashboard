@@ -2,6 +2,10 @@
 const fs = require('fs');
 const path = require('path');
 const readXlsxFile = require('read-excel-file/node');
+const {
+  toIsoDateOnly,
+  determineEtfProSnapshotDate
+} = require(path.join(__dirname, '..', 'src', 'utils', 'etfProSnapshotDate.cjs'));
 
 const DEFAULT_SOURCE_DIR = '/Users/timsmith/Desktop/dashboard/hedgeye/etfpro';
 const FILENAME_PREFIX = 'etf-pro-all-active-tickers-';
@@ -41,14 +45,6 @@ function parseMaybeDate(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function toIsoDateOnly(date) {
-  if (!date) return null;
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
 }
 
 function ensureDir(dirPath) {
@@ -152,19 +148,6 @@ async function parseWorkbookFromPath(xlsxPath) {
   return data;
 }
 
-function determineSnapshotDate(rows, fallbackDateIso) {
-  const asOfValues = rows.map((r) => r.asOf).filter(Boolean);
-  if (asOfValues.length > 0) {
-    const latest = asOfValues
-      .map((v) => new Date(v))
-      .filter((d) => !Number.isNaN(d.getTime()))
-      .sort((a, b) => b.getTime() - a.getTime())[0];
-    if (latest) return toIsoDateOnly(latest);
-  }
-  if (fallbackDateIso) return toIsoDateOnly(new Date(fallbackDateIso));
-  return toIsoDateOnly(new Date());
-}
-
 async function main() {
   const sourceDir = process.env.ETFPRO_SOURCE_DIR || DEFAULT_SOURCE_DIR;
   const outDir = path.join(__dirname, '..', 'data', 'hedgeye', 'etfpro');
@@ -202,7 +185,7 @@ async function main() {
 
     const parsedAt = new Date().toISOString();
     const fileMtime = stat.mtime.toISOString();
-    const snapshotDate = determineSnapshotDate(rows, fileMtime);
+    const snapshotDate = determineEtfProSnapshotDate(rows, fileMtime);
 
     const payload = {
       meta: {

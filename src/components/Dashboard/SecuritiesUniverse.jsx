@@ -1030,7 +1030,7 @@ const SecuritiesUniverse = () => {
       </div>
 
       {/* Data Table */}
-      <Card className="dark:bg-gray-800 p-0 rounded-lg overflow-hidden" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <Card className="dark:bg-gray-800 p-0 rounded-lg overflow-hidden" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3', boxShadow: 'none', outline: 'none', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
             <thead className="bg-[#f3f0e6] text-slate-800">
@@ -1058,7 +1058,6 @@ const SecuritiesUniverse = () => {
                     ), align: 'center', infoParams: 'trend', width: '60px'
                   },
                   { key: 'riskRangeHistory', label: 'Risk Range', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">RR</div>, align: 'center', infoParams: 'riskRange', width: '400px' },
-                  { key: 'atr', label: 'ATR', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">ATR</div>, align: 'center', infoParams: 'atr', width: '70px' },
                   { key: 'ivolPrem', label: 'IVOL Prem', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolPrem', width: '65px' },
                   { key: 'ttmZScore', label: 'TTM Z-Score', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'ttmZScore', width: '55px' },
                   { key: 'ivolZScore', label: 'IVOL High', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolZScore', width: '60px' },
@@ -1067,6 +1066,7 @@ const SecuritiesUniverse = () => {
 
                   { key: 'quadRanking', label: 'Quad', icon: <LayoutGrid size={18} className="text-blue-500" />, align: 'center', infoParams: 'quad', width: '50px' },
                   { key: 'priceChanges', label: 'Price Change', icon: <DollarSign size={18} className="text-blue-500" />, align: 'center', width: '80px' },
+                  { key: 'atr', label: 'ATR', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">ATR</div>, align: 'center', infoParams: 'atr', width: '70px' },
                   { key: 'signal', label: 'Sig', icon: <Activity size={18} className="text-blue-500" />, align: 'center', width: '50px' }
                 ].map((col, index, arr) => (
                   <th
@@ -1197,45 +1197,6 @@ const SecuritiesUniverse = () => {
                         style={{
                           padding: '2px 3px',
                           textAlign: 'center',
-                          fontWeight: 600,
-                          borderRight: '1px solid #d6d0c3'
-                        }}
-                        className="dark:text-white"
-                      >
-                        {security.atr !== null ? (
-                          <div style={{
-                            display: 'inline-grid',
-                            gridTemplateColumns: 'auto auto',
-                            columnGap: '3px',
-                            rowGap: '1px',
-                            fontSize: '9px',
-                            justifyContent: 'center',
-                            alignItems: 'center'
-                          }}>
-                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>Spot:</span>
-                            <span style={{ color: '#374151', textAlign: 'left', fontWeight: 600 }}>
-                              {security.price !== null && security.price !== undefined
-                                ? formatPrice(security.price, security.ticker)
-                                : '--'}
-                            </span>
-                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>Abs:</span>
-                            <span style={{ color: '#374151', textAlign: 'left' }}>{security.atr.toFixed(2)}</span>
-                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>%:</span>
-                            <span style={{
-                              color: security.atrPercent > 5 ? '#ef4444' :
-                                security.atrPercent > 2 ? '#f59e0b' : '#10b981',
-                              textAlign: 'left'
-                            }}>
-                              {security.atrPercent.toFixed(1)}%
-                            </span>
-                          </div>
-                        ) : '--'}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: '2px 3px',
-                          textAlign: 'center',
                           color: volMetrics ? getIvolPremColor(volMetrics.ivolPrem) : '#6b7280',
                           fontWeight: 600,
                           borderRight: '1px solid #d6d0c3'
@@ -1354,6 +1315,44 @@ const SecuritiesUniverse = () => {
                             1M: {formatPriceChange(priceChange1M)}
                           </span>
                         </div>
+                      </td>
+                      <td
+                        style={{
+                          padding: '2px 3px',
+                          textAlign: 'center',
+                          fontWeight: 600,
+                          borderRight: '1px solid #d6d0c3'
+                        }}
+                        className="dark:text-white"
+                      >
+                        {security.atr !== null ? (
+                          <div style={{
+                            display: 'inline-grid',
+                            gridTemplateColumns: 'auto auto',
+                            columnGap: '3px',
+                            rowGap: '1px',
+                            fontSize: '9px',
+                            justifyContent: 'center',
+                            alignItems: 'center'
+                          }}>
+                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>Spot:</span>
+                            <span style={{ color: '#374151', textAlign: 'left', fontWeight: 600 }}>
+                              {security.price !== null && security.price !== undefined
+                                ? formatPrice(security.price, security.ticker)
+                                : '--'}
+                            </span>
+                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>Abs:</span>
+                            <span style={{ color: '#374151', textAlign: 'left' }}>{security.atr.toFixed(2)}</span>
+                            <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>%:</span>
+                            <span style={{
+                              color: security.atrPercent > 5 ? '#ef4444' :
+                                security.atrPercent > 2 ? '#f59e0b' : '#10b981',
+                              textAlign: 'left'
+                            }}>
+                              {security.atrPercent.toFixed(1)}%
+                            </span>
+                          </div>
+                        ) : '--'}
                       </td>
                       <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600 }} className="dark:text-white">
                         {security.signal}

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Text } from '@tremor/react';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { isFreshForToday } from '../../utils/dateFreshness';
 import EtfProCard from './EtfProCard';
 import './SecuritiesList.css';
 
@@ -11,7 +12,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
-  const [etfProFresh, setEtfProFresh] = useState(null);
+  const [etfProFresh, setEtfProFresh] = useState(false);
   const [activeView, setActiveView] = useState(() => {
     const saved = localStorage.getItem(VIEW_KEY);
     return saved === 'etfpro' ? 'etfpro' : 'signal';
@@ -438,54 +439,48 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           const batch = tickersWithPrices.slice(i, i + batchSize);
           await Promise.all(batch.map(async (ticker) => {
             try {
-              const currentPrice = prices[ticker]?.price;
-              const currentPriceNum = parseFloat(currentPrice);
-              if (isNaN(currentPriceNum) || currentPriceNum <= 0) return;
+              // Fetch one 30-day history and compute both W/W and M/M from the
+              // same series so the numerator and denominator come from the
+              // same era (robust to stale DB history).
+              const history = await MarketDataService
+                .getHistoricalData(ticker, 30)
+                .catch(() => ({ data: [] }));
 
-              // Fetch weekly (7 days) and monthly (30 days) historical data
-              const [weeklyData, monthlyData] = await Promise.all([
-                MarketDataService.getHistoricalData(ticker, 7).catch(() => ({ data: [] })),
-                MarketDataService.getHistoricalData(ticker, 30).catch(() => ({ data: [] }))
-              ]);
+              const closes = (history?.data || [])
+                .map(d => (typeof d.close === 'number' ? d.close : parseFloat(d.close)))
+                .filter(c => Number.isFinite(c) && c > 0);
 
-              // Calculate weekly change
-              if (weeklyData && weeklyData.data && weeklyData.data.length > 0) {
-                // Get the oldest data point (first in chronological order)
-                const weekAgoPrice = weeklyData.data[0]?.close;
-                if (weekAgoPrice && weekAgoPrice > 0) {
-                  const weeklyChange = ((currentPriceNum - weekAgoPrice) / weekAgoPrice) * 100;
-                  const security = securities.find(s => s.ticker === ticker);
-                  if (security && !isNaN(weeklyChange)) {
-                    moversData.weekly[weeklyChange >= 0 ? 'upside' : 'downside'].push({
-                      ticker,
-                      name: security.name,
-                      change: weeklyChange,
-                      assetClass: security.assetClass
-                    });
-                  }
-                }
+              if (closes.length < 2) return;
+
+              const last = closes[closes.length - 1];
+              const weekAgo = closes.length >= 6 ? closes[closes.length - 6] : closes[0];
+              const monthAgo = closes[0];
+
+              const weeklyChange = ((last - weekAgo) / weekAgo) * 100;
+              const monthlyChange = ((last - monthAgo) / monthAgo) * 100;
+
+              const security = securities.find(s => s.ticker === ticker);
+              if (!security) return;
+
+              if (Number.isFinite(weeklyChange)) {
+                moversData.weekly[weeklyChange >= 0 ? 'upside' : 'downside'].push({
+                  ticker,
+                  name: security.name,
+                  change: weeklyChange,
+                  assetClass: security.assetClass
+                });
               }
 
-              // Calculate monthly change
-              if (monthlyData && monthlyData.data && monthlyData.data.length > 0) {
-                // Get the oldest data point (first in chronological order)
-                const monthAgoPrice = monthlyData.data[0]?.close;
-                if (monthAgoPrice && monthAgoPrice > 0) {
-                  const monthlyChange = ((currentPriceNum - monthAgoPrice) / monthAgoPrice) * 100;
-                  const security = securities.find(s => s.ticker === ticker);
-                  if (security && !isNaN(monthlyChange)) {
-                    moversData.monthly[monthlyChange >= 0 ? 'upside' : 'downside'].push({
-                      ticker,
-                      name: security.name,
-                      change: monthlyChange,
-                      assetClass: security.assetClass
-                    });
-                  }
-                }
+              if (Number.isFinite(monthlyChange)) {
+                moversData.monthly[monthlyChange >= 0 ? 'upside' : 'downside'].push({
+                  ticker,
+                  name: security.name,
+                  change: monthlyChange,
+                  assetClass: security.assetClass
+                });
               }
             } catch (error) {
               // Silently skip tickers that fail (no historical data available)
-              // console.error(`Error calculating movers for ${ticker}:`, error);
             }
           }));
 
@@ -550,7 +545,29 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     setEtfProFresh(fresh);
   }, []);
 
-  const ssFresh = !loading && Object.keys(prices).length > 0;
+  // Eagerly check ETF Pro freshness on mount so the dot reflects the latest
+  // upload state without requiring the user to click the ETFP tab first.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snapshot = await MarketDataService.getHedgeyeEtfPro();
+        if (cancelled) return;
+        setEtfProFresh(isFreshForToday(snapshot?.meta?.snapshotDate));
+      } catch {
+        if (!cancelled) setEtfProFresh(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const ssFresh = useMemo(() => {
+    const entries = Object.values(riskRanges);
+    if (entries.length === 0) return false;
+    return isFreshForToday(entries[0]?.date);
+  }, [riskRanges]);
 
   return (
     <div className="relative securities-card" style={{ overflow: 'hidden' }}>
@@ -577,7 +594,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
               className={activeView === 'etfpro' ? 'toggle-btn active' : 'toggle-btn'}
               onClick={() => setActiveView('etfpro')}
             >
-              <span className={`status-dot ${etfProFresh === true ? 'fresh' : etfProFresh === false ? 'stale' : ''}`} />
+              <span className={`status-dot ${etfProFresh ? 'fresh' : 'stale'}`} />
               ETFP
             </button>
           </div>

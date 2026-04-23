@@ -395,6 +395,14 @@ export class MarketDataService {
     }
   }
 
+  /** Save parsed ETF Pro rows (from browser xlsx) to server disk; same format as collect:etfpro */
+  static async postHedgeyeEtfProSnapshot(payload) {
+    const response = await apiClient.post('/api/hedgeye/etfpro', payload, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
+  }
+
   // Get historical price data for a symbol
   static async getHistoricalData(symbol, days = 30) {
     try {

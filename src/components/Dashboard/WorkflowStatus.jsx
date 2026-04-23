@@ -124,10 +124,42 @@ const WorkflowStatus = () => {
         setRiskRanges({});
       }
 
-      // Process freshness data
+      // Process freshness data — merge ETF Pro from the same GET /api/hedgeye/etfpro the card uses
       if (results[2].status === 'fulfilled') {
-        console.log('[WorkflowStatus] Freshness fulfilled, risk-ranges itemCount:', results[2].value?.dataTypes?.['risk-ranges']?.itemCount);
-        setFreshnessData(results[2].value);
+        let fr = results[2].value;
+        try {
+          const etf = await withTimeout(MarketDataService.getHedgeyeEtfPro(), 20000);
+          if (etf && (etf.meta || (Array.isArray(etf.rows) && etf.rows.length > 0))) {
+            const rowCount = Array.isArray(etf.rows) ? etf.rows.length : (etf.meta?.rowCount ?? 0);
+            const nyToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+            let d = etf.meta?.snapshotDate;
+            if (!d && etf.meta?.parsedAt) {
+              const t = new Date(etf.meta.parsedAt);
+              if (!Number.isNaN(t.getTime())) {
+                d = t.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+              }
+            }
+            const status = d && d === nyToday ? 'fresh' : d ? 'stale' : 'missing';
+            fr = {
+              ...fr,
+              dataTypes: {
+                ...(fr.dataTypes || {}),
+                'etf-pro': {
+                  status,
+                  lastUpdated: d,
+                  date: d,
+                  scrapedAt: etf.meta?.parsedAt,
+                  itemCount: rowCount,
+                  source: 'EtfProLocal',
+                },
+              },
+            };
+          }
+        } catch (mergeErr) {
+          console.warn('[WorkflowStatus] ETF Pro freshness merge:', mergeErr?.message);
+        }
+        console.log('[WorkflowStatus] Freshness fulfilled, etf-pro date:', fr?.dataTypes?.['etf-pro']?.date);
+        setFreshnessData(fr);
       } else {
         console.error('Error fetching Hedgeye freshness:', results[2].reason);
         setFreshnessData(null);
@@ -323,26 +355,34 @@ const WorkflowStatus = () => {
 
   // Calculate data freshness
   const getDataFreshness = (contentDate, uploadTimestamp, dataType) => {
-    if (!contentDate) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never', timestampStr: 'Never' };
+    // If backend omitted content date but we have a technical timestamp, use that calendar day (NY) — e.g. ETF Pro local file edge cases
+    let effectiveDate = contentDate;
+    if (!effectiveDate && uploadTimestamp) {
+      const t = new Date(uploadTimestamp);
+      if (!Number.isNaN(t.getTime())) {
+        effectiveDate = t.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      }
+    }
+    if (!effectiveDate) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never', timestampStr: 'Never' };
 
     // Current date in YYYY-MM-DD format (EST)
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
     let dataDate;
-    // Check if contentDate is already YYYY-MM-DD (Content Date from backend)
-    const isSimpleContentDate = typeof contentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(contentDate);
+    // Check if effectiveDate is already YYYY-MM-DD (Content Date from backend)
+    const isSimpleContentDate = typeof effectiveDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate);
 
     if (isSimpleContentDate) {
-      dataDate = contentDate;
+      dataDate = effectiveDate;
     } else {
-      const co = new Date(contentDate);
+      const co = new Date(effectiveDate);
       if (isNaN(co.getTime())) return { status: 'error', hours: null, label: 'Invalid Date', dateStr: 'Invalid', timestampStr: 'Invalid' };
       dataDate = co.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     }
 
     // Determine the display timestamp string
-    // Use uploadTimestamp if provided, otherwise fallback to contentDate
-    const displayTime = uploadTimestamp || contentDate;
+    // Use uploadTimestamp if provided, otherwise fallback to effectiveDate
+    const displayTime = uploadTimestamp || effectiveDate;
     const isSimpleDisplayDate = typeof displayTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(displayTime);
 
     let dateObj;
@@ -618,7 +658,7 @@ const WorkflowStatus = () => {
 
               <div>
                 {(() => {
-                  // Define the 6 data types with their display info
+                  // All Hedgeye data sources for the Data Upload table
                   const dataTypeConfig = {
                     'risk-ranges': { name: 'Risk Ranges', unit: 'items' },
                     'early-look': { name: 'Early Look', unit: 'items' },
@@ -627,10 +667,12 @@ const WorkflowStatus = () => {
                     'signal-strength': { name: 'Signal Strength', unit: 'items' },
                     'portfolio-solutions': { name: 'Portfolio Solutions', unit: 'items' },
                     'the-macro-show': { name: 'Macro Show', unit: 'positions' },
-                    'the-call': { name: 'The Call', unit: 'positions' }
+                    'the-call': { name: 'The Call', unit: 'positions' },
+                    'etf-pro': { name: 'ETF Pro', unit: 'items' }
                   };
 
-                  return Object.entries(dataTypeConfig).map(([key, config], index) => {
+                  const dataTypeRows = Object.entries(dataTypeConfig);
+                  return dataTypeRows.map(([key, config], index) => {
                     const data = freshnessData?.dataTypes?.[key] || { status: 'missing', itemCount: 0 };
 
                     // Get background color based on status
@@ -658,7 +700,7 @@ const WorkflowStatus = () => {
                           gridTemplateColumns: '2fr 1fr 2fr',
                           gap: '4px',
                           padding: '4px 5px',
-                          borderBottom: index < 5 ? `1px solid ${isDark ? '#374151' : '#d6d0c3'}` : 'none',
+                          borderBottom: index < dataTypeRows.length - 1 ? `1px solid ${isDark ? '#374151' : '#d6d0c3'}` : 'none',
                           cursor: 'pointer',
                           transition: 'background-color 0.15s ease',
                           backgroundColor: getBackgroundColor(data.status)
@@ -765,14 +807,15 @@ const WorkflowStatus = () => {
                     { key: 'signal-strength', label: 'Signal Strength' },
                     { key: 'momo-tracker', label: 'MOMO Tracker' },
                     { key: 'the-call', label: 'The Call' },
-                    { key: 'the-macro-show', label: 'The Macro Show' }
+                    { key: 'the-macro-show', label: 'The Macro Show' },
+                    { key: 'etf-pro', label: 'ETF Pro' }
                   ].map(({ key, label }) => {
                     const diff = changelogData?.[key];
 
                     // Always show these cards (including placeholders with no data)
                     const alwaysShow = [
                       'risk-ranges', 'early-look', 'bitcoin-trend-tracker', 'portfolio-solutions',
-                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show'
+                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show', 'etf-pro'
                     ].includes(key);
 
                     if (!alwaysShow) {
@@ -782,8 +825,12 @@ const WorkflowStatus = () => {
 
                     // Check if there's any data to display
                     const hasData = diff && diff.available && (
-                      diff.added.length > 0 ||
-                      diff.removed.length > 0 ||
+                      (diff.added && diff.added.length > 0) ||
+                      (diff.removed && diff.removed.length > 0) ||
+                      (diff.addedLongs && diff.addedLongs.length > 0) ||
+                      (diff.removedLongs && diff.removedLongs.length > 0) ||
+                      (diff.addedShorts && diff.addedShorts.length > 0) ||
+                      (diff.removedShorts && diff.removedShorts.length > 0) ||
                       (diff.updates && diff.updates.length > 0) ||
                       (diff.trendChanges && diff.trendChanges.length > 0) ||
                       (diff.cryptoTrendChanges && diff.cryptoTrendChanges.length > 0) ||
@@ -878,7 +925,7 @@ const WorkflowStatus = () => {
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                                 <div>
-                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Added</span>
+                                  <span style={{ fontSize: '9px', color: '#10b981' }}>Added</span>
                                   {(diff.outbucketDiff?.added?.length > 0) ? (
                                     (diff.outbucketDiff.added || []).map(t => {
                                       const text = typeof t === 'string' ? t : (t?.ticker || t?.symbol || JSON.stringify(t));
@@ -902,7 +949,7 @@ const WorkflowStatus = () => {
                                   )}
                                 </div>
                                 <div>
-                                  <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Removed</span>
+                                  <span style={{ fontSize: '9px', color: '#ef4444' }}>Removed</span>
                                   {(diff.outbucketDiff?.removed?.length > 0) ? (
                                     (diff.outbucketDiff.removed || []).map(t => {
                                       const text = typeof t === 'string' ? t : (t?.ticker || t?.symbol || JSON.stringify(t));
@@ -1158,6 +1205,74 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
+                        {/* ETF PRO: Longs / Shorts Added & Removed (local file diffs) */}
+                        {key === 'etf-pro' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {diff && diff.available ? (
+                              <>
+                                <div>
+                                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '6px' }}>LONGS</div>
+                                  <div style={{ marginBottom: '8px' }}>
+                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Added {diff.previousDate ? `vs ${formatDate(diff.previousDate)}` : ''}</div>
+                                    {(diff.addedLongs && diff.addedLongs.length > 0) ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {diff.addedLongs.map((t) => (
+                                          <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Removed</div>
+                                    {(diff.removedLongs && diff.removedLongs.length > 0) ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {diff.removedLongs.map((t) => (
+                                          <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '6px' }}>SHORTS</div>
+                                  <div style={{ marginBottom: '8px' }}>
+                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Added</div>
+                                    {(diff.addedShorts && diff.addedShorts.length > 0) ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {diff.addedShorts.map((t) => (
+                                          <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Removed</div>
+                                    {(diff.removedShorts && diff.removedShorts.length > 0) ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {diff.removedShorts.map((t) => (
+                                          <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                                {diff?.error ? `Error: ${diff.error}` : 'No ETF Pro snapshot on server (upload from the ETF Pro card or run collect:etfpro).'}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* THE CALL & THE MACRO SHOW: Longs/Shorts/Neutrals display */}
                         {(key === 'the-call' || key === 'the-macro-show') && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1246,7 +1361,7 @@ const WorkflowStatus = () => {
                         )}
 
                         {/* GENERIC FALLBACK: Added/Removed Table for any others */}
-                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && hasData && (
+                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && key !== 'etf-pro' && hasData && (
                           <div>
                             {/* Section Header - match Risk Ranges style */}
                             <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>

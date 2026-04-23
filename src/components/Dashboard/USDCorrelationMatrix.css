@@ -55,9 +55,6 @@
 }
 
 .usd-corr-td-metric {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   white-space: nowrap;
   min-width: 0;
 }
@@ -66,14 +63,12 @@
   font-weight: 700;
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
+  vertical-align: middle;
 }
 
+/* Verbose name is suppressed for visual consistency with the Volatility card (icon + symbol only) */
 .usd-corr-metric-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+  display: none;
 }
 
 .usd-corr-td-center {
@@ -92,6 +87,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  vertical-align: middle;
+  margin-right: 8px;
   opacity: 1;
   font-size: 13px;
 }

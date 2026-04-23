@@ -114,7 +114,16 @@ function pctHeatProps(pctNum) {
 function formatPeriodPct(val) {
   if (val == null || !Number.isFinite(Number(val))) return '—';
   const n = Number(val);
-  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
+}
+
+// Same shape as `formatPeriodPct` but renders bps deltas (used by derived
+// curve-spread rows like 2s10s / 5s30s / 3M10Y). Unit suffix is omitted
+// because it's already shown in the YIELD column for these rows.
+function formatPeriodBps(val) {
+  if (val == null || !Number.isFinite(Number(val))) return '—';
+  const n = Number(val);
+  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
 }
 
 // Main market regions configuration (for 3x2 grid with full charts)
@@ -155,16 +164,16 @@ const MAIN_MARKET_REGIONS = {
       { symbol: 'USDCNY', name: 'USD/CNY' }
     ]
   },
-  crypto: {
-    label: 'Crypto',
-    regionKey: 'Cryptocurrencies',
+  commodities: {
+    label: 'Commodities',
+    regionKey: 'Commodities',
     indices: [
-      { symbol: 'BTC', name: 'Bitcoin' },
-      { symbol: 'ETH', name: 'Ethereum' },
-      { symbol: 'BNB', name: 'BNB' },
-      { symbol: 'ADA', name: 'Cardano' },
-      { symbol: 'SOL', name: 'Solana' },
-      { symbol: 'XRP', name: 'XRP' }
+      { symbol: 'BZ', name: 'Brent' },
+      { symbol: 'CL', name: 'WTI' },
+      { symbol: 'GC', name: 'Gold' },
+      { symbol: 'SI', name: 'Silver' },
+      { symbol: 'HG', name: 'Copper' },
+      { symbol: 'PL', name: 'Platinum' }
     ]
   },
   rates: {
@@ -179,16 +188,16 @@ const MAIN_MARKET_REGIONS = {
       { symbol: 'FEDFUNDS', name: 'Fed Funds' }
     ]
   },
-  commodities: {
-    label: 'Commodities',
-    regionKey: 'Commodities',
+  crypto: {
+    label: 'Crypto',
+    regionKey: 'Cryptocurrencies',
     indices: [
-      { symbol: 'BZ', name: 'Brent' },
-      { symbol: 'CL', name: 'WTI' },
-      { symbol: 'GC', name: 'Gold' },
-      { symbol: 'SI', name: 'Silver' },
-      { symbol: 'HG', name: 'Copper' },
-      { symbol: 'PL', name: 'Platinum' }
+      { symbol: 'BTC', name: 'Bitcoin' },
+      { symbol: 'ETH', name: 'Ethereum' },
+      { symbol: 'BNB', name: 'BNB' },
+      { symbol: 'ADA', name: 'Cardano' },
+      { symbol: 'SOL', name: 'Solana' },
+      { symbol: 'XRP', name: 'XRP' }
     ]
   }
 };
@@ -198,6 +207,8 @@ const CURRENCIES_CONFIG = {
   label: 'Currencies',
   tradingHours: 'Sun 5PM - Fri 5PM EST',
   indices: [
+    { symbol: 'USD', name: 'DXY' },
+    { symbol: 'UUP', name: 'UUP' },
     { symbol: 'EURUSD', name: 'EUR/USD' },
     { symbol: 'USDJPY', name: 'USD/JPY' },
     { symbol: 'GBPUSD', name: 'GBP/USD' },
@@ -207,9 +218,7 @@ const CURRENCIES_CONFIG = {
     { symbol: 'USDCHF', name: 'USD/CHF' },
     { symbol: 'NZDUSD', name: 'NZD/USD' },
     { symbol: 'USDCNY', name: 'USD/CNY' },
-    { symbol: 'EURGBP', name: 'EUR/GBP' },
-    { symbol: 'USD', name: 'DXY' },
-    { symbol: 'UUP', name: 'UUP' }
+    { symbol: 'EURGBP', name: 'EUR/GBP' }
   ]
 };
 
@@ -287,32 +296,258 @@ function VolatilityCard() {
   );
 }
 
+// Format a numeric price/yield. Unit suffixes (%, bps) are not appended —
+// the unit is shown in the column header instead to reduce clutter.
+function formatTablePrice(rawPrice, unit) {
+  if (rawPrice == null || rawPrice === '' || rawPrice === '--') return '—';
+  const num =
+    typeof rawPrice === 'number'
+      ? rawPrice
+      : parseFloat(String(rawPrice).replace(/[^0-9.-]/g, ''));
+  if (!Number.isFinite(num)) return '—';
+
+  const fractionDigits = unit === 'bps' ? 1 : 2;
+
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits
+  }).format(num);
+}
+
+// Derive per-row display metrics from the raw quote payload.
+function getRowMetrics(idx, quote) {
+  const pctRaw = quote?.changePercent;
+  const pctNum = parseFloat(String(pctRaw ?? '').replace(/[^0-9.-]/g, ''));
+  const hasPct = Number.isFinite(pctNum);
+  const isPositive = hasPct ? pctNum >= 0 : null;
+  const unit = idx.unit || quote?.unit;
+  const isBps = unit === 'bps';
+  const priceStr = formatTablePrice(quote?.price, unit);
+  let pctStr = '—';
+  if (hasPct) {
+    if (isBps) {
+      pctStr = `${pctNum > 0 ? '+' : ''}${pctNum.toFixed(1)}`;
+    } else {
+      pctStr = `${pctNum > 0 ? '+' : ''}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(pctNum)}`;
+    }
+  }
+
+  const w = quote?.weekChangePct;
+  const mo = quote?.monthChangePct;
+  const m3 = quote?.threeMonthChangePct;
+  const m6 = quote?.sixMonthChangePct;
+  const ytd = quote?.ytdChangePct;
+  const weekNum = w == null || w === '' ? NaN : Number(w);
+  const monthNum = mo == null || mo === '' ? NaN : Number(mo);
+  const threeMonthNum = m3 == null || m3 === '' ? NaN : Number(m3);
+  const sixMonthNum = m6 == null || m6 === '' ? NaN : Number(m6);
+  const ytdNum = ytd == null || ytd === '' ? NaN : Number(ytd);
+  const formatPeriod = isBps ? formatPeriodBps : formatPeriodPct;
+
+  return {
+    priceStr,
+    pctStr,
+    pctNum,
+    isPositive,
+    quote,
+    weekStr: formatPeriod(w),
+    monthStr: formatPeriod(mo),
+    threeMonthStr: formatPeriod(m3),
+    sixMonthStr: formatPeriod(m6),
+    ytdStr: formatPeriod(ytd),
+    weekNum: Number.isFinite(weekNum) ? weekNum : null,
+    monthNum: Number.isFinite(monthNum) ? monthNum : null,
+    threeMonthNum: Number.isFinite(threeMonthNum) ? threeMonthNum : null,
+    sixMonthNum: Number.isFinite(sixMonthNum) ? sixMonthNum : null,
+    ytdNum: Number.isFinite(ytdNum) ? ytdNum : null
+  };
+}
+
+// Auto-fit the quotes table so every cell stays on a single line. Measures
+// each cell's `scrollWidth` (natural content width at the current font size)
+// against its `clientWidth` (column width allocated by `table-layout: fixed`).
+// If any cell would overflow, shrinks a single `--mw-scale` CSS variable on
+// the table just enough for the widest cell to fit — same scale applied to
+// every cell so the card stays internally consistent. Different cards compute
+// independently, so one may render smaller than its neighbors.
+function useAutoFitTable(tableRef, deps) {
+  React.useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!table) return undefined;
+
+    const MIN_SCALE = 0.62;   // 11px * 0.62 ≈ 6.8px floor
+    const MAX_SCALE = 1;
+    const SAFETY = 0.97;      // Small margin to avoid sub-pixel re-overflow
+
+    let rafId = null;
+
+    const fit = () => {
+      if (!table.isConnected) return;
+      table.style.setProperty('--mw-scale', String(MAX_SCALE));
+      // Force a synchronous layout so scrollWidth reflects the MAX_SCALE pass.
+      void table.offsetWidth;
+
+      const cells = table.querySelectorAll('th, td');
+      let minFit = 1;
+      cells.forEach((cell) => {
+        const cw = cell.clientWidth;
+        const sw = cell.scrollWidth;
+        if (cw > 0 && sw > cw) {
+          const ratio = cw / sw;
+          if (ratio < minFit) minFit = ratio;
+        }
+      });
+
+      if (minFit < 1) {
+        const scale = Math.max(
+          MIN_SCALE,
+          Math.min(MAX_SCALE, MAX_SCALE * minFit * SAFETY)
+        );
+        table.style.setProperty('--mw-scale', scale.toFixed(3));
+      }
+    };
+
+    const schedule = () => {
+      if (rafId != null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        fit();
+      });
+    };
+
+    schedule();
+
+    const ro = new ResizeObserver(schedule);
+    ro.observe(table);
+
+    return () => {
+      if (rafId != null) cancelAnimationFrame(rafId);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+// Shared quotes-table body used by both `RegionChartPanel` and `RatesCard`.
+// `priceLabel` defaults to PRICE but callers may pass YIELD / OAS / SPREAD.
+function QuotesTable({ indices, data, loading, priceLabel = 'PRICE' }) {
+  // Append a "(%)" unit hint to the price header only when the column's values
+  // are expressed as a percent (YIELD). Plain PRICE and mixed-unit labels like
+  // "OAS / PRICE" are left alone since they're not all-percent.
+  const priceHeader =
+    priceLabel === 'YIELD' ? 'YIELD (%)' : priceLabel;
+  const tableRef = React.useRef(null);
+  useAutoFitTable(tableRef, [indices, data, loading, priceLabel]);
+  return (
+    <div className="region-mw-body">
+      <div className="region-mw-table-wrap">
+        <table ref={tableRef} className="region-mw-quotes-table">
+          <thead>
+            <tr>
+              <th className="region-mw-th region-mw-th-trend" aria-hidden="true" />
+              <th className="region-mw-th region-mw-th-name" scope="col" />
+              <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
+                {priceHeader}
+              </th>
+              <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">DAY (%)</th>
+              <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">WEEKLY (%)</th>
+              <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">MONTHLY (%)</th>
+              <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">3M (%)</th>
+              <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">6M (%)</th>
+              <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">YTD (%)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {indices.map((idx) => {
+              const quote = data?.find((d) => d.symbol === idx.symbol);
+              const m = getRowMetrics(idx, quote);
+              const dirUp = m.isPositive === true;
+              const dirDown = m.isPositive === false;
+              const pctHeat = loading
+                ? { className: 'region-mw-heat--na', style: {} }
+                : pctHeatProps(m.pctNum);
+              const weekHeat = loading
+                ? { className: 'region-mw-heat--na', style: {} }
+                : pctHeatProps(m.weekNum);
+              const monthHeat = loading
+                ? { className: 'region-mw-heat--na', style: {} }
+                : pctHeatProps(m.monthNum);
+              const threeMonthHeat = loading
+                ? { className: 'region-mw-heat--na', style: {} }
+                : pctHeatProps(m.threeMonthNum);
+              const sixMonthHeat = loading
+                ? { className: 'region-mw-heat--na', style: {} }
+                : pctHeatProps(m.sixMonthNum);
+              const ytdHeat = loading
+                ? { className: 'region-mw-heat--na', style: {} }
+                : pctHeatProps(m.ytdNum);
+              return (
+                <tr key={idx.symbol} className="region-mw-tr">
+                  <td className="region-mw-td region-mw-td-trend" aria-hidden="true">
+                    {m.isPositive != null && (
+                      <span className={dirUp ? 'mw-trend-up' : 'mw-trend-down'}>
+                        {dirUp ? '▲' : '▼'}
+                      </span>
+                    )}
+                  </td>
+                  <td className="region-mw-td region-mw-td-name">{idx.name}</td>
+                  <td
+                    className={`region-mw-td region-mw-td-num region-mw-td-price ${loading ? '' : m.quote?.price != null ? (dirUp ? 'positive' : dirDown ? 'negative' : '') : ''}`}
+                  >
+                    {loading ? '…' : m.priceStr}
+                  </td>
+                  <td
+                    className={`region-mw-td region-mw-td-num region-mw-td-heat ${pctHeat.className}`}
+                    style={pctHeat.style}
+                  >
+                    {loading ? '…' : m.pctStr}
+                  </td>
+                  <td
+                    className={`region-mw-td region-mw-td-num region-mw-td-heat ${weekHeat.className}`}
+                    style={weekHeat.style}
+                  >
+                    {loading ? '…' : m.weekStr}
+                  </td>
+                  <td
+                    className={`region-mw-td region-mw-td-num region-mw-td-heat ${monthHeat.className}`}
+                    style={monthHeat.style}
+                  >
+                    {loading ? '…' : m.monthStr}
+                  </td>
+                  <td
+                    className={`region-mw-td region-mw-td-num region-mw-td-heat ${threeMonthHeat.className}`}
+                    style={threeMonthHeat.style}
+                  >
+                    {loading ? '…' : m.threeMonthStr}
+                  </td>
+                  <td
+                    className={`region-mw-td region-mw-td-num region-mw-td-heat ${sixMonthHeat.className}`}
+                    style={sixMonthHeat.style}
+                  >
+                    {loading ? '…' : m.sixMonthStr}
+                  </td>
+                  <td
+                    className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
+                    style={ytdHeat.style}
+                  >
+                    {loading ? '…' : m.ytdStr}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // RegionChartPanel — full-width metrics table (charts may return later)
 function RegionChartPanel({ region, regionKey, data, loading }) {
   const { label, indices, regionKey: marketRegionKey } = region;
   const tableIndices = React.useMemo(() => indices.slice(0, 12), [indices]);
   const isRates = marketRegionKey === 'Rates';
 
-  const formatTablePrice = React.useCallback(
-    (rawPrice, { suffix = '' } = {}) => {
-      if (rawPrice == null || rawPrice === '' || rawPrice === '--') return '—';
-      const num =
-        typeof rawPrice === 'number'
-          ? rawPrice
-          : parseFloat(String(rawPrice).replace(/[^0-9.-]/g, ''));
-      if (!Number.isFinite(num)) return '—';
-
-      return (
-        new Intl.NumberFormat('en-US', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        }).format(num) + suffix
-      );
-    },
-    []
-  );
-
-  // Track market status with updates
   const [marketStatus, setMarketStatus] = React.useState('closed');
 
   React.useEffect(() => {
@@ -320,11 +555,10 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
       setMarketStatus(getMarketStatus(marketRegionKey));
     };
     updateStatus();
-    const interval = setInterval(updateStatus, 60000); // Update every minute
+    const interval = setInterval(updateStatus, 60000);
     return () => clearInterval(interval);
   }, [marketRegionKey]);
 
-  // Get status indicator emoji and title
   const getStatusIndicator = () => {
     switch (marketStatus) {
       case 'open':
@@ -340,7 +574,6 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
 
   const statusIndicator = getStatusIndicator();
 
-  // Oldest timestamp across all quotes in this region
   const regionLastUpdated = React.useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) return null;
     const timestamps = data
@@ -349,7 +582,6 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
     return getMinTimestamp(timestamps);
   }, [data]);
 
-  // Per-index source breakdown for this region (one entry per symbol)
   const regionSources = React.useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) return [];
     const interval = SOURCE_POLL_INTERVALS.multiRegionQuotes;
@@ -368,41 +600,6 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
       .filter(Boolean);
   }, [data, tableIndices]);
 
-  const getRowMetrics = (symbol) => {
-    const indexQuote = data?.find((d) => d.symbol === symbol);
-    const pctRaw = indexQuote?.changePercent;
-    const pctNum = parseFloat(String(pctRaw ?? '').replace(/[^0-9.-]/g, ''));
-    const hasPct = Number.isFinite(pctNum);
-    const isPositive = hasPct ? pctNum >= 0 : null;
-    const priceStr = formatTablePrice(indexQuote?.price, {
-      suffix: isRates ? '%' : ''
-    });
-    const pctStr = hasPct
-      ? `${pctNum > 0 ? '+' : ''}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(pctNum)}%`
-      : '—';
-
-    const w = indexQuote?.weekChangePct;
-    const mo = indexQuote?.monthChangePct;
-    const ytd = indexQuote?.ytdChangePct;
-    const weekNum = w == null || w === '' ? NaN : Number(w);
-    const monthNum = mo == null || mo === '' ? NaN : Number(mo);
-    const ytdNum = ytd == null || ytd === '' ? NaN : Number(ytd);
-
-    return {
-      priceStr,
-      pctStr,
-      pctNum,
-      isPositive,
-      indexQuote,
-      weekStr: formatPeriodPct(w),
-      monthStr: formatPeriodPct(mo),
-      ytdStr: formatPeriodPct(ytd),
-      weekNum: Number.isFinite(weekNum) ? weekNum : null,
-      monthNum: Number.isFinite(monthNum) ? monthNum : null,
-      ytdNum: Number.isFinite(ytdNum) ? ytdNum : null
-    };
-  };
-
   return (
     <div className={`region-chart-panel region-chart-panel--${regionKey} region-chart-panel--mw`}>
       <div className="region-chart-header region-chart-header--mw">
@@ -419,93 +616,147 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
           <span className="region-label">{label}</span>
         </div>
       </div>
-      <div className="region-mw-body">
-        <div className="region-mw-table-wrap">
-          <table className="region-mw-quotes-table">
-            <thead>
-              <tr>
-                <th className="region-mw-th region-mw-th-trend" aria-hidden="true" />
-                <th className="region-mw-th region-mw-th-name" scope="col" />
-                <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
-                  {isRates ? 'YIELD' : 'PRICE'}
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  %
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  WEEKLY
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  MONTHLY
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  YTD
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableIndices.map((idx) => {
-                const m = getRowMetrics(idx.symbol);
-                const dirUp = m.isPositive === true;
-                const dirDown = m.isPositive === false;
-                const pctHeat = loading
-                  ? { className: 'region-mw-heat--na', style: {} }
-                  : pctHeatProps(m.pctNum);
-                const weekHeat = loading
-                  ? { className: 'region-mw-heat--na', style: {} }
-                  : pctHeatProps(m.weekNum);
-                const monthHeat = loading
-                  ? { className: 'region-mw-heat--na', style: {} }
-                  : pctHeatProps(m.monthNum);
-                const ytdHeat = loading
-                  ? { className: 'region-mw-heat--na', style: {} }
-                  : pctHeatProps(m.ytdNum);
-                return (
-                  <tr key={idx.symbol} className="region-mw-tr">
-                    <td className="region-mw-td region-mw-td-trend" aria-hidden="true">
-                      {m.isPositive != null && (
-                        <span className={dirUp ? 'mw-trend-up' : 'mw-trend-down'}>
-                          {dirUp ? '▲' : '▼'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="region-mw-td region-mw-td-name">{idx.name}</td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-price ${loading ? '' : m.indexQuote?.price != null ? (dirUp ? 'positive' : dirDown ? 'negative' : '') : ''}`}
-                    >
-                      {loading ? '…' : m.priceStr}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${pctHeat.className}`}
-                      style={pctHeat.style}
-                    >
-                      {loading ? '…' : m.pctStr}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${weekHeat.className}`}
-                      style={weekHeat.style}
-                    >
-                      {loading ? '…' : m.weekStr}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${monthHeat.className}`}
-                      style={monthHeat.style}
-                    >
-                      {loading ? '…' : m.monthStr}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
-                      style={ytdHeat.style}
-                    >
-                      {loading ? '…' : m.ytdStr}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      <QuotesTable
+        indices={tableIndices}
+        data={data}
+        loading={loading}
+        priceLabel={isRates ? 'YIELD' : 'PRICE'}
+      />
+    </div>
+  );
+}
+
+// Tabs shown on the enhanced Rates card. Order matters — first tab is the
+// default. Labels map 1:1 to the `rates.<tabKey>` shape returned by the
+// /api/multi-region-quotes endpoint.
+const RATES_TABS = [
+  { key: 'us_treasuries', label: 'Treasuries', priceLabel: 'YIELD' },
+  { key: 'policy', label: 'Policy', priceLabel: 'YIELD' },
+  { key: 'credit', label: 'Credit', priceLabel: 'OAS / PRICE' },
+  { key: 'eu_sovereigns', label: 'EU', priceLabel: 'YIELD' },
+  { key: 'asia_sovereigns', label: 'Asia', priceLabel: 'YIELD' }
+];
+
+// RatesCard — tabbed panel (same footprint as RegionChartPanel) exposing
+// Treasuries + curve spreads, Policy, Credit, EU and Asia sovereigns.
+function RatesCard({ data, loading }) {
+  const [activeTab, setActiveTab] = React.useState('us_treasuries');
+  const [marketStatus, setMarketStatus] = React.useState('closed');
+
+  React.useEffect(() => {
+    const update = () => setMarketStatus(getMarketStatus('Rates'));
+    update();
+    const interval = setInterval(update, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const statusIndicator = React.useMemo(() => {
+    switch (marketStatus) {
+      case 'open':
+        return { emoji: '🟢', title: 'Market open' };
+      case 'extended':
+        return { emoji: '🔵', title: 'Extended hours' };
+      case 'holiday':
+        return { emoji: '🔴', title: 'Market closed - Holiday' };
+      default:
+        return { emoji: '🔴', title: 'Market closed' };
+    }
+  }, [marketStatus]);
+
+  const tabConfig = React.useMemo(
+    () => RATES_TABS.find((t) => t.key === activeTab) || RATES_TABS[0],
+    [activeTab]
+  );
+
+  // Rows for the active tab. `data` is `{ us_treasuries: [...], policy: [...] }`
+  // when the server supports tabs. A legacy flat-array response is only
+  // valid for the Treasuries tab; all other tabs render an empty state so
+  // users can tell the backend hasn't been updated yet.
+  const isLegacyShape = Array.isArray(data);
+  const rows = React.useMemo(() => {
+    if (!data) return [];
+    if (isLegacyShape) {
+      return activeTab === 'us_treasuries' ? data : [];
+    }
+    return Array.isArray(data[activeTab]) ? data[activeTab] : [];
+  }, [data, isLegacyShape, activeTab]);
+
+  // Build the `indices` input for QuotesTable from the rows themselves so
+  // ordering matches the backend (including derived spread rows at the end).
+  const tabIndices = React.useMemo(
+    () => rows.map((r) => ({ symbol: r.symbol, name: r.name, unit: r.unit })),
+    [rows]
+  );
+
+  const lastUpdated = React.useMemo(() => {
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const timestamps = rows
+      .map((r) => r?.lastUpdated || r?.timestamp || r?.chartUpdatedAt)
+      .filter(Boolean);
+    return getMinTimestamp(timestamps);
+  }, [rows]);
+
+  const sources = React.useMemo(() => {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    const interval = SOURCE_POLL_INTERVALS.multiRegionQuotes;
+    return rows
+      .map((row) => {
+        const ts = row?.lastUpdated || row?.timestamp || row?.chartUpdatedAt;
+        if (!ts) return null;
+        return {
+          id: row.symbol,
+          label: `${row.name} (${row.symbol})`,
+          updatedAt: ts,
+          status: getSourceFreshness(ts, interval)
+        };
+      })
+      .filter(Boolean);
+  }, [rows]);
+
+  return (
+    <div className="region-chart-panel region-chart-panel--rates region-chart-panel--mw rates-card">
+      <div className="region-chart-header region-chart-header--mw rates-card-header">
+        <div className="region-header-left">
+          <StatusDot
+            updatedAt={lastUpdated}
+            status={statusIndicator.emoji === '🟢' ? 'active' : statusIndicator.emoji === '🔵' ? 'stale' : 'inactive'}
+            size={10}
+            className="mr-1"
+            label="Rates region"
+            emoji={statusIndicator.emoji}
+            sources={sources}
+          />
+          <span className="region-label">Rates</span>
+        </div>
+        <div className="rates-tabs" role="tablist" aria-label="Rates categories">
+          {RATES_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={tab.key === activeTab}
+              className={`rates-tab${tab.key === activeTab ? ' rates-tab--active' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
+      {tabIndices.length === 0 && !loading ? (
+        <div className="region-mw-body rates-tab-empty">
+          <div className="rates-tab-empty-message">
+            No data available for this tab yet.
+          </div>
+        </div>
+      ) : (
+        <QuotesTable
+          indices={tabIndices}
+          data={rows}
+          loading={loading}
+          priceLabel={tabConfig.priceLabel}
+        />
+      )}
     </div>
   );
 }
@@ -617,6 +868,17 @@ function CurrenciesPanel({ data, loading }) {
                 const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
                 const hasChange = Number.isFinite(parsedChange);
                 const heat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeat(changePercent);
+
+                const mtdRaw = quote?.mtdChangePct;
+                const qtdRaw = quote?.qtdChangePct;
+                const ytdRaw = quote?.ytdChangePct;
+                const mtdNum = mtdRaw == null || mtdRaw === '' ? NaN : Number(mtdRaw);
+                const qtdNum = qtdRaw == null || qtdRaw === '' ? NaN : Number(qtdRaw);
+                const ytdNum = ytdRaw == null || ytdRaw === '' ? NaN : Number(ytdRaw);
+                const mtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(mtdNum);
+                const qtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(qtdNum);
+                const ytdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(ytdNum);
+
                 return (
                   <tr key={index.symbol} className="region-mw-tr">
                     <td className="region-mw-td region-mw-td-name">{index.name}</td>
@@ -627,9 +889,24 @@ function CurrenciesPanel({ data, loading }) {
                     >
                       {loading ? '…' : formatPct(changePercent)}
                     </td>
-                    <td className="region-mw-td region-mw-td-num region-mw-td-heat region-mw-heat--na">—</td>
-                    <td className="region-mw-td region-mw-td-num region-mw-td-heat region-mw-heat--na">—</td>
-                    <td className="region-mw-td region-mw-td-num region-mw-td-heat region-mw-heat--na">—</td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${mtdHeat.className}`}
+                      style={mtdHeat.style}
+                    >
+                      {loading ? '…' : formatPeriodPct(mtdRaw)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${qtdHeat.className}`}
+                      style={qtdHeat.style}
+                    >
+                      {loading ? '…' : formatPeriodPct(qtdRaw)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
+                      style={ytdHeat.style}
+                    >
+                      {loading ? '…' : formatPeriodPct(ytdRaw)}
+                    </td>
                   </tr>
                 );
               })}
@@ -729,15 +1006,26 @@ export default function MultiRegionMarketOverview() {
 
       {/* Main 3x2 Grid of Full Charts */}
       <div className="main-markets-grid">
-        {Object.keys(MAIN_MARKET_REGIONS).map((regionKey) => (
-          <RegionChartPanel
-            key={regionKey}
-            region={MAIN_MARKET_REGIONS[regionKey]}
-            regionKey={regionKey}
-            data={getRegionData(regionKey)}
-            loading={loading}
-          />
-        ))}
+        {Object.keys(MAIN_MARKET_REGIONS).map((regionKey) => {
+          if (regionKey === 'rates') {
+            return (
+              <RatesCard
+                key={regionKey}
+                data={getRegionData(regionKey)}
+                loading={loading}
+              />
+            );
+          }
+          return (
+            <RegionChartPanel
+              key={regionKey}
+              region={MAIN_MARKET_REGIONS[regionKey]}
+              regionKey={regionKey}
+              data={getRegionData(regionKey)}
+              loading={loading}
+            />
+          );
+        })}
       </div>
 
       {/* Secondary Section - Left: Currencies + Volume; Right: USD Correlations + Volatility */}

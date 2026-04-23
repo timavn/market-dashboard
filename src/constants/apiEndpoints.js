@@ -19,6 +19,7 @@ export const ENDPOINTS = {
   PERFORMANCE_EQUITY_CURVE: '/api/performance/equity-curve',
   PERFORMANCE_STATEMENTS: '/api/performance/statements',
   PERFORMANCE_STATEMENT: '/api/performance/statement',
+  PERFORMANCE_REALIZED_GAIN_LOSS: '/api/performance/realized-gain-loss',
 
   // Economic indicators
   VIX: '/api/indicators/vix',

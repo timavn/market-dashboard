@@ -18,6 +18,7 @@ const {
 const {
   buildHedgeyeVolumeSnapshotResponse
 } = require('./src/utils/hedgeyeVolumeSnapshot.cjs');
+const { determineEtfProSnapshotDate } = require('./src/utils/etfProSnapshotDate.cjs');
 
 const app = express();
 // In development, use port 3001 so React dev server can use 3000
@@ -70,7 +71,34 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
+
+/**
+ * Resolve ETF Pro content date + counts from latest.json (handles legacy files without meta.snapshotDate).
+ * Uses row asOf (via determineEtfProSnapshotDate), else parsedAt / source file mtime in America/New_York.
+ */
+function resolveEtfProSnapshotForAnalytics(etf) {
+  if (!etf || typeof etf !== 'object') {
+    return { snapDate: null, rowCount: 0, scraped: null };
+  }
+  const parsedAt = etf?.meta?.parsedAt;
+  const fileMtime = etf?.meta?.sourceFileMtime;
+  const fallbackIso = parsedAt || fileMtime;
+  const rows = Array.isArray(etf?.rows) ? etf.rows : [];
+  let snapDate = etf?.meta?.snapshotDate;
+  if (!snapDate && rows.length > 0) {
+    snapDate = determineEtfProSnapshotDate(rows, fallbackIso);
+  }
+  if (!snapDate && fallbackIso) {
+    const d = new Date(fallbackIso);
+    if (!Number.isNaN(d.getTime())) {
+      snapDate = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    }
+  }
+  const rowCount = rows.length > 0 ? rows.length : (etf?.meta?.rowCount ?? 0);
+  const scraped = parsedAt || fileMtime;
+  return { snapDate, rowCount, scraped };
+}
 
 // Performance Routes
 const performanceRoutes = require('./src/routes/performance');
@@ -105,7 +133,32 @@ const FRED_SERIES = {
   'UST13W': 'DGS3MO',
   'SOFR': 'SOFR',
   'FEDFUNDS': 'DFF',  // Federal Funds Effective Rate
+  'IORB': 'IORB',     // Interest on Reserve Balances
+  // Credit spreads (ICE BofA Option-Adjusted Spreads, daily, in percent)
+  'IG_OAS': 'BAMLC0A0CM',     // US IG Corporate OAS
+  'HY_OAS': 'BAMLH0A0HYM2',   // US HY Corporate OAS
 };
+
+// International sovereign 10Y yields. Stooq used to provide free daily CSVs
+// but now gates the `/q/d/l/` endpoint behind an API key; until a replacement
+// intraday source is wired, we read these monthly from FRED's OECD-sourced
+// IRLTLT01 series (suffix `156N` = harmonized 10-year long-term rate, percent
+// per annum). Data is ~1 month delayed but is the best free source we have.
+const INTL_BOND_FRED_FALLBACK = {
+  'BUND10Y': 'IRLTLT01DEM156N',   // Germany
+  'GILT10Y': 'IRLTLT01GBM156N',   // UK
+  'OAT10Y': 'IRLTLT01FRM156N',    // France
+  'BTP10Y': 'IRLTLT01ITM156N',    // Italy
+  'JGB10Y': 'IRLTLT01JPM156N',    // Japan
+  'ACGB10Y': 'IRLTLT01AUM156N',   // Australia
+  'KTB10Y': 'IRLTLT01KRM156N',    // South Korea
+  // CGB (China) has no FRED monthly series — renders as '—' until a paid
+  // feed or alternate free source is wired in.
+};
+
+// Kept for forward compatibility if a keyless Stooq replacement becomes
+// available. Empty for now; fetchIntlBondQuote skips Stooq when this is empty.
+const STOOQ_BOND_SYMBOLS = {};
 
 // Yahoo Finance ticker mappings (consolidated from securitiesConfig.js)
 // This should match src/constants/securitiesConfig.js YAHOO_TICKER_MAP
@@ -257,14 +310,72 @@ const MARKET_REGIONS = {
   },
   rates: {
     label: 'Rates',
+    // `indices` preserved for backwards compatibility with callers that
+    // still expect a flat list (and for generic region iteration). The
+    // tabbed structure is authoritative for the /api/multi-region-quotes
+    // response shape under the `rates` key.
     indices: [
-      { symbol: 'UST2Y', name: '2-Yr', fredSymbol: 'DGS2' },
-      { symbol: 'UST5Y', name: '5-Yr', fredSymbol: 'DGS5' },
-      { symbol: 'UST10Y', name: '10-Yr', fredSymbol: 'DGS10' },
-      { symbol: 'UST30Y', name: '30-Yr', fredSymbol: 'DGS30' },
-      { symbol: 'UST13W', name: '13-Wk', fredSymbol: 'DGS3MO' },
-      { symbol: 'FEDFUNDS', name: 'Fed Funds', fredSymbol: 'DFF' }
-    ]
+      { symbol: 'UST2Y', name: '2-Yr' },
+      { symbol: 'UST5Y', name: '5-Yr' },
+      { symbol: 'UST10Y', name: '10-Yr' },
+      { symbol: 'UST30Y', name: '30-Yr' },
+      { symbol: 'UST13W', name: '13-Wk' },
+      { symbol: 'FEDFUNDS', name: 'Fed Funds' }
+    ],
+    tabs: {
+      us_treasuries: {
+        label: 'Treasuries',
+        indices: [
+          { symbol: 'UST2Y', name: '2-Yr', unit: 'yield' },
+          { symbol: 'UST5Y', name: '5-Yr', unit: 'yield' },
+          { symbol: 'UST10Y', name: '10-Yr', unit: 'yield' },
+          { symbol: 'UST30Y', name: '30-Yr', unit: 'yield' }
+        ],
+        // Derived rows (computed server-side from the indices above)
+        derived: [
+          { symbol: 'CURVE_2s10s', name: '2s10s', unit: 'bps', formula: ['UST10Y', 'UST2Y'] },
+          { symbol: 'CURVE_5s30s', name: '5s30s', unit: 'bps', formula: ['UST30Y', 'UST5Y'] },
+          { symbol: 'CURVE_3m10y', name: '3M10Y', unit: 'bps', formula: ['UST10Y', 'UST13W'] }
+        ]
+      },
+      policy: {
+        label: 'Policy',
+        indices: [
+          { symbol: 'FEDFUNDS', name: 'Fed Funds', unit: 'yield' },
+          { symbol: 'SOFR', name: 'SOFR', unit: 'yield' },
+          { symbol: 'UST13W', name: '13-Wk', unit: 'yield' },
+          { symbol: 'IORB', name: 'IORB', unit: 'yield' }
+        ]
+      },
+      credit: {
+        label: 'Credit',
+        indices: [
+          { symbol: 'IG_OAS', name: 'IG OAS', unit: 'oas' },
+          { symbol: 'HY_OAS', name: 'HY OAS', unit: 'oas' },
+          { symbol: 'LQD', name: 'LQD', unit: 'price' },
+          { symbol: 'HYG', name: 'HYG', unit: 'price' },
+          { symbol: 'EMB', name: 'EMB', unit: 'price' }
+        ]
+      },
+      eu_sovereigns: {
+        label: 'EU',
+        indices: [
+          { symbol: 'BUND10Y', name: 'Bund 10Y', unit: 'yield', intl: true },
+          { symbol: 'GILT10Y', name: 'Gilt 10Y', unit: 'yield', intl: true },
+          { symbol: 'OAT10Y', name: 'OAT 10Y', unit: 'yield', intl: true },
+          { symbol: 'BTP10Y', name: 'BTP 10Y', unit: 'yield', intl: true }
+        ]
+      },
+      asia_sovereigns: {
+        label: 'Asia',
+        indices: [
+          { symbol: 'JGB10Y', name: 'JGB 10Y', unit: 'yield', intl: true },
+          { symbol: 'CGB10Y', name: 'CGB 10Y', unit: 'yield', intl: true },
+          { symbol: 'ACGB10Y', name: 'ACGB 10Y', unit: 'yield', intl: true },
+          { symbol: 'KTB10Y', name: 'KTB 10Y', unit: 'yield', intl: true }
+        ]
+      }
+    }
   },
   commodities: {
     label: 'Commodities',
@@ -558,6 +669,78 @@ async function fetchFredQuote(seriesId) {
   }
 }
 
+// Fetch last-two EOD bond-yield observations from Stooq (free, daily).
+// Returns { price, change, changePercent, timestamp } or null on failure.
+async function fetchStooqBondQuote(stooqSymbol) {
+  try {
+    const url = 'https://stooq.com/q/d/l/';
+    const response = await axios.get(url, {
+      params: { s: stooqSymbol, i: 'd' },
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    const text = String(response.data || '').trim();
+    if (!text || text.toLowerCase().includes('no data')) {
+      console.warn(`[Stooq] No data for ${stooqSymbol}`);
+      return null;
+    }
+
+    const lines = text.split('\n').filter((line) => line && !line.startsWith('Date'));
+    if (lines.length === 0) return null;
+
+    // Lines: Date,Open,High,Low,Close,Volume
+    // Take the last two rows with parseable Close.
+    const rows = lines
+      .map((line) => {
+        const parts = line.split(',');
+        if (parts.length < 5) return null;
+        const closeNum = parseFloat(parts[4]);
+        if (!Number.isFinite(closeNum)) return null;
+        return { date: parts[0], close: closeNum };
+      })
+      .filter(Boolean);
+
+    if (rows.length === 0) return null;
+
+    const latest = rows[rows.length - 1];
+    const previous = rows[rows.length - 2] ?? latest;
+    const change = latest.close - previous.close;
+    const changePercent = previous.close !== 0 ? (change / previous.close) * 100 : 0;
+
+    console.log(`[Stooq] ${stooqSymbol}: price=${latest.close}, change=${change.toFixed(3)} (${rows.length} rows)`);
+
+    return {
+      price: latest.close.toFixed(2),
+      change: change.toFixed(2),
+      changePercent: changePercent.toFixed(2),
+      timestamp: latest.date
+        ? new Date(`${latest.date}T00:00:00Z`).toISOString()
+        : new Date().toISOString()
+    };
+  } catch (error) {
+    console.error(`[Stooq] Error fetching ${stooqSymbol}:`, error.message);
+    return null;
+  }
+}
+
+// Fetch international bond yield: Stooq primary, FRED monthly fallback.
+// `symbol` is an internal symbol like BUND10Y / JGB10Y.
+async function fetchIntlBondQuote(symbol) {
+  const upper = symbol.toUpperCase();
+  const stooqSym = STOOQ_BOND_SYMBOLS[upper];
+  if (stooqSym) {
+    const stooqQuote = await fetchStooqBondQuote(stooqSym);
+    if (stooqQuote) return { ...stooqQuote, source: 'stooq' };
+  }
+  const fredSeries = INTL_BOND_FRED_FALLBACK[upper];
+  if (fredSeries) {
+    const fredQuote = await fetchFredQuote(fredSeries);
+    if (fredQuote) return { ...fredQuote, source: 'fred' };
+  }
+  return null;
+}
+
 // Fetch quote with caching
 async function getQuote(symbol) {
   const now = Date.now();
@@ -573,11 +756,15 @@ async function getQuote(symbol) {
   console.log(`[Cache] Miss for ${cacheKey}, fetching...`);
 
   // Fetch new data
+  const upperSym = symbol.toUpperCase();
+  const isIntlBond = STOOQ_BOND_SYMBOLS[upperSym] != null || INTL_BOND_FRED_FALLBACK[upperSym] != null;
   const mapping = getTickerMapping(symbol);
   let quoteData = null;
 
   try {
-    if (mapping.source === 'fred') {
+    if (isIntlBond) {
+      quoteData = await fetchIntlBondQuote(upperSym);
+    } else if (mapping.source === 'fred') {
       quoteData = await fetchFredQuote(mapping.ticker);
     } else {
       quoteData = await fetchYahooQuote(mapping.ticker);
@@ -1142,16 +1329,35 @@ function computePeriodPercentsFromCloses(closes) {
 
   const weekIdx = Math.max(0, n - 1 - 5);
   const monthIdx = Math.max(0, n - 1 - 21);
+  const threeMonthIdx = Math.max(0, n - 1 - 63);
+  const sixMonthIdx = Math.max(0, n - 1 - 126);
   const weekRef = closes[weekIdx].close;
   const monthRef = closes[monthIdx].close;
+  const threeMonthRef = closes[threeMonthIdx].close;
+  const sixMonthRef = closes[sixMonthIdx].close;
 
-  const yNow = new Date().getUTCFullYear();
+  const nowDate = new Date();
+  const yNow = nowDate.getUTCFullYear();
+  const mNow = nowDate.getUTCMonth();
+  const qStartMonth = Math.floor(mNow / 3) * 3;
+
   let ytdRef = null;
+  let mtdRef = null;
+  let qtdRef = null;
   for (let i = 0; i < n; i++) {
-    if (new Date(closes[i].t).getUTCFullYear() === yNow) {
+    const d = new Date(closes[i].t);
+    const yy = d.getUTCFullYear();
+    const mm = d.getUTCMonth();
+    if (ytdRef == null && yy === yNow) {
       ytdRef = closes[i].close;
-      break;
     }
+    if (qtdRef == null && yy === yNow && mm >= qStartMonth && mm < qStartMonth + 3) {
+      qtdRef = closes[i].close;
+    }
+    if (mtdRef == null && yy === yNow && mm === mNow) {
+      mtdRef = closes[i].close;
+    }
+    if (ytdRef != null && qtdRef != null && mtdRef != null) break;
   }
   if (ytdRef == null || !Number.isFinite(ytdRef) || ytdRef === 0) {
     ytdRef = closes[0].close;
@@ -1165,6 +1371,10 @@ function computePeriodPercentsFromCloses(closes) {
   return {
     weekChangePct: pct(weekRef),
     monthChangePct: pct(monthRef),
+    threeMonthChangePct: pct(threeMonthRef),
+    sixMonthChangePct: pct(sixMonthRef),
+    mtdChangePct: pct(mtdRef),
+    qtdChangePct: pct(qtdRef),
     ytdChangePct: pct(ytdRef)
   };
 }
@@ -1249,6 +1459,122 @@ async function getPeriodReturnsCached(symbol) {
   const data = await computePeriodReturnsForSymbol(symbol);
   periodReturnsCache.set(key, { data, ts: now });
   return data;
+}
+
+// Cache raw daily-close series so derived spread rows can compute bps period
+// deltas without re-fetching both legs on every request.
+const dailyClosesCache = new Map();
+const DAILY_CLOSES_CACHE_TTL = parseInt(process.env.DAILY_CLOSES_CACHE_TTL_MS || '60000', 10);
+
+async function getDailyClosesCached(symbol) {
+  const key = symbol.toUpperCase();
+  const now = Date.now();
+  const hit = dailyClosesCache.get(key);
+  if (hit && now - hit.ts < DAILY_CLOSES_CACHE_TTL) {
+    return hit.data;
+  }
+  const mapping = getTickerMapping(symbol);
+  const upperSym = symbol.toUpperCase();
+  const isRateProxy = symbolIsYahooRateProxy(upperSym);
+  let closes = null;
+  try {
+    if (mapping.source === 'fred' && !isRateProxy) {
+      closes = await fetchFredDailyClosesSeries(mapping.ticker);
+    } else {
+      closes = await fetchYahooDailyClosesSeries(symbol);
+    }
+  } catch (err) {
+    console.warn(`[Rates] daily closes fetch failed for ${symbol}:`, err.message);
+    closes = null;
+  }
+  dailyClosesCache.set(key, { data: closes, ts: now });
+  return closes;
+}
+
+// Build a date-keyed map of daily close values (UTC day) for quick alignment
+// between two leg series.
+function buildCloseByDayMap(series) {
+  const map = new Map();
+  if (!Array.isArray(series)) return map;
+  for (const row of series) {
+    const d = new Date(row.t);
+    const dayKey = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+    map.set(dayKey, { t: row.t, close: row.close });
+  }
+  return map;
+}
+
+// Build a paired spread series (in bps) from two daily-close series. Only days
+// where both legs have a close are emitted. `factor` converts yields (%) to bps.
+function buildSpreadBpsSeries(longSeries, shortSeries) {
+  if (!Array.isArray(longSeries) || !Array.isArray(shortSeries)) return null;
+  const shortByDay = buildCloseByDayMap(shortSeries);
+  const out = [];
+  for (const row of longSeries) {
+    const d = new Date(row.t);
+    const dayKey = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+    const shortHit = shortByDay.get(dayKey);
+    if (!shortHit) continue;
+    if (!Number.isFinite(row.close) || !Number.isFinite(shortHit.close)) continue;
+    out.push({ t: row.t, close: (row.close - shortHit.close) * 100 });
+  }
+  return out.length >= 2 ? out : null;
+}
+
+// Compute period deltas in bps for a spread series using the same calendar
+// boundaries as computePeriodPercentsFromCloses. Returns `null` if the series
+// is too short. All values are rounded to 0.1 bps for display.
+function computeSpreadBpsDeltas(spreadSeries) {
+  if (!spreadSeries || spreadSeries.length < 2) return null;
+  const n = spreadSeries.length;
+  const last = spreadSeries[n - 1].close;
+  const prev = spreadSeries[n - 2].close;
+  if (!Number.isFinite(last)) return null;
+
+  const weekIdx = Math.max(0, n - 1 - 5);
+  const monthIdx = Math.max(0, n - 1 - 21);
+  const threeMonthIdx = Math.max(0, n - 1 - 63);
+  const sixMonthIdx = Math.max(0, n - 1 - 126);
+  const weekRef = spreadSeries[weekIdx].close;
+  const monthRef = spreadSeries[monthIdx].close;
+  const threeMonthRef = spreadSeries[threeMonthIdx].close;
+  const sixMonthRef = spreadSeries[sixMonthIdx].close;
+
+  const nowDate = new Date();
+  const yNow = nowDate.getUTCFullYear();
+  const mNow = nowDate.getUTCMonth();
+  const qStartMonth = Math.floor(mNow / 3) * 3;
+
+  let ytdRef = null;
+  let mtdRef = null;
+  let qtdRef = null;
+  for (let i = 0; i < n; i++) {
+    const d = new Date(spreadSeries[i].t);
+    const yy = d.getUTCFullYear();
+    const mm = d.getUTCMonth();
+    if (ytdRef == null && yy === yNow) ytdRef = spreadSeries[i].close;
+    if (qtdRef == null && yy === yNow && mm >= qStartMonth && mm < qStartMonth + 3) {
+      qtdRef = spreadSeries[i].close;
+    }
+    if (mtdRef == null && yy === yNow && mm === mNow) mtdRef = spreadSeries[i].close;
+    if (ytdRef != null && qtdRef != null && mtdRef != null) break;
+  }
+  if (ytdRef == null || !Number.isFinite(ytdRef)) ytdRef = spreadSeries[0].close;
+
+  const delta = (ref) =>
+    ref != null && Number.isFinite(ref) ? Math.round((last - ref) * 10) / 10 : null;
+
+  return {
+    dayDeltaBps: delta(prev),
+    weekDeltaBps: delta(weekRef),
+    monthDeltaBps: delta(monthRef),
+    threeMonthDeltaBps: delta(threeMonthRef),
+    sixMonthDeltaBps: delta(sixMonthRef),
+    mtdDeltaBps: delta(mtdRef),
+    qtdDeltaBps: delta(qtdRef),
+    ytdDeltaBps: delta(ytdRef),
+    latestBps: Math.round(last * 10) / 10
+  };
 }
 
 // Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
@@ -1505,81 +1831,132 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
     // Other types are stored as single snapshot items per day
     const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'volume'];
 
+    // Single scan of HedgeyeDailySnapshot, then pick the latest item per snapshotType.
+    // This reports the true most recent upload regardless of age, matching how
+    // Risk Ranges is handled above. Handles paginated results via LastEvaluatedKey.
+    let latestByType = {};
+    let scanError = null;
+    try {
+      let ExclusiveStartKey;
+      do {
+        const snapResult = await dynamodb.scan({
+          TableName: 'HedgeyeDailySnapshot',
+          ExclusiveStartKey
+        }).promise();
+
+        for (const item of snapResult.Items || []) {
+          if (!item || !item.snapshotType || !item.date) continue;
+          const cur = latestByType[item.snapshotType];
+          if (!cur || item.date.localeCompare(cur.date) > 0) {
+            latestByType[item.snapshotType] = item;
+          }
+        }
+
+        ExclusiveStartKey = snapResult.LastEvaluatedKey;
+      } while (ExclusiveStartKey);
+    } catch (err) {
+      console.error('[API] Error scanning HedgeyeDailySnapshot:', err.message);
+      scanError = err;
+    }
+
     for (const snapshotType of snapshotTypes) {
-      try {
-        let latestSnapshot = null;
-
-        // Query recent dates (last 7 days) to find the latest entry
-        for (let i = 0; i < 7; i++) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-          const queryParams = {
-            TableName: 'HedgeyeDailySnapshot',
-            Key: {
-              date: dateStr,
-              snapshotType: snapshotType
-            }
-          };
-
-          const queryResult = await dynamodb.get(queryParams).promise();
-          if (queryResult.Item) {
-            latestSnapshot = queryResult.Item;
-            break;
-          }
-        }
-
-        if (latestSnapshot) {
-          // Calculate item count based on snapshot type
-          let itemCount = 0;
-
-          // Use explicit count fields if available
-          if (latestSnapshot.riskRangeCount) itemCount = latestSnapshot.riskRangeCount;
-          else if (latestSnapshot.positionCount) itemCount = latestSnapshot.positionCount;
-          else if (latestSnapshot.stockCount) itemCount = latestSnapshot.stockCount;
-          else if (latestSnapshot.cryptoCount) itemCount = latestSnapshot.cryptoCount + (latestSnapshot.stockCount || 0);
-          else if (latestSnapshot.rankingCount) itemCount = latestSnapshot.rankingCount;
-
-          // Fallback to counting data keys if explicit counts are missing/zero
-          if (itemCount === 0 && latestSnapshot.data) {
-            if (snapshotType === 'bitcoin-trend-tracker' && latestSnapshot.data.cryptos) {
-              itemCount = Object.keys(latestSnapshot.data.cryptos).length + Object.keys(latestSnapshot.data.stocks || {}).length;
-            } else if (Array.isArray(latestSnapshot.data.longs) || Array.isArray(latestSnapshot.data.shorts)) {
-              itemCount = (latestSnapshot.data.longs?.length || 0) + (latestSnapshot.data.shorts?.length || 0);
-            } else if (Array.isArray(latestSnapshot.data)) {
-              itemCount = latestSnapshot.data.length;
-            } else if (Array.isArray(latestSnapshot.data.stocks)) {
-              itemCount = latestSnapshot.data.stocks.length;
-            } else if (Array.isArray(latestSnapshot.data.rankings)) {
-              itemCount = latestSnapshot.data.rankings.length;
-            } else if (typeof latestSnapshot.data === 'object') {
-              itemCount = Object.keys(latestSnapshot.data).length;
-            }
-          }
-
-          results[snapshotType] = {
-            status: getFreshnessStatus(latestSnapshot.date),
-            lastUpdated: latestSnapshot.date, // Use content date as primary
-            scrapedAt: latestSnapshot.scrapedAt,
-            itemCount: itemCount,
-            date: latestSnapshot.date,
-            source: 'HedgeyeDailySnapshot'
-          };
-
-        } else {
-          results[snapshotType] = {
-            status: 'missing',
-            lastUpdated: null,
-            itemCount: 0,
-            date: null,
-            source: 'HedgeyeDailySnapshot'
-          };
-        }
-      } catch (err) {
-        console.error(`[API] Error querying HedgeyeDailySnapshot for ${snapshotType}:`, err.message);
-        results[snapshotType] = { status: 'error', error: err.message };
+      if (scanError) {
+        results[snapshotType] = { status: 'error', error: scanError.message };
+        continue;
       }
+
+      const latestSnapshot = latestByType[snapshotType];
+
+      if (latestSnapshot) {
+        // Calculate item count based on snapshot type
+        let itemCount = 0;
+
+        // Use explicit count fields if available
+        if (latestSnapshot.riskRangeCount) itemCount = latestSnapshot.riskRangeCount;
+        else if (latestSnapshot.positionCount) itemCount = latestSnapshot.positionCount;
+        else if (latestSnapshot.stockCount) itemCount = latestSnapshot.stockCount;
+        else if (latestSnapshot.cryptoCount) itemCount = latestSnapshot.cryptoCount + (latestSnapshot.stockCount || 0);
+        else if (latestSnapshot.rankingCount) itemCount = latestSnapshot.rankingCount;
+
+        // Fallback to counting data keys if explicit counts are missing/zero
+        if (itemCount === 0 && latestSnapshot.data) {
+          if (snapshotType === 'bitcoin-trend-tracker' && latestSnapshot.data.cryptos) {
+            itemCount = Object.keys(latestSnapshot.data.cryptos).length + Object.keys(latestSnapshot.data.stocks || {}).length;
+          } else if (Array.isArray(latestSnapshot.data.longs) || Array.isArray(latestSnapshot.data.shorts)) {
+            itemCount = (latestSnapshot.data.longs?.length || 0) + (latestSnapshot.data.shorts?.length || 0);
+          } else if (Array.isArray(latestSnapshot.data)) {
+            itemCount = latestSnapshot.data.length;
+          } else if (Array.isArray(latestSnapshot.data.stocks)) {
+            itemCount = latestSnapshot.data.stocks.length;
+          } else if (Array.isArray(latestSnapshot.data.rankings)) {
+            itemCount = latestSnapshot.data.rankings.length;
+          } else if (typeof latestSnapshot.data === 'object') {
+            itemCount = Object.keys(latestSnapshot.data).length;
+          }
+        }
+
+        results[snapshotType] = {
+          status: getFreshnessStatus(latestSnapshot.date),
+          lastUpdated: latestSnapshot.date, // Use content date as primary
+          scrapedAt: latestSnapshot.scrapedAt,
+          itemCount: itemCount,
+          date: latestSnapshot.date,
+          source: 'HedgeyeDailySnapshot'
+        };
+      } else {
+        results[snapshotType] = {
+          status: 'missing',
+          lastUpdated: null,
+          itemCount: 0,
+          date: null,
+          source: 'HedgeyeDailySnapshot'
+        };
+      }
+    }
+
+    // 3. ETF Pro — local json (same as GET /api/hedgeye/etfpro)
+    try {
+      const etfproLatest = path.join(__dirname, 'data', 'hedgeye', 'etfpro', 'latest.json');
+      if (fs.existsSync(etfproLatest)) {
+        const etf = JSON.parse(fs.readFileSync(etfproLatest, 'utf-8'));
+        let { snapDate, rowCount, scraped } = resolveEtfProSnapshotForAnalytics(etf);
+        if (!snapDate) {
+          try {
+            const st = fs.statSync(etfproLatest);
+            if (st.mtime) {
+              snapDate = st.mtime.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+            }
+          } catch (statErr) {
+            console.warn('[API] ETF Pro freshness stat mtime failed:', statErr.message);
+          }
+        }
+        if (!scraped) {
+          try {
+            scraped = fs.statSync(etfproLatest).mtime.toISOString();
+          } catch (statErr2) {
+            // leave scraped null
+          }
+        }
+        results['etf-pro'] = {
+          status: getFreshnessStatus(snapDate),
+          lastUpdated: snapDate,
+          scrapedAt: scraped,
+          itemCount: rowCount,
+          date: snapDate,
+          source: 'EtfProLocal'
+        };
+      } else {
+        results['etf-pro'] = {
+          status: 'missing',
+          lastUpdated: null,
+          itemCount: 0,
+          date: null,
+          source: 'EtfProLocal'
+        };
+      }
+    } catch (err) {
+      console.error('[API] Error reading ETF Pro for freshness:', err.message);
+      results['etf-pro'] = { status: 'error', error: err.message };
     }
 
     const totalTime = Date.now() - startTime;
@@ -2068,7 +2445,11 @@ app.get('/api/hedgeye/etfpro', (req, res) => {
 
     const raw = fs.readFileSync(latestPath, 'utf-8');
     const parsed = JSON.parse(raw);
-    const todayDate = parsed.meta?.snapshotDate;
+    const { snapDate: resolvedDate } = resolveEtfProSnapshotForAnalytics(parsed);
+    if (resolvedDate && (!parsed.meta || !parsed.meta.snapshotDate)) {
+      parsed.meta = { ...(parsed.meta || {}), snapshotDate: resolvedDate };
+    }
+    const todayDate = parsed.meta?.snapshotDate || resolvedDate;
 
     // Find previous day's snapshot for diffing
     let changes = null;
@@ -2119,6 +2500,56 @@ app.get('/api/hedgeye/etfpro', (req, res) => {
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/etfpro:', error);
     return res.status(500).json({ error: 'Failed to load ETF Pro snapshot', details: error.message });
+  }
+});
+
+// Persist ETF Pro snapshot (parsed client-side from .xlsx, same on-disk format as collect:etfpro)
+app.post('/api/hedgeye/etfpro', (req, res) => {
+  const MAX_ROWS = 5000;
+  try {
+    const { rows, filename: sourceFilename } = req.body || {};
+    if (!Array.isArray(rows)) {
+      return res.status(400).json({ error: 'Request body must include a "rows" array' });
+    }
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'rows array is empty' });
+    }
+    if (rows.length > MAX_ROWS) {
+      return res.status(400).json({ error: `rows exceeds maximum (${MAX_ROWS})` });
+    }
+    for (const r of rows) {
+      if (!r || typeof r !== 'object' || !String(r.ticker || '').trim()) {
+        return res.status(400).json({ error: 'Each row must be an object with a non-empty ticker' });
+      }
+    }
+
+    const parsedAt = new Date().toISOString();
+    const snapshotDate = determineEtfProSnapshotDate(rows, parsedAt);
+    const etfproDir = path.join(__dirname, 'data', 'hedgeye', 'etfpro');
+    fs.mkdirSync(etfproDir, { recursive: true });
+
+    const payload = {
+      meta: {
+        snapshotDate,
+        parsedAt,
+        source: 'upload',
+        sourceFilename: sourceFilename != null ? String(sourceFilename) : null,
+        rowCount: rows.length
+      },
+      rows
+    };
+
+    const datedPath = path.join(etfproDir, `${snapshotDate}.json`);
+    const latestPath = path.join(etfproDir, 'latest.json');
+    const json = JSON.stringify(payload, null, 2);
+    fs.writeFileSync(datedPath, json);
+    fs.writeFileSync(latestPath, json);
+    console.log(`[API] POST /api/hedgeye/etfpro wrote ${datedPath} (${rows.length} rows, snapshotDate=${snapshotDate})`);
+
+    return res.json({ ok: true, meta: payload.meta });
+  } catch (error) {
+    console.error('[API] Error in POST /api/hedgeye/etfpro:', error);
+    return res.status(500).json({ error: 'Failed to save ETF Pro snapshot', details: error.message });
   }
 });
 
@@ -2573,6 +3004,88 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
       }
     }));
 
+    // ETF Pro — local dated JSON + latest.json (same diff as GET /api/hedgeye/etfpro)
+    try {
+      const etfproDir = path.join(__dirname, 'data', 'hedgeye', 'etfpro');
+      const latestPath = path.join(etfproDir, 'latest.json');
+      if (!fs.existsSync(latestPath)) {
+        results['etf-pro'] = {
+          added: [], removed: [], available: false, currentDate: null, previousDate: null,
+          addedLongs: [], removedLongs: [], addedShorts: [], removedShorts: []
+        };
+      } else {
+        const parsed = JSON.parse(fs.readFileSync(latestPath, 'utf-8'));
+        const { snapDate: resolvedDate } = resolveEtfProSnapshotForAnalytics(parsed);
+        if (resolvedDate && (!parsed.meta || !parsed.meta.snapshotDate)) {
+          parsed.meta = { ...(parsed.meta || {}), snapshotDate: resolvedDate };
+        }
+        const todayDate = parsed.meta?.snapshotDate || resolvedDate;
+
+        const classifyEtfPro = (rows) => {
+          const longs = new Set();
+          const shorts = new Set();
+          for (const r of rows || []) {
+            const ticker = String(r.ticker || '').trim().toUpperCase();
+            if (!ticker) continue;
+            if (String(r.call).toLowerCase() === 'short') {
+              shorts.add(ticker);
+            } else {
+              longs.add(ticker);
+            }
+          }
+          return { longs, shorts };
+        };
+
+        const dated = fs.readdirSync(etfproDir)
+          .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+          .map(f => f.replace('.json', ''))
+          .filter(d => d !== todayDate)
+          .sort()
+          .reverse();
+
+        if (dated.length > 0) {
+          const prevParsed = JSON.parse(fs.readFileSync(path.join(etfproDir, `${dated[0]}.json`), 'utf-8'));
+          const today = classifyEtfPro(parsed.rows || []);
+          const prev = classifyEtfPro(prevParsed.rows || []);
+          const addedLongs = [...today.longs].filter(t => !prev.longs.has(t));
+          const removedLongs = [...prev.longs].filter(t => !today.longs.has(t));
+          const addedShorts = [...today.shorts].filter(t => !prev.shorts.has(t));
+          const removedShorts = [...prev.shorts].filter(t => !today.shorts.has(t));
+          const added = [...new Set([...addedLongs, ...addedShorts])];
+          const removed = [...new Set([...removedLongs, ...removedShorts])];
+          results['etf-pro'] = {
+            available: true,
+            currentDate: todayDate,
+            previousDate: dated[0],
+            added,
+            removed,
+            addedLongs,
+            removedLongs,
+            addedShorts,
+            removedShorts
+          };
+        } else {
+          results['etf-pro'] = {
+            available: !!todayDate,
+            currentDate: todayDate,
+            previousDate: null,
+            added: [],
+            removed: [],
+            addedLongs: [],
+            removedLongs: [],
+            addedShorts: [],
+            removedShorts: []
+          };
+        }
+      }
+    } catch (err) {
+      console.error('[API] ETF Pro changelog:', err.message);
+      results['etf-pro'] = {
+        available: false, error: err.message,
+        added: [], removed: [], addedLongs: [], removedLongs: [], addedShorts: [], removedShorts: []
+      };
+    }
+
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/hedgeye/changelog completed in ${totalTime}ms`);
     res.json(results);
@@ -2645,6 +3158,179 @@ app.get('/api/macro-indicators', async (req, res) => {
   }
 });
 
+// Build a uniform quote row for the multi-region response.
+async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
+  try {
+    const quote = await getQuote(index.symbol);
+    const mapping = getTickerMapping(index.symbol);
+    const isIntl = index.intl === true;
+
+    let sparklineData = [];
+    if (includeSparklines && !isIntl && mapping.source === 'yahoo') {
+      sparklineData = await getIntradayData(index.symbol);
+    }
+
+    let weekChangePct = null;
+    let monthChangePct = null;
+    let threeMonthChangePct = null;
+    let sixMonthChangePct = null;
+    let mtdChangePct = null;
+    let qtdChangePct = null;
+    let ytdChangePct = null;
+    if (wantPeriodReturns && !isIntl) {
+      try {
+        const periods = await getPeriodReturnsCached(index.symbol);
+        if (periods) {
+          weekChangePct = periods.weekChangePct;
+          monthChangePct = periods.monthChangePct;
+          threeMonthChangePct = periods.threeMonthChangePct ?? null;
+          sixMonthChangePct = periods.sixMonthChangePct ?? null;
+          mtdChangePct = periods.mtdChangePct ?? null;
+          qtdChangePct = periods.qtdChangePct ?? null;
+          ytdChangePct = periods.ytdChangePct;
+        }
+      } catch (periodErr) {
+        console.warn(`[API] Period returns failed for ${index.symbol}:`, periodErr.message);
+      }
+    }
+
+    return {
+      symbol: index.symbol,
+      name: index.name,
+      unit: index.unit || undefined,
+      price: quote?.price || null,
+      change: quote?.change || null,
+      changePercent: quote?.changePercent || null,
+      timestamp: quote?.timestamp || new Date().toISOString(),
+      sparklineData,
+      weekChangePct,
+      monthChangePct,
+      threeMonthChangePct,
+      sixMonthChangePct,
+      mtdChangePct,
+      qtdChangePct,
+      ytdChangePct
+    };
+  } catch (error) {
+    console.error(`[API] Error fetching ${index.symbol}:`, error.message);
+    return {
+      symbol: index.symbol,
+      name: index.name,
+      unit: index.unit || undefined,
+      price: null,
+      error: 'Failed to fetch quote',
+      weekChangePct: null,
+      monthChangePct: null,
+      threeMonthChangePct: null,
+      sixMonthChangePct: null,
+      mtdChangePct: null,
+      qtdChangePct: null,
+      ytdChangePct: null
+    };
+  }
+}
+
+// Build the tabbed `rates` payload (Treasuries + derived curve spreads,
+// Policy, Credit, EU Sovereigns, Asia Sovereigns).
+async function buildRatesPayload(region, opts) {
+  const tabs = region.tabs || {};
+  const out = {};
+
+  for (const [tabKey, tab] of Object.entries(tabs)) {
+    const rows = await Promise.all((tab.indices || []).map((idx) => buildQuoteRow(idx, opts)));
+
+    // Append derived rows (e.g. US Treasury curve spreads in bps). A derived
+    // formula references symbols like ['UST10Y', 'UST2Y']; if a required leg
+    // isn't present in this tab we fetch it on-demand via the cache-backed
+    // getQuote so we can still compute the spread.
+    if (Array.isArray(tab.derived) && tab.derived.length > 0) {
+      const rowsBySymbol = new Map(rows.map((r) => [r.symbol, r]));
+      const resolveYield = async (sym) => {
+        const existing = rowsBySymbol.get(sym);
+        if (existing && existing.price != null) {
+          return { value: parseFloat(existing.price), ts: existing.timestamp };
+        }
+        try {
+          const q = await getQuote(sym);
+          if (q?.price != null) {
+            return { value: parseFloat(q.price), ts: q.timestamp };
+          }
+        } catch (err) {
+          console.warn(`[Rates] derived leg ${sym} fetch failed:`, err.message);
+        }
+        return { value: NaN, ts: null };
+      };
+
+      for (const derived of tab.derived) {
+        const [longSym, shortSym] = derived.formula;
+        const [longLeg, shortLeg] = await Promise.all([resolveYield(longSym), resolveYield(shortSym)]);
+        let priceStr = null;
+        if (Number.isFinite(longLeg.value) && Number.isFinite(shortLeg.value)) {
+          priceStr = ((longLeg.value - shortLeg.value) * 100).toFixed(1); // yields in %, spread in bps
+        }
+
+        // Populate bps period deltas from a date-aligned historical spread
+        // series. If either leg is unavailable historically we leave the
+        // period fields null and the row falls back to em-dashes on the UI.
+        let dayDeltaBps = null;
+        let weekDeltaBps = null;
+        let monthDeltaBps = null;
+        let threeMonthDeltaBps = null;
+        let sixMonthDeltaBps = null;
+        let mtdDeltaBps = null;
+        let qtdDeltaBps = null;
+        let ytdDeltaBps = null;
+        try {
+          const [longCloses, shortCloses] = await Promise.all([
+            getDailyClosesCached(longSym),
+            getDailyClosesCached(shortSym)
+          ]);
+          const spreadSeries = buildSpreadBpsSeries(longCloses, shortCloses);
+          const deltas = computeSpreadBpsDeltas(spreadSeries);
+          if (deltas) {
+            dayDeltaBps = deltas.dayDeltaBps;
+            weekDeltaBps = deltas.weekDeltaBps;
+            monthDeltaBps = deltas.monthDeltaBps;
+            threeMonthDeltaBps = deltas.threeMonthDeltaBps;
+            sixMonthDeltaBps = deltas.sixMonthDeltaBps;
+            mtdDeltaBps = deltas.mtdDeltaBps;
+            qtdDeltaBps = deltas.qtdDeltaBps;
+            ytdDeltaBps = deltas.ytdDeltaBps;
+          }
+        } catch (err) {
+          console.warn(`[Rates] derived deltas failed for ${derived.symbol}:`, err.message);
+        }
+
+        rows.push({
+          symbol: derived.symbol,
+          name: derived.name,
+          unit: derived.unit || 'bps',
+          price: priceStr,
+          change: dayDeltaBps,
+          // For bps-denominated derived rows the UI renders these fields with
+          // a " bps" suffix (see getRowMetrics), so we populate them with the
+          // bps delta rather than a percent change.
+          changePercent: dayDeltaBps,
+          timestamp: longLeg.ts || shortLeg.ts || new Date().toISOString(),
+          sparklineData: [],
+          weekChangePct: weekDeltaBps,
+          monthChangePct: monthDeltaBps,
+          threeMonthChangePct: threeMonthDeltaBps,
+          sixMonthChangePct: sixMonthDeltaBps,
+          mtdChangePct: mtdDeltaBps,
+          qtdChangePct: qtdDeltaBps,
+          ytdChangePct: ytdDeltaBps,
+          derived: true
+        });
+      }
+    }
+
+    out[tabKey] = rows;
+  }
+
+  return out;
+}
+
 // Multi-Region Quotes endpoint - fetches quotes and sparklines for all regions
 app.get('/api/multi-region-quotes', async (req, res) => {
   const startTime = Date.now();
@@ -2653,10 +3339,12 @@ app.get('/api/multi-region-quotes', async (req, res) => {
     const requestedRegions = regions ? regions.split(',') : Object.keys(MARKET_REGIONS);
     const wantPeriodReturns =
       includePeriodReturns === 'true' || includePeriodReturns === true || includePeriodReturns === '1';
+    const wantSparklines = includeSparklines === 'true';
 
     console.log(`[API] /api/multi-region-quotes called for regions: ${requestedRegions.join(', ')}, sparklines: ${includeSparklines}, periodReturns: ${wantPeriodReturns}`);
 
     const results = {};
+    const opts = { includeSparklines: wantSparklines, wantPeriodReturns };
 
     for (const regionKey of requestedRegions) {
       const region = MARKET_REGIONS[regionKey];
@@ -2665,64 +3353,20 @@ app.get('/api/multi-region-quotes', async (req, res) => {
         continue;
       }
 
+      // Tabbed regions (currently just `rates`) return a nested object keyed
+      // by tab. All other regions return a flat array of quote rows.
+      if (region.tabs) {
+        console.log(`[API] Fetching tabbed region ${regionKey} (${Object.keys(region.tabs).join(', ')})...`);
+        results[regionKey] = await buildRatesPayload(region, opts);
+        const tabCounts = Object.entries(results[regionKey])
+          .map(([k, v]) => `${k}=${v.length}`)
+          .join(' ');
+        console.log(`[API] Completed ${regionKey}: ${tabCounts}`);
+        continue;
+      }
+
       console.log(`[API] Fetching ${region.indices.length} indices for ${regionKey}...`);
-
-      // Fetch quotes for all indices in this region in parallel
-      const quotes = await Promise.all(
-        region.indices.map(async (index) => {
-          try {
-            const quote = await getQuote(index.symbol);
-            const mapping = getTickerMapping(index.symbol);
-
-            // Fetch sparkline data if requested (default: true)
-            let sparklineData = [];
-            if (includeSparklines === 'true' && mapping.source === 'yahoo') {
-              sparklineData = await getIntradayData(index.symbol);
-            }
-
-            let weekChangePct = null;
-            let monthChangePct = null;
-            let ytdChangePct = null;
-            if (wantPeriodReturns) {
-              try {
-                const periods = await getPeriodReturnsCached(index.symbol);
-                if (periods) {
-                  weekChangePct = periods.weekChangePct;
-                  monthChangePct = periods.monthChangePct;
-                  ytdChangePct = periods.ytdChangePct;
-                }
-              } catch (periodErr) {
-                console.warn(`[API] Period returns failed for ${index.symbol}:`, periodErr.message);
-              }
-            }
-
-            return {
-              symbol: index.symbol,
-              name: index.name,
-              price: quote?.price || null,
-              change: quote?.change || null,
-              changePercent: quote?.changePercent || null,
-              timestamp: quote?.timestamp || new Date().toISOString(),
-              sparklineData,
-              weekChangePct,
-              monthChangePct,
-              ytdChangePct
-            };
-          } catch (error) {
-            console.error(`[API] Error fetching ${index.symbol}:`, error.message);
-            return {
-              symbol: index.symbol,
-              name: index.name,
-              price: null,
-              error: 'Failed to fetch quote',
-              weekChangePct: null,
-              monthChangePct: null,
-              ytdChangePct: null
-            };
-          }
-        })
-      );
-
+      const quotes = await Promise.all(region.indices.map((index) => buildQuoteRow(index, opts)));
       results[regionKey] = quotes;
       console.log(`[API] Completed ${regionKey}: ${quotes.length} quotes fetched`);
     }
@@ -4295,6 +4939,24 @@ const server = app.listen(PORT, async () => {
   await validateAWSCredentials();
 });
 
+// Fail loud and fast on listen errors so the process exits with a non-zero
+// code instead of being swallowed by the uncaughtException FATAL-GUARD
+// below. Without this, EADDRINUSE silently drains the event loop and the
+// process exits 0, which causes `concurrently -k` to kill `npm start` too.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[FATAL] Port ${PORT} is already in use. Another server.js is probably still running.`);
+    console.error(`        Run:  lsof -iTCP:${PORT} -sTCP:LISTEN -n -P    then:  kill <pid>`);
+    process.exit(1);
+  }
+  if (err.code === 'EACCES') {
+    console.error(`[FATAL] Permission denied binding to port ${PORT}.`);
+    process.exit(1);
+  }
+  console.error('[FATAL] HTTP server error:', err);
+  process.exit(1);
+});
+
 // -----------------------------
 // WebSocket: /ws/market
 // -----------------------------
@@ -4442,9 +5104,33 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (err) => {
   console.error('[FATAL-GUARD] Uncaught exception:', err && err.stack ? err.stack : err);
-  // Deliberately do not exit — in dev we prefer a live server with a
-  // logged error over a crashed one. If the process is truly wedged,
-  // the user will restart manually.
+  // Deliberately do not exit on transient runtime errors (e.g. stray
+  // axios/Yahoo rejections) — in dev we prefer a live server with a
+  // logged error over a crashed one. However, we MUST exit on fatal
+  // startup errors like EADDRINUSE; otherwise the process drains its
+  // event loop, exits 0, and `concurrently -k` kills the CRA dev server
+  // along with it, masking the real problem.
+  const fatalCodes = new Set(['EADDRINUSE', 'EACCES', 'EADDRNOTAVAIL']);
+  if (err && fatalCodes.has(err.code)) {
+    process.exit(1);
+  }
 });
+
+// Graceful shutdown: when concurrently (or the user) sends SIGTERM/SIGINT,
+// close the HTTP server and terminate WebSocket clients so the process
+// actually exits instead of lingering as a zombie holding port 3001.
+const shutdown = (signal) => {
+  console.log(`\n[shutdown] Received ${signal}, closing server...`);
+  const done = () => process.exit(0);
+  try {
+    wss.clients.forEach((c) => { try { c.terminate(); } catch (_) {} });
+    server.close(done);
+    setTimeout(() => process.exit(0), 3000).unref();
+  } catch (_) {
+    process.exit(0);
+  }
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = app;

@@ -138,6 +138,23 @@ class PerformanceService {
       throw error;
     }
   }
+
+  /**
+   * Realized gain/loss lot details for bubble chart
+   * @param {string} period - 'all' | 'ytd' | '1y' | '90d' | '30d'
+   * @param {string} symbol - optional ticker filter
+   */
+  static async getRealizedGainLoss(period = 'all', symbol = '') {
+    try {
+      const params = { period };
+      if (symbol && symbol.trim()) params.symbol = symbol.trim();
+      const response = await apiClient.get(ENDPOINTS.PERFORMANCE_REALIZED_GAIN_LOSS, { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching realized gain/loss:', error);
+      throw error;
+    }
+  }
 }
 
 export default PerformanceService;

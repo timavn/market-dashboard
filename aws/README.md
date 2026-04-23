@@ -18,6 +18,7 @@ All tables use **PAY_PER_REQUEST** billing mode:
 - ✅ `Holdings` - Individual holdings per snapshot
 - ✅ `PerformanceHistory` - Daily performance metrics
 - ✅ `PositionPerformance` - Per-position tracking
+- ✅ `RealizedGainLoss` - Schwab Realized Gain/Loss – Lot Details (closed lots for Performance Tracking chart)
 - ✅ `ProcessingLogs` - CSV processing audit trail
 
 **Hedgeye Data:**
@@ -43,7 +44,8 @@ All tables use **PAY_PER_REQUEST** billing mode:
   - Memory: 512 MB, Timeout: 30 seconds
   - Handler: `csv_processor.lambda_handler`
   - Trigger: S3 PUT events on `uploads/*.csv`
-  - Purpose: Parse Schwab CSVs → DynamoDB
+  - Purpose: Parse Schwab CSVs → DynamoDB (positions, transactions, **Realized G/L Lot Details**)
+  - Env: `REALIZED_GAIN_LOSS_TABLE` (default `RealizedGainLoss`) on the Lambda function when deploying Lot Details support
 
 #### **Express Backend (localhost:3001)**
 - ✅ **ACTIVE** - Primary AWS integration layer

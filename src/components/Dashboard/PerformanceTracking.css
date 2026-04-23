@@ -1,0 +1,24 @@
+/* Realized G/L scatter — matches dashboard cream + chart readability */
+.performance-tracking-wrap {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.performance-chart-card {
+  flex: 1;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+}
+
+.performance-chart-container {
+  flex: 1;
+  min-height: 320px;
+  width: 100%;
+}
+
+.recharts-surface {
+  overflow: visible;
+}

@@ -1030,35 +1030,37 @@ const PortfolioDashboard = () => {
           }}
           className="dark:border-gray-700"
         >
-          <Button
+          <button
             onClick={() => setShowWorkflowStatus(!showWorkflowStatus)}
-            variant={showWorkflowStatus ? 'primary' : 'secondary'}
-            size="md"
-            className="shadow-lg"
+            className={`rounded-md border transition-colors w-full ${showWorkflowStatus
+              ? 'bg-[#e6e0d2] border-[#c5bcac] dark:bg-blue-600 hover:bg-[#ddd6c6] dark:hover:bg-blue-700 text-[#111]'
+              : 'bg-[#f8f6ef] border-[#d6d0c3] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 dark:border-gray-600'
+              }`}
             style={{
-              minWidth: '48px',
-              height: '48px',
-              padding: '0',
+              minWidth: '32px',
+              height: '32px',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: '50%',
-              border: showWorkflowStatus ? '2px solid #8b7e6a' : '2px solid #d6d0c3',
-              backgroundColor: '#f8f6ef',
-              transition: 'all 0.2s ease-in-out',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              overflow: 'hidden',
+              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Analytics"
           >
-            <img
-              src="/images/icons/analytics.png"
-              alt="Analytics"
-              style={{
-                width: '24px',
-                height: '24px',
-                objectFit: 'contain',
-              }}
-            />
-          </Button>
+            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
+              <img
+                src="/images/icons/analytics.png"
+                alt="Analytics"
+                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+              />
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`text-sm font-medium whitespace-nowrap ${showWorkflowStatus ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
+                Analytics
+              </span>
+            )}
+          </button>
         </div>
       </div>
 

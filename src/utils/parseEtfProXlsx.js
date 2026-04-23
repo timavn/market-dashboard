@@ -1,4 +1,7 @@
 import readXlsxFile from 'read-excel-file/browser';
+import cjsEtf from './etfProSnapshotDate.cjs';
+
+const { determineEtfProSnapshotDate } = cjsEtf;
 
 const EXPECTED_HEADERS = [
   'ETF',
@@ -110,11 +113,19 @@ export async function parseEtfProWorkbook(file) {
     })
     .filter((r) => r.ticker);
 
+  const uploadedAt = new Date().toISOString();
+  const fileMtime = file && typeof file.lastModified === 'number'
+    ? new Date(file.lastModified).toISOString()
+    : null;
+  const snapshotDate = determineEtfProSnapshotDate(data, fileMtime);
+
   return {
     rows: data,
     meta: {
-      uploadedAt: new Date().toISOString(),
+      snapshotDate,
+      uploadedAt,
       filename: file?.name ?? null,
+      rowCount: data.length,
     },
   };
 }

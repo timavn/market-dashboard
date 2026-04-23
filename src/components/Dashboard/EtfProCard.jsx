@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { isFreshForToday } from '../../utils/dateFreshness';
 import './EtfProCard.css';
 
 function formatSignedPercent(value, digits = 2) {
@@ -55,39 +56,53 @@ function sortRows(rows, sort) {
   return copy;
 }
 
-function EtfProTable({ title, titleClass, rows, isExpanded, toggleSort, added, removed }) {
-  const hasChanges = added.length > 0 || removed.length > 0;
-  const addedSet = useMemo(() => new Set(added.map(t => t.toUpperCase())), [added]);
-  const removedSet = useMemo(() => new Set(removed.map(t => t.toUpperCase())), [removed]);
+function EtfProPaneTitle({ title, count }) {
+  return (
+    <div className="etfpro-pane">
+      <div className="etfpro-pane-title">
+        <span className="etfpro-pane-title-label">{title}</span>
+        <span className="etfpro-pane-count">{count}</span>
+      </div>
+    </div>
+  );
+}
+
+function EtfProColumnChanges({ added, removed }) {
+  const a = Array.isArray(added) ? added : [];
+  const r = Array.isArray(removed) ? removed : [];
+
+  const renderList = (arr, kind) => (
+    <div className="etfpro-change-list">
+      {arr.length > 0 ? (
+        arr.map((t) => (
+          <div key={t} className={`etfpro-change-ticker ${kind}`}>
+            {t}
+          </div>
+        ))
+      ) : (
+        <div className="etfpro-change-empty">No change</div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="etfpro-changes etfpro-changes-column">
+      <div className="etfpro-change-header add">Added</div>
+      <div className="etfpro-change-list-cell">{renderList(a, 'add')}</div>
+      <div className="etfpro-change-header remove">Removed</div>
+      <div className="etfpro-change-list-cell">{renderList(r, 'remove')}</div>
+    </div>
+  );
+}
+
+function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
+  const addedSet = useMemo(
+    () => new Set((Array.isArray(newlyAdded) ? newlyAdded : []).map((t) => String(t).toUpperCase())),
+    [newlyAdded]
+  );
 
   return (
     <div className="etfpro-pane">
-      <div className={`etfpro-pane-title ${titleClass}`}>
-        {title}
-        <span className="etfpro-pane-count">{rows.length}</span>
-      </div>
-
-      {hasChanges && (
-        <div className="etfpro-changes">
-          {added.length > 0 && (
-            <div className="etfpro-change-section">
-              <div className="etfpro-change-header add">Added</div>
-              <div className="etfpro-change-list">
-                {added.map(t => <div key={t} className="etfpro-change-ticker add">{t}</div>)}
-              </div>
-            </div>
-          )}
-          {removed.length > 0 && (
-            <div className="etfpro-change-section">
-              <div className="etfpro-change-header remove">Removed</div>
-              <div className="etfpro-change-list">
-                {removed.map(t => <div key={t} className="etfpro-change-ticker remove">{t}</div>)}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       <div className={isExpanded ? 'etfpro-pane-scroll expanded' : 'etfpro-pane-scroll'}>
         <table className="etfpro-table">
           <thead>
@@ -130,7 +145,9 @@ function EtfProTable({ title, titleClass, rows, isExpanded, toggleSort, added, r
                   <td className="right mono">{Number.isFinite(r.daysHeld) ? r.daysHeld : '--'}</td>
                   {isExpanded && (
                     <>
-                      <td className="wrap" title={r.etf}>{r.etf || '--'}</td>
+                      <td className="wrap" title={r.etf}>
+                        {r.etf || '--'}
+                      </td>
                       <td className="wrap">{r.assetClass || '--'}</td>
                       <td className="right mono">{formatSignedPercent(r.absolutePerformance)}</td>
                       <td className="right mono">{formatSignedPercent(r.sp500)}</td>
@@ -157,58 +174,47 @@ function EtfProTable({ title, titleClass, rows, isExpanded, toggleSort, added, r
 }
 
 const EMPTY_CHANGES = {
-  addedLongs: [], removedLongs: [], addedShorts: [], removedShorts: [], previousDate: null,
+  addedLongs: [],
+  removedLongs: [],
+  addedShorts: [],
+  removedShorts: [],
+  previousDate: null
 };
-
-function isFreshForToday(snapshotDate) {
-  if (!snapshotDate) return false;
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return snapshotDate === `${yyyy}-${mm}-${dd}`;
-}
 
 const EtfProCard = ({ isExpanded = false, onFreshness }) => {
   const [rows, setRows] = useState([]);
-  const [meta, setMeta] = useState(null);
   const [changes, setChanges] = useState(EMPTY_CHANGES);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState({ key: 'relativePerformance', dir: 'desc' });
 
-  useEffect(() => {
-    let isMounted = true;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const snapshot = await MarketDataService.getHedgeyeEtfPro();
-        if (!isMounted) return;
-        setRows(Array.isArray(snapshot?.rows) ? snapshot.rows : []);
-        setMeta(snapshot?.meta ?? null);
-        setChanges(snapshot?.changes ?? EMPTY_CHANGES);
-        if (onFreshness) onFreshness(isFreshForToday(snapshot?.meta?.snapshotDate));
-      } catch (e) {
-        if (!isMounted) return;
-        const msg =
-          e?.response?.data?.error ||
-          e?.message ||
-          'Failed to load ETF Pro snapshot. Run: npm run collect:etfpro';
-        setError(msg);
-        setRows([]);
-        setMeta(null);
-        setChanges(EMPTY_CHANGES);
-        if (onFreshness) onFreshness(false);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      isMounted = false;
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const snapshot = await MarketDataService.getHedgeyeEtfPro();
+      setRows(Array.isArray(snapshot?.rows) ? snapshot.rows : []);
+      setChanges(
+        snapshot?.changes && typeof snapshot.changes === 'object' ? { ...EMPTY_CHANGES, ...snapshot.changes } : EMPTY_CHANGES
+      );
+      if (onFreshness) onFreshness(isFreshForToday(snapshot?.meta?.snapshotDate));
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error ||
+        e?.message ||
+        'Failed to load ETF Pro. Run npm run collect:etfpro to sync from the ETF Pro folder.';
+      setError(msg);
+      setRows([]);
+      setChanges(EMPTY_CHANGES);
+      if (onFreshness) onFreshness(false);
+    } finally {
+      setLoading(false);
+    }
   }, [onFreshness]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const { longRows, shortRows } = useMemo(() => {
     const longs = [];
@@ -222,7 +228,7 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
     }
     return {
       longRows: sortRows(longs, sort),
-      shortRows: sortRows(shorts, sort),
+      shortRows: sortRows(shorts, sort)
     };
   }, [rows, sort]);
 
@@ -241,28 +247,33 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
         <div className="etfpro-empty">Loading ETF Pro…</div>
       ) : rows.length === 0 ? (
         <div className="etfpro-empty">
-          No ETF Pro snapshot found yet. Run: <span className="mono">npm run collect:etfpro</span>
+          No ETF Pro data yet. Run <span className="mono">npm run collect:etfpro</span> to pull the
+          latest workbook from the ETF Pro folder.
         </div>
       ) : (
-        <div className="etfpro-split">
-          <EtfProTable
-            title="Longs"
-            titleClass="long"
-            rows={longRows}
-            isExpanded={isExpanded}
-            toggleSort={toggleSort}
-            added={changes.addedLongs || []}
-            removed={changes.removedLongs || []}
-          />
-          <EtfProTable
-            title="Shorts"
-            titleClass="short"
-            rows={shortRows}
-            isExpanded={isExpanded}
-            toggleSort={toggleSort}
-            added={changes.addedShorts || []}
-            removed={changes.removedShorts || []}
-          />
+        <div className="etfpro-split-stack">
+          <div className="etfpro-columns">
+            <div className="etfpro-column etfpro-column-long">
+              <EtfProPaneTitle title="Longs" count={longRows.length} />
+              <EtfProColumnChanges added={changes.addedLongs} removed={changes.removedLongs} />
+              <EtfProTable
+                rows={longRows}
+                isExpanded={isExpanded}
+                toggleSort={toggleSort}
+                newlyAdded={changes.addedLongs}
+              />
+            </div>
+            <div className="etfpro-column etfpro-column-short">
+              <EtfProPaneTitle title="Shorts" count={shortRows.length} />
+              <EtfProColumnChanges added={changes.addedShorts} removed={changes.removedShorts} />
+              <EtfProTable
+                rows={shortRows}
+                isExpanded={isExpanded}
+                toggleSort={toggleSort}
+                newlyAdded={changes.addedShorts}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -270,4 +281,3 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
 };
 
 export default EtfProCard;
-

@@ -6,6 +6,7 @@ const dynamodb = new AWS.DynamoDB.DocumentClient();
 
 const PERFORMANCE_TABLE = 'PerformanceHistory';
 const POSITION_PERFORMANCE_TABLE = 'PositionPerformance';
+const REALIZED_GAIN_LOSS_TABLE = process.env.REALIZED_GAIN_LOSS_TABLE || 'RealizedGainLoss';
 
 // Helper: Scan table with simple sort
 async function getPerformanceHistory(startDateStr) {
@@ -271,6 +272,88 @@ router.get('/statement/:date', async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+function periodToStartDate(period) {
+    const now = new Date();
+    const y = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d; };
+    if (period === '30d') return y(30);
+    if (period === '90d') return y(90);
+    if (period === '1y') {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() - 1);
+        return d;
+    }
+    if (period === 'ytd') {
+        return new Date(now.getFullYear(), 0, 1);
+    }
+    return new Date(2000, 0, 1);
+}
+
+async function scanAllRealizedLots() {
+    const items = [];
+    let startKey;
+    do {
+        const data = await dynamodb
+            .scan({
+                TableName: REALIZED_GAIN_LOSS_TABLE,
+                ExclusiveStartKey: startKey,
+            })
+            .promise();
+        if (data.Items && data.Items.length) items.push(...data.Items);
+        startKey = data.LastEvaluatedKey;
+    } while (startKey);
+    return items;
+}
+
+// GET /api/performance/realized-gain-loss?period=all|ytd|1y|90d|30d&symbol=
+router.get('/realized-gain-loss', async (req, res) => {
+    try {
+        const period = req.query.period || 'all';
+        const symbolQ = (req.query.symbol || '').trim().toUpperCase();
+
+        const end = new Date();
+        const endStr = end.toISOString().split('T')[0];
+        const start = periodToStartDate(period);
+        const startStr = start.toISOString().split('T')[0];
+
+        let items = await scanAllRealizedLots();
+        items = items.filter((it) => {
+            const d = it.closedDate;
+            if (!d) return false;
+            return d >= startStr && d <= endStr;
+        });
+        if (symbolQ) {
+            items = items.filter((it) => (it.symbol || '').toUpperCase().includes(symbolQ));
+        }
+        items.sort((a, b) => (a.closedDate || '').localeCompare(b.closedDate || ''));
+
+        const lots = items.map((it) => ({
+            lotId: it.lotId,
+            symbol: it.symbol,
+            name: it.name,
+            closedDate: it.closedDate,
+            openedDate: it.openedDate,
+            quantity: parseFloat(it.quantity) || 0,
+            proceeds: parseFloat(it.proceeds) || 0,
+            costBasis: parseFloat(it.costBasis) || 0,
+            gainLossDollar: parseFloat(it.gainLossDollar) || 0,
+            gainLossPercent: parseFloat(it.gainLossPercent) || 0,
+            term: it.term,
+            washSale: it.washSale,
+        }));
+
+        res.json({
+            lots,
+            count: lots.length,
+            startDate: startStr,
+            endDate: endStr,
+            period,
+        });
+    } catch (err) {
+        console.error('realized-gain-loss', err);
+        res.status(500).json({ error: err.message || 'Failed to fetch realized gain/loss' });
     }
 });
 
