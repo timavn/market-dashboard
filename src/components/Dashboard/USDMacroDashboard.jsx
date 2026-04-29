@@ -109,7 +109,11 @@ const getMsUntilNextNewYorkMidnight = () => {
   return Math.max(1000, oneDayMs - elapsedMs + 1000);
 };
 
-const USDMacroDashboard = () => {
+const USDMacroDashboard = ({
+  multiRegionMarketData = {},
+  multiRegionLoading = true,
+  multiRegionError = null
+}) => {
   const initialMarketDays = getRecentMarketDays(5);
   const [data, setData] = useState({
     dxy: null,
@@ -345,7 +349,11 @@ const USDMacroDashboard = () => {
       {/* Banner with Title and Metric Bar */}
       <div className="relative rounded-lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <MultiRegionMarketOverview />
+          <MultiRegionMarketOverview
+            marketData={multiRegionMarketData}
+            loading={multiRegionLoading}
+            error={multiRegionError}
+          />
         </div>
       </div>
 

@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Card, Metric, Text, Grid, Title, Button, Badge } from '@tremor/react';
 import ReactMarkdown from 'react-markdown';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
 import CSVUpload from '../CSVUpload';
 import USDMacroDashboard from './USDMacroDashboard';
+import { CurrenciesCompactRail } from './MultiRegionMarketOverview';
 import SecuritiesList from './SecuritiesList';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { bookContent } from '../../constants/bookContent';
@@ -41,6 +42,29 @@ const PortfolioDashboard = () => {
   const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
   const [performanceImageError, setPerformanceImageError] = useState(false);
   const [portfolioBreakdownImageError, setPortfolioBreakdownImageError] = useState(false);
+
+  const [multiRegionMarketData, setMultiRegionMarketData] = useState({});
+  const [multiRegionLoading, setMultiRegionLoading] = useState(true);
+  const [multiRegionError, setMultiRegionError] = useState(null);
+
+  const fetchMultiRegionQuotes = useCallback(async () => {
+    try {
+      const data = await MarketDataService.getMultiRegionQuotes(null, false, true);
+      setMultiRegionMarketData(data);
+      setMultiRegionLoading(false);
+      setMultiRegionError(null);
+    } catch (err) {
+      console.error('Failed to fetch multi-region quotes:', err);
+      setMultiRegionError(err.message);
+      setMultiRegionLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMultiRegionQuotes();
+    const interval = setInterval(fetchMultiRegionQuotes, 30000);
+    return () => clearInterval(interval);
+  }, [fetchMultiRegionQuotes]);
 
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
@@ -581,12 +605,20 @@ const PortfolioDashboard = () => {
             zIndex: showPortfolioMetrics ? (signalStrengthExpanded ? 1200 : 100) : 'auto',
             overflow: 'visible', // Allow card to expand beyond container
             transition: 'all 0.3s ease-in-out',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
           }}
         >
           <SecuritiesList
             isPortfolioOpen={showPortfolioMetrics}
             isExpanded={signalStrengthExpanded}
             onExpandToggle={() => setSignalStrengthExpanded(!signalStrengthExpanded)}
+          />
+          <CurrenciesCompactRail
+            data={multiRegionMarketData.currencies}
+            loading={multiRegionLoading}
+            layout="sidebar"
           />
         </div>
 
@@ -600,7 +632,11 @@ const PortfolioDashboard = () => {
             transition: 'all 0.3s ease-in-out',
           }}
         >
-          <USDMacroDashboard />
+          <USDMacroDashboard
+            multiRegionMarketData={multiRegionMarketData}
+            multiRegionLoading={multiRegionLoading}
+            multiRegionError={multiRegionError}
+          />
         </div>
 
         {/* Right Sidebar - Portfolio Metrics (removed from grid, now in vertical bar) */}
@@ -1852,7 +1888,7 @@ const PortfolioDashboard = () => {
         )}
       </div>
 
-      {/* Performance Tracking Panel */}
+      {/* Securities A–Z list panel */}
       <div
         style={{
           position: 'fixed',
@@ -1907,7 +1943,7 @@ const PortfolioDashboard = () => {
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
               >
-                Performance Tracking
+                Performance
               </Title>
             </div>
             <div

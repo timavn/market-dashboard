@@ -2,10 +2,18 @@
 import axios from 'axios';
 import { ENDPOINTS } from '../../constants/apiEndpoints';
 
-// Use same backend URL pattern as marketDataService
-const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+// Prefer CRA proxy: relative /api on localhost:3000 → package.json proxy → backend.
+// Set REACT_APP_BACKEND_URL for custom hosts. Otherwise :3001 direct (and restart server after route changes).
+function getApiBase() {
+  if (process.env.REACT_APP_BACKEND_URL) return process.env.REACT_APP_BACKEND_URL;
+  if (typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1):3000$/.test(window.location.host)) {
+    return '';
+  }
+  return 'http://localhost:3001';
+}
+
 const apiClient = axios.create({
-  baseURL: backendUrl,
+  baseURL: getApiBase(),
   timeout: 60000,
   headers: {
     'Content-Type': 'application/json',
@@ -140,14 +148,15 @@ class PerformanceService {
   }
 
   /**
-   * Realized gain/loss lot details for bubble chart
-   * @param {string} period - 'all' | 'ytd' | '1y' | '90d' | '30d'
-   * @param {string} symbol - optional ticker filter
+   * Realized gain/loss lots (Schwab Lot Details) for bubble chart / performance
+   * @param {{ period?: string, symbol?: string }} opts - period: ytd|30d|90d|1y|all; optional server-side symbol filter
+   * @returns {Promise<{ lots: Array, count: number, startDate: string, endDate: string, period: string }>}
    */
-  static async getRealizedGainLoss(period = 'all', symbol = '') {
+  static async getRealizedGainLoss(opts = {}) {
+    const { period = 'ytd', symbol } = opts;
     try {
       const params = { period };
-      if (symbol && symbol.trim()) params.symbol = symbol.trim();
+      if (symbol && String(symbol).trim()) params.symbol = String(symbol).trim();
       const response = await apiClient.get(ENDPOINTS.PERFORMANCE_REALIZED_GAIN_LOSS, { params });
       return response.data;
     } catch (error) {

@@ -20,7 +20,6 @@ import { getVolatilityMetrics } from '../../constants/securityCategoryMapping';
 import { METRIC_DEFINITIONS } from '../../constants/metricDefinitions';
 import MetricDefinitionPopover from '../common/MetricDefinitionPopover';
 import {
-  AlignLeft,
   FileText,
   Activity,
   BarChart3,
@@ -77,49 +76,6 @@ const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
           }}
         >
           {date}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Security name component with truncation and hover tooltip
-const TruncatedSecurityName = ({ name, maxLength = 20 }) => {
-  const [showTooltip, setShowTooltip] = useState(false);
-  const isTruncated = name && name.length > maxLength;
-  const displayName = isTruncated ? `${name.substring(0, maxLength)}...` : name;
-
-  return (
-    <div
-      style={{
-        position: 'relative',
-        maxWidth: '160px',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap'
-      }}
-      onMouseEnter={() => setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-    >
-      {displayName}
-      {showTooltip && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '100%',
-            left: '0',
-            backgroundColor: '#1f2937',
-            color: '#fff',
-            padding: '4px 8px',
-            borderRadius: '4px',
-            fontSize: '10px',
-            whiteSpace: 'nowrap',
-            zIndex: 1000,
-            marginBottom: '4px',
-            pointerEvents: 'none'
-          }}
-        >
-          {name}
         </div>
       )}
     </div>
@@ -426,13 +382,15 @@ const SecuritiesUniverse = () => {
 
   // Sort securities (supports multiple column sorting)
   const sortedSecurities = useMemo(() => {
-    if (sortConfig.length === 0) {
+    // ATR is not user-sortable; ignore if present (legacy or stray state)
+    const effectiveSortConfig = sortConfig.filter(s => s.key !== 'atr');
+    if (effectiveSortConfig.length === 0) {
       return filteredSecurities;
     }
 
     const sorted = [...filteredSecurities].sort((a, b) => {
       // Apply each sort in order
-      for (const sort of sortConfig) {
+      for (const sort of effectiveSortConfig) {
         let aValue = a[sort.key];
         let bValue = b[sort.key];
 
@@ -468,8 +426,9 @@ const SecuritiesUniverse = () => {
         if (aValue === null || aValue === undefined) aValue = '';
         if (bValue === null || bValue === undefined) bValue = '';
 
-        // Convert to comparable types
-        if (typeof aValue === 'string') {
+        // String compare (case-insensitive) only when both are strings; never call
+        // toLowerCase on numbers — e.g. null ATR -> '' while peer row has a number
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
           aValue = aValue.toLowerCase();
           bValue = bValue.toLowerCase();
         }
@@ -492,6 +451,7 @@ const SecuritiesUniverse = () => {
 
   // Handle column sort (toggle on/off, supports multiple columns)
   const handleSort = (key) => {
+    if (key === 'atr') return;
     setSortConfig(prev => {
       const existingIndex = prev.findIndex(s => s.key === key);
 
@@ -743,12 +703,29 @@ const SecuritiesUniverse = () => {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px' }}>
-        {/* ATH Row */}
+        {/* ATH Row — above current day (t) column; plain "ATH: value" text only */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-          <span style={{ width: '28px', color: '#6b7280', fontWeight: 500, fontSize: '8px' }}>ATH</span>
-          <span style={{ fontWeight: 600, color: '#3b82f6', fontSize: '8px' }}>
-            {ath > 0 ? ath.toFixed(2) : '--'}
-          </span>
+          <span style={{ width: '28px' }} />
+          <div style={{ display: 'flex' }}>
+            {dayLabels.map((_, index) => (
+              <div
+                key={`ath-${index}`}
+                style={{
+                  width: index === lastIndex ? lastCellWidth : cellWidth,
+                  textAlign: 'center',
+                  borderRight: index < lastIndex ? '1px solid #d6d0c3' : 'none',
+                  padding: '0 2px',
+                  fontSize: '8px',
+                  color: '#6b7280',
+                  lineHeight: 1.2
+                }}
+              >
+                {index === lastIndex
+                  ? `ATH: ${ath > 0 ? ath.toFixed(2) : '--'}`
+                  : null}
+              </div>
+            ))}
+          </div>
         </div>
         {/* Day Labels Row (date + t label stacked) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
@@ -1036,43 +1013,67 @@ const SecuritiesUniverse = () => {
             <thead className="bg-[#f3f0e6] text-slate-800">
               <tr style={{ borderTop: '1px solid #c9c3b6', borderBottom: '1px solid #c9c3b6' }}>
                 {[
-                  { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'center', width: '45px' },
-                  { key: 'name', label: 'Name', icon: <AlignLeft size={14} className="text-blue-500" />, align: 'center', width: '75px' },
-                  {
-                    key: 'assetClass', label: 'Asset Class', icon: (
-                      <svg width="14" height="14" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M12 2 L12 12 L22 12" />
-                      </svg>
-                    ), align: 'center', width: '55px'
-                  },
-                  { key: 'sector', label: 'Sector', icon: <LayoutGrid size={14} className="text-blue-500" />, align: 'center', width: '68px' },
-                  { key: 'factorExposure', label: 'Factor Exposure', icon: <SlidersHorizontal size={14} className="text-blue-500" />, align: 'center', width: '60px' },
+                  { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '17px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'center', width: '45px' },
                   {
                     key: 'bias', label: 'Bias', icon: (
-                      <svg width="14" height="14" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="17" height="17" viewBox="0 0 24 24" className="text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M7 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h2" />
                         <line x1="12" y1="4" x2="12" y2="20" />
                         <path d="M17 4h2c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2h-2" />
                       </svg>
                     ), align: 'center', infoParams: 'trend', width: '60px'
                   },
-                  { key: 'riskRangeHistory', label: 'Risk Range', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">RR</div>, align: 'center', infoParams: 'riskRange', width: '400px' },
-                  { key: 'ivolPrem', label: 'IVOL Prem', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolPrem', width: '65px' },
-                  { key: 'ttmZScore', label: 'TTM Z-Score', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'ttmZScore', width: '55px' },
-                  { key: 'ivolZScore', label: 'IVOL High', icon: <Percent size={18} className="text-blue-500" />, align: 'center', infoParams: 'ivolZScore', width: '60px' },
-                  { key: 'zScore', label: 'Z-Score', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'zScore', width: '50px' },
-                  { key: 'beta', label: 'Beta', icon: <div style={{ height: '18px', width: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">β</div>, align: 'center', infoParams: 'beta', width: '40px' },
+                  { key: 'riskRangeHistory', label: 'Risk Range', icon: <div style={{ height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', fontWeight: 600 }} className="text-blue-500">RR</div>, align: 'center', infoParams: 'riskRange', width: '400px' },
+                  { key: 'ivolPrem', label: 'IVOL Prem', icon: <Percent size={22} className="text-blue-500" />, align: 'center', infoParams: 'ivolPrem', width: '65px' },
+                  { key: 'ttmZScore', label: 'TTM Z-Score', icon: <div style={{ height: '22px', width: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'ttmZScore', width: '55px' },
+                  { key: 'ivolZScore', label: 'IVOL High', icon: <Percent size={22} className="text-blue-500" />, align: 'center', infoParams: 'ivolZScore', width: '60px' },
+                  { key: 'zScore', label: 'Z-Score', icon: <div style={{ height: '22px', width: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', fontWeight: 600 }} className="text-blue-500">Z</div>, align: 'center', infoParams: 'zScore', width: '50px' },
+                  { key: 'beta', label: 'Beta', icon: <div style={{ height: '22px', width: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', fontWeight: 600 }} className="text-blue-500">β</div>, align: 'center', infoParams: 'beta', width: '40px' },
 
-                  { key: 'quadRanking', label: 'Quad', icon: <LayoutGrid size={18} className="text-blue-500" />, align: 'center', infoParams: 'quad', width: '50px' },
-                  { key: 'priceChanges', label: 'Price Change', icon: <DollarSign size={18} className="text-blue-500" />, align: 'center', width: '80px' },
-                  { key: 'atr', label: 'ATR', icon: <div style={{ height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600 }} className="text-blue-500">ATR</div>, align: 'center', infoParams: 'atr', width: '70px' },
-                  { key: 'signal', label: 'Sig', icon: <Activity size={18} className="text-blue-500" />, align: 'center', width: '50px' }
-                ].map((col, index, arr) => (
+                  { key: 'quadRanking', label: 'Quad', icon: <LayoutGrid size={22} className="text-blue-500" />, align: 'center', infoParams: 'quad', width: '50px' },
+                  { key: 'priceChanges', label: 'Price Change', icon: <DollarSign size={22} className="text-blue-500" />, align: 'center', width: '80px' },
+                  {
+                    key: 'atr',
+                    label: 'ATR',
+                    icon: (
+                      <svg width="29" height="29" viewBox="0 0 100 100" aria-hidden style={{ display: 'block' }}>
+                        <title>ATR (stop sign)</title>
+                        <polygon
+                          points="30,5 70,5 95,30 95,70 70,95 30,95 5,70 5,30"
+                          fill="#c81e1e"
+                          stroke="#7f1d1d"
+                          strokeWidth="3"
+                          strokeLinejoin="miter"
+                        />
+                        <text
+                          x="50"
+                          y="51"
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          fill="#ffffff"
+                          fontSize="26"
+                          fontWeight="800"
+                          fontFamily="system-ui, -apple-system, Impact, 'Arial Black', sans-serif"
+                          letterSpacing="-0.06em"
+                          style={{ userSelect: 'none' }}
+                        >
+                          STOP
+                        </text>
+                      </svg>
+                    ),
+                    align: 'center',
+                    infoParams: 'atr',
+                    width: '70px',
+                    sortable: false
+                  },
+                  { key: 'signal', label: 'Sig', icon: <Activity size={22} className="text-blue-500" />, align: 'center', width: '50px' }
+                ].map((col, index, arr) => {
+                  const isSortable = col.sortable !== false;
+                  return (
                   <th
                     key={col.key}
                     style={{
-                      padding: '2px 3px',
+                      padding: '3px 3px 4px',
                       textAlign: col.align,
                       verticalAlign: 'middle',
                       background: '#f3f0e6',
@@ -1088,59 +1089,110 @@ const SecuritiesUniverse = () => {
                       zIndex: 10,
                       boxShadow: 'inset 0 -1px 0 #c9c3b6'
                     }}
-                    className="group hover:bg-[#efe9dc] transition-colors"
-                    onClick={() => handleSort(col.key)}
+                    className={isSortable ? 'group hover:bg-[#efe9dc] transition-colors' : 'transition-colors'}
+                    onClick={isSortable ? () => handleSort(col.key) : undefined}
+                    aria-sort={!isSortable ? 'none' : undefined}
                   >
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px', cursor: 'pointer' }}>
-                      <span
-                        onClick={(e) => {
-                          if (col.infoParams) {
-                            e.stopPropagation();
-                            handleMetricDefinitionClick(e, col.infoParams);
-                          }
-                        }}
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'stretch',
+                        gap: 0,
+                        cursor: isSortable ? 'pointer' : 'default',
+                        width: '100%'
+                      }}
+                    >
+                      {/* 2px below labels (match filter tag gap-0.5). Column + flex-end = bottom of band, not right-aligned. */}
+                      <div
                         style={{
-                          fontSize: '9px',
-                          color: '#000000',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          lineHeight: 1.2,
-                          cursor: col.infoParams ? 'pointer' : 'default',
-                          borderBottom: col.infoParams ? '1px dotted #94a3b8' : 'none'
+                          minHeight: '24px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'flex-end',
+                          alignItems: 'center',
+                          textAlign: 'center',
+                          padding: '0 1px',
+                          lineHeight: 1.12,
+                          marginBottom: '2px',
+                          width: '100%'
                         }}
-                        className={col.infoParams ? "hover:text-blue-600 transition-colors" : ""}
                       >
-                        {col.label}
-                      </span>
-                      <div style={{ display: 'flex', justifyContent: 'center', color: '#1e40af' }}>{col.icon}</div>
-                      <div style={{ display: 'flex', justifyContent: 'center' }}>
-                        {(() => {
+                        <span
+                          onClick={(e) => {
+                            if (col.infoParams) {
+                              e.stopPropagation();
+                              handleMetricDefinitionClick(e, col.infoParams);
+                            }
+                          }}
+                          style={{
+                            fontSize: '9px',
+                            color: '#000000',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                            lineHeight: 1.12,
+                            cursor: col.infoParams ? 'pointer' : 'default',
+                            display: 'block',
+                            width: '100%',
+                            maxWidth: '100%'
+                          }}
+                          className={col.infoParams ? "hover:text-blue-600 transition-colors" : ""}
+                        >
+                          {col.label}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          minHeight: '31px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#1e40af',
+                          width: '100%',
+                          marginBottom: '1px'
+                        }}
+                      >
+                        {col.icon}
+                      </div>
+                      <div
+                        style={{
+                          minHeight: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '100%'
+                        }}
+                      >
+                        {isSortable ? (() => {
                           const sortInfo = getSortInfo(col.key);
                           if (sortInfo) {
                             return (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '1px', color: '#2563eb', fontWeight: 700, fontSize: '9px' }}>
                                 <span>{sortInfo.order}</span>
-                                {sortInfo.direction === 'asc' ? <ArrowUp size={10} strokeWidth={3} /> : <ArrowDown size={10} strokeWidth={3} />}
+                                {sortInfo.direction === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />}
                               </div>
                             );
                           }
                           return (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#cbd5e1' }}>
-                              <ArrowUp size={8} strokeWidth={2.5} />
-                              <ArrowDown size={8} strokeWidth={2.5} />
+                              <ArrowUp size={10} strokeWidth={2.5} />
+                              <ArrowDown size={10} strokeWidth={2.5} />
                             </div>
                           );
-                        })()}
+                        })() : (
+                          <div style={{ minHeight: '12px' }} aria-hidden="true" />
+                        )}
                       </div>
                     </div>
                   </th>
-                ))}
+                );
+                })}
               </tr>
             </thead>
             <tbody>
               {sortedSecurities.length === 0 ? (
                 <tr>
-                  <td colSpan="16" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
+                  <td colSpan="12" style={{ padding: '40px', textAlign: 'center' }} className="dark:text-gray-400">
                     {searchQuery
                       ? `No securities found matching "${searchQuery}"`
                       : 'No securities available'}
@@ -1164,20 +1216,6 @@ const SecuritiesUniverse = () => {
                     >
                       <td style={{ padding: '2px 3px', fontWeight: '600', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-white">
                         {security.ticker}
-                      </td>
-                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <TruncatedSecurityName name={security.name} maxLength={14} />
-                        </div>
-                      </td>
-                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
-                        {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
-                      </td>
-                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
-                        {security.sector || 'N/A'}
-                      </td>
-                      <td style={{ padding: '2px 3px', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-gray-300">
-                        {security.factorExposure}
                       </td>
                       <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
                         <span style={{

@@ -1,4 +1,3 @@
-/* Realized G/L scatter — matches dashboard cream + chart readability */
 .performance-tracking-wrap {
   min-height: 0;
   flex: 1;
@@ -6,19 +5,14 @@
   flex-direction: column;
 }
 
-.performance-chart-card {
-  flex: 1;
-  min-height: 360px;
-  display: flex;
-  flex-direction: column;
+.performance-universe-row {
+  font-family: inherit;
 }
 
-.performance-chart-container {
-  flex: 1;
+.realized-gl-chart-wrap {
   min-height: 320px;
-  width: 100%;
 }
 
-.recharts-surface {
-  overflow: visible;
+.realized-gl-chart-card .recharts-cartesian-axis-tick-value {
+  font-size: 10px;
 }

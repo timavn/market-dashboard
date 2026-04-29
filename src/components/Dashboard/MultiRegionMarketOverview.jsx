@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { MarketDataService } from '../../services/api/marketDataService';
 import { USDMarketService } from '../../services/api/usdMarketService';
 import MarketVolumeTable from './MarketVolumeTable';
 import { VolatilityTableWithTabs } from './VolatilityTable';
@@ -202,7 +201,7 @@ const MAIN_MARKET_REGIONS = {
   }
 };
 
-// Currencies configuration (for mini cards in secondary section)
+// Currencies configuration (shared by regional rail panel)
 const CURRENCIES_CONFIG = {
   label: 'Currencies',
   tradingHours: 'Sun 5PM - Fri 5PM EST',
@@ -221,6 +220,167 @@ const CURRENCIES_CONFIG = {
     { symbol: 'EURGBP', name: 'EUR/GBP' }
   ]
 };
+
+// Compact Currencies panel: regional header + slim MTD/QTD/YTD table (sidebar or legacy rail layout)
+export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
+  const [currenciesStatus, setCurrenciesStatus] = React.useState('closed');
+  React.useEffect(() => {
+    const update = () => setCurrenciesStatus(getMarketStatus('Currencies'));
+    update();
+    const interval = setInterval(update, 60000);
+    return () => clearInterval(interval);
+  }, []);
+  const currStatus = currenciesStatus === 'open'
+    ? { emoji: '🟢', title: 'Market open' }
+    : { emoji: '🔴', title: 'Market closed' };
+
+  const currenciesLastUpdated = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const timestamps = data
+      .map((q) => q?.timestamp || q?.lastUpdated)
+      .filter(Boolean);
+    return getMinTimestamp(timestamps);
+  }, [data]);
+
+  const currencySources = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return [];
+    const interval = SOURCE_POLL_INTERVALS.currenciesQuotes || SOURCE_POLL_INTERVALS.multiRegionQuotes;
+    return CURRENCIES_CONFIG.indices
+      .map((idx) => {
+        const idxQuote = data.find((d) => d.symbol === idx.symbol);
+        const ts = idxQuote?.lastUpdated || idxQuote?.timestamp;
+        if (!ts) return null;
+        return {
+          id: idx.symbol,
+          label: `${idx.name} (${idx.symbol})`,
+          updatedAt: ts,
+          status: getSourceFreshness(ts, interval)
+        };
+      })
+      .filter(Boolean);
+  }, [data]);
+
+  const pctHeatFxDay = (val) => {
+    const numeric = Number(String(val ?? '').replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
+    const intensity = Math.min(Math.abs(numeric) / 2, 1);
+    return {
+      className: `region-mw-heat--${numeric >= 0 ? 'pos' : 'neg'}`,
+      style: { '--heat': intensity }
+    };
+  };
+
+  const formatPctDisplay = (val) => {
+    if (val == null || val === '' || val === '--') return '--';
+    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+    if (Number.isNaN(num)) return '--';
+    return `${num}%`;
+  };
+
+  const tableRef = React.useRef(null);
+  useAutoFitTable(tableRef, [data, loading]);
+
+  return (
+    <div
+      className={`region-chart-panel region-chart-panel--mw currencies-compact-rail${layout === 'sidebar' ? ' currencies-compact-rail--in-sidebar' : ''}`}
+    >
+      <div className="region-chart-header region-chart-header--mw">
+        <div className="region-header-left">
+          <StatusDot
+            updatedAt={currenciesLastUpdated}
+            status={currenciesStatus === 'open' ? 'active' : 'inactive'}
+            size={10}
+            className="mr-1"
+            label="Currencies"
+            emoji={currStatus.emoji}
+            sources={currencySources}
+          />
+          <span className="region-label">Currencies</span>
+        </div>
+      </div>
+      <div className="region-mw-body currencies-compact-rail__body">
+        <div className="region-mw-table-wrap currencies-rail-table-wrap">
+          <table ref={tableRef} className="region-mw-quotes-table currencies-mw-table currencies-rail-table">
+            <thead>
+              <tr>
+                <th className="region-mw-th region-mw-th-name" scope="col">
+                  Ticker
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
+                  Price
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  1D %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  MTD %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  QTD %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  YTD %
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {CURRENCIES_CONFIG.indices.map((index) => {
+                const quote = data?.find((d) => d.symbol === index.symbol);
+                const price = loading ? '…' : (quote?.price != null ? String(quote.price) : '—');
+                const changePercent = quote?.changePercent;
+                const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
+                const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
+                const hasChange = Number.isFinite(parsedChange);
+                const heat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatFxDay(changePercent);
+
+                const mtdRaw = quote?.mtdChangePct;
+                const qtdRaw = quote?.qtdChangePct;
+                const ytdRaw = quote?.ytdChangePct;
+                const mtdNum = mtdRaw == null || mtdRaw === '' ? NaN : Number(mtdRaw);
+                const qtdNum = qtdRaw == null || qtdRaw === '' ? NaN : Number(qtdRaw);
+                const ytdNum = ytdRaw == null || ytdRaw === '' ? NaN : Number(ytdRaw);
+                const mtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(mtdNum);
+                const qtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(qtdNum);
+                const ytdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(ytdNum);
+
+                return (
+                  <tr key={index.symbol} className="region-mw-tr">
+                    <td className="region-mw-td region-mw-td-name">{index.name}</td>
+                    <td className="region-mw-td region-mw-td-num region-mw-td-price">{price}</td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}
+                      style={heat.style}
+                    >
+                      {loading ? '…' : formatPctDisplay(changePercent)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${mtdHeat.className}`}
+                      style={mtdHeat.style}
+                    >
+                      {loading ? '…' : formatPeriodPct(mtdRaw)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${qtdHeat.className}`}
+                      style={mtdHeat.style}
+                    >
+                      {loading ? '…' : formatPeriodPct(qtdRaw)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
+                      style={ytdHeat.style}
+                    >
+                      {loading ? '…' : formatPeriodPct(ytdRaw)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // VolumeCard - standalone card (styled like region panels)
 function VolumeCard() {
@@ -761,168 +921,8 @@ function RatesCard({ data, loading }) {
   );
 }
 
-// CurrenciesPanel component - table with Ticker, Price, 1-Day % Chg, MTD/QTD/YTD % Chg
-function CurrenciesPanel({ data, loading }) {
-  const [currenciesStatus, setCurrenciesStatus] = React.useState('closed');
-  React.useEffect(() => {
-    const update = () => setCurrenciesStatus(getMarketStatus('Currencies'));
-    update();
-    const interval = setInterval(update, 60000);
-    return () => clearInterval(interval);
-  }, []);
-  const currStatus = currenciesStatus === 'open'
-    ? { emoji: '🟢', title: 'Market open' }
-    : { emoji: '🔴', title: 'Market closed' };
-
-  const currenciesLastUpdated = React.useMemo(() => {
-    if (!Array.isArray(data) || data.length === 0) return null;
-    const timestamps = data
-      .map((q) => q?.timestamp || q?.lastUpdated)
-      .filter(Boolean);
-    return getMinTimestamp(timestamps);
-  }, [data]);
-
-  const currencySources = React.useMemo(() => {
-    if (!Array.isArray(data) || data.length === 0) return [];
-    const interval = SOURCE_POLL_INTERVALS.currenciesQuotes || SOURCE_POLL_INTERVALS.multiRegionQuotes;
-    return CURRENCIES_CONFIG.indices
-      .map((idx) => {
-        const idxQuote = data.find(d => d.symbol === idx.symbol);
-        const ts = idxQuote?.lastUpdated || idxQuote?.timestamp;
-        if (!ts) return null;
-        return {
-          id: idx.symbol,
-          label: `${idx.name} (${idx.symbol})`,
-          updatedAt: ts,
-          status: getSourceFreshness(ts, interval)
-        };
-      })
-      .filter(Boolean);
-  }, [data]);
-
-  const pctHeat = (val) => {
-    const numeric = Number(String(val ?? '').replace(/[^0-9.-]/g, ''));
-    if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
-    // FX day moves are typically small; cap at 2% for readable tint scaling.
-    const intensity = Math.min(Math.abs(numeric) / 2, 1);
-    return {
-      className: `region-mw-heat--${numeric >= 0 ? 'pos' : 'neg'}`,
-      style: { '--heat': intensity }
-    };
-  };
-
-  const formatPct = (val) => {
-    if (val == null || val === '' || val === '--') return '--';
-    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
-    if (Number.isNaN(num)) return '--';
-    return `${num}%`;
-  };
-
-  return (
-    <div className="region-chart-panel region-chart-panel--mw currencies-panel">
-      <div className="region-chart-header region-chart-header--mw">
-        <div className="region-header-left">
-          <StatusDot
-            updatedAt={currenciesLastUpdated}
-            status={currenciesStatus === 'open' ? 'active' : 'inactive'}
-            size={10}
-            className="mr-1"
-            label="Currencies"
-            emoji={currStatus.emoji}
-            sources={currencySources}
-          />
-          <span className="region-label">Currencies</span>
-        </div>
-      </div>
-      <div className="region-mw-body">
-        <div className="region-mw-table-wrap">
-          <table className="region-mw-quotes-table currencies-mw-table">
-            <thead>
-              <tr>
-                <th className="region-mw-th region-mw-th-name" scope="col">
-                  Ticker
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
-                  Price
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1D %
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  MTD %
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  QTD %
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  YTD %
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {CURRENCIES_CONFIG.indices.map((index) => {
-                const quote = data?.find(d => d.symbol === index.symbol);
-                const price = loading ? '…' : (quote?.price != null ? String(quote.price) : '—');
-                const changePercent = quote?.changePercent;
-                const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
-                const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
-                const hasChange = Number.isFinite(parsedChange);
-                const heat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeat(changePercent);
-
-                const mtdRaw = quote?.mtdChangePct;
-                const qtdRaw = quote?.qtdChangePct;
-                const ytdRaw = quote?.ytdChangePct;
-                const mtdNum = mtdRaw == null || mtdRaw === '' ? NaN : Number(mtdRaw);
-                const qtdNum = qtdRaw == null || qtdRaw === '' ? NaN : Number(qtdRaw);
-                const ytdNum = ytdRaw == null || ytdRaw === '' ? NaN : Number(ytdRaw);
-                const mtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(mtdNum);
-                const qtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(qtdNum);
-                const ytdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(ytdNum);
-
-                return (
-                  <tr key={index.symbol} className="region-mw-tr">
-                    <td className="region-mw-td region-mw-td-name">{index.name}</td>
-                    <td className="region-mw-td region-mw-td-num region-mw-td-price">{price}</td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}
-                      style={heat.style}
-                    >
-                      {loading ? '…' : formatPct(changePercent)}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${mtdHeat.className}`}
-                      style={mtdHeat.style}
-                    >
-                      {loading ? '…' : formatPeriodPct(mtdRaw)}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${qtdHeat.className}`}
-                      style={qtdHeat.style}
-                    >
-                      {loading ? '…' : formatPeriodPct(qtdRaw)}
-                    </td>
-                    <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
-                      style={ytdHeat.style}
-                    >
-                      {loading ? '…' : formatPeriodPct(ytdRaw)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Main MultiRegionMarketOverview component
-export default function MultiRegionMarketOverview() {
-  const [marketData, setMarketData] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+// Main MultiRegionMarketOverview component (multi-region quotes supplied by parent)
+export default function MultiRegionMarketOverview({ marketData, loading, error }) {
   // USD correlation data for the USD Correlation card (right stack)
   const [correlationData, setCorrelationData] = useState({
     correlations: null,
@@ -932,12 +932,6 @@ export default function MultiRegionMarketOverview() {
   });
   const [correlationLoading, setCorrelationLoading] = useState(true);
   const [correlationError, setCorrelationError] = useState(null);
-
-  useEffect(() => {
-    fetchMarketData();
-    const interval = setInterval(fetchMarketData, 30000); // 30s polling to reduce provider throttling
-    return () => clearInterval(interval);
-  }, []);
 
   // Fetch USD correlation data for the USD Correlation card
   useEffect(() => {
@@ -969,19 +963,6 @@ export default function MultiRegionMarketOverview() {
     };
   }, []);
 
-  const fetchMarketData = async () => {
-    try {
-      const data = await MarketDataService.getMultiRegionQuotes(null, false, true);
-      setMarketData(data);
-      setLoading(false);
-      setError(null);
-    } catch (err) {
-      console.error('Failed to fetch multi-region quotes:', err);
-      setError(err.message);
-      setLoading(false);
-    }
-  };
-
   // Map region keys to data keys in marketData
   const getRegionData = (regionKey) => {
     const keyMap = {
@@ -1004,7 +985,29 @@ export default function MultiRegionMarketOverview() {
         </div>
       )}
 
-      {/* Main 3x2 Grid of Full Charts */}
+      {/* Secondary Section - Left: Currencies + Volume; Right: USD Correlations + Volatility */}
+      <div className="secondary-markets-section">
+        <div className="secondary-left-column">
+          <CurrenciesCompactRail
+            data={marketData.currencies}
+            loading={loading}
+            layout="sidebar"
+          />
+          <VolumeCard />
+        </div>
+        <div className="secondary-cards-stack">
+          <USDCorrelationCard
+            correlations={correlationData.correlations}
+            rollingStats={correlationData.rollingStats}
+            correlationsTimestamp={correlationData.correlationsTimestamp}
+            calculationDate={correlationData.calculationDate}
+            loading={correlationLoading}
+            error={correlationError}
+          />
+          <VolatilityCard />
+        </div>
+      </div>
+
       <div className="main-markets-grid">
         {Object.keys(MAIN_MARKET_REGIONS).map((regionKey) => {
           if (regionKey === 'rates') {
@@ -1026,28 +1029,6 @@ export default function MultiRegionMarketOverview() {
             />
           );
         })}
-      </div>
-
-      {/* Secondary Section - Left: Currencies + Volume; Right: USD Correlations + Volatility */}
-      <div className="secondary-markets-section">
-        <div className="secondary-left-column">
-          <CurrenciesPanel
-            data={marketData.currencies}
-            loading={loading}
-          />
-          <VolumeCard />
-        </div>
-        <div className="secondary-cards-stack">
-          <USDCorrelationCard
-            correlations={correlationData.correlations}
-            rollingStats={correlationData.rollingStats}
-            correlationsTimestamp={correlationData.correlationsTimestamp}
-            calculationDate={correlationData.calculationDate}
-            loading={correlationLoading}
-            error={correlationError}
-          />
-          <VolatilityCard />
-        </div>
       </div>
     </div>
   );

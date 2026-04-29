@@ -299,6 +299,32 @@
   }
 }
 
+/* Compact Currencies panel (sidebar under SS/ETF Pro) */
+.currencies-compact-rail .currencies-compact-rail__body {
+  flex: 0 0 auto;
+}
+
+.currencies-compact-rail--in-sidebar {
+  width: 100%;
+  max-width: none;
+  align-self: stretch;
+}
+
+.currencies-rail-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.currencies-rail-table.region-mw-quotes-table {
+  table-layout: auto;
+  width: 100%;
+}
+
+.currencies-rail-table .region-mw-td,
+.currencies-rail-table .region-mw-th {
+  overflow: visible;
+}
+
 /* Region Chart Panel - wrapper for each full chart */
 .region-chart-panel {
   background: #f8f6ef;
@@ -358,25 +384,25 @@
   color: #111827;
 }
 
-/* Region cards only: keep index names on one line; trim metric columns evenly */
-.region-mw-quotes-table:not(.currencies-mw-table) {
+/* Region quote tables (six cards + rates): fixed layout; compact rail excluded */
+.region-mw-quotes-table:not(.currencies-rail-table) {
   table-layout: fixed;
 }
 
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-name,
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td-name {
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-th-name,
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-td-name {
   width: 14%;
   white-space: nowrap;
 }
 
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-price,
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td-price {
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-th-price,
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-td-price {
   width: 16%;
   white-space: nowrap;
 }
 
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th-metric,
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td.region-mw-td-heat {
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-th-metric,
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-td.region-mw-td-heat {
   width: 11.6%;
   padding-left: 4px;
   padding-right: 4px;
@@ -385,12 +411,12 @@
 
 /* Auto-fit safety net: clip rather than bleed if content still won't shrink
    enough to fit (rare — the useAutoFitTable hook handles this for us). */
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-td,
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th {
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-td,
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-th {
   overflow: hidden;
 }
 
-.region-mw-quotes-table:not(.currencies-mw-table) .region-mw-th.region-mw-th-metric {
+.region-mw-quotes-table:not(.currencies-rail-table) .region-mw-th.region-mw-th-metric {
   padding-left: 4px;
   padding-right: 4px;
 }
@@ -881,10 +907,9 @@
   display: flex;
   align-items: stretch;
   gap: 12px;
-  padding: 0 0 16px;
+  padding: 12px 0 16px;
 }
 
-/* Left column: Currencies on top, Volume below (fills white space) */
 .secondary-left-column {
   flex: 1;
   display: flex;
@@ -894,7 +919,7 @@
   min-height: 0;
 }
 
-.secondary-left-column .currencies-panel {
+.secondary-left-column > .currencies-compact-rail {
   flex: 0 0 auto;
 }
 
@@ -904,203 +929,6 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-/* Currencies Panel */
-.currencies-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: #f8f6ef;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  border: 1px solid #d6d0c3;
-  min-width: 0;
-}
-
-.currencies-mw-table {
-  /* Keep currencies readable without forcing horizontal scroll */
-  min-width: 0;
-}
-
-.currencies-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: #f3f0e6;
-  border-bottom: 1px solid #d6d0c3;
-  gap: 12px;
-}
-
-.currencies-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.currencies-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: #111;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-family: inherit;
-}
-
-.currencies-timestamp {
-  font-size: 10px;
-  color: #6b7280;
-  font-family: monospace;
-  margin-left: 4px;
-}
-
-/* Volume card title - matches RATES/Currencies styling */
-.volume-card-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: #000080;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.currencies-hours {
-  display: none;
-  /* Hidden in favor of header indices */
-}
-
-.currencies-header-indices {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: 12px;
-  flex-wrap: wrap;
-}
-
-.currency-header-item {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 9px;
-  color: #6b7280;
-}
-
-.currency-header-name {
-  font-weight: 500;
-}
-
-.currency-header-change {
-  font-weight: 600;
-}
-
-.currency-header-change.positive {
-  color: #16a34a;
-}
-
-.currency-header-change.negative {
-  color: #dc2626;
-}
-
-.currencies-range-selector {
-  display: flex;
-  gap: 2px;
-}
-
-.currency-range-btn {
-  padding: 3px 6px;
-  font-size: 9px;
-  font-weight: 500;
-  background: transparent;
-  border: none;
-  border-radius: 3px;
-  color: #6b7280;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.currency-range-btn:hover {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.currency-range-btn.active {
-  background: #dbeafe;
-  color: #1d4ed8;
-  font-weight: 600;
-}
-
-.currencies-table-wrap {
-  padding: 8px 10px 10px;
-  overflow-x: auto;
-}
-
-.currencies-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 10px;
-  color: #111827;
-}
-
-.currencies-th {
-  text-align: right;
-  font-weight: 600;
-  color: #1f2937;
-  padding: 5px 7px;
-  border-bottom: 1px solid #d6d0c3;
-  background: #efede6;
-  vertical-align: bottom;
-  white-space: nowrap;
-}
-
-.currencies-th-ticker {
-  text-align: left;
-  border-bottom-color: #d6d0c3;
-}
-
-.currencies-th-price {
-  border-bottom-color: #d6d0c3;
-}
-
-.currencies-th-pct {
-  min-width: 4em;
-}
-
-.currencies-th-split {
-  display: block;
-  line-height: 1.2;
-}
-
-.currencies-tr {
-  border-bottom: 1px solid #e7e3d9;
-}
-
-.currencies-td {
-  padding: 5px 7px;
-  text-align: right;
-  color: #1f2937;
-  line-height: 1.2;
-}
-
-.currencies-td-ticker {
-  text-align: left;
-  font-weight: 500;
-}
-
-.currencies-td-price {
-  font-weight: 500;
-}
-
-.currencies-td-pct.positive {
-  color: #16a34a;
-  font-weight: 600;
-}
-
-.currencies-td-pct.negative {
-  color: #dc2626;
-  font-weight: 600;
 }
 
 /* Secondary cards - Volume and Volatility (separate cards, same dimensions) */
