@@ -4,6 +4,7 @@ Parse Hedgeye Signal Strength PDF using AWS Textract
 Extracts added/removed stocks and full stock list (table rendered as image)
 """
 
+import os
 import re
 import boto3
 import io
@@ -13,6 +14,7 @@ from decimal import Decimal
 import pdfplumber
 from pathlib import Path
 from date_utils import extract_date_from_pdf
+from signal_strength_pages import infer_signal_strength_textract_pages
 
 
 def extract_specific_pages_as_pdf(pdf_path, page_numbers):
@@ -111,14 +113,36 @@ def extract_signal_strength(pdf_path, s3_key=None):
                 data['removed'] = tickers
                 print(f"   Removed: {', '.join(tickers)}")
 
+    naive_pages = os.environ.get('SIGNAL_STRENGTH_NAIVE_TEXTRACT', '').lower() in (
+        '1',
+        'true',
+        'yes',
+    )
+    if naive_pages:
+        page_nums = list(range(2, num_pages + 1))
+        print('   ⚙️ SIGNAL_STRENGTH_NAIVE_TEXTRACT: scanning all pages 2..N')
+    else:
+        meta = infer_signal_strength_textract_pages(pdf_path)
+        page_nums = meta['textract_pages']
+        saved = meta['naive_calls'] - meta['textract_calls']
+        print(
+            f"   ⚙️ Signal Strength Textract pages (heuristic): {page_nums[0]}-{page_nums[-1]}"
+            if page_nums
+            else '   ⚙️ Signal Strength Textract pages (heuristic): none'
+        )
+        if saved > 0:
+            print(f"      (~{saved} fewer AnalyzeDocument calls vs naive)")
+        if num_pages >= 2 and not page_nums:
+            page_nums = list(range(2, num_pages + 1))
+            print('   ⚠️ Heuristic returned no pages; falling back to all pages 2..N')
+
     # Use Textract for table extraction (stock list from page 2 onwards)
     textract = boto3.client('textract', region_name='us-west-1')
 
-    # Iterate through pages 2 to end individually
-    # Textract synchronous API only processes the FIRST page of a document
+    # Iterate selected pages individually — sync API only processes the FIRST page of each PDF blob
     all_rows = []
-    
-    for page_num in range(2, num_pages + 1):
+
+    for page_num in page_nums:
         print(f"   📑 Extracting page {page_num} from PDF...")
         try:
             # Extract single page

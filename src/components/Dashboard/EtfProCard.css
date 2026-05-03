@@ -21,9 +21,93 @@
   font-size: 12px;
 }
 
-/* Side-by-side Longs / Shorts: each column is one bordered stack (title → changes → table) */
+/* Stacked Added/Removed (blue bars) then side-by-side Longs / Shorts tables */
 .etfpro-split-stack {
   margin-top: 5px;
+}
+
+.etfpro-stacked-changes {
+  margin-bottom: 8px;
+  padding: 4px 3px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(214, 208, 195, 0.9);
+  background: #fcfaf5;
+}
+
+.etfpro-change-bluebar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1d4ed8;
+  background-color: #dbeafe;
+}
+
+.etfpro-change-bluebar:first-child {
+  margin-top: 0;
+}
+
+.etfpro-change-bluebar-date {
+  font-weight: 400;
+  font-size: 10px;
+}
+
+.etfpro-change-leg {
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+
+.etfpro-change-leg:last-of-type {
+  margin-bottom: 2px;
+}
+
+.etfpro-change-leg-title {
+  font-size: 10px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.etfpro-change-leg-long {
+  color: #15803d;
+}
+
+.etfpro-change-leg-short {
+  color: #b91c1c;
+}
+
+.etfpro-change-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.etfpro-change-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.etfpro-change-pill.add {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.etfpro-change-pill.remove {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.etfpro-change-na {
+  font-size: 10px;
+  font-style: italic;
+  color: #6b7280;
 }
 
 .etfpro-columns {
@@ -177,88 +261,6 @@
 .etfpro-table .neg {
   color: #991b1b;
   font-weight: 800;
-}
-
-/* Day-over-day changes: Added / Removed sections */
-.etfpro-changes {
-  padding: 2px 3px 3px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  border-bottom: 1px solid #d6d0c3;
-  background: #fcfaf5;
-}
-
-/* Per-column changes (inside long/short bordered stack) */
-.etfpro-changes.etfpro-changes-column {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.etfpro-change-list-cell {
-  min-width: 0;
-  width: 100%;
-}
-
-.etfpro-change-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.etfpro-change-header {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.55px;
-  padding: 2px 3px 1px;
-  border-radius: 2px 2px 0 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  align-self: start;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.etfpro-change-header.add {
-  color: #065f46;
-  background: rgba(16, 185, 129, 0.1);
-  border-color: rgba(5, 95, 70, 0.12);
-}
-
-.etfpro-change-header.remove {
-  color: #991b1b;
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(153, 27, 27, 0.12);
-}
-
-.etfpro-change-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.etfpro-change-ticker {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 3px;
-  white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.etfpro-change-ticker.add {
-  color: #065f46;
-  background: rgba(16, 185, 129, 0.06);
-}
-
-.etfpro-change-ticker.remove {
-  color: #991b1b;
-  background: rgba(239, 68, 68, 0.06);
-}
-
-.etfpro-change-empty {
-  font-size: 10px;
-  font-style: italic;
-  color: #6b7280;
-  padding: 2px 3px;
 }
 
 /* Row highlighting for newly added positions */

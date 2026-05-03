@@ -38,7 +38,7 @@ const WorkflowStatus = () => {
   });
   const [snapshotCache, setSnapshotCache] = useState({}); // Cache: {"type-date": {data, pdfUrl}}
 
-  // All 6 data types with their PDF loading states
+  // Hedgeye workbook types for Data Preview (plus ETF Pro from local workbook API)
   const DATA_TYPES = [
     { key: 'risk-ranges', label: 'Risk Ranges' },
     { key: 'early-look', label: 'Early Look' },
@@ -47,7 +47,8 @@ const WorkflowStatus = () => {
     { key: 'signal-strength', label: 'Signal Strength' },
     { key: 'portfolio-solutions', label: 'Portfolio Solutions' },
     { key: 'the-macro-show', label: 'Macro Show' },
-    { key: 'the-call', label: 'The Call' }
+    { key: 'the-call', label: 'The Call' },
+    { key: 'etf-pro', label: 'ETF Pro' },
   ];
 
   // Track PDF URLs and loading states for each data type
@@ -62,6 +63,8 @@ const WorkflowStatus = () => {
 
   // Get hedgeyeStatus and csvStatus from workflowStatus (with safe defaults)
   const hedgeyeStatus = workflowStatus?.hedgeye || {};
+  /** When Hedgeye has not scraped yet, Data Preview lists ETF Pro alone (workbook-driven). */
+  const previewCardTypes = hedgeyeStatus.lastRun ? DATA_TYPES : DATA_TYPES.filter((t) => t.key === 'etf-pro');
   const csvStatus = workflowStatus?.csvUpload || {};
 
   // Fetch workflow status and data
@@ -182,20 +185,6 @@ const WorkflowStatus = () => {
     }
   };
 
-  // Fetch all PDFs sequentially when preview tab is active
-  // Fetch all PDFs sequentially when preview tab is active
-  useEffect(() => {
-    const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
-    if (activeTab === 'preview' && currentHedgeyeStatus.lastRun) {
-      // Only fetch if we haven't fetched for this date yet
-      if (lastFetchedRunDate.current !== currentHedgeyeStatus.lastRun) {
-        fetchAllPdfs();
-        fetchCsvUrl();
-        lastFetchedRunDate.current = currentHedgeyeStatus.lastRun;
-      }
-    }
-  }, [activeTab, workflowStatus]);
-
   useEffect(() => {
     fetchData();
 
@@ -207,14 +196,6 @@ const WorkflowStatus = () => {
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
-
-  // Fetch preview data when selected date changes
-  useEffect(() => {
-    if (activeTab === 'preview' && selectedPreviewDate) {
-      console.log(`📅 Fetching preview data for ${selectedPreviewDate}`);
-      fetchAllPdfs(selectedPreviewDate);
-    }
-  }, [selectedPreviewDate, activeTab]);
 
   // Helper: Get data from local storage cache
   const getFromCache = (key, date) => {
@@ -242,24 +223,84 @@ const WorkflowStatus = () => {
 
 
 
-  // Improved parallel fetcher
-  const fetchAllPdfs = async (customDate = null) => {
+  // Improved parallel fetcher (Data Preview). ETF Pro always uses /api/hedgeye/etfpro (workbook-driven).
+  const fetchAllPdfs = async () => {
     const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
-    if (!currentHedgeyeStatus.lastRun && !customDate) return;
+    const hedgeyeScheduled = !!currentHedgeyeStatus.lastRun;
 
     const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-    const date = customDate || new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
+    const date = hedgeyeScheduled
+      ? (selectedPreviewDate || new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0])
+      : selectedPreviewDate;
 
-    // Helper to fetch single item
     const fetchItem = async (key) => {
-      // Set loading state for this item
-      setAllPdfData(prev => ({
+      // ETF Pro: no Hedgeye screenshot; latest workbook JSON only.
+      if (key === 'etf-pro') {
+        setAllPdfData((prev) => ({
+          ...prev,
+          [key]: { ...prev[key], loading: true, error: null },
+        }));
+        try {
+          const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/etfpro`);
+          const payload = snapshotResponse.data || {};
+          const snap = {
+            key: 'etf-pro',
+            data: {
+              rows: Array.isArray(payload.rows) ? payload.rows : [],
+              meta: payload.meta || {},
+              changes:
+                payload.changes && typeof payload.changes === 'object' ? payload.changes : {},
+            },
+            trendChanges: [],
+          };
+          const etfCacheKey = 'etf-pro-latest';
+          setSnapshotCache((prev) => ({
+            ...prev,
+            [etfCacheKey]: snap,
+          }));
+          setAllPdfData((prev) => ({
+            ...prev,
+            [key]: {
+              loading: false,
+              url: null,
+              type: null,
+              error: null,
+              workbookOnly: true,
+            },
+          }));
+          setAllSnapshotData((prev) => ({
+            ...prev,
+            [key]: snap,
+          }));
+        } catch (err) {
+          console.warn('[Preview] ETF Pro fetch failed:', err?.message || err);
+          setAllPdfData((prev) => ({
+            ...prev,
+            [key]: {
+              loading: false,
+              url: null,
+              type: null,
+              error:
+                err?.response?.status === 404
+                  ? 'No workbook on server (upload or npm run collect:etfpro)'
+                  : 'Unable to load ETF Pro',
+              workbookOnly: true,
+            },
+          }));
+          setAllSnapshotData((prev) => ({
+            ...prev,
+            [key]: null,
+          }));
+        }
+        return;
+      }
+
+      setAllPdfData((prev) => ({
         ...prev,
-        [key]: { ...prev[key], loading: true, error: null }
+        [key]: { ...prev[key], loading: true, error: null },
       }));
 
       try {
-        // --- PDF / Screenshot Handling ---
         let pdfResult = null;
         const cachedPdf = getFromCache(key, date);
 
@@ -267,74 +308,70 @@ const WorkflowStatus = () => {
           console.log(`[Cache Hit] ${key}`);
           pdfResult = cachedPdf;
         } else {
-          // Fetch from network
-          const response = await axios.get(`${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`);
+          const response = await axios.get(
+            `${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`
+          );
           pdfResult = {
             url: response.data.url,
             type: response.data.type || 'screenshot',
-            error: null
+            error: null,
           };
-          // Cache it
           saveToCache(key, date, pdfResult);
         }
 
-        // Update PDF state immediately
-        setAllPdfData(prev => ({
+        setAllPdfData((prev) => ({
           ...prev,
-          [key]: { loading: false, ...pdfResult }
+          [key]: { loading: false, ...pdfResult },
         }));
 
-        // --- Snapshot Handling (with cache) ---
         const cacheKey = `${key}-${date}`;
 
-        // Check cache first
         if (snapshotCache[cacheKey]) {
           console.log(`✓ Using cached snapshot for ${key} on ${date}`);
-          setAllSnapshotData(prev => ({
+          setAllSnapshotData((prev) => ({
             ...prev,
-            [key]: snapshotCache[cacheKey]
+            [key]: snapshotCache[cacheKey],
           }));
         } else {
-          // Fetch from API
           try {
-            const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/snapshot/${key}?date=${date}`);
+            const snapshotResponse = await axios.get(
+              `${backendUrl}/api/hedgeye/snapshot/${key}?date=${date}`
+            );
             const snapshotData = snapshotResponse.data;
 
-            // Store in cache
-            setSnapshotCache(prev => ({
+            setSnapshotCache((prev) => ({
               ...prev,
-              [cacheKey]: snapshotData
+              [cacheKey]: snapshotData,
             }));
 
-            setAllSnapshotData(prev => ({
+            setAllSnapshotData((prev) => ({
               ...prev,
-              [key]: snapshotData
+              [key]: snapshotData,
             }));
           } catch (err) {
             console.warn(`Snapshot failed for ${key} on ${date}`, err);
-            setAllSnapshotData(prev => ({
+            setAllSnapshotData((prev) => ({
               ...prev,
-              [key]: null
+              [key]: null,
             }));
           }
         }
-
       } catch (error) {
         console.error(`Error fetching PDF for ${key}:`, error);
-        setAllPdfData(prev => ({
+        setAllPdfData((prev) => ({
           ...prev,
           [key]: {
             loading: false,
             url: null,
             type: null,
-            error: 'Not available'
-          }
+            error: 'Not available',
+          },
         }));
       }
     };
 
-    // Fire all requests in parallel
-    await Promise.all(DATA_TYPES.map(item => fetchItem(item.key)));
+    const keysToFetch = hedgeyeScheduled ? DATA_TYPES.map((item) => item.key) : ['etf-pro'];
+    await Promise.all(keysToFetch.map((k) => fetchItem(k)));
   };
 
   // Fetch CSV presigned URL
@@ -352,6 +389,21 @@ const WorkflowStatus = () => {
       setCsvUrl(null);
     }
   };
+
+  // Data Preview loads Hedgeye scrape rows when scraper ran; ETF Pro workbook always loads from /api/hedgeye/etfpro.
+  useEffect(() => {
+    const h = workflowStatus?.hedgeye || {};
+    if (activeTab !== 'preview') return;
+
+    const sig = `${h.lastRun ?? 'norun'}-${selectedPreviewDate}`;
+    if (lastFetchedRunDate.current !== sig) {
+      lastFetchedRunDate.current = sig;
+      fetchAllPdfs();
+      if (h.lastRun) {
+        fetchCsvUrl();
+      }
+    }
+  }, [activeTab, workflowStatus?.hedgeye?.lastRun, selectedPreviewDate]);
 
   // Calculate data freshness
   const getDataFreshness = (contentDate, uploadTimestamp, dataType) => {
@@ -1205,31 +1257,35 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
-                        {/* ETF PRO: Longs / Shorts Added & Removed (local file diffs) */}
+                        {/* ETF PRO: Added/Removed blue bars (same hierarchy as Signal Strength), then LONGS / SHORTS */}
                         {key === 'etf-pro' && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             {diff && diff.available ? (
                               <>
+                                {/* Added */}
                                 <div>
-                                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '6px' }}>LONGS</div>
-                                  <div style={{ marginBottom: '8px' }}>
-                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Added {diff.previousDate ? `vs ${formatDate(diff.previousDate)}` : ''}</div>
+                                  <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>Added</span>
+                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                                  </div>
+                                  <div style={{ marginTop: '6px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
                                     {(diff.addedLongs && diff.addedLongs.length > 0) ? (
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                                         {diff.addedLongs.map((t) => (
-                                          <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                          <span key={`al-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
                                         ))}
                                       </div>
                                     ) : (
                                       <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
                                     )}
                                   </div>
-                                  <div>
-                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Removed</div>
-                                    {(diff.removedLongs && diff.removedLongs.length > 0) ? (
+                                  <div style={{ marginTop: '8px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
+                                    {(diff.addedShorts && diff.addedShorts.length > 0) ? (
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {diff.removedLongs.map((t) => (
-                                          <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        {diff.addedShorts.map((t) => (
+                                          <span key={`as-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
                                         ))}
                                       </div>
                                     ) : (
@@ -1237,26 +1293,30 @@ const WorkflowStatus = () => {
                                     )}
                                   </div>
                                 </div>
+                                {/* Removed */}
                                 <div>
-                                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '6px' }}>SHORTS</div>
-                                  <div style={{ marginBottom: '8px' }}>
-                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Added</div>
-                                    {(diff.addedShorts && diff.addedShorts.length > 0) ? (
+                                  <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>Removed</span>
+                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
+                                  </div>
+                                  <div style={{ marginTop: '6px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
+                                    {(diff.removedLongs && diff.removedLongs.length > 0) ? (
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {diff.addedShorts.map((t) => (
-                                          <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        {diff.removedLongs.map((t) => (
+                                          <span key={`rl-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
                                         ))}
                                       </div>
                                     ) : (
                                       <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
                                     )}
                                   </div>
-                                  <div>
-                                    <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Removed</div>
+                                  <div style={{ marginTop: '8px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
                                     {(diff.removedShorts && diff.removedShorts.length > 0) ? (
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                                         {diff.removedShorts.map((t) => (
-                                          <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                          <span key={`rs-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
                                         ))}
                                       </div>
                                     ) : (
@@ -1782,7 +1842,7 @@ const WorkflowStatus = () => {
             gap: '16px',
             padding: '4px'
           }}>
-            {DATA_TYPES.map(({ key, label }) => {
+            {previewCardTypes.map(({ key, label }) => {
               const pdfData = allPdfData[key] || {};
               // Determine data for this type
               const hasData = key === 'risk-ranges' && riskRangesTableData.length > 0;
@@ -1917,6 +1977,30 @@ const WorkflowStatus = () => {
                             Loading {label}...
                           </Text>
                         </div>
+                      ) : pdfData.workbookOnly ? (
+                        <div style={{
+                          padding: '16px',
+                          height: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexDirection: 'column',
+                          gap: '10px'
+                        }}>
+                          <Text style={{
+                            color: isDark ? '#9ca3af' : '#6b7280',
+                            fontSize: '12px',
+                            textAlign: 'center',
+                            lineHeight: 1.45,
+                          }}>
+                            ETF Pro positions come from workbook upload or collect:etfpro — no Hedgeye screenshot is paired with this source.
+                          </Text>
+                          {pdfData.error && (
+                            <Text style={{ fontSize: '11px', color: '#ef4444', textAlign: 'center' }}>
+                              {pdfData.error}
+                            </Text>
+                          )}
+                        </div>
                       ) : pdfData.url && pdfData.type === 'pdf' ? (
                         <iframe
                           src={`${pdfData.url}#toolbar=0&navpanes=0&scrollbar=1`}
@@ -1982,8 +2066,28 @@ const WorkflowStatus = () => {
                           );
                         }
 
-                        // No data available
+                        // No data yet (avoid infinite loading on ETF fetch error / empty)
                         if (!data) {
+                          if (
+                            key === 'etf-pro'
+                            && snapshotData === null
+                            && !(allPdfData[key] || {}).loading
+                          ) {
+                            return (
+                              <div style={{
+                                flex: 1,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: '20px',
+                                color: isDark ? '#9ca3af' : '#6b7280',
+                                fontSize: '12px',
+                                textAlign: 'center'
+                              }}>
+                                {(allPdfData[key] || {}).error || 'Unable to load ETF Pro'}
+                              </div>
+                            );
+                          }
                           return (
                             <div style={{
                               flex: 1,
@@ -1995,6 +2099,169 @@ const WorkflowStatus = () => {
                               fontSize: '12px'
                             }}>
                               Loading data...
+                            </div>
+                          );
+                        }
+
+                        // ETF Pro — same Added/Removed hierarchy as changelog (Analytics Data Upload cards)
+                        if (key === 'etf-pro') {
+                          const ch = data.changes && typeof data.changes === 'object' ? data.changes : {};
+                          const addedLongs = ch.addedLongs || [];
+                          const removedLongs = ch.removedLongs || [];
+                          const addedShorts = ch.addedShorts || [];
+                          const removedShorts = ch.removedShorts || [];
+                          const bracket = data.meta?.snapshotDate ? formatDate(data.meta.snapshotDate) : '';
+
+                          const rows = Array.isArray(data.rows) ? data.rows : [];
+                          const fmtRel = (v) => {
+                            if (v === null || v === undefined || !Number.isFinite(Number(v))) return '--';
+                            const n = Number(v);
+                            const sign = n > 0 ? '+' : '';
+                            return `${sign}${n.toFixed(2)}%`;
+                          };
+                          const splitPos = () => ({
+                            longs: rows.filter((r) => String(r.call).toLowerCase() !== 'short'),
+                            shorts: rows.filter((r) => String(r.call).toLowerCase() === 'short'),
+                          });
+                          const { longs: longPos, shorts: shortPos } = splitPos();
+
+                          const tickerTable = (list) => (
+                            <Table>
+                              <TableHead>
+                                <TableRow>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Rel</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Days</TableHeaderCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {list.length === 0 ? (
+                                  <TableRow>
+                                    <TableCell colSpan={3} style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic', padding: '8px' }}>None</TableCell>
+                                  </TableRow>
+                                ) : (
+                                  list.map((r) => (
+                                    <TableRow key={`${String(r.id || '')}-${r.ticker}`}>
+                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{r.ticker}</TableCell>
+                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{fmtRel(r.relativePerformance)}</TableCell>
+                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{
+                                        Number.isFinite(r.daysHeld) ? r.daysHeld : '--'}</TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </Table>
+                          );
+
+                          const blueBarSx = {
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: isDark ? '#93c5fd' : '#1d4ed8',
+                            marginBottom: '4px',
+                            padding: '4px 6px',
+                            backgroundColor: isDark ? '#1e3a5f' : '#dbeafe',
+                            borderRadius: '4px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          };
+
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '12px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                <div>
+                                  <div style={blueBarSx}>
+                                    <span>Added</span>
+                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>
+                                      ({bracket})
+                                    </span>
+                                  </div>
+                                  <div style={{ marginTop: '6px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
+                                    {addedLongs.length > 0 ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {addedLongs.map((t) => (
+                                          <span key={`al-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                  <div style={{ marginTop: '8px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
+                                    {addedShorts.length > 0 ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {addedShorts.map((t) => (
+                                          <span key={`as-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style={blueBarSx}>
+                                    <span>Removed</span>
+                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>
+                                      ({bracket})
+                                    </span>
+                                  </div>
+                                  <div style={{ marginTop: '6px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
+                                    {removedLongs.length > 0 ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {removedLongs.map((t) => (
+                                          <span key={`rl-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                  <div style={{ marginTop: '8px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
+                                    {removedShorts.length > 0 ? (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                        {removedShorts.map((t) => (
+                                          <span key={`rs-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <div>
+                                <Text style={{
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  color: isDark ? '#f3f4f6' : '#111827',
+                                  marginBottom: '6px',
+                                  display: 'block',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em',
+                                }}>
+                                  Long positions ({longPos.length})
+                                </Text>
+                                {tickerTable(longPos)}
+                              </div>
+                              <div style={{ paddingTop: '4px', borderTop: `1px solid ${isDark ? '#374151' : '#d6d0c3'}` }}>
+                                <Text style={{
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  color: isDark ? '#f3f4f6' : '#111827',
+                                  marginBottom: '6px',
+                                  display: 'block',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em',
+                                }}>
+                                  Short positions ({shortPos.length})
+                                </Text>
+                                {tickerTable(shortPos)}
+                              </div>
                             </div>
                           );
                         }

@@ -53,6 +53,25 @@ const PortfolioDashboard = () => {
       setMultiRegionMarketData(data);
       setMultiRegionLoading(false);
       setMultiRegionError(null);
+
+      if (
+        process.env.NODE_ENV === 'development' &&
+        Array.isArray(data?.currencies) &&
+        data.currencies.length > 0
+      ) {
+        const row = data.currencies[0];
+        const hasPeriodRolling =
+          Object.prototype.hasOwnProperty.call(row, 'thirtyDayChangePct') &&
+          Object.prototype.hasOwnProperty.call(row, 'ninetyDayChangePct');
+        const hasSomePeriodTail =
+          row?.ytdChangePct != null || row?.weekChangePct != null || row?.monthChangePct != null;
+        if (!hasPeriodRolling && hasSomePeriodTail) {
+          console.warn(
+            '[market-dashboard] Currencies API is missing thirtyDayChangePct/ninetyDayChangePct — the Node server is probably an old build. Restart from this repo (`npm run server` or `node server.js`). API base:',
+            process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001'
+          );
+        }
+      }
     } catch (err) {
       console.error('Failed to fetch multi-region quotes:', err);
       setMultiRegionError(err.message);

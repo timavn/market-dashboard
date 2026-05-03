@@ -627,6 +627,39 @@ aws dynamodb create-table \
 
 ---
 
+### HedgeyeProcessingLedger
+
+**Purpose**: Idempotent Textract/Dynamo ingestion — one row per `(snapshotType, PDF SHA-256)` so bulk reruns skip duplicate payloads.
+
+**Primary Key**:
+- Partition Key: `snapshotType` (String) — same labels as `HedgeyeDailySnapshot.snapshotType`
+- Sort Key: `contentSha256` (String) — hex-encoded SHA-256 of PDF bytes
+
+**Attributes**:
+- `reportDate` (String, optional): Report `YYYY-MM-DD`
+- `pdfSource` (String, optional): S3 key of source PDF
+- `dynamoSnapshotKey` (String, optional): Audit helper (e.g. `date#snapshotType`)
+- `processedAt` (String): ISO UTC when ingestion succeeded
+- `processorVersion` (String): Parser / projector version for controlled replay
+
+See [`aws/lambda/HEDGEYE_PROCESSING_LEDGER.md`](../lambda/HEDGEYE_PROCESSING_LEDGER.md) and [`aws/lambda/hedgeye_processing_ledger.py`](../lambda/hedgeye_processing_ledger.py).
+
+**AWS CLI Creation**:
+```bash
+aws dynamodb create-table \
+  --table-name HedgeyeProcessingLedger \
+  --attribute-definitions \
+    AttributeName=snapshotType,AttributeType=S \
+    AttributeName=contentSha256,AttributeType=S \
+  --key-schema \
+    AttributeName=snapshotType,KeyType=HASH \
+    AttributeName=contentSha256,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST \
+  --region us-west-1
+```
+
+---
+
 ## User Data Tables
 
 ### DailyNotes
@@ -737,6 +770,8 @@ aws dynamodb create-table --table-name USDCorrelations --attribute-definitions A
 
 # Hedgeye Data Tables
 aws dynamodb create-table --table-name HedgeyeDailySnapshot --attribute-definitions AttributeName=date,AttributeType=S AttributeName=snapshotType,AttributeType=S --key-schema AttributeName=date,KeyType=HASH AttributeName=snapshotType,KeyType=RANGE --billing-mode PAY_PER_REQUEST --region us-west-1
+
+aws dynamodb create-table --table-name HedgeyeProcessingLedger --attribute-definitions AttributeName=snapshotType,AttributeType=S AttributeName=contentSha256,AttributeType=S --key-schema AttributeName=snapshotType,KeyType=HASH AttributeName=contentSha256,KeyType=RANGE --billing-mode PAY_PER_REQUEST --region us-west-1
 
 aws dynamodb create-table --table-name HedgeyeRiskRanges --attribute-definitions AttributeName=date,AttributeType=S --key-schema AttributeName=date,KeyType=HASH --billing-mode PAY_PER_REQUEST --region us-west-1
 

@@ -111,17 +111,29 @@ function pctHeatProps(pctNum) {
 }
 
 function formatPeriodPct(val) {
-  if (val == null || !Number.isFinite(Number(val))) return '—';
-  const n = Number(val);
+  if (val == null) return '—';
+  const s = String(val).trim();
+  if (s === '') return '—';
+  const n = Number(s);
+  if (!Number.isFinite(n)) return '—';
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
+}
+
+/** Currencies compact rail: suffix % on numeric period cells (— unchanged). */
+function formatCurrenciesPeriodCell(val) {
+  const s = formatPeriodPct(val);
+  return s === '—' ? '—' : `${s}%`;
 }
 
 // Same shape as `formatPeriodPct` but renders bps deltas (used by derived
 // curve-spread rows like 2s10s / 5s30s / 3M10Y). Unit suffix is omitted
 // because it's already shown in the YIELD column for these rows.
 function formatPeriodBps(val) {
-  if (val == null || !Number.isFinite(Number(val))) return '—';
-  const n = Number(val);
+  if (val == null) return '—';
+  const s = String(val).trim();
+  if (s === '') return '—';
+  const n = Number(s);
+  if (!Number.isFinite(n)) return '—';
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
 }
 
@@ -309,17 +321,25 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
                 <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
                   Price
                 </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1D %
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col" title="Day % change">
+                  %
+                </th>
+                <th
+                  className="region-mw-th region-mw-th-num region-mw-th-metric"
+                  scope="col"
+                  title="30 trading sessions (~6 weeks rolling)."
+                >
+                  30D
+                </th>
+                <th
+                  className="region-mw-th region-mw-th-num region-mw-th-metric"
+                  scope="col"
+                  title="90 trading sessions (~4 months rolling)."
+                >
+                  90D
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  MTD %
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  QTD %
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  YTD %
+                  YTD
                 </th>
               </tr>
             </thead>
@@ -333,14 +353,14 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
                 const hasChange = Number.isFinite(parsedChange);
                 const heat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatFxDay(changePercent);
 
-                const mtdRaw = quote?.mtdChangePct;
-                const qtdRaw = quote?.qtdChangePct;
+                const thirtyRaw = quote?.thirtyDayChangePct;
+                const ninetyRaw = quote?.ninetyDayChangePct;
                 const ytdRaw = quote?.ytdChangePct;
-                const mtdNum = mtdRaw == null || mtdRaw === '' ? NaN : Number(mtdRaw);
-                const qtdNum = qtdRaw == null || qtdRaw === '' ? NaN : Number(qtdRaw);
+                const thirtyNum = thirtyRaw == null || thirtyRaw === '' ? NaN : Number(thirtyRaw);
+                const ninetyNum = ninetyRaw == null || ninetyRaw === '' ? NaN : Number(ninetyRaw);
                 const ytdNum = ytdRaw == null || ytdRaw === '' ? NaN : Number(ytdRaw);
-                const mtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(mtdNum);
-                const qtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(qtdNum);
+                const thirtyHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(thirtyNum);
+                const ninetyHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(ninetyNum);
                 const ytdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(ytdNum);
 
                 return (
@@ -354,22 +374,22 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
                       {loading ? '…' : formatPctDisplay(changePercent)}
                     </td>
                     <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${mtdHeat.className}`}
-                      style={mtdHeat.style}
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${thirtyHeat.className}`}
+                      style={thirtyHeat.style}
                     >
-                      {loading ? '…' : formatPeriodPct(mtdRaw)}
+                      {loading ? '…' : formatCurrenciesPeriodCell(thirtyRaw)}
                     </td>
                     <td
-                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${qtdHeat.className}`}
-                      style={mtdHeat.style}
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${ninetyHeat.className}`}
+                      style={ninetyHeat.style}
                     >
-                      {loading ? '…' : formatPeriodPct(qtdRaw)}
+                      {loading ? '…' : formatCurrenciesPeriodCell(ninetyRaw)}
                     </td>
                     <td
                       className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
                       style={ytdHeat.style}
                     >
-                      {loading ? '…' : formatPeriodPct(ytdRaw)}
+                      {loading ? '…' : formatCurrenciesPeriodCell(ytdRaw)}
                     </td>
                   </tr>
                 );
@@ -475,6 +495,9 @@ function formatTablePrice(rawPrice, unit) {
 }
 
 // Derive per-row display metrics from the raw quote payload.
+// Period columns map to server `computePeriodPercentsFromCloses`: WEEKLY ≈ 5 sessions,
+// MONTHLY ≈ 21 sessions, 3M/6M ≈ 63/126 sessions (rolling), YTD = calendar year-to-date.
+// This differs from the compact Currencies rail, which uses calendar MTD/QTD/YTD plus 15D.
 function getRowMetrics(idx, quote) {
   const pctRaw = quote?.changePercent;
   const pctNum = parseFloat(String(pctRaw ?? '').replace(/[^0-9.-]/g, ''));
@@ -611,7 +634,13 @@ function QuotesTable({ indices, data, loading, priceLabel = 'PRICE' }) {
               </th>
               <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">DAY (%)</th>
               <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">WEEKLY (%)</th>
-              <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">MONTHLY (%)</th>
+              <th
+                className="region-mw-th region-mw-th-num region-mw-th-metric"
+                scope="col"
+                title="Approx. 21 trading sessions (~1 month rolling). Not calendar month-to-date — see Currencies card for MTD %."
+              >
+                MONTHLY (%)
+              </th>
               <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">3M (%)</th>
               <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">6M (%)</th>
               <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">YTD (%)</th>

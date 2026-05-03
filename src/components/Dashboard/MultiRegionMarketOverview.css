@@ -316,8 +316,32 @@
 }
 
 .currencies-rail-table.region-mw-quotes-table {
-  table-layout: auto;
+  table-layout: fixed;
   width: 100%;
+}
+
+/* Tighter ticker/price spacing; equal share for four metric columns (%,30D,90D,YTD). */
+.currencies-rail-table .region-mw-th-name,
+.currencies-rail-table .region-mw-td-name {
+  width: 15%;
+  white-space: nowrap;
+  padding-right: 4px;
+}
+
+.currencies-rail-table .region-mw-th-price,
+.currencies-rail-table .region-mw-td-price {
+  width: 9%;
+  white-space: nowrap;
+  padding-left: 2px;
+  padding-right: 6px;
+}
+
+.currencies-rail-table .region-mw-th-metric,
+.currencies-rail-table .region-mw-td.region-mw-td-heat {
+  width: calc((100% - 24%) / 4);
+  padding-left: 2px;
+  padding-right: 2px;
+  white-space: nowrap;
 }
 
 .currencies-rail-table .region-mw-td,

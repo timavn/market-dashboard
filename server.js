@@ -1316,6 +1316,8 @@ async function fetchFREDHistorical(seriesId, range) {
 // Period returns (weekly / monthly / YTD) for multi-region table — one daily series per symbol, cached
 const periodReturnsCache = new Map();
 const PERIOD_RETURNS_CACHE_TTL = parseInt(process.env.PERIOD_RETURNS_CACHE_TTL_MS || '30000', 10);
+/** Bump when `computePeriodPercentsFromCloses` grows new fields — avoids serving stale cached objects lacking them. */
+const PERIOD_RETURNS_CACHE_KEY_VERSION = '4';
 
 function symbolIsYahooRateProxy(upperSym) {
   return upperSym === 'UST2Y' || upperSym === 'UST10Y' || upperSym === 'UST30Y';
@@ -1328,10 +1330,16 @@ function computePeriodPercentsFromCloses(closes) {
   if (last == null || !Number.isFinite(last) || last === 0) return null;
 
   const weekIdx = Math.max(0, n - 1 - 5);
+  const fifteenDayIdx = Math.max(0, n - 1 - 15);
+  const thirtyDayIdx = Math.max(0, n - 1 - 30);
+  const ninetyDayIdx = Math.max(0, n - 1 - 90);
   const monthIdx = Math.max(0, n - 1 - 21);
   const threeMonthIdx = Math.max(0, n - 1 - 63);
   const sixMonthIdx = Math.max(0, n - 1 - 126);
   const weekRef = closes[weekIdx].close;
+  const fifteenDayRef = closes[fifteenDayIdx].close;
+  const thirtyDayRef = closes[thirtyDayIdx].close;
+  const ninetyDayRef = closes[ninetyDayIdx].close;
   const monthRef = closes[monthIdx].close;
   const threeMonthRef = closes[threeMonthIdx].close;
   const sixMonthRef = closes[sixMonthIdx].close;
@@ -1370,6 +1378,9 @@ function computePeriodPercentsFromCloses(closes) {
 
   return {
     weekChangePct: pct(weekRef),
+    fifteenDayChangePct: pct(fifteenDayRef),
+    thirtyDayChangePct: pct(thirtyDayRef),
+    ninetyDayChangePct: pct(ninetyDayRef),
     monthChangePct: pct(monthRef),
     threeMonthChangePct: pct(threeMonthRef),
     sixMonthChangePct: pct(sixMonthRef),
@@ -1450,7 +1461,7 @@ async function computePeriodReturnsForSymbol(symbol) {
 }
 
 async function getPeriodReturnsCached(symbol) {
-  const key = symbol.toUpperCase();
+  const key = `${symbol.toUpperCase()}:${PERIOD_RETURNS_CACHE_KEY_VERSION}`;
   const now = Date.now();
   const hit = periodReturnsCache.get(key);
   if (hit && now - hit.ts < PERIOD_RETURNS_CACHE_TTL) {
@@ -3171,6 +3182,9 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
     }
 
     let weekChangePct = null;
+    let fifteenDayChangePct = null;
+    let thirtyDayChangePct = null;
+    let ninetyDayChangePct = null;
     let monthChangePct = null;
     let threeMonthChangePct = null;
     let sixMonthChangePct = null;
@@ -3182,6 +3196,9 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
         const periods = await getPeriodReturnsCached(index.symbol);
         if (periods) {
           weekChangePct = periods.weekChangePct;
+          fifteenDayChangePct = periods.fifteenDayChangePct ?? null;
+          thirtyDayChangePct = periods.thirtyDayChangePct ?? null;
+          ninetyDayChangePct = periods.ninetyDayChangePct ?? null;
           monthChangePct = periods.monthChangePct;
           threeMonthChangePct = periods.threeMonthChangePct ?? null;
           sixMonthChangePct = periods.sixMonthChangePct ?? null;
@@ -3204,6 +3221,9 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       timestamp: quote?.timestamp || new Date().toISOString(),
       sparklineData,
       weekChangePct,
+      fifteenDayChangePct,
+      thirtyDayChangePct,
+      ninetyDayChangePct,
       monthChangePct,
       threeMonthChangePct,
       sixMonthChangePct,
@@ -3220,6 +3240,9 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       price: null,
       error: 'Failed to fetch quote',
       weekChangePct: null,
+      fifteenDayChangePct: null,
+      thirtyDayChangePct: null,
+      ninetyDayChangePct: null,
       monthChangePct: null,
       threeMonthChangePct: null,
       sixMonthChangePct: null,

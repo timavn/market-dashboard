@@ -56,6 +56,23 @@ function sortRows(rows, sort) {
   return copy;
 }
 
+/** Matches Workflow Signal Strength changelog bars — M/D from YYYY-MM-DD. */
+function formatChangesBarDate(dateStr) {
+  if (!dateStr) return '';
+  const s = String(dateStr).trim();
+  const withTime = s.includes('T') ? s : `${s.split(' ')[0]}T12:00:00`;
+  const d = new Date(withTime);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+}
+
+const EMPTY_CHANGES = {
+  addedLongs: [],
+  removedLongs: [],
+  addedShorts: [],
+  removedShorts: [],
+  previousDate: null,
+};
+
 function EtfProPaneTitle({ title, count }) {
   return (
     <div className="etfpro-pane">
@@ -67,30 +84,55 @@ function EtfProPaneTitle({ title, count }) {
   );
 }
 
-function EtfProColumnChanges({ added, removed }) {
-  const a = Array.isArray(added) ? added : [];
-  const r = Array.isArray(removed) ? removed : [];
-
-  const renderList = (arr, kind) => (
-    <div className="etfpro-change-list">
-      {arr.length > 0 ? (
-        arr.map((t) => (
-          <div key={t} className={`etfpro-change-ticker ${kind}`}>
+function renderTickerWrap(arr, pillClass) {
+  const list = Array.isArray(arr) ? arr : [];
+  return (
+    <div className="etfpro-change-pill-row">
+      {list.length > 0 ? (
+        list.map((t) => (
+          <span key={t} className={`etfpro-change-pill ${pillClass}`}>
             {t}
-          </div>
+          </span>
         ))
       ) : (
-        <div className="etfpro-change-empty">No change</div>
+        <span className="etfpro-change-na">N/A</span>
       )}
     </div>
   );
+}
+
+/** Added / Removed blue-bar sections with LONGS · SHORTS (matches Workflow Signal Strength hierarchy). */
+function EtfProStackedChanges({ changes, snapshotDate }) {
+  const c = changes || EMPTY_CHANGES;
+  const bar = formatChangesBarDate(snapshotDate);
 
   return (
-    <div className="etfpro-changes etfpro-changes-column">
-      <div className="etfpro-change-header add">Added</div>
-      <div className="etfpro-change-list-cell">{renderList(a, 'add')}</div>
-      <div className="etfpro-change-header remove">Removed</div>
-      <div className="etfpro-change-list-cell">{renderList(r, 'remove')}</div>
+    <div className="etfpro-stacked-changes">
+      <div className="etfpro-change-bluebar">
+        <span>Added</span>
+        <span className="etfpro-change-bluebar-date">{bar ? `(${bar})` : ''}</span>
+      </div>
+      <div className="etfpro-change-leg">
+        <div className="etfpro-change-leg-title etfpro-change-leg-long">LONGS</div>
+        {renderTickerWrap(c.addedLongs, 'add')}
+      </div>
+      <div className="etfpro-change-leg">
+        <div className="etfpro-change-leg-title etfpro-change-leg-short">SHORTS</div>
+        {renderTickerWrap(c.addedShorts, 'add')}
+      </div>
+
+      <div className="etfpro-change-bluebar">
+        <span>Removed</span>
+        <span className="etfpro-change-bluebar-date">{bar ? `(${bar})` : ''}</span>
+      </div>
+      <div className="etfpro-change-leg">
+        <div className="etfpro-change-leg-title etfpro-change-leg-long">LONGS</div>
+        {renderTickerWrap(c.removedLongs, 'remove')}
+      </div>
+      <div className="etfpro-change-leg">
+        <div className="etfpro-change-leg-title etfpro-change-leg-short">SHORTS</div>
+        {renderTickerWrap(c.removedShorts, 'remove')}
+      </div>
     </div>
   );
 }
@@ -173,17 +215,10 @@ function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
   );
 }
 
-const EMPTY_CHANGES = {
-  addedLongs: [],
-  removedLongs: [],
-  addedShorts: [],
-  removedShorts: [],
-  previousDate: null
-};
-
 const EtfProCard = ({ isExpanded = false, onFreshness }) => {
   const [rows, setRows] = useState([]);
   const [changes, setChanges] = useState(EMPTY_CHANGES);
+  const [snapshotDate, setSnapshotDate] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState({ key: 'relativePerformance', dir: 'desc' });
@@ -194,6 +229,7 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
     try {
       const snapshot = await MarketDataService.getHedgeyeEtfPro();
       setRows(Array.isArray(snapshot?.rows) ? snapshot.rows : []);
+      setSnapshotDate(snapshot?.meta?.snapshotDate || null);
       setChanges(
         snapshot?.changes && typeof snapshot.changes === 'object' ? { ...EMPTY_CHANGES, ...snapshot.changes } : EMPTY_CHANGES
       );
@@ -205,6 +241,7 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
         'Failed to load ETF Pro. Run npm run collect:etfpro to sync from the ETF Pro folder.';
       setError(msg);
       setRows([]);
+      setSnapshotDate(null);
       setChanges(EMPTY_CHANGES);
       if (onFreshness) onFreshness(false);
     } finally {
@@ -252,10 +289,10 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
         </div>
       ) : (
         <div className="etfpro-split-stack">
+          <EtfProStackedChanges changes={changes} snapshotDate={snapshotDate} />
           <div className="etfpro-columns">
             <div className="etfpro-column etfpro-column-long">
               <EtfProPaneTitle title="Longs" count={longRows.length} />
-              <EtfProColumnChanges added={changes.addedLongs} removed={changes.removedLongs} />
               <EtfProTable
                 rows={longRows}
                 isExpanded={isExpanded}
@@ -265,7 +302,6 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
             </div>
             <div className="etfpro-column etfpro-column-short">
               <EtfProPaneTitle title="Shorts" count={shortRows.length} />
-              <EtfProColumnChanges added={changes.addedShorts} removed={changes.removedShorts} />
               <EtfProTable
                 rows={shortRows}
                 isExpanded={isExpanded}

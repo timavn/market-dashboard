@@ -5,12 +5,16 @@ Automatically detects PDF type and routes to appropriate processor
 Can process multiple files or single file
 """
 
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pdfplumber
+from hedgeye_pdf_detect import (
+    FOLDER_MAPPING,
+    PDF_TYPES,
+    detect_pdf_type as detect_pdf_type_shared,
+    infer_forced_type_from_path,
+)
 
 # Import individual processors
 from parse_hedgeye_pdf import extract_all_risk_range_data as extract_risk_ranges, save_to_dynamodb as save_risk_ranges
@@ -24,103 +28,27 @@ import boto3
 
 DOWNLOADS_DIR = Path.home() / "Desktop" / "dashboard" / "hedgeye"
 
-# PDF type detection patterns (based on first page content)
-PDF_TYPES = {
-    'risk-ranges': {
-        'patterns': ['HOW TO USE RISK RANGE SIGNALS', 'BUY TRADE', 'SELL TRADE', 'BULLISH TREND', 'BEARISH TREND'],
-        'title_match': 'HOW TO USE RISK RANGE SIGNALS',  # Unique text on page 1
-        's3_folder': 'risk-ranges',
-        'processor': 'risk_ranges'
-    },
-    'bitcoin-trend-tracker': {
-        'patterns': ['CRYPTO QUANT', 'BTC', 'AVAX', 'BLOK', 'ZEC'],
-        'title_match': 'CRYPTO QUANT',
-        's3_folder': 'bitcoin-trend-tracker',
-        'processor': 'bitcoin_tracker'
-    },
-    'early-look': {
-        'patterns': ['THE BIG PICTURE', 'KEY TAKEAWAYS', 'MACRO GRIND', 'QUAD'],
-        'title_match': 'THE BIG PICTURE',  # Unique text on early look
-        's3_folder': 'early-look',
-        'processor': 'early_look'
-    },
-    'momo-tracker': {
-        'patterns': ['MOMO TRACKER', 'MOMENTUM TRACKER', 'HEDGEYE MOMENTUM TRACKER', 'FUNDAMENTAL SNAPSHOT', 'PERFORMANCE'],
-        'title_match': 'MOMO TRACKER',
-        's3_folder': 'momo-tracker',
-        'processor': 'momo_tracker'
-    },
-    'portfolio-solutions': {
-        'patterns': ['PORTFOLIO SOLUTIONS', 'ETF RE-RANK', 'TOP MOVERS', 'BOTTOM MOVERS', 'MACRO ETFS BY RANK'],
-        'title_match': 'ETF RE-RANK',
-        's3_folder': 'portfolio-solutions',
-        'processor': 'portfolio_solutions'
-    },
-    'signal-strength': {
-        'patterns': ['SIGNAL STRENGTH', 'STOCKS:', 'ADDED:', 'REMOVED:'],
-        'title_match': 'SIGNAL STRENGTH STOCKS',
-        's3_folder': 'signal-strength',
-        'processor': 'signal_strength'
-    }
-}
-
-# Folder mapping for explicit type enforcement
-FOLDER_MAPPING = {
-    'riskranges': 'risk-ranges',
-    'earlylook': 'early-look',
-    'bitcointracker': 'bitcoin-trend-tracker',
-    'momotracker': 'momo-tracker',
-    'signalstrength': 'signal-strength',
-    'portfoliosolutions': 'portfolio-solutions'
-}
 
 def detect_pdf_type(pdf_path, forced_type=None):
-    """Detect PDF type by scanning first page content, or use forced type"""
+    """Detect PDF type by scanning first page content, or use forced type."""
     print(f"🔍 Detecting type for: {pdf_path.name}")
 
-    # If forced type (from folder) is provided, use it
     if forced_type:
         config = PDF_TYPES.get(forced_type)
         if config:
             print(f"   ✅ Using forced type: {forced_type} (from folder)")
             return forced_type, config
-        else:
-            print(f"   ⚠️  Unknown forced type: {forced_type}")
+        print(f"   ⚠️  Unknown forced type: {forced_type}")
 
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            # Get first page text
-            first_page = pdf.pages[0].extract_text().upper()
+    inferred = infer_forced_type_from_path(pdf_path)
+    pdf_type, config = detect_pdf_type_shared(pdf_path, forced_type=inferred)
 
-            # Try exact title match first (most reliable)
-            for pdf_type, config in PDF_TYPES.items():
-                if config['title_match'] in first_page:
-                    print(f"   ✅ Detected: {pdf_type} (title match)")
-                    return pdf_type, config
-
-            # Fall back to pattern matching
-            best_match = None
-            best_score = 0
-
-            for pdf_type, config in PDF_TYPES.items():
-                matches = sum(1 for pattern in config['patterns'] if pattern in first_page)
-                if matches > best_score:
-                    best_score = matches
-                    best_match = (pdf_type, config)
-
-            if best_match and best_score >= 2:
-                print(f"   ✅ Detected: {best_match[0]} (pattern match: {best_score} hits)")
-                return best_match
-
-            # If inside a subfolder but detection failed, still default to forced_type if available?
-            # We already handled forced_type above.
-            
-            print(f"   ⚠️  Unknown PDF type, defaulting to 'signal-strength'")
-            return 'signal-strength', PDF_TYPES['signal-strength']
-
-    except Exception as e:
-        print(f"   ❌ Error detecting type: {e}")
+    if pdf_type is None:
+        print(f"   ❌ Error detecting type")
         return None, None
+
+    print(f"   ✅ Detected: {pdf_type}")
+    return pdf_type, config
 
 def upload_pdf_to_s3(pdf_path, pdf_type_folder):
     """Upload PDF to S3 in appropriate folder"""
