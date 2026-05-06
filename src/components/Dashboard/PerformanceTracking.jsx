@@ -2,10 +2,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Text } from '@tremor/react';
 import { useTheme } from '../../context/ThemeContext';
 import SecurityDetailModal from './SecurityDetailModal';
+import PortfolioPerformanceDashboard from './PortfolioPerformanceDashboard';
 import RealizedGainLossBubbleChart from './RealizedGainLossBubbleChart';
 import PerformanceService from '../../services/api/performanceService';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { filterSecurities, getGicsSector, mapAssetClassToFactor } from '../../utils/securitiesUniverseUtils';
+import { computeKPIs } from '../../utils/realizedGainLossUtils';
 import './PerformanceTracking.css';
 
 const PerformanceTracking = () => {
@@ -55,12 +57,16 @@ const PerformanceTracking = () => {
     setSearchQuery('');
   };
 
+  const realizedKPIs = useMemo(() => computeKPIs(realizedLots), [realizedLots]);
+
   return (
     <div
       className="performance-tracking-wrap p-2 space-y-2"
       style={{ backgroundColor: isDark ? '#111827' : '#f8f6ef' }}
     >
       <div className="px-1">
+        <PortfolioPerformanceDashboard isDark={isDark} realizedKPIs={realizedKPIs} />
+        
         <RealizedGainLossBubbleChart
           lots={realizedLots}
           searchQuery={searchQuery}

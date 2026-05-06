@@ -349,6 +349,47 @@
   overflow: visible;
 }
 
+/* Sectors Compact Rail overrides (7 columns) */
+.sectors-rail-table .region-mw-th-sector,
+.sectors-rail-table .region-mw-td-sector {
+  width: 28%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 4px;
+}
+
+.sectors-rail-table .region-mw-th-sector {
+  text-align: left;
+}
+
+.sectors-rail-table .region-mw-th-ticker,
+.sectors-rail-table .region-mw-td-ticker {
+  width: 12%;
+  white-space: nowrap;
+  padding-right: 4px;
+}
+
+.sectors-rail-table .region-mw-th-ticker {
+  text-align: left;
+}
+
+.sectors-rail-table .region-mw-th-price,
+.sectors-rail-table .region-mw-td-price {
+  width: 12%;
+  white-space: nowrap;
+  padding-left: 2px;
+  padding-right: 4px;
+}
+
+.sectors-rail-table .region-mw-th-metric,
+.sectors-rail-table .region-mw-td.region-mw-td-heat {
+  width: calc(48% / 4);
+  padding-left: 2px;
+  padding-right: 2px;
+  white-space: nowrap;
+}
+
 /* Region Chart Panel - wrapper for each full chart */
 .region-chart-panel {
   background: #f8f6ef;

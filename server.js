@@ -275,6 +275,23 @@ const MARKET_REGIONS = {
       { symbol: 'RSP', name: 'EW S&P (Breadth)', yahooSymbol: 'RSP' }
     ]
   },
+  sectors: {
+    label: 'Sectors',
+    indices: [
+      { symbol: 'XLY', name: 'Consumer Discretionary', yahooSymbol: 'XLY' },
+      { symbol: 'XLF', name: 'Financial Select Sector', yahooSymbol: 'XLF' },
+      { symbol: 'XLV', name: 'Health Care Select Sector', yahooSymbol: 'XLV' },
+      { symbol: 'XLK', name: 'Technology Select Sector', yahooSymbol: 'XLK' },
+      { symbol: 'XLP', name: 'Consumer Staples Select Sector', yahooSymbol: 'XLP' },
+      { symbol: 'XLI', name: 'Industrial Select Sector', yahooSymbol: 'XLI' },
+      { symbol: 'XLB', name: 'Materials Select Sector', yahooSymbol: 'XLB' },
+      { symbol: 'XLE', name: 'The Energy Select Sector', yahooSymbol: 'XLE' },
+      { symbol: 'XLU', name: 'Utilities Select Sector', yahooSymbol: 'XLU' },
+      { symbol: 'XLRE', name: 'Real Estate Select Sector', yahooSymbol: 'XLRE' },
+      { symbol: 'XLC', name: 'Communications Services Sector', yahooSymbol: 'XLC' },
+      { symbol: 'SPX', name: 'S&P 500', yahooSymbol: '^GSPC' }
+    ]
+  },
   europe: {
     label: 'Europe',
     indices: [

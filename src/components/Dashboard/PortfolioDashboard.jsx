@@ -5,7 +5,7 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
 import CSVUpload from '../CSVUpload';
 import USDMacroDashboard from './USDMacroDashboard';
-import { CurrenciesCompactRail } from './MultiRegionMarketOverview';
+import { SectorsCompactRail } from './MultiRegionMarketOverview';
 import SecuritiesList from './SecuritiesList';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { bookContent } from '../../constants/bookContent';
@@ -13,6 +13,7 @@ import WorkflowStatus from './WorkflowStatus';
 import SecuritiesUniverse from './SecuritiesUniverse';
 import PerformanceTracking from './PerformanceTracking';
 import PortfolioBreakdown from './PortfolioBreakdown';
+import ExpectedValuesWindow from './ExpectedValuesWindow';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -23,6 +24,7 @@ const PortfolioDashboard = () => {
   const portfolioDataRef = useRef(null); // Ref to track current portfolio data for polling
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
   const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
+  const [showEVWindow, setShowEVWindow] = useState(false);
   const [signalStrengthExpanded, setSignalStrengthExpanded] = useState(false);
   const [peaPodImageError, setPeaPodImageError] = useState(false);
   const [bookImageError, setBookImageError] = useState(false);
@@ -634,8 +636,8 @@ const PortfolioDashboard = () => {
             isExpanded={signalStrengthExpanded}
             onExpandToggle={() => setSignalStrengthExpanded(!signalStrengthExpanded)}
           />
-          <CurrenciesCompactRail
-            data={multiRegionMarketData.currencies}
+          <SectorsCompactRail
+            data={multiRegionMarketData.sectors}
             loading={multiRegionLoading}
             layout="sidebar"
           />
@@ -785,6 +787,32 @@ const PortfolioDashboard = () => {
             {showPortfolioMetrics && (
               <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
                 The Pods
+              </span>
+            )}
+          </button>
+
+          {/* +EV Button */}
+          <button
+            onClick={() => setShowEVWindow(!showEVWindow)}
+            className="rounded-md border border-[#d6d0c3] dark:border-gray-600 bg-[#f8f6ef] dark:bg-gray-800 hover:bg-[#efe9dc] dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            style={{
+              minWidth: '32px',
+              height: '32px',
+              padding: showPortfolioMetrics ? '0 12px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              overflow: 'hidden',
+              gap: showPortfolioMetrics ? '12px' : '0'
+            }}
+            title="Expected Values"
+          >
+            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
+              <span className="font-bold text-black dark:text-white" style={{ fontSize: '12px' }}>+EV</span>
+            </div>
+            {showPortfolioMetrics && (
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                +EV Data
               </span>
             )}
           </button>
@@ -1118,6 +1146,17 @@ const PortfolioDashboard = () => {
           </button>
         </div>
       </div>
+
+      {/* Expected Values Window */}
+      <ExpectedValuesWindow
+        show={showEVWindow}
+        onClose={() => setShowEVWindow(false)}
+        top={0}
+        right={showPortfolioMetrics ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' : '40px'}
+        width={showEVWindow ? `calc(100vw - ${showPortfolioMetrics ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' : '40px'})` : '0px'}
+        theme={theme}
+        showPortfolioMetrics={showPortfolioMetrics}
+      />
 
       {/* The Pods Window - Separate Pop-out Panel */}
       <div

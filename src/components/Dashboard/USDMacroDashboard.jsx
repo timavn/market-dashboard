@@ -9,6 +9,7 @@ import { USDMarketService } from '../../services/api/usdMarketService';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { REFRESH_INTERVALS } from '../../constants/usdMarket';
 import { isTradingDay } from '../../utils/marketHolidays';
+import CFTCNetLongCard from './CFTCNetLongCard';
 
 const NEW_YORK_TZ = 'America/New_York';
 const NEW_YORK_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
@@ -354,6 +355,28 @@ const USDMacroDashboard = ({
             loading={multiRegionLoading}
             error={multiRegionError}
           />
+        </div>
+      </div>
+
+      {/* GLOBAL QUAD FORECAST and CFTC NON COMMERCIAL NET LONG - Side by Side */}
+      <div className="macro-call-card min-h-[200px] flex flex-col p-4">
+        <div className="region-chart-header">
+          <div className="region-header-left">
+            <span className="region-label dark:text-white">GLOBAL QUAD FORECAST & CFTC DATA</span>
+          </div>
+        </div>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: '16px',
+          height: '400px'
+        }}>
+          <div style={{ height: '100%', border: '1px dashed gray', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <span style={{ color: 'gray' }}>Global Quad Forecast Placeholder</span>
+          </div>
+          <div style={{ height: '100%' }}>
+            <CFTCNetLongCard />
+          </div>
         </div>
       </div>
 

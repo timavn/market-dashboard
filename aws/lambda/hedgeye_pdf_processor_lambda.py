@@ -36,6 +36,7 @@ from parse_signal_strength import extract_signal_strength, save_to_dynamodb as s
 from parse_macro_show import extract_macro_show, save_to_dynamodb as save_macro_show
 from parse_the_call import extract_the_call, save_to_dynamodb as save_the_call
 from parse_volume import extract_volume_snapshot, save_to_dynamodb as save_volume
+from parse_cftc import extract_cftc_data, save_to_dynamodb as save_cftc
 
 # Initialize AWS clients
 s3 = boto3.client('s3')
@@ -62,6 +63,8 @@ def detect_pdf_type(name_or_key):
         return 'the-call'
     elif '/volume/' in filename_lower or 'volume' in filename_lower or 'market share volume' in filename_lower:
         return 'volume'
+    elif 'cftc' in filename_lower:
+        return 'cftc-positioning'
     else:
         return None
 
@@ -169,6 +172,13 @@ def lambda_handler(event, context):
                 save_volume(data, pdf_s3_key=s3_key, pdf_date=pdf_date)
             else:
                 print("❌ No data extracted from Volume slide")
+
+        elif pdf_type == 'cftc-positioning':
+            data = extract_cftc_data(temp_pdf_path)
+            if data:
+                save_cftc(data, pdf_s3_key=s3_key, pdf_date=pdf_date)
+            else:
+                print("❌ No data extracted from CFTC Positioning")
 
         # Clean up temp file
         os.remove(temp_pdf_path)

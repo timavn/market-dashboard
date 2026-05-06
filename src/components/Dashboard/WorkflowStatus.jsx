@@ -49,6 +49,7 @@ const WorkflowStatus = () => {
     { key: 'the-macro-show', label: 'Macro Show' },
     { key: 'the-call', label: 'The Call' },
     { key: 'etf-pro', label: 'ETF Pro' },
+    { key: 'cftc-positioning', label: 'CFTC Net Long' },
   ];
 
   // Track PDF URLs and loading states for each data type
@@ -720,7 +721,8 @@ const WorkflowStatus = () => {
                     'portfolio-solutions': { name: 'Portfolio Solutions', unit: 'items' },
                     'the-macro-show': { name: 'Macro Show', unit: 'positions' },
                     'the-call': { name: 'The Call', unit: 'positions' },
-                    'etf-pro': { name: 'ETF Pro', unit: 'items' }
+                    'etf-pro': { name: 'ETF Pro', unit: 'items' },
+                    'cftc-positioning': { name: 'CFTC Net Long', unit: 'metrics' }
                   };
 
                   const dataTypeRows = Object.entries(dataTypeConfig);
@@ -2515,6 +2517,40 @@ const WorkflowStatus = () => {
                                       }}>
                                         {row.trend}
                                       </span>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          );
+                        }
+                        // CFTC Positioning
+                        if (key === 'cftc-positioning') {
+                          const metrics = data || [];
+                          return (
+                            <Table>
+                              <TableHead>
+                                <TableRow>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Metric</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Latest</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>W/W Chg</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>1Y Z-Score</TableHeaderCell>
+                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>3Y Z-Score</TableHeaderCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {metrics.map((row, i) => (
+                                  <TableRow key={i}>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.metric}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{row.latest !== null ? Number(row.latest).toLocaleString() : '--'}</TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: row.wwChg > 0 ? '#10b981' : row.wwChg < 0 ? '#ef4444' : 'inherit' }}>
+                                      {row.wwChg !== null ? `${row.wwChg > 0 ? '+' : ''}${Number(row.wwChg).toLocaleString()}` : '--'}
+                                    </TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: row.zScore1Y > 0 ? '#10b981' : row.zScore1Y < 0 ? '#ef4444' : 'inherit' }}>
+                                      {row.zScore1Y !== null ? Number(row.zScore1Y).toFixed(2) : '--'}
+                                    </TableCell>
+                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: row.zScore3Y > 0 ? '#10b981' : row.zScore3Y < 0 ? '#ef4444' : 'inherit' }}>
+                                      {row.zScore3Y !== null ? Number(row.zScore3Y).toFixed(2) : '--'}
                                     </TableCell>
                                   </TableRow>
                                 ))}

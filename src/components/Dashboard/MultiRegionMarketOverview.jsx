@@ -233,6 +233,25 @@ const CURRENCIES_CONFIG = {
   ]
 };
 
+// Sectors configuration
+const SECTORS_CONFIG = {
+  label: 'Sectors',
+  indices: [
+    { symbol: 'SPX', name: 'S&P 500' },
+    { symbol: 'XLY', name: 'Cons Discretionary' },
+    { symbol: 'XLF', name: 'Financials' },
+    { symbol: 'XLV', name: 'Health Care' },
+    { symbol: 'XLK', name: 'Technology' },
+    { symbol: 'XLP', name: 'Cons Staples' },
+    { symbol: 'XLI', name: 'Industrials' },
+    { symbol: 'XLB', name: 'Materials' },
+    { symbol: 'XLE', name: 'Energy' },
+    { symbol: 'XLU', name: 'Utilities' },
+    { symbol: 'XLRE', name: 'Real Estate' },
+    { symbol: 'XLC', name: 'Communication' }
+  ]
+};
+
 // Compact Currencies panel: regional header + slim MTD/QTD/YTD table (sidebar or legacy rail layout)
 export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
   const [currenciesStatus, setCurrenciesStatus] = React.useState('closed');
@@ -384,6 +403,184 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
                       style={ninetyHeat.style}
                     >
                       {loading ? '…' : formatCurrenciesPeriodCell(ninetyRaw)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
+                      style={ytdHeat.style}
+                    >
+                      {loading ? '…' : formatCurrenciesPeriodCell(ytdRaw)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Compact Sectors panel
+export function SectorsCompactRail({ data, loading, layout = 'rail' }) {
+  const [sectorsStatus, setSectorsStatus] = React.useState('closed');
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  React.useEffect(() => {
+    const update = () => setSectorsStatus(getMarketStatus('US')); // Sectors follow US market hours
+    update();
+    const interval = setInterval(update, 60000);
+    return () => clearInterval(interval);
+  }, []);
+  const secStatus = sectorsStatus === 'open' || sectorsStatus === 'extended'
+    ? { emoji: '🟢', title: sectorsStatus === 'open' ? 'Market open' : 'Extended hours' }
+    : { emoji: '🔴', title: 'Market closed' };
+
+  const sectorsLastUpdated = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const timestamps = data
+      .map((q) => q?.timestamp || q?.lastUpdated)
+      .filter(Boolean);
+    return getMinTimestamp(timestamps);
+  }, [data]);
+
+  const sectorSources = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return [];
+    const interval = SOURCE_POLL_INTERVALS.multiRegionQuotes;
+    return SECTORS_CONFIG.indices
+      .map((idx) => {
+        const idxQuote = data.find((d) => d.symbol === idx.symbol);
+        const ts = idxQuote?.lastUpdated || idxQuote?.timestamp;
+        if (!ts) return null;
+        return {
+          id: idx.symbol,
+          label: `${idx.name} (${idx.symbol})`,
+          updatedAt: ts,
+          status: getSourceFreshness(ts, interval)
+        };
+      })
+      .filter(Boolean);
+  }, [data]);
+
+  const pctHeatFxDay = (val) => {
+    const numeric = Number(String(val ?? '').replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
+    const intensity = Math.min(Math.abs(numeric) / 2, 1);
+    return {
+      className: `region-mw-heat--${numeric >= 0 ? 'pos' : 'neg'}`,
+      style: { '--heat': intensity }
+    };
+  };
+
+  const formatPctDisplay = (val) => {
+    if (val == null || val === '' || val === '--') return '--';
+    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+    if (Number.isNaN(num)) return '--';
+    return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
+  };
+
+  const tableRef = React.useRef(null);
+  useAutoFitTable(tableRef, [data, loading]);
+
+  return (
+    <div
+      className={`region-chart-panel region-chart-panel--mw currencies-compact-rail${layout === 'sidebar' ? ' currencies-compact-rail--in-sidebar' : ''} origin-top-left transition-all duration-300 ease-in-out ${isExpanded ? 'relative z-[100] scale-[1.8] shadow-2xl bg-[#f8f6ef]' : 'scale-100'}`}
+    >
+      <div className="region-chart-header region-chart-header--mw">
+        <div className="region-header-left">
+          <StatusDot
+            updatedAt={sectorsLastUpdated}
+            status={sectorsStatus === 'open' ? 'active' : 'inactive'}
+            size={10}
+            className="mr-1"
+            label="Sectors"
+            emoji={secStatus.emoji}
+            sources={sectorSources}
+          />
+          <span className="region-label">Sectors</span>
+        </div>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="ml-auto text-gray-500 hover:text-gray-800 p-1 rounded hover:bg-gray-200 transition-colors z-10"
+          title={isExpanded ? "Collapse" : "Expand"}
+        >
+          {isExpanded ? (
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          ) : (
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+          )}
+        </button>
+      </div>
+      <div className="region-mw-body currencies-compact-rail__body">
+        <div className="region-mw-table-wrap currencies-rail-table-wrap">
+          <table ref={tableRef} className="region-mw-quotes-table currencies-mw-table currencies-rail-table sectors-rail-table">
+            <thead>
+              <tr>
+                <th className="region-mw-th region-mw-th-sector" scope="col">
+                  SECTOR
+                </th>
+                <th className="region-mw-th region-mw-th-ticker" scope="col">
+                  Ticker
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
+                  Price
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  MTD %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  QTD %
+                </th>
+                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                  YTD %
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {SECTORS_CONFIG.indices.map((index) => {
+                const quote = data?.find((d) => d.symbol === index.symbol);
+                const priceVal = parseFloat(quote?.price);
+                const price = loading ? '…' : (!Number.isNaN(priceVal) ? priceVal.toFixed(2) : '—');
+                const changePercent = quote?.changePercent;
+                const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
+                const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
+                const hasChange = Number.isFinite(parsedChange);
+                const heat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatFxDay(changePercent);
+
+                const mtdRaw = quote?.mtdChangePct;
+                const qtdRaw = quote?.qtdChangePct;
+                const ytdRaw = quote?.ytdChangePct;
+                const mtdNum = mtdRaw == null || mtdRaw === '' ? NaN : Number(mtdRaw);
+                const qtdNum = qtdRaw == null || qtdRaw === '' ? NaN : Number(qtdRaw);
+                const ytdNum = ytdRaw == null || ytdRaw === '' ? NaN : Number(ytdRaw);
+                const mtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(mtdNum);
+                const qtdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(qtdNum);
+                const ytdHeat = loading ? { className: 'region-mw-heat--na', style: {} } : pctHeatProps(ytdNum);
+
+                return (
+                  <tr key={index.symbol} className="region-mw-tr">
+                    <td className="region-mw-td region-mw-td-sector truncate max-w-[80px]" title={index.name}>{index.name}</td>
+                    <td className="region-mw-td region-mw-td-ticker font-bold">{index.symbol}</td>
+                    <td className="region-mw-td region-mw-td-num region-mw-td-price">{price}</td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}
+                      style={heat.style}
+                    >
+                      {loading ? '…' : formatPctDisplay(changePercent)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${mtdHeat.className}`}
+                      style={mtdHeat.style}
+                    >
+                      {loading ? '…' : formatCurrenciesPeriodCell(mtdRaw)}
+                    </td>
+                    <td
+                      className={`region-mw-td region-mw-td-num region-mw-td-heat ${qtdHeat.className}`}
+                      style={qtdHeat.style}
+                    >
+                      {loading ? '…' : formatCurrenciesPeriodCell(qtdRaw)}
                     </td>
                     <td
                       className={`region-mw-td region-mw-td-num region-mw-td-heat ${ytdHeat.className}`}
