@@ -810,7 +810,7 @@ function useAutoFitTable(tableRef, deps) {
 
 // Shared quotes-table body used by both `RegionChartPanel` and `RatesCard`.
 // `priceLabel` defaults to PRICE but callers may pass YIELD / OAS / SPREAD.
-function QuotesTable({ indices, data, loading, priceLabel = 'PRICE' }) {
+function QuotesTable({ indices, data, loading, priceLabel = 'PRICE', indexLabel = 'INDEX' }) {
   // Append a "(%)" unit hint to the price header only when the column's values
   // are expressed as a percent (YIELD). Plain PRICE and mixed-unit labels like
   // "OAS / PRICE" are left alone since they're not all-percent.
@@ -825,7 +825,7 @@ function QuotesTable({ indices, data, loading, priceLabel = 'PRICE' }) {
           <thead>
             <tr>
               <th className="region-mw-th region-mw-th-trend" aria-hidden="true" />
-              <th className="region-mw-th region-mw-th-name" scope="col" />
+              <th className="region-mw-th region-mw-th-name" scope="col">{indexLabel}</th>
               <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
                 {priceHeader}
               </th>
@@ -928,11 +928,23 @@ function QuotesTable({ indices, data, loading, priceLabel = 'PRICE' }) {
   );
 }
 
+const REGION_ICONS = {
+  us:          { el: '🇺🇸', cls: '' },
+  europe:      { el: '🌍', cls: '' },
+  asia:        { el: '🌏', cls: '' },
+  commodities: { el: '💧', cls: '' },
+  crypto:      { el: '₿',  cls: 'region-icon--crypto' },
+  rates:       { el: '%',  cls: 'region-icon--rates' },
+};
+
 // RegionChartPanel — full-width metrics table (charts may return later)
 function RegionChartPanel({ region, regionKey, data, loading }) {
   const { label, indices, regionKey: marketRegionKey } = region;
   const tableIndices = React.useMemo(() => indices.slice(0, 12), [indices]);
   const isRates = marketRegionKey === 'Rates';
+  const isCrypto = marketRegionKey === 'Cryptocurrencies';
+  const indexLabel = isCrypto ? 'ASSET' : 'INDEX';
+  const iconCfg = REGION_ICONS[regionKey] || { el: '', cls: '' };
 
   const [marketStatus, setMarketStatus] = React.useState('closed');
 
@@ -990,16 +1002,17 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
     <div className={`region-chart-panel region-chart-panel--${regionKey} region-chart-panel--mw`}>
       <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
+          <span className={`region-icon ${iconCfg.cls}`}>{iconCfg.el}</span>
+          <span className="region-label">{label}</span>
           <StatusDot
             updatedAt={regionLastUpdated}
             status={statusIndicator.emoji === '🟢' ? 'active' : statusIndicator.emoji === '🔵' ? 'stale' : 'inactive'}
-            size={10}
-            className="mr-1"
+            size={8}
+            className="ml-1"
             label={`${label} region`}
             emoji={statusIndicator.emoji}
             sources={regionSources}
           />
-          <span className="region-label">{label}</span>
         </div>
       </div>
       <QuotesTable
@@ -1007,6 +1020,7 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
         data={data}
         loading={loading}
         priceLabel={isRates ? 'YIELD' : 'PRICE'}
+        indexLabel={indexLabel}
       />
     </div>
   );
@@ -1103,16 +1117,17 @@ function RatesCard({ data, loading }) {
     <div className="region-chart-panel region-chart-panel--rates region-chart-panel--mw rates-card">
       <div className="region-chart-header region-chart-header--mw rates-card-header">
         <div className="region-header-left">
+          <span className="region-icon region-icon--rates">%</span>
+          <span className="region-label">Rates</span>
           <StatusDot
             updatedAt={lastUpdated}
             status={statusIndicator.emoji === '🟢' ? 'active' : statusIndicator.emoji === '🔵' ? 'stale' : 'inactive'}
-            size={10}
-            className="mr-1"
+            size={8}
+            className="ml-1"
             label="Rates region"
             emoji={statusIndicator.emoji}
             sources={sources}
           />
-          <span className="region-label">Rates</span>
         </div>
         <div className="rates-tabs" role="tablist" aria-label="Rates categories">
           {RATES_TABS.map((tab) => (
@@ -1141,6 +1156,7 @@ function RatesCard({ data, loading }) {
           data={rows}
           loading={loading}
           priceLabel={tabConfig.priceLabel}
+          indexLabel="TENOR"
         />
       )}
     </div>

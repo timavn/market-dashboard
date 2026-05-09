@@ -392,11 +392,11 @@
 
 /* Region Chart Panel - wrapper for each full chart */
 .region-chart-panel {
-  background: #f8f6ef;
+  background: #ffffff;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-  border: 1px solid #d6d0c3;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
+  border: 1px solid #e5e7eb;
 }
 
 .region-chart-panel--mw {
@@ -411,14 +411,14 @@
   align-items: center;
   justify-content: flex-start;
   padding: 7px 12px;
-  background: #f3f0e6;
-  border-bottom: 1px solid #d6d0c3;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
   gap: 12px;
   min-height: 44px;
 }
 
 .region-chart-header--mw {
-  border-bottom: 1px solid #d8d2c5;
+  border-bottom: 1px solid #e5e7eb;
   min-height: 36px;
   padding: 6px 10px;
 }
@@ -594,6 +594,33 @@
   background-color: #fafafa;
 }
 
+/* Region header icon (emoji or styled char) */
+.region-icon {
+  font-size: 15px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.region-icon--rates {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.region-icon--crypto {
+  color: #d97706;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .region-header-left {
   display: flex;
   align-items: center;
@@ -668,15 +695,15 @@
 }
 
 .rates-tab:hover {
-  background: #ece7d8;
+  background: #f3f4f6;
   color: #111827;
 }
 
 .rates-tab--active,
 .rates-tab--active:hover {
-  background: #ffffff;
-  color: #0f172a;
-  border-color: #d6d0c3;
+  background: #f0f4ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
 }
 
 .rates-tab-empty {
