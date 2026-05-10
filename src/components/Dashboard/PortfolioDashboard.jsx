@@ -14,6 +14,9 @@ import SecuritiesUniverse from './SecuritiesUniverse';
 import PerformanceTracking from './PerformanceTracking';
 import PortfolioBreakdown from './PortfolioBreakdown';
 import ExpectedValuesWindow from './ExpectedValuesWindow';
+import CFTCNetLongCard from './CFTCNetLongCard';
+import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
+import GlobalQuadsCard from './GlobalQuadsCard';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -657,6 +660,8 @@ const PortfolioDashboard = () => {
             multiRegionMarketData={multiRegionMarketData}
             multiRegionLoading={multiRegionLoading}
             multiRegionError={multiRegionError}
+            sidebarCols={signalStrengthExpanded ? 3 : 2}
+            centerCols={showPortfolioMetrics ? (signalStrengthExpanded ? 6 : 7) : (signalStrengthExpanded ? 9 : 10)}
           />
         </div>
 

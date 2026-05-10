@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Card, Title, Text } from '@tremor/react';
-import USQuadChart from './USQuadChart';
-import WelcomeToTheMachine from './WelcomeToTheMachine';
 import MultiRegionMarketOverview from './MultiRegionMarketOverview';
 import GlobalMarketDayCycleHeader from './GlobalMarketDayCycleHeader';
 import StatusDot from '../common/StatusDot';
@@ -10,6 +8,8 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import { REFRESH_INTERVALS } from '../../constants/usdMarket';
 import { isTradingDay } from '../../utils/marketHolidays';
 import CFTCNetLongCard from './CFTCNetLongCard';
+import GlobalQuadsCard from './GlobalQuadsCard';
+import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
 
 const NEW_YORK_TZ = 'America/New_York';
 const NEW_YORK_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
@@ -113,7 +113,9 @@ const getMsUntilNextNewYorkMidnight = () => {
 const USDMacroDashboard = ({
   multiRegionMarketData = {},
   multiRegionLoading = true,
-  multiRegionError = null
+  multiRegionError = null,
+  sidebarCols = 2,
+  centerCols = 10
 }) => {
   const initialMarketDays = getRecentMarketDays(5);
   const [data, setData] = useState({
@@ -358,78 +360,81 @@ const USDMacroDashboard = ({
         </div>
       </div>
 
-      {/* GLOBAL QUAD FORECAST and CFTC NON COMMERCIAL NET LONG - Side by Side */}
-      <div className="macro-call-card min-h-[200px] flex flex-col p-4">
-        <div className="region-chart-header">
-          <div className="region-header-left">
-            <span className="region-label dark:text-white">GLOBAL QUAD FORECAST & CFTC DATA</span>
+      {/* CFTC, Factor Performance, Global Quads - extend left under sidebar */}
+      {(() => {
+        const pct = (sidebarCols / centerCols * 100).toFixed(4);
+        return (
+          <div style={{
+            marginLeft: `calc(-${pct}% - 16px)`,
+            width: `calc(${(100 + sidebarCols / centerCols * 100).toFixed(4)}% + 16px)`,
+          }}>
+            {/* CFTC and Factor Performance - Side by Side */}
+            <div className="flex flex-col md:flex-row gap-4 mb-4" style={{ alignItems: 'stretch' }}>
+              <div className="flex-1" style={{ height: '400px' }}>
+                <CFTCNetLongCard />
+              </div>
+              <div className="flex-1" style={{ height: '400px' }}>
+                <StyleFactorPerformanceCard />
+              </div>
+            </div>
+            {/* Global Quads - Full Width */}
+            <GlobalQuadsCard />
           </div>
-        </div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: '16px',
-          height: '400px'
-        }}>
-          <div style={{ height: '100%', border: '1px dashed gray', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-             <span style={{ color: 'gray' }}>Global Quad Forecast Placeholder</span>
-          </div>
-          <div style={{ height: '100%' }}>
-            <CFTCNetLongCard />
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
-      {/* MACRO and THE CALL - Side by Side */}
-      <div className="flex flex-col md:flex-row gap-4" style={{ alignItems: 'stretch' }}>
-        {/* Left: MACRO SHOW */}
-        <div className="flex-1 macro-call-card">
-          <div className="region-chart-header">
-            <div className="region-header-left">
-              <StatusDot
-                updatedAt={latestMacroScrapedAt}
-                status={latestMacroScrapedAt ? 'active' : undefined}
-                size={10}
-                className="mr-1"
-                label="Macro Show"
-                emoji={latestMacroScrapedAt ? '🟢' : '⚪'}
-              />
-              <span className="region-label dark:text-white">MACRO SHOW</span>
+      {/* MACRO and THE CALL - extend left under sidebar */}
+      {(() => {
+        const pct = (sidebarCols / centerCols * 100).toFixed(4);
+        return (
+          <div style={{
+            marginLeft: `calc(-${pct}% - 16px)`,
+            width: `calc(${(100 + sidebarCols / centerCols * 100).toFixed(4)}% + 16px)`,
+          }}>
+            <div className="flex flex-col md:flex-row gap-4" style={{ alignItems: 'stretch' }}>
+              {/* Left: MACRO SHOW */}
+              <div className="flex-1 macro-call-card">
+                <div className="region-chart-header">
+                  <div className="region-header-left">
+                    <StatusDot
+                      updatedAt={latestMacroScrapedAt}
+                      status={latestMacroScrapedAt ? 'active' : undefined}
+                      size={10}
+                      className="mr-1"
+                      label="Macro Show"
+                      emoji={latestMacroScrapedAt ? '🟢' : '⚪'}
+                    />
+                    <span className="region-label dark:text-white">MACRO SHOW</span>
+                  </div>
+                </div>
+                <div className="macro-call-body macro-call-body-days">
+                  {renderShowRows(macroShowRows.length > 0 ? macroShowRows : marketDays.map((day) => ({ ...day, snapshot: null })))}
+                </div>
+              </div>
+
+              {/* Right: THE CALL */}
+              <div className="flex-1 macro-call-card">
+                <div className="region-chart-header">
+                  <div className="region-header-left">
+                    <StatusDot
+                      updatedAt={latestCallScrapedAt}
+                      status={latestCallScrapedAt ? 'active' : undefined}
+                      size={10}
+                      className="mr-1"
+                      label="The Call"
+                      emoji={latestCallScrapedAt ? '🟢' : '⚪'}
+                    />
+                    <span className="region-label dark:text-white">THE CALL</span>
+                  </div>
+                </div>
+                <div className="macro-call-body macro-call-body-days">
+                  {renderShowRows(theCallRows.length > 0 ? theCallRows : marketDays.map((day) => ({ ...day, snapshot: null })))}
+                </div>
+              </div>
             </div>
           </div>
-          <div className="macro-call-body macro-call-body-days">
-            {renderShowRows(macroShowRows.length > 0 ? macroShowRows : marketDays.map((day) => ({ ...day, snapshot: null })))}
-          </div>
-        </div>
-
-        {/* Right: THE CALL */}
-        <div className="flex-1 macro-call-card">
-          <div className="region-chart-header">
-            <div className="region-header-left">
-              <StatusDot
-                updatedAt={latestCallScrapedAt}
-                status={latestCallScrapedAt ? 'active' : undefined}
-                size={10}
-                className="mr-1"
-                label="The Call"
-                emoji={latestCallScrapedAt ? '🟢' : '⚪'}
-              />
-              <span className="region-label dark:text-white">THE CALL</span>
-            </div>
-          </div>
-          <div className="macro-call-body macro-call-body-days">
-            {renderShowRows(theCallRows.length > 0 ? theCallRows : marketDays.map((day) => ({ ...day, snapshot: null })))}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        {/* US Quad Charts Section */}
-        <USQuadChart />
-
-        {/* Welcome to the Machine Section */}
-        <WelcomeToTheMachine />
-      </div>
+        );
+      })()}
 
       {/* Error overlay */}
       {error && (

@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Title, Text, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Badge } from '@tremor/react';
+import { Info, TrendingUp, RefreshCw, DollarSign, Package, LayoutGrid, ArrowUp, ArrowDown } from 'lucide-react';
+import StatusDot from '../common/StatusDot';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';
+
+const CATEGORY_META = {
+  EQUITIES:    { Icon: TrendingUp,  color: '#2563eb', bgLight: '#eff6ff',  bgDark: 'rgba(37,99,235,0.12)'   },
+  RATES:       { Icon: RefreshCw,   color: '#7c3aed', bgLight: '#f5f3ff',  bgDark: 'rgba(124,58,237,0.12)'  },
+  CURRENCIES:  { Icon: DollarSign,  color: '#d97706', bgLight: '#fffbeb',  bgDark: 'rgba(217,119,6,0.12)'   },
+  COMMODITIES: { Icon: Package,     color: '#059669', bgLight: '#ecfdf5',  bgDark: 'rgba(5,150,105,0.12)'   },
+  OTHER:       { Icon: LayoutGrid,  color: '#6b7280', bgLight: '#f3f4f6',  bgDark: 'rgba(107,114,128,0.12)' },
+};
 
 const CFTCNetLongCard = () => {
   const { theme } = useTheme();
@@ -126,106 +136,84 @@ const CFTCNetLongCard = () => {
         overflow: 'hidden'
       }}
     >
-      <div style={{
-        padding: '12px 16px',
-        borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-        backgroundColor: isDark ? '#1f2937' : '#f9fafb',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Title style={{ fontSize: '14px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', margin: 0 }}>
+      <div style={{ padding: '11px 16px', borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, backgroundColor: isDark ? '#1f2937' : '#f9fafb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Title style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', margin: 0 }}>
             CFTC Non-Commercial Net Long Positioning
           </Title>
+          <Info size={13} color={isDark ? '#6b7280' : '#9ca3af'} style={{ flexShrink: 0 }} />
         </div>
-        {data?.date && (
-          <Badge size="xs" color="gray" style={{
-            backgroundColor: isDark ? '#374151' : '#f3f4f6',
-            color: isDark ? '#d1d5db' : '#4b5563',
-            border: 'none',
-            fontSize: '10px'
-          }}>
-            {new Date(data.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </Badge>
-        )}
+        <StatusDot
+          updatedAt={data?.date ? new Date(data.date + 'T12:00:00') : null}
+          status={data ? 'active' : loading ? 'stale' : 'inactive'}
+          size={9}
+          label="CFTC Positioning Data"
+          showDateOnly
+        />
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 12px 12px 12px' }}>
-        {categories.map((category) => (
-          <div key={category} style={{ marginTop: '16px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '4px 8px',
-              backgroundColor: isDark ? 'rgba(55, 65, 81, 0.5)' : '#f3f4f6',
-              borderRadius: '4px',
-              marginBottom: '8px'
-            }}>
-              <Text style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                color: isDark ? '#f3f4f6' : '#111827',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase'
-              }}>
-                {category}
-              </Text>
-            </div>
-            
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase' }}>Metric</TableHeaderCell>
-                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase', textAlign: 'right' }}>Latest</TableHeaderCell>
-                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase', textAlign: 'right' }}>W/W Chg</TableHeaderCell>
-                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase', textAlign: 'right' }}>1Y Z</TableHeaderCell>
-                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase', textAlign: 'right' }}>3Y Z</TableHeaderCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {groupedData[category].map((row, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 500, color: isDark ? '#d1d5db' : '#374151' }}>
-                      {row.metric}
-                    </TableCell>
-                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: isDark ? '#f3f4f6' : '#111827' }}>
-                      {formatNumber(row.latest)}
-                    </TableCell>
-                    <TableCell style={{ 
-                      padding: '4px 8px', 
-                      fontSize: '11px', 
-                      fontFamily: 'monospace', 
-                      textAlign: 'right',
-                      color: row.wwChg > 0 ? (isDark ? '#34d399' : '#10b981') : row.wwChg < 0 ? (isDark ? '#f87171' : '#ef4444') : (isDark ? '#d1d5db' : '#374151')
-                    }}>
-                      {row.wwChg !== null && row.wwChg > 0 ? '+' : ''}{formatNumber(row.wwChg)}
-                    </TableCell>
-                    <TableCell style={{ 
-                      padding: '4px 8px', 
-                      fontSize: '11px', 
-                      fontFamily: 'monospace', 
-                      textAlign: 'right',
-                      color: getZScoreColor(row.zScore1Y)
-                    }}>
-                      {formatZScore(row.zScore1Y)}
-                    </TableCell>
-                    <TableCell style={{ 
-                      padding: '4px 8px', 
-                      fontSize: '11px', 
-                      fontFamily: 'monospace', 
-                      textAlign: 'right',
-                      color: getZScoreColor(row.zScore3Y)
-                    }}>
-                      {formatZScore(row.zScore3Y)}
-                    </TableCell>
+      <div style={{ flex: 1, overflow: 'auto', padding: '0 12px 4px 12px' }}>
+        {categories.map((category) => {
+          const meta = CATEGORY_META[category] || CATEGORY_META.OTHER;
+          const { Icon: CatIcon } = meta;
+          const hdr = { padding: '6px 8px', fontSize: '10px', fontWeight: 700, color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' };
+          return (
+            <div key={category} style={{ marginTop: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', backgroundColor: isDark ? meta.bgDark : meta.bgLight, borderRadius: '4px', marginBottom: '6px', borderLeft: `3px solid ${meta.color}` }}>
+                <CatIcon size={12} color={meta.color} />
+                <span style={{ fontSize: '11px', fontWeight: 700, color: meta.color, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+                  {category}
+                </span>
+              </div>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableHeaderCell style={hdr}>Metric</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>Latest</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>W/W Change</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>1Y Z-Score</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>3Y Z-Score</TableHeaderCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ))}
+                </TableHead>
+                <TableBody>
+                  {groupedData[category].map((row, idx) => {
+                    const wwColor = row.wwChg > 0
+                      ? (isDark ? '#34d399' : '#10b981')
+                      : row.wwChg < 0
+                        ? (isDark ? '#f87171' : '#ef4444')
+                        : (isDark ? '#d1d5db' : '#374151');
+                    return (
+                      <TableRow key={idx}>
+                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 500, color: isDark ? '#d1d5db' : '#374151' }}>
+                          {row.metric}
+                        </TableCell>
+                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: isDark ? '#f3f4f6' : '#111827' }}>
+                          {formatNumber(row.latest)}
+                        </TableCell>
+                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: wwColor }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', justifyContent: 'flex-end' }}>
+                            {row.wwChg !== null && row.wwChg > 0 ? '+' : ''}{formatNumber(row.wwChg)}
+                            {row.wwChg != null && row.wwChg > 0 && <ArrowUp size={10} />}
+                            {row.wwChg != null && row.wwChg < 0 && <ArrowDown size={10} />}
+                          </span>
+                        </TableCell>
+                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: getZScoreColor(row.zScore1Y) }}>
+                          {formatZScore(row.zScore1Y)}
+                        </TableCell>
+                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: getZScoreColor(row.zScore3Y) }}>
+                          {formatZScore(row.zScore3Y)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ padding: '6px 16px', fontSize: '10px', fontStyle: 'italic', color: isDark ? '#9ca3af' : '#6b7280', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, backgroundColor: isDark ? '#1f2937' : '#f9fafb' }}>
+        All values represent net contracts
       </div>
     </Card>
   );

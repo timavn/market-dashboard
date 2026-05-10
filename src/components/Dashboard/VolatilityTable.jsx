@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Activity } from 'lucide-react';
 import StatusDot from '../common/StatusDot';
 import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
 import './VolatilityTable.css';
@@ -224,37 +225,37 @@ const VolatilityTable = ({ onIndicatorHelp, onLastUpdatedChange, onSourcesChange
             <thead>
               <tr>
                 <th className="region-mw-th region-mw-th-name" scope="col">
-                  Series
+                  SERIES
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  Spot
+                  SPOT
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1D Ago
+                  1D AGO
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1W Ago
+                  1W AGO
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  4W Ago
+                  4W AGO
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric vol-mw-sep-left" scope="col">
-                  DoD (bps)
+                  DOD (BPS)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  DoD (%)
+                  DOD (%)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric vol-mw-sep-left" scope="col">
-                  VoV (bps)
+                  VOV (BPS)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  VoV (%)
+                  VOV (%)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric vol-mw-sep-left" scope="col">
-                  MoM (bps)
+                  MOM (BPS)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  MoM (%)
+                  MOM (%)
                 </th>
               </tr>
             </thead>
@@ -448,16 +449,24 @@ const VolatilityTableWithTabs = ({ statusIndicator }) => {
   return (
     <div className="volatility-tabs">
       <div className="region-chart-header region-chart-header--mw volatility-header-with-tabs">
+        <div className="region-header-left">
+          <span className="card-header-icon card-header-icon--blue">
+            <Activity size={16} strokeWidth={2} />
+          </span>
+          <span className="region-label region-label--lg">Volatility</span>
+        </div>
+        <div className="volatility-tab-buttons-inline">
+          <button type="button" className="volatility-tab-btn active" aria-pressed="true">BPS</button>
+          <button type="button" className="volatility-tab-btn" aria-pressed="false">%</button>
+        </div>
         <StatusDot
           updatedAt={lastUpdated}
           status={derivedStatus}
-          size={10}
-          className="mr-1"
+          size={8}
           label="Volatility data"
           emoji={status.emoji}
           sources={volSources}
         />
-        <span className="region-label">Volatility</span>
       </div>
       <VolRangesPopover indicatorKey={openIndicator} onClose={() => setOpenIndicator(null)} />
       <VolatilityTable

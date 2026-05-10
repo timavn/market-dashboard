@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Share2 } from 'lucide-react';
 import StatusDot from '../common/StatusDot';
 import { getSourceFreshness } from '../../utils/timeUtils';
 import { USD_METRICS, CORRELATION_PERIODS, REFRESH_INTERVALS } from '../../constants/usdMarket';
@@ -151,23 +152,25 @@ const USDCorrelationMatrix = ({
     <div className="usd-correlation-panel region-chart-panel--mw">
       <div className="region-chart-header region-chart-header--mw usd-correlation-header--mw">
         <div className="region-header-left">
+          <span className="card-header-icon card-header-icon--blue">
+            <Share2 size={16} strokeWidth={2} />
+          </span>
+          <span className="region-label region-label--lg">Key USD Correlations</span>
+        </div>
+        <div className="usd-correlation-header-note">
+          <span className="usd-correlation-header-note-item">*Days = Trading Days</span>
+          <span className="usd-correlation-header-note-sep" aria-hidden="true">•</span>
+          <span className="usd-correlation-header-note-item">52-Wk Rolling</span>
+          <span className="usd-correlation-header-note-sep" aria-hidden="true">•</span>
+          <span className="usd-correlation-header-note-item">30D Correlation</span>
           <StatusDot
             updatedAt={effectiveUpdatedAt}
             status={statusState}
-            size={10}
-            className="mr-1"
+            size={8}
             label="USD Correlations"
             emoji={statusEmoji}
             sources={statusSources}
           />
-          <span className="region-label">Key USD Correlations</span>
-        </div>
-        <div className="usd-correlation-header-note">
-          <span className="usd-correlation-header-note-item">*Days = Trading Days</span>
-          <span className="usd-correlation-header-note-sep" aria-hidden="true">
-            •
-          </span>
-          <span className="usd-correlation-header-note-item">52-Wk Rolling 30D Correlation</span>
         </div>
       </div>
 
@@ -196,19 +199,19 @@ const USDCorrelationMatrix = ({
                     </th>
                   ))}
                   <th className="region-mw-th region-mw-th-num region-mw-th-metric usd-corr-sep-left" scope="col">
-                    High
+                    HIGH
                   </th>
                   <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                    Low
+                    LOW
                   </th>
                   <th
                     className="region-mw-th region-mw-th-num region-mw-th-metric usd-corr-sep-left"
                     scope="col"
                   >
-                    % Time Pos
+                    % TIME POS
                   </th>
                   <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                    % Time Neg
+                    % TIME NEG
                   </th>
                 </tr>
               </thead>

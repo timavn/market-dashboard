@@ -313,16 +313,16 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange, onHeaderNoteC
                   METRIC
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  Prior Day
+                  PRIOR DAY
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1M Avg
+                  1M AVG
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  3M Avg
+                  3M AVG
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1Y Avg
+                  1Y AVG
                 </th>
               </tr>
             </thead>

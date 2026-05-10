@@ -1857,7 +1857,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'volume'];
+    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'volume', 'cftc-positioning'];
 
     // Single scan of HedgeyeDailySnapshot, then pick the latest item per snapshotType.
     // This reports the true most recent upload regardless of age, matching how
@@ -1879,9 +1879,22 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
             latestByType[item.snapshotType] = item;
           }
         }
+        // Debug: Log CFTC items found
+        const cftcItems = snapResult.Items?.filter(i => i.snapshotType === 'cftc-positioning') || [];
+        if (cftcItems.length > 0) {
+          console.log(`[Freshness] Found ${cftcItems.length} CFTC items:`, cftcItems.map(i => ({ date: i.date, metricsCount: i.metricsCount })));
+        }
 
         ExclusiveStartKey = snapResult.LastEvaluatedKey;
       } while (ExclusiveStartKey);
+
+      // Debug: Log what we found for CFTC
+      console.log('[Freshness] latestByType after scan:', Object.keys(latestByType));
+      if (latestByType['cftc-positioning']) {
+        console.log('[Freshness] CFTC latest:', { date: latestByType['cftc-positioning'].date, metricsCount: latestByType['cftc-positioning'].metricsCount });
+      } else {
+        console.log('[Freshness] No CFTC data found in latestByType');
+      }
     } catch (err) {
       console.error('[API] Error scanning HedgeyeDailySnapshot:', err.message);
       scanError = err;
@@ -1899,25 +1912,26 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
         // Calculate item count based on snapshot type
         let itemCount = 0;
 
-        // Use explicit count fields if available
-        if (latestSnapshot.riskRangeCount) itemCount = latestSnapshot.riskRangeCount;
-        else if (latestSnapshot.positionCount) itemCount = latestSnapshot.positionCount;
-        else if (latestSnapshot.stockCount) itemCount = latestSnapshot.stockCount;
-        else if (latestSnapshot.cryptoCount) itemCount = latestSnapshot.cryptoCount + (latestSnapshot.stockCount || 0);
-        else if (latestSnapshot.rankingCount) itemCount = latestSnapshot.rankingCount;
-
-        // Fallback to counting data keys if explicit counts are missing/zero
-        if (itemCount === 0 && latestSnapshot.data) {
-          if (snapshotType === 'bitcoin-trend-tracker' && latestSnapshot.data.cryptos) {
-            itemCount = Object.keys(latestSnapshot.data.cryptos).length + Object.keys(latestSnapshot.data.stocks || {}).length;
-          } else if (Array.isArray(latestSnapshot.data.longs) || Array.isArray(latestSnapshot.data.shorts)) {
-            itemCount = (latestSnapshot.data.longs?.length || 0) + (latestSnapshot.data.shorts?.length || 0);
-          } else if (Array.isArray(latestSnapshot.data)) {
-            itemCount = latestSnapshot.data.length;
+        if (latestSnapshot.data) {
+          // Use explicit count fields if available
+          if (latestSnapshot.riskRangeCount) {
+            itemCount = latestSnapshot.riskRangeCount;
+          } else if (latestSnapshot.metricsCount) {
+            // CFTC Positioning uses metricsCount
+            itemCount = latestSnapshot.metricsCount;
+          } else if (latestSnapshot.stockCount) {
+            itemCount = latestSnapshot.stockCount;
+          } else if (latestSnapshot.cryptoCount) {
+            itemCount = latestSnapshot.cryptoCount;
+          } else if (latestSnapshot.rankingCount) {
+            itemCount = latestSnapshot.rankingCount;
           } else if (Array.isArray(latestSnapshot.data.stocks)) {
             itemCount = latestSnapshot.data.stocks.length;
           } else if (Array.isArray(latestSnapshot.data.rankings)) {
             itemCount = latestSnapshot.data.rankings.length;
+          } else if (Array.isArray(latestSnapshot.data)) {
+            // CFTC data is an array of metrics
+            itemCount = latestSnapshot.data.length;
           } else if (typeof latestSnapshot.data === 'object') {
             itemCount = Object.keys(latestSnapshot.data).length;
           }
@@ -2695,7 +2709,8 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
       'portfolio-solutions',
       'the-macro-show',
       'the-call',
-      'volume'
+      'volume',
+      'cftc-positioning'
     ];
 
     const results = {};
@@ -2760,6 +2775,61 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
               available: true,
               currentDate: current.date
             };
+            return;
+          }
+
+          // For cftc-positioning, extract significant Z-scores even with just 1 snapshot
+          if (type === 'cftc-positioning' && recentSnapshots.length === 1) {
+            const current = recentSnapshots[0];
+            const significantPositive = [];
+            const significantNegative = [];
+
+            if (current.data && Array.isArray(current.data)) {
+              current.data.forEach(metric => {
+                // Handle DynamoDB Decimal type or regular numbers
+                const z1yRaw = metric.zScore1Y;
+                const z3yRaw = metric.zScore3Y;
+
+                const z1y = z1yRaw !== undefined && z1yRaw !== null
+                  ? (typeof z1yRaw === 'object' && z1yRaw.toNumber ? z1yRaw.toNumber() : parseFloat(z1yRaw))
+                  : null;
+                const z3y = z3yRaw !== undefined && z3yRaw !== null
+                  ? (typeof z3yRaw === 'object' && z3yRaw.toNumber ? z3yRaw.toNumber() : parseFloat(z3yRaw))
+                  : null;
+
+                if (z1y > 2.0 || z3y > 2.0) {
+                  significantPositive.push({
+                    metric: metric.metric,
+                    category: metric.category,
+                    zScore1Y: z1y,
+                    zScore3Y: z3y,
+                    latest: metric.latest,
+                    wwChg: metric.wwChg
+                  });
+                } else if (z1y < -2.0 || z3y < -2.0) {
+                  significantNegative.push({
+                    metric: metric.metric,
+                    category: metric.category,
+                    zScore1Y: z1y,
+                    zScore3Y: z3y,
+                    latest: metric.latest,
+                    wwChg: metric.wwChg
+                  });
+                }
+              });
+            }
+
+            // Sort by most extreme first
+            significantPositive.sort((a, b) => Math.max(b.zScore1Y || 0, b.zScore3Y || 0) - Math.max(a.zScore1Y || 0, a.zScore3Y || 0));
+            significantNegative.sort((a, b) => Math.min(a.zScore1Y || 0, a.zScore3Y || 0) - Math.min(b.zScore1Y || 0, b.zScore3Y || 0));
+
+            results[type] = {
+              available: true,
+              currentDate: current.date,
+              significantPositive,
+              significantNegative
+            };
+            console.log(`[Changelog] CFTC with 1 snapshot - positive: ${significantPositive.length}, negative: ${significantNegative.length}`);
             return;
           }
 
@@ -3024,6 +3094,73 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
 
           console.log('[Changelog] Calculated trendChanges for early-look:', trendChanges.length, 'items');
           results[type].trendChanges = trendChanges;
+        }
+
+        // CFTC Positioning - extract significant Z-score changes (> 2.0 or < -2.0)
+        if (type === 'cftc-positioning') {
+          const significantPositive = [];
+          const significantNegative = [];
+
+          console.log('[Changelog] CFTC - Processing data, type:', typeof current.data, 'isArray:', Array.isArray(current.data));
+
+          if (current.data && Array.isArray(current.data)) {
+            console.log(`[Changelog] CFTC - Total metrics: ${current.data.length}`);
+            console.log('[Changelog] CFTC - First metric sample:', JSON.stringify(current.data[0], null, 2));
+
+            current.data.forEach((metric, idx) => {
+              // DynamoDB Decimals need special handling - convert to number
+              const z1yRaw = metric.zScore1Y;
+              const z3yRaw = metric.zScore3Y;
+
+              // Handle DynamoDB Decimal type (has toNumber method) or regular numbers
+              const z1y = z1yRaw !== undefined && z1yRaw !== null
+                ? (typeof z1yRaw === 'object' && z1yRaw.toNumber ? z1yRaw.toNumber() : parseFloat(z1yRaw))
+                : null;
+              const z3y = z3yRaw !== undefined && z3yRaw !== null
+                ? (typeof z3yRaw === 'object' && z3yRaw.toNumber ? z3yRaw.toNumber() : parseFloat(z3yRaw))
+                : null;
+
+              if (idx < 3) {
+                console.log(`[Changelog] CFTC - Metric ${idx} (${metric.metric}): z1y=${z1y}, z3y=${z3y}`);
+              }
+
+              // Check if any Z-score exceeds threshold
+              if (z1y > 2.0 || z3y > 2.0) {
+                significantPositive.push({
+                  metric: metric.metric,
+                  category: metric.category,
+                  zScore1Y: z1y,
+                  zScore3Y: z3y,
+                  latest: metric.latest,
+                  wwChg: metric.wwChg
+                });
+              } else if (z1y < -2.0 || z3y < -2.0) {
+                significantNegative.push({
+                  metric: metric.metric,
+                  category: metric.category,
+                  zScore1Y: z1y,
+                  zScore3Y: z3y,
+                  latest: metric.latest,
+                  wwChg: metric.wwChg
+                });
+              }
+            });
+          }
+
+          // Sort by absolute Z-score (most extreme first)
+          significantPositive.sort((a, b) => Math.max(b.zScore1Y || 0, b.zScore3Y || 0) - Math.max(a.zScore1Y || 0, a.zScore3Y || 0));
+          significantNegative.sort((a, b) => Math.min(a.zScore1Y || 0, a.zScore3Y || 0) - Math.min(b.zScore1Y || 0, b.zScore3Y || 0));
+
+          results[type].significantPositive = significantPositive;
+          results[type].significantNegative = significantNegative;
+
+          console.log(`[Changelog] CFTC Positioning - Significant positive: ${significantPositive.length}, negative: ${significantNegative.length}`);
+          if (significantPositive.length > 0) {
+            console.log('[Changelog] CFTC - Positive sample:', significantPositive[0]);
+          }
+          if (significantNegative.length > 0) {
+            console.log('[Changelog] CFTC - Negative sample:', significantNegative[0]);
+          }
         }
 
       } catch (err) {

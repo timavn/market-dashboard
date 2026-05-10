@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { DollarSign, BarChart2 } from 'lucide-react';
 import { USDMarketService } from '../../services/api/usdMarketService';
 import MarketVolumeTable from './MarketVolumeTable';
 import { VolatilityTableWithTabs } from './VolatilityTable';
@@ -317,17 +318,19 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
     >
       <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
-          <StatusDot
-            updatedAt={currenciesLastUpdated}
-            status={currenciesStatus === 'open' ? 'active' : 'inactive'}
-            size={10}
-            className="mr-1"
-            label="Currencies"
-            emoji={currStatus.emoji}
-            sources={currencySources}
-          />
-          <span className="region-label">Currencies</span>
+          <span className="card-icon-badge card-icon-badge--green">
+            <DollarSign size={13} strokeWidth={2.5} />
+          </span>
+          <span className="region-label region-label--lg">Currencies</span>
         </div>
+        <StatusDot
+          updatedAt={currenciesLastUpdated}
+          status={currenciesStatus === 'open' ? 'active' : 'inactive'}
+          size={8}
+          label="Currencies"
+          emoji={currStatus.emoji}
+          sources={currencySources}
+        />
       </div>
       <div className="region-mw-body currencies-compact-rail__body">
         <div className="region-mw-table-wrap currencies-rail-table-wrap">
@@ -335,10 +338,10 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
             <thead>
               <tr>
                 <th className="region-mw-th region-mw-th-name" scope="col">
-                  Ticker
+                  TICKER
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-price" scope="col">
-                  Price
+                  PRICE
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col" title="Day % change">
                   %
@@ -487,28 +490,29 @@ export function SectorsCompactRail({ data, loading, layout = 'rail' }) {
     >
       <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
+          <span className="region-label">Sectors</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <StatusDot
             updatedAt={sectorsLastUpdated}
             status={sectorsStatus === 'open' ? 'active' : 'inactive'}
-            size={10}
-            className="mr-1"
+            size={8}
             label="Sectors"
             emoji={secStatus.emoji}
             sources={sectorSources}
           />
-          <span className="region-label">Sectors</span>
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-gray-500 hover:text-gray-800 p-1 rounded hover:bg-gray-200 transition-colors z-10"
+            title={isExpanded ? "Collapse" : "Expand"}
+          >
+            {isExpanded ? (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+            )}
+          </button>
         </div>
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="ml-auto text-gray-500 hover:text-gray-800 p-1 rounded hover:bg-gray-200 transition-colors z-10"
-          title={isExpanded ? "Collapse" : "Expand"}
-        >
-          {isExpanded ? (
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-          ) : (
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
-          )}
-        </button>
       </div>
       <div className="region-mw-body currencies-compact-rail__body">
         <div className="region-mw-table-wrap currencies-rail-table-wrap">
@@ -613,20 +617,26 @@ function VolumeCard() {
   return (
     <div className="region-chart-panel region-chart-panel--mw volume-card">
       <div className="region-chart-header region-chart-header--mw">
-        <StatusDot
-          updatedAt={volLastUpdated}
-          status={volStatus}
-          size={10}
-          className="mr-1"
-          label="Volume"
-          showDateOnly
-        />
-        <span className="region-label">Volume</span>
-        {volHeaderNote ? (
-          <span className="mw-card-header-note" title={volHeaderNote}>
-            {volHeaderNote}
+        <div className="region-header-left">
+          <span className="card-header-icon card-header-icon--blue">
+            <BarChart2 size={16} strokeWidth={2} />
           </span>
-        ) : null}
+          <span className="region-label region-label--lg">Volume</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+          {volHeaderNote ? (
+            <span className="mw-card-header-note" title={volHeaderNote}>
+              {volHeaderNote}
+            </span>
+          ) : null}
+          <StatusDot
+            updatedAt={volLastUpdated}
+            status={volStatus}
+            size={8}
+            label="Volume"
+            showDateOnly
+          />
+        </div>
       </div>
       <MarketVolumeTable
         onLastUpdatedChange={setVolLastUpdated}
@@ -1004,11 +1014,12 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
         <div className="region-header-left">
           <span className={`region-icon ${iconCfg.cls}`}>{iconCfg.el}</span>
           <span className="region-label">{label}</span>
+        </div>
+        <div style={{ marginLeft: 'auto' }}>
           <StatusDot
             updatedAt={regionLastUpdated}
             status={statusIndicator.emoji === '🟢' ? 'active' : statusIndicator.emoji === '🔵' ? 'stale' : 'inactive'}
             size={8}
-            className="ml-1"
             label={`${label} region`}
             emoji={statusIndicator.emoji}
             sources={regionSources}
@@ -1119,15 +1130,6 @@ function RatesCard({ data, loading }) {
         <div className="region-header-left">
           <span className="region-icon region-icon--rates">%</span>
           <span className="region-label">Rates</span>
-          <StatusDot
-            updatedAt={lastUpdated}
-            status={statusIndicator.emoji === '🟢' ? 'active' : statusIndicator.emoji === '🔵' ? 'stale' : 'inactive'}
-            size={8}
-            className="ml-1"
-            label="Rates region"
-            emoji={statusIndicator.emoji}
-            sources={sources}
-          />
         </div>
         <div className="rates-tabs" role="tablist" aria-label="Rates categories">
           {RATES_TABS.map((tab) => (
@@ -1142,6 +1144,16 @@ function RatesCard({ data, loading }) {
               {tab.label}
             </button>
           ))}
+        </div>
+        <div style={{ marginLeft: 'auto' }}>
+          <StatusDot
+            updatedAt={lastUpdated}
+            status={statusIndicator.emoji === '🟢' ? 'active' : statusIndicator.emoji === '🔵' ? 'stale' : 'inactive'}
+            size={8}
+            label="Rates region"
+            emoji={statusIndicator.emoji}
+            sources={sources}
+          />
         </div>
       </div>
       {tabIndices.length === 0 && !loading ? (

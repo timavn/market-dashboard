@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sun, Moon, X } from 'lucide-react';
+import { Sun, Moon, X, Globe } from 'lucide-react';
 import { utcToZonedTime, format } from 'date-fns-tz';
 import { GLOBAL_MARKETS, getMarketStatus, getMarketCountdown, US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, HK_MARKET_HOLIDAYS, isMarketHoliday } from '../../constants/globalMarkets';
 
@@ -901,53 +901,40 @@ const CityNode = ({ market, now, onClick }) => {
   const zonedTime = utcToZonedTime(now, market.timezone);
   const status = getMarketStatus(market, zonedTime);
   const localTime = formatLocalTime(now, market.timezone);
-  const isDaytime = isLocalDaytime(market.timezone, now);
   const utcOffset = getUTCOffsetLabel(market.timezone, now);
-  const dayOffset = getDayOffset(market.timezone, now);
   const dayLabel = getDayLabel(market.timezone, now);
 
   const handleClick = (e) => {
     onClick(market, e.currentTarget);
   };
 
-  // Determine styling based on day offset
-  const dayIndicatorStyle = useMemo(() => {
-    if (dayOffset === -1) {
-      return 'text-[#6b7280] bg-[#f2efe7] border border-[#d6d0c3]'; // Yesterday - muted
-    } else if (dayOffset === 0) {
-      return 'text-black bg-[#f2efe7] border border-[#c9c3b6]'; // Today - highlighted
-    } else {
-      return 'text-[#6b7280] bg-[#f2efe7] border border-[#d6d0c3]'; // Tomorrow - subtle highlight
-    }
-  }, [dayOffset]);
-
   return (
     <motion.div
-      className="flex flex-col items-center cursor-pointer relative px-3 py-1 rounded-md border border-transparent hover:border-[#d6d0c3] hover:bg-[#f7f3e8]"
+      className="flex flex-col items-center cursor-pointer relative px-3 py-0.5 rounded-md hover:bg-gray-50"
       onClick={handleClick}
-      whileHover={{ scale: 1.05 }}
+      whileHover={{ scale: 1.02 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
       {/* Status Dot + City Code */}
-      <div className="flex items-center gap-1.5 mb-0.5">
+      <div className="flex items-center gap-1 mb-0">
         <StatusDot status={status} />
-        <span className="font-semibold text-xs text-gray-800 tracking-wide">
+        <span className="font-bold text-[11px] text-gray-900 tracking-wide">
           {market.code}
         </span>
       </div>
 
-      {/* Local Time (monospace) */}
-      <span className="font-mono text-sm text-black tabular-nums">
+      {/* Local Time - large bold */}
+      <span className="font-bold text-[15px] text-gray-900 tabular-nums leading-tight">
         {localTime}
       </span>
 
-      {/* Day Indicator - Subtle badge showing which day */}
-      <div className={`text-[8px] px-1.5 py-0.5 rounded mt-0.5 font-medium ${dayIndicatorStyle}`}>
+      {/* Day Badge - blue pill */}
+      <div className="mt-0.5 text-[9px] px-1.5 py-0 rounded-full bg-blue-100 text-blue-700 font-medium whitespace-nowrap leading-[1.6]">
         {dayLabel}
       </div>
 
       {/* UTC Offset */}
-      <span className="text-[9px] text-[#4b5563] mt-0.5">
+      <span className="text-[9px] text-gray-400 mt-0">
         {utcOffset}
       </span>
     </motion.div>
@@ -1000,70 +987,35 @@ const GlobalMarketDayCycleHeader = () => {
     return `${hours}:${minutes}`;
   }, [now]);
 
-  // Calculate sunlight gradient position based on UTC time
-  // Noon UTC (12:00) should be at the center of the gradient
-  const sunlightPosition = useMemo(() => {
-    const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60;
-    // Map 0-24 hours to gradient position
-    // At noon (12), we want the center; at midnight (0/24), edges
-    return ((utcHours - 12) / 24) * 100;
-  }, [now]);
-
-  // Calculate stats
-  const stats = useMemo(() => {
-    const openCount = getOpenMarketsCount(GLOBAL_MARKETS, now);
-    const nextEvent = getNextMarketEvent(GLOBAL_MARKETS, now);
-    return { openCount, nextEvent };
-  }, [now]);
-
   return (
     <div className="w-full mb-4">
-      <div className="relative overflow-hidden rounded-lg bg-[#f8f6ef] shadow-[0_2px_10px_rgba(0,0,0,0.08)] border border-[#d6d0c3]">
-        {/* Header Bar - Reduced thickness by 33% */}
-        <div className="px-5 py-2 flex items-center justify-between border-b border-[#d6d0c3] bg-[#f3f0e6]">
-          <div className="flex items-center gap-4">
+      <div className="relative rounded-lg bg-white shadow-[0_2px_10px_rgba(0,0,0,0.08)] border border-gray-200">
+        {/* Header Bar */}
+        <div className="px-5 py-1 flex items-center justify-between border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Globe size={15} className="text-blue-500" />
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-black">
               Global Market Day-Cycle
             </h2>
-            {stats.openCount > 0 && (
-              <div className="flex items-center gap-1.5 text-[11px] text-black">
-                <span className="text-[8px] leading-none">🟢</span>
-                <span>{stats.openCount} market{stats.openCount !== 1 ? 's' : ''} open</span>
-              </div>
-            )}
           </div>
-          <div className="flex items-center gap-4">
-            {stats.nextEvent && (
-              <div className="text-[11px] text-black">
-                Next: {stats.nextEvent.marketName} ({stats.nextEvent.market}) {stats.nextEvent.action} in {stats.nextEvent.timeStr}
-              </div>
-            )}
-            <div className="text-[11px] text-black font-mono tracking-wide">
-              UTC {utcTime}
-            </div>
+          <div className="text-[12px] text-gray-500 font-mono tracking-wide">
+            UTC {utcTime}
           </div>
         </div>
 
-        {/* Timeline Container */}
-        <div className="relative h-28 bg-[#fcfaf5]" style={{ overflowX: 'hidden', overflowY: 'visible' }}>
-          {/* Living Sky Ribbon - Celestial layer with animated Sun and Moon */}
-          <LivingSkyRibbon now={now} />
-
-          {/* City Nodes Container */}
-          <div className="relative h-full flex items-center justify-around px-4 sm:px-8 z-20">
-            {GLOBAL_MARKETS.map((market) => (
-              <CityNode
-                key={market.id}
-                market={market}
-                now={now}
-                onClick={(market, element) => {
-                  setSelectedMarket(market);
-                  setAnchorElement(element);
-                }}
-              />
-            ))}
-          </div>
-
+        {/* City Nodes Row */}
+        <div className="flex items-center justify-around px-4 py-1.5">
+          {GLOBAL_MARKETS.map((market) => (
+            <CityNode
+              key={market.id}
+              market={market}
+              now={now}
+              onClick={(market, element) => {
+                setSelectedMarket(market);
+                setAnchorElement(element);
+              }}
+            />
+          ))}
         </div>
       </div>
 

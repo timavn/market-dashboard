@@ -862,14 +862,15 @@ const WorkflowStatus = () => {
                     { key: 'momo-tracker', label: 'MOMO Tracker' },
                     { key: 'the-call', label: 'The Call' },
                     { key: 'the-macro-show', label: 'The Macro Show' },
-                    { key: 'etf-pro', label: 'ETF Pro' }
+                    { key: 'etf-pro', label: 'ETF Pro' },
+                    { key: 'cftc-positioning', label: 'CFTC Net Long' }
                   ].map(({ key, label }) => {
                     const diff = changelogData?.[key];
 
                     // Always show these cards (including placeholders with no data)
                     const alwaysShow = [
                       'risk-ranges', 'early-look', 'bitcoin-trend-tracker', 'portfolio-solutions',
-                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show', 'etf-pro'
+                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show', 'etf-pro', 'cftc-positioning'
                     ].includes(key);
 
                     if (!alwaysShow) {
@@ -1422,8 +1423,61 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
+                        {/* CFTC POSITIONING: Significant Z-Score Changes (> 2.0 or < -2.0) */}
+                        {key === 'cftc-positioning' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* Positive Z-Scores (> 2.0) */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#34d399' : '#059669', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.15)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Significant Positive Z-Scores</span>
+                                <span style={{ fontWeight: 400, fontSize: '10px' }}>(Z &gt; 2.0)</span>
+                              </div>
+                              {(diff?.significantPositive && diff.significantPositive.length > 0) ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  {diff.significantPositive.map((item, idx) => (
+                                    <div key={idx} style={{ fontSize: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 4px', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', borderRadius: '3px' }}>
+                                      <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>
+                                        {item.metric} <span style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '9px' }}>({item.category})</span>
+                                      </span>
+                                      <span style={{ color: '#10b981', fontWeight: 600 }}>
+                                        {item.zScore1Y > item.zScore3Y ? item.zScore1Y.toFixed(2) : item.zScore3Y.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+
+                            {/* Negative Z-Scores (< -2.0) */}
+                            <div>
+                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#f87171' : '#dc2626', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.15)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>Significant Negative Z-Scores</span>
+                                <span style={{ fontWeight: 400, fontSize: '10px' }}>(Z &lt; -2.0)</span>
+                              </div>
+                              {(diff?.significantNegative && diff.significantNegative.length > 0) ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  {diff.significantNegative.map((item, idx) => (
+                                    <div key={idx} style={{ fontSize: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 4px', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', borderRadius: '3px' }}>
+                                      <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>
+                                        {item.metric} <span style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '9px' }}>({item.category})</span>
+                                      </span>
+                                      <span style={{ color: '#ef4444', fontWeight: 600 }}>
+                                        {item.zScore1Y < item.zScore3Y ? item.zScore1Y.toFixed(2) : item.zScore3Y.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         {/* GENERIC FALLBACK: Added/Removed Table for any others */}
-                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && key !== 'etf-pro' && hasData && (
+                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && key !== 'etf-pro' && key !== 'cftc-positioning' && hasData && (
                           <div>
                             {/* Section Header - match Risk Ranges style */}
                             <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
