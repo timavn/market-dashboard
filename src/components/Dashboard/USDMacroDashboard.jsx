@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { CalendarDays, Phone } from 'lucide-react';
 import { Card, Title, Text } from '@tremor/react';
 import MultiRegionMarketOverview from './MultiRegionMarketOverview';
 import GlobalMarketDayCycleHeader from './GlobalMarketDayCycleHeader';
@@ -66,7 +67,8 @@ const getRecentMarketDays = (count = 5) => {
       const dateKey = formatDateKey(cursor);
       days.push({
         dateKey,
-        label: cursor.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        label: cursor.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        dayOfWeek: cursor.toLocaleDateString('en-US', { weekday: 'long' })
       });
     }
     const previousDay = new Date(cursor);
@@ -320,7 +322,11 @@ const USDMacroDashboard = ({
           key={row.dateKey}
           className={`macro-call-day-row ${isLastRow ? 'last-row' : ''}`}
         >
-          <div className="macro-call-day-block">{row.label}</div>
+          <div className="macro-call-day-block">
+            <CalendarDays size={13} className="macro-call-day-block-icon" />
+            <span className="macro-call-day-block-date">{row.label}</span>
+            <span className="macro-call-day-block-dow">{row.dayOfWeek}</span>
+          </div>
           <div className="macro-call-day-content">
             <div className="macro-call-day-line long">
               <span className="macro-call-side-label">Long</span>
@@ -394,18 +400,18 @@ const USDMacroDashboard = ({
             <div className="flex flex-col md:flex-row gap-4" style={{ alignItems: 'stretch' }}>
               {/* Left: MACRO SHOW */}
               <div className="flex-1 macro-call-card">
-                <div className="region-chart-header">
-                  <div className="region-header-left">
-                    <StatusDot
-                      updatedAt={latestMacroScrapedAt}
-                      status={latestMacroScrapedAt ? 'active' : undefined}
-                      size={10}
-                      className="mr-1"
-                      label="Macro Show"
-                      emoji={latestMacroScrapedAt ? '🟢' : '⚪'}
-                    />
-                    <span className="region-label dark:text-white">MACRO SHOW</span>
+                <div className="macro-call-card-header">
+                  <div className="macro-call-header-left">
+                    <CalendarDays size={16} className="macro-call-header-icon" />
+                    <span className="macro-call-header-title">MACRO SHOW</span>
                   </div>
+                  <StatusDot
+                    updatedAt={latestMacroScrapedAt}
+                    status={latestMacroScrapedAt ? 'active' : undefined}
+                    size={10}
+                    label="Macro Show"
+                    emoji={latestMacroScrapedAt ? '🟢' : '⚪'}
+                  />
                 </div>
                 <div className="macro-call-body macro-call-body-days">
                   {renderShowRows(macroShowRows.length > 0 ? macroShowRows : marketDays.map((day) => ({ ...day, snapshot: null })))}
@@ -414,18 +420,18 @@ const USDMacroDashboard = ({
 
               {/* Right: THE CALL */}
               <div className="flex-1 macro-call-card">
-                <div className="region-chart-header">
-                  <div className="region-header-left">
-                    <StatusDot
-                      updatedAt={latestCallScrapedAt}
-                      status={latestCallScrapedAt ? 'active' : undefined}
-                      size={10}
-                      className="mr-1"
-                      label="The Call"
-                      emoji={latestCallScrapedAt ? '🟢' : '⚪'}
-                    />
-                    <span className="region-label dark:text-white">THE CALL</span>
+                <div className="macro-call-card-header">
+                  <div className="macro-call-header-left">
+                    <Phone size={16} className="macro-call-header-icon" />
+                    <span className="macro-call-header-title">THE CALL</span>
                   </div>
+                  <StatusDot
+                    updatedAt={latestCallScrapedAt}
+                    status={latestCallScrapedAt ? 'active' : undefined}
+                    size={10}
+                    label="The Call"
+                    emoji={latestCallScrapedAt ? '🟢' : '⚪'}
+                  />
                 </div>
                 <div className="macro-call-body macro-call-body-days">
                   {renderShowRows(theCallRows.length > 0 ? theCallRows : marketDays.map((day) => ({ ...day, snapshot: null })))}

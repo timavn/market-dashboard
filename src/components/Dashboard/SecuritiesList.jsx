@@ -572,33 +572,51 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   return (
     <div className="relative securities-card" style={{ overflow: 'hidden' }}>
       <div className="securities-card-header">
-        <div className="securities-card-header-inner">
+        {/* Left: icon badge + title */}
+        <div className="securities-header-left">
+          {activeView === 'signal' ? (
+            <span className="securities-icon-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10" />
+                <line x1="12" y1="20" x2="12" y2="4" />
+                <line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+            </span>
+          ) : (
+            <span className="securities-icon-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </span>
+          )}
           <span className="securities-card-title">
-            {activeView === 'etfpro' ? 'ETF Pro' : 'Signal Strength'}
+            {activeView === 'etfpro' ? 'ETF PRO' : 'SIGNAL STRENGTH'}
           </span>
-          <div className="securities-view-toggle" role="tablist" aria-label="Left sidebar view">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeView === 'signal'}
-              className={activeView === 'signal' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('signal')}
-            >
-              <span className={`status-dot ${ssFresh ? 'fresh' : 'stale'}`} />
-              SS
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeView === 'etfpro'}
-              className={activeView === 'etfpro' ? 'toggle-btn active' : 'toggle-btn'}
-              onClick={() => setActiveView('etfpro')}
-            >
-              <span className={`status-dot ${etfProFresh ? 'fresh' : 'stale'}`} />
-              ETFP
-            </button>
-          </div>
         </div>
+        {/* Center: SS / ETFP toggle */}
+        <div className="securities-view-toggle" role="tablist" aria-label="Left sidebar view">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === 'signal'}
+            className={activeView === 'signal' ? 'toggle-btn active' : 'toggle-btn'}
+            onClick={() => setActiveView('signal')}
+          >
+            <span className={`status-dot ${ssFresh ? 'fresh' : 'stale'}`} />
+            SS
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === 'etfpro'}
+            className={activeView === 'etfpro' ? 'toggle-btn active' : 'toggle-btn'}
+            onClick={() => setActiveView('etfpro')}
+          >
+            <span className={`status-dot ${etfProFresh ? 'fresh' : 'stale'}`} />
+            ETFP
+          </button>
+        </div>
+        {/* Right: expand chevron */}
         {onExpandToggle && (
           <button
             onClick={(e) => {
@@ -608,15 +626,9 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             className="securities-expand-btn"
             title={isExpanded ? 'Collapse left sidebar' : 'Expand left sidebar'}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path
-                d={isExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
+                d={isExpanded ? "M10 12L6 8L10 4" : "M6 4L10 8L6 12"}
                 stroke="currentColor"
                 strokeWidth="2"
                 strokeLinecap="round"
@@ -633,10 +645,10 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
         <>
           {/* Top Movers Section - Compact Table Format */}
           <div className="top-movers-section">
-            <div className="top-movers-compact">
+            <div className="top-movers-compact top-movers-sidebyside">
               {/* Top Gainers Table */}
               <div className="top-movers-table-container">
-                <div className="top-movers-header gainers">Gainers</div>
+                <div className="top-movers-header gainers">✦ GAINERS</div>
                 <table className="top-movers-table">
                   <thead>
                     <tr>
@@ -695,7 +707,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
 
               {/* Top Losers Table */}
               <div className="top-movers-table-container">
-                <div className="top-movers-header losers">Losers</div>
+                <div className="top-movers-header losers">↘ LOSERS</div>
                 <table className="top-movers-table">
                   <thead>
                     <tr>
@@ -805,8 +817,8 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           className="securities-header-row"
           style={{
             gridTemplateColumns: isExpanded
-              ? '20px 30px 60px 70px 60px 50px 50px 80px 45px'
-              : '20px 30px 60px 70px 60px 50px 50px'
+              ? '20px 30px 60px 70px 60px 60px 80px 45px'
+              : '20px 30px 60px 70px 60px 60px'
           }}
         >
           <div
@@ -849,7 +861,6 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           <div className="header-price">Spot Price</div>
           <div className="header-bias">Bias</div>
           <div className="header-lrr">LRR</div>
-          <div className="header-hrr">HRR</div>
           {isExpanded && (
             <>
               <div className="header-odds">+/-</div>
@@ -866,8 +877,8 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
               className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
               style={{
                 gridTemplateColumns: isExpanded
-                  ? '20px 30px 60px 70px 60px 50px 50px 80px 45px'
-                  : '20px 30px 60px 70px 60px 50px 50px'
+                  ? '20px 30px 60px 70px 60px 60px 80px 45px'
+                  : '20px 30px 60px 70px 60px 60px'
               }}
             >
               <div className="data-dot-cell">
@@ -957,20 +968,6 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                     if (lrr !== undefined && lrr !== null) {
                       const isPercentage = security.ticker.startsWith('UST');
                       return formatRiskLevel(lrr, isPercentage);
-                    }
-                    return '--';
-                  })()}
-                </span>
-              </div>
-              <div className="data-hrr-cell">
-                <span className="data-hrr">
-                  {(() => {
-                    const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                    const hrr = riskRangeData?.hrr;
-
-                    if (hrr !== undefined && hrr !== null) {
-                      const isPercentage = security.ticker.startsWith('UST');
-                      return formatRiskLevel(hrr, isPercentage);
                     }
                     return '--';
                   })()}

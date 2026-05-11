@@ -1,6 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Card, Title } from '@tremor/react';
 import { useTheme } from '../../context/ThemeContext';
+
+// Country flag emoji helper
+const FLAG = {
+  'Argentina':      '🇦🇷',
+  'Australia':      '🇦🇺',
+  'Brazil':         '🇧🇷',
+  'Canada':         '🇨🇦',
+  'Chile':          '🇨🇱',
+  'China':          '🇨🇳',
+  'Colombia':       '🇨🇴',
+  'Czech Republic': '🇨🇿',
+  'France':         '🇫🇷',
+  'Germany':        '🇩🇪',
+  'Greece':         '🇬🇷',
+  'Hong Kong':      '🇭🇰',
+  'India':          '🇮🇳',
+  'Indonesia':      '🇮🇩',
+  'Israel':         '🇮🇱',
+  'Italy':          '🇮🇹',
+  'Japan':          '🇯🇵',
+  'Malaysia':       '🇲🇾',
+  'Mexico':         '🇲🇽',
+  'Peru':           '🇵🇪',
+  'Philippines':    '🇵🇭',
+  'Poland':         '🇵🇱',
+  'Russia':         '🇷🇺',
+  'Saudi Arabia':   '🇸🇦',
+  'Singapore':      '🇸🇬',
+  'South Africa':   '🇿🇦',
+  'South Korea':    '🇰🇷',
+  'Spain':          '🇪🇸',
+  'Taiwan':         '🇹🇼',
+  'Thailand':       '🇹🇭',
+  'Turkey':         '🇹🇷',
+  'United Kingdom': '🇬🇧',
+  'United States':  '🇺🇸',
+};
 
 const QUARTERS = [
   '1Q24', '2Q24', '3Q24', '4Q24',
@@ -94,45 +131,44 @@ const getDefaultData = () => {
   return data;
 };
 
-const getCellColor = (value, isDark) => {
-  switch (value) {
-    case '1':
-      return isDark ? '#059669' : '#10b981'; // green-600 / green-500
-    case '2':
-      return isDark ? '#4ade80' : '#86efac'; // green-400 / green-300
-    case '3':
-      return isDark ? '#fbbf24' : '#f59e0b'; // amber-400 / amber-500
-    case '4':
-      return isDark ? '#dc2626' : '#ef4444'; // red-600 / red-500
-    default:
-      return 'transparent';
-  }
+// Colors derived directly from the QUAD logo letters:
+// Q=#008000 (Quad1), U=#7CB342 (Quad2), A=#FFC107 (Quad3), D=#FE0000 (Quad4)
+const QUAD_COLORS = {
+  '1': { bg: '#008000', text: '#ffffff' }, // Q - dark green
+  '2': { bg: '#7CB342', text: '#ffffff' }, // U - light green
+  '3': { bg: '#FFC107', text: '#1a1a1a' }, // A - amber (dark text for contrast)
+  '4': { bg: '#FE0000', text: '#ffffff' }, // D - red
+};
+
+const getCellColor = (value) => {
+  return QUAD_COLORS[value]?.bg || 'transparent';
+};
+
+const getCellTextColor = (value) => {
+  if (!value) return null;
+  return QUAD_COLORS[value]?.text || '#ffffff';
 };
 
 const getTextColor = (value, isDark) => {
   if (!value) return isDark ? '#9ca3af' : '#6b7280';
-  return '#ffffff';
+  return getCellTextColor(value) || '#ffffff';
 };
 
 const GlobalQuadsCard = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  
+
   const [data, setData] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          return getDefaultData();
-        }
+        try { return JSON.parse(saved); } catch (e) { return getDefaultData(); }
       }
     }
     return getDefaultData();
   });
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }
@@ -140,32 +176,31 @@ const GlobalQuadsCard = () => {
 
   const handleCellChange = (country, quarter, value) => {
     if (value === '' || /^[1-4]$/.test(value)) {
-      setData(prev => ({
-        ...prev,
-        [country]: {
-          ...prev[country],
-          [quarter]: value
-        }
-      }));
+      setData(prev => ({ ...prev, [country]: { ...prev[country], [quarter]: value } }));
     }
   };
 
+  const border = `1px solid ${isDark ? '#374151' : '#e5e7eb'}`;
+  const bg = isDark ? '#1f2937' : '#ffffff';
+  const bgHeader = isDark ? '#111827' : '#f8fafc';
+
   const renderCell = (country, quarter) => {
     const value = data[country]?.[quarter] || '';
-    const bgColor = getCellColor(value, isDark);
+    const bgColor = getCellColor(value);
     const textColor = getTextColor(value, isDark);
-    
+    const isEst = ESTIMATES_QUARTERS.includes(quarter);
     return (
       <div
         key={`${country}-${quarter}`}
         style={{
-          backgroundColor: bgColor,
-          border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+          backgroundColor: bgColor || (isEst ? (isDark ? '#1e2a3a' : '#f0f6ff') : bg),
+          borderRight: border,
+          borderBottom: border,
           minWidth: COLUMN_WIDTH,
-          height: '28px',
+          height: '26px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
         }}
       >
         <input
@@ -173,17 +208,11 @@ const GlobalQuadsCard = () => {
           value={value}
           onChange={(e) => handleCellChange(country, quarter, e.target.value)}
           style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
+            width: '100%', height: '100%', border: 'none',
             backgroundColor: 'transparent',
-            color: textColor,
-            textAlign: 'center',
-            fontSize: '12px',
-            fontWeight: 600,
-            fontFamily: 'monospace',
-            outline: 'none',
-            padding: 0
+            color: value ? textColor : (isDark ? '#4b5563' : '#d1d5db'),
+            textAlign: 'center', fontSize: '12px', fontWeight: 700,
+            fontFamily: 'monospace', outline: 'none', padding: 0, cursor: 'text',
           }}
           maxLength={1}
         />
@@ -191,286 +220,122 @@ const GlobalQuadsCard = () => {
     );
   };
 
-  // Render functions for G20 table
-  const renderG20CountryRow = (country) => (
+  const renderCountryRow = (country, regionWidth) => (
     <div
       key={country.name}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: `${G20_REGION_WIDTH} repeat(13, ${COLUMN_WIDTH})`,
-        borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
-      }}
+      style={{ display: 'flex', borderBottom: border }}
     >
-      <div
-        style={{
-          padding: '4px 8px',
-          fontSize: '11px',
-          fontWeight: 400,
-          color: isDark ? '#d1d5db' : '#374151',
-          display: 'flex',
-          alignItems: 'center',
-          borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-          backgroundColor: isDark ? '#1f2937' : '#ffffff'
-        }}
-      >
-        {country.name}
+      <div style={{
+        width: regionWidth, flexShrink: 0, padding: '3px 8px',
+        fontSize: '11px', fontWeight: 500,
+        color: isDark ? '#d1d5db' : '#374151',
+        display: 'flex', alignItems: 'center', gap: '5px',
+        borderRight: border, backgroundColor: bg,
+      }}>
+        <span style={{ fontSize: '13px', lineHeight: 1, flexShrink: 0 }}>{FLAG[country.name] || '🏳️'}</span>
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{country.name}</span>
       </div>
       {QUARTERS.map(q => renderCell(country.name, q))}
     </div>
   );
 
-  const renderG20ModeMedianRow = () => (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: `${G20_REGION_WIDTH} repeat(13, ${COLUMN_WIDTH})`,
-        borderBottom: 'none'
-      }}
-    >
-      <div
-        style={{
-          padding: '6px 8px',
-          fontSize: '10px',
-          fontWeight: 700,
-          color: '#ffffff',
-          backgroundColor: isDark ? '#1e40af' : '#3b82f6',
-          display: 'flex',
-          alignItems: 'center',
-          borderRight: `1px solid ${isDark ? '#1e3a8a' : '#2563eb'}`
-        }}
-      >
-        MODE/MEDIAN
+  const renderModeMedianRow = (key, regionWidth) => (
+    <div style={{ display: 'flex', borderTop: `2px solid ${isDark ? '#374151' : '#cbd5e1'}` }}>
+      <div style={{
+        width: regionWidth, flexShrink: 0, padding: '5px 8px',
+        fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em',
+        color: isDark ? '#93c5fd' : '#1d4ed8',
+        display: 'flex', alignItems: 'center',
+        borderRight: border,
+        backgroundColor: isDark ? '#172035' : '#eff6ff',
+      }}>
+        MODE / MEDIAN
       </div>
-      {QUARTERS.map(q => (
-        <div
-          key={q}
-          style={{
-            backgroundColor: isDark ? '#1e40af' : '#3b82f6',
-            borderRight: `1px solid ${isDark ? '#1e3a8a' : '#2563eb'}`,
-            minWidth: COLUMN_WIDTH,
-            height: '28px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <input
-            type="text"
-            value={data['G20_MODE/MEDIAN']?.[q] || ''}
-            onChange={(e) => handleCellChange('G20_MODE/MEDIAN', q, e.target.value)}
-            style={{
-              width: '100%',
-              height: '100%',
-              border: 'none',
-              backgroundColor: 'transparent',
-              color: '#ffffff',
-              textAlign: 'center',
-              fontSize: '12px',
-              fontWeight: 700,
-              fontFamily: 'monospace',
-              outline: 'none',
-              padding: 0
-            }}
-            maxLength={1}
-          />
-        </div>
-      ))}
+      {QUARTERS.map(q => {
+        const val = data[key]?.[q] || '';
+        const mmBg = val ? getCellColor(val) : (isDark ? '#172035' : '#eff6ff');
+        const mmText = val ? getTextColor(val, isDark) : (isDark ? '#93c5fd' : '#1d4ed8');
+        const isEst = ESTIMATES_QUARTERS.includes(q);
+        return (
+          <div key={q} style={{
+            backgroundColor: mmBg || (isEst ? (isDark ? '#1a2d45' : '#e0eeff') : (isDark ? '#172035' : '#eff6ff')),
+            borderRight: border, minWidth: COLUMN_WIDTH, height: '28px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <input
+              type="text"
+              value={val}
+              onChange={(e) => handleCellChange(key, q, e.target.value)}
+              style={{
+                width: '100%', height: '100%', border: 'none',
+                backgroundColor: 'transparent', color: mmText,
+                textAlign: 'center', fontSize: '12px', fontWeight: 700,
+                fontFamily: 'monospace', outline: 'none', padding: 0,
+              }}
+              maxLength={1}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 
-  // Render functions for EM table
-  const renderEMCountryRow = (country) => (
-    <div
-      key={country.name}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: `${EM_REGION_WIDTH} repeat(13, ${COLUMN_WIDTH})`,
-        borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
-      }}
-    >
-      <div
-        style={{
-          padding: '4px 8px',
-          fontSize: '11px',
-          fontWeight: 400,
-          color: isDark ? '#d1d5db' : '#374151',
-          display: 'flex',
-          alignItems: 'center',
-          borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-          backgroundColor: isDark ? '#1f2937' : '#ffffff'
-        }}
-      >
-        {country.name}
-      </div>
-      {QUARTERS.map(q => renderCell(country.name, q))}
-    </div>
-  );
-
-  const renderEMModeMedianRow = () => (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: `${EM_REGION_WIDTH} repeat(13, ${COLUMN_WIDTH})`,
-        borderBottom: 'none'
-      }}
-    >
-      <div
-        style={{
-          padding: '6px 8px',
-          fontSize: '10px',
-          fontWeight: 700,
-          color: '#ffffff',
-          backgroundColor: isDark ? '#1e40af' : '#3b82f6',
-          display: 'flex',
-          alignItems: 'center',
-          borderRight: `1px solid ${isDark ? '#1e3a8a' : '#2563eb'}`
-        }}
-      >
-        MODE/MEDIAN
-      </div>
-      {QUARTERS.map(q => (
-        <div
-          key={q}
-          style={{
-            backgroundColor: isDark ? '#1e40af' : '#3b82f6',
-            borderRight: `1px solid ${isDark ? '#1e3a8a' : '#2563eb'}`,
-            minWidth: COLUMN_WIDTH,
-            height: '28px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <input
-            type="text"
-            value={data['EM_MODE/MEDIAN']?.[q] || ''}
-            onChange={(e) => handleCellChange('EM_MODE/MEDIAN', q, e.target.value)}
-            style={{
-              width: '100%',
-              height: '100%',
-              border: 'none',
-              backgroundColor: 'transparent',
-              color: '#ffffff',
-              textAlign: 'center',
-              fontSize: '12px',
-              fontWeight: 700,
-              fontFamily: 'monospace',
-              outline: 'none',
-              padding: 0
-            }}
-            maxLength={1}
-          />
-        </div>
-      ))}
-    </div>
-  );
-
-  // Render table header for a section
   const renderTableHeader = (sectionLabel, regionWidth) => (
     <div style={{ flexShrink: 0 }}>
-      {/* Top Tier - Section Label */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: `${regionWidth} repeat(9, ${COLUMN_WIDTH}) repeat(4, ${COLUMN_WIDTH})`,
-          borderBottom: `1px solid ${isDark ? '#4b5563' : '#d1d5db'}`,
-          backgroundColor: isDark ? '#111827' : '#f3f4f6'
-        }}
-      >
-        <div
-          style={{
-            padding: '10px 8px',
-            fontSize: '12px',
-            fontWeight: 700,
-            color: isDark ? '#f9fafb' : '#111827',
-            textAlign: 'center',
-            borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: isDark ? '#374151' : '#e5e7eb'
-          }}
-        >
-          {sectionLabel}
+      {/* Row 1: section label | ACTUALS (9 cols) | ESTIMATES (4 cols) */}
+      <div style={{ display: 'flex', borderBottom: border, backgroundColor: bgHeader }}>
+        <div style={{
+          width: regionWidth, flexShrink: 0,
+          display: 'flex', alignItems: 'center', gap: '5px',
+          padding: '7px 8px', borderRight: border,
+          fontSize: '12px', fontWeight: 800,
+          color: isDark ? '#f3f4f6' : '#111827',
+          backgroundColor: isDark ? '#374151' : '#e2e8f0',
+        }}>
+          <span style={{ fontSize: '14px' }}>🌐</span>
+          <span>{sectionLabel}</span>
         </div>
-        {/* Actuals Header - spans 9 columns */}
-        <div
-          style={{
-            gridColumn: 'span 9',
-            padding: '10px',
-            fontSize: '12px',
-            fontWeight: 700,
-            color: isDark ? '#f9fafb' : '#111827',
-            textAlign: 'center',
-            borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-            borderBottom: `2px solid ${isDark ? '#4b5563' : '#9ca3af'}`,
-            backgroundColor: isDark ? '#1f2937' : '#e5e7eb'
-          }}
-        >
-          Actuals
+        <div style={{
+          width: `calc(${COLUMN_WIDTH} * 9)`, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em',
+          color: isDark ? '#9ca3af' : '#64748b',
+          textTransform: 'uppercase',
+          borderRight: border,
+          backgroundColor: isDark ? '#1f2937' : '#f1f5f9',
+        }}>
+          ACTUALS
         </div>
-        {/* Estimates Header - spans 4 columns */}
-        <div
-          style={{
-            gridColumn: 'span 4',
-            padding: '10px',
-            fontSize: '12px',
-            fontWeight: 700,
-            color: isDark ? '#f9fafb' : '#111827',
-            textAlign: 'center',
-            borderBottom: `2px solid ${isDark ? '#3b82f6' : '#60a5fa'}`,
-            backgroundColor: isDark ? '#1e3a8a' : '#dbeafe'
-          }}
-        >
-          Estimates
+        <div style={{
+          width: `calc(${COLUMN_WIDTH} * 4)`, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em',
+          color: isDark ? '#60a5fa' : '#2563eb',
+          textTransform: 'uppercase',
+          backgroundColor: isDark ? '#1e2d45' : '#dbeafe',
+        }}>
+          ESTIMATES
         </div>
       </div>
-
-      {/* Second Tier - Quarter Labels */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: `${regionWidth} repeat(13, ${COLUMN_WIDTH})`,
-          borderBottom: `2px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-          backgroundColor: isDark ? '#1f2937' : '#f9fafb'
-        }}
-      >
-        <div
-          style={{
-            borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
-          }}
-        />
+      {/* Row 2: quarter labels */}
+      <div style={{ display: 'flex', borderBottom: `2px solid ${isDark ? '#374151' : '#cbd5e1'}`, backgroundColor: isDark ? '#1f2937' : '#f8fafc' }}>
+        <div style={{ width: regionWidth, flexShrink: 0, borderRight: border }} />
         {ACTUALS_QUARTERS.map(q => (
-          <div
-            key={q}
-            style={{
-              padding: '8px 2px',
-              fontSize: '11px',
-              fontWeight: 600,
-              color: isDark ? '#9ca3af' : '#4b5563',
-              textAlign: 'center',
-              borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-              fontFamily: 'monospace'
-            }}
-          >
-            {q}
-          </div>
+          <div key={q} style={{
+            minWidth: COLUMN_WIDTH, flexShrink: 0,
+            padding: '5px 2px', fontSize: '10px', fontWeight: 600,
+            color: isDark ? '#9ca3af' : '#64748b',
+            textAlign: 'center', borderRight: border, fontFamily: 'monospace',
+          }}>{q}</div>
         ))}
         {ESTIMATES_QUARTERS.map(q => (
-          <div
-            key={q}
-            style={{
-              padding: '8px 2px',
-              fontSize: '11px',
-              fontWeight: 600,
-              color: '#3b82f6',
-              textAlign: 'center',
-              borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-              fontFamily: 'monospace'
-            }}
-          >
-            {q}
-          </div>
+          <div key={q} style={{
+            minWidth: COLUMN_WIDTH, flexShrink: 0,
+            padding: '5px 2px', fontSize: '10px', fontWeight: 700,
+            color: isDark ? '#60a5fa' : '#2563eb',
+            textAlign: 'center', borderRight: border, fontFamily: 'monospace',
+            backgroundColor: isDark ? '#1e2d45' : '#eff6ff',
+          }}>{q}</div>
         ))}
       </div>
     </div>
@@ -481,38 +346,24 @@ const GlobalQuadsCard = () => {
       className={isDark ? 'dark:bg-gray-800' : ''}
       style={{
         border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-        borderRadius: '0.5rem',
-        padding: 0,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
+        borderRadius: '0.5rem', padding: 0, height: '100%',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          padding: '8px 16px',
-          borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-          backgroundColor: isDark ? '#1f2937' : '#f9fafb',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexShrink: 0
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* QUAD Logo */}
-          <div
-            style={{
-              fontFamily: "Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif",
-              lineHeight: 1,
-              fontSize: '20px',
-              display: 'flex',
-              flexDirection: 'column',
-              userSelect: 'none',
-            }}
-          >
+      {/* Card Header */}
+      <div style={{
+        padding: '8px 14px',
+        borderBottom: border,
+        backgroundColor: isDark ? '#1f2937' : '#ffffff',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        flexShrink: 0,
+      }}>
+        {/* Left: QUAD logo + title */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{
+            fontFamily: "Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif",
+            lineHeight: 1, fontSize: '20px', display: 'flex', flexDirection: 'column', userSelect: 'none',
+          }}>
             <div style={{ display: 'flex' }}>
               <span style={{ color: '#008000' }}>Q</span>
               <span style={{ color: '#7CB342' }}>U</span>
@@ -522,43 +373,62 @@ const GlobalQuadsCard = () => {
               <span style={{ color: '#FE0000' }}>D</span>
             </div>
           </div>
-          <Title
-            style={{
-              fontSize: '14px',
-              fontWeight: 600,
-              color: isDark ? '#f9fafb' : '#111827',
-              margin: 0
-            }}
-          >
+          <Title style={{ fontSize: '14px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', margin: 0 }}>
             Global Quad Forecast
           </Title>
         </div>
-        <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-          1=Goldilocks (↑growth, ↓inflation) | 2=Reflation (↑both) | 3=Stagflation (↓growth, ↑inflation) | 4=Deflation (↓both)
+        {/* Right: legend pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {[
+            { val: '1', label: 'Goldilocks',  desc: '(↑ growth, ↓ inflation)' },
+            { val: '2', label: 'Reflation',   desc: '(↑ both)' },
+            { val: '3', label: 'Stagflation', desc: '(↓ growth, ↑ inflation)' },
+            { val: '4', label: 'Deflation',   desc: '(↓ both)' },
+          ].map(({ val, label, desc }) => (
+            <span key={val} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: '17px', height: '17px', borderRadius: '4px',
+                backgroundColor: QUAD_COLORS[val].bg, color: QUAD_COLORS[val].text,
+                fontSize: '10px', fontWeight: 800, fontFamily: 'monospace', flexShrink: 0,
+              }}>{val}</span>
+              <span style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#e5e7eb' : '#374151' }}>{label}</span>
+              <span style={{ fontSize: '10px', color: isDark ? '#6b7280' : '#9ca3af' }}>{desc}</span>
+            </span>
+          ))}
         </div>
       </div>
 
       {/* Side-by-Side Tables */}
-      <div style={{ flex: 1, overflow: 'auto', display: 'flex', gap: '1px' }}>
+      <div style={{ flex: 1, overflow: 'auto', display: 'flex', gap: 0 }}>
         {/* G20 Table */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, borderRight: `2px solid ${isDark ? '#4b5563' : '#cbd5e1'}` }}>
           {renderTableHeader('G20', G20_REGION_WIDTH)}
-          
-          {/* G20 Data - flat list */}
           <div>
-            {G20_COUNTRIES.map(renderG20CountryRow)}
-            {renderG20ModeMedianRow()}
+            {G20_COUNTRIES.map(c => renderCountryRow(c, G20_REGION_WIDTH))}
+            {/* ellipsis separator */}
+            <div style={{
+              display: 'flex', borderBottom: border,
+              padding: '3px 10px', fontSize: '11px',
+              color: isDark ? '#6b7280' : '#9ca3af',
+              backgroundColor: isDark ? '#1a2535' : '#f8fafc',
+            }}>…</div>
+            {renderModeMedianRow('G20_MODE/MEDIAN', G20_REGION_WIDTH)}
           </div>
         </div>
 
         {/* EM Table */}
         <div style={{ flex: 1, minWidth: 0 }}>
           {renderTableHeader('EM', EM_REGION_WIDTH)}
-          
-          {/* EM Data - flat list */}
           <div>
-            {EM_COUNTRIES.map(renderEMCountryRow)}
-            {renderEMModeMedianRow()}
+            {EM_COUNTRIES.map(c => renderCountryRow(c, EM_REGION_WIDTH))}
+            <div style={{
+              display: 'flex', borderBottom: border,
+              padding: '3px 10px', fontSize: '11px',
+              color: isDark ? '#6b7280' : '#9ca3af',
+              backgroundColor: isDark ? '#1a2535' : '#f8fafc',
+            }}>…</div>
+            {renderModeMedianRow('EM_MODE/MEDIAN', EM_REGION_WIDTH)}
           </div>
         </div>
       </div>

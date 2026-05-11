@@ -164,20 +164,20 @@ const StyleFactorPerformanceCard = () => {
       <div
         style={{
           padding: '10px 12px',
-          borderBottom: `2px solid ${isDark ? '#3b82f6' : '#2563eb'}`,
+          borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
           backgroundColor: isDark ? '#1f2937' : '#ffffff'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
-          <BarChart2 size={14} color={isDark ? '#3b82f6' : '#2563eb'} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
+          <TrendingUp size={14} color={isDark ? '#60a5fa' : '#2563eb'} strokeWidth={2.5} style={{ flexShrink: 0 }} />
           <Title
             style={{
               fontSize: '13px',
-              fontWeight: 700,
-              color: isDark ? '#3b82f6' : '#2563eb',
+              fontWeight: 800,
+              color: isDark ? '#f9fafb' : '#111827',
               margin: 0,
               textTransform: 'uppercase',
-              letterSpacing: '0.5px'
+              letterSpacing: '0.04em'
             }}
           >
             Factor Performance
@@ -209,14 +209,15 @@ const StyleFactorPerformanceCard = () => {
             padding: '6px 8px',
             fontSize: '10px',
             fontWeight: 700,
-            color: isDark ? '#f9fafb' : '#111827',
+            color: isDark ? '#9ca3af' : '#6b7280',
             textTransform: 'uppercase',
+            letterSpacing: '0.04em',
             borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
             display: 'flex',
             alignItems: 'center'
           }}
         >
-          Factor
+          FACTOR
         </div>
         {COLUMN_LABELS.map((label, idx) => (
           <div

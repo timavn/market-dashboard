@@ -73,13 +73,12 @@ const EMPTY_CHANGES = {
   previousDate: null,
 };
 
-function EtfProPaneTitle({ title, count }) {
+function EtfProPaneTitle({ title, count, type }) {
+  const labelColor = type === 'long' ? '#15803d' : type === 'short' ? '#b91c1c' : '#111';
   return (
-    <div className="etfpro-pane">
-      <div className="etfpro-pane-title">
-        <span className="etfpro-pane-title-label">{title}</span>
-        <span className="etfpro-pane-count">{count}</span>
-      </div>
+    <div className="etfpro-pane-title">
+      <span className="etfpro-pane-title-label" style={{ color: labelColor }}>{title.toUpperCase()}</span>
+      <span className="etfpro-pane-count">{count}</span>
     </div>
   );
 }
@@ -137,11 +136,17 @@ function EtfProStackedChanges({ changes, snapshotDate }) {
   );
 }
 
+const DEFAULT_VISIBLE = 9;
+
 function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
+  const [showAll, setShowAll] = useState(false);
   const addedSet = useMemo(
     () => new Set((Array.isArray(newlyAdded) ? newlyAdded : []).map((t) => String(t).toUpperCase())),
     [newlyAdded]
   );
+
+  const visibleRows = isExpanded || showAll ? rows : rows.slice(0, DEFAULT_VISIBLE);
+  const hiddenCount = rows.length - visibleRows.length;
 
   return (
     <div className="etfpro-pane">
@@ -149,6 +154,7 @@ function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
         <table className="etfpro-table">
           <thead>
             <tr>
+              <th className="etfpro-col-num">#</th>
               <th className="clickable" onClick={() => toggleSort('ticker')}>
                 Ticker
               </th>
@@ -174,7 +180,7 @@ function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {visibleRows.map((r, idx) => {
               const rel = r.relativePerformance;
               const relClass =
                 Number.isFinite(rel) && rel !== 0 ? (rel > 0 ? 'pos' : 'neg') : '';
@@ -182,6 +188,7 @@ function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
               const rowHighlight = addedSet.has(tk) ? 'row-added' : '';
               return (
                 <tr key={r.id} className={rowHighlight}>
+                  <td className="etfpro-col-num mono">{idx + 1}</td>
                   <td className="mono">{r.ticker}</td>
                   <td className={`right mono ${relClass}`}>{formatSignedPercent(rel)}</td>
                   <td className="right mono">{Number.isFinite(r.daysHeld) ? r.daysHeld : '--'}</td>
@@ -203,13 +210,31 @@ function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={isExpanded ? 10 : 3} className="etfpro-pane-empty">
+                <td colSpan={isExpanded ? 11 : 4} className="etfpro-pane-empty">
                   None
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+        {hiddenCount > 0 && !isExpanded && (
+          <button
+            type="button"
+            className="etfpro-show-more"
+            onClick={() => setShowAll(true)}
+          >
+            +{hiddenCount} more ∨
+          </button>
+        )}
+        {showAll && !isExpanded && rows.length > DEFAULT_VISIBLE && (
+          <button
+            type="button"
+            className="etfpro-show-more"
+            onClick={() => setShowAll(false)}
+          >
+            ∧ show less
+          </button>
+        )}
       </div>
     </div>
   );
@@ -292,7 +317,7 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
           <EtfProStackedChanges changes={changes} snapshotDate={snapshotDate} />
           <div className="etfpro-columns">
             <div className="etfpro-column etfpro-column-long">
-              <EtfProPaneTitle title="Longs" count={longRows.length} />
+              <EtfProPaneTitle title="Longs" count={longRows.length} type="long" />
               <EtfProTable
                 rows={longRows}
                 isExpanded={isExpanded}
@@ -301,7 +326,7 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
               />
             </div>
             <div className="etfpro-column etfpro-column-short">
-              <EtfProPaneTitle title="Shorts" count={shortRows.length} />
+              <EtfProPaneTitle title="Shorts" count={shortRows.length} type="short" />
               <EtfProTable
                 rows={shortRows}
                 isExpanded={isExpanded}

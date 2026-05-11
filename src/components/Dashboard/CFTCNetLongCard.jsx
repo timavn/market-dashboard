@@ -1,16 +1,35 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Title, Text, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Badge } from '@tremor/react';
-import { Info, TrendingUp, RefreshCw, DollarSign, Package, LayoutGrid, ArrowUp, ArrowDown } from 'lucide-react';
+import { Info, TrendingUp, RefreshCw, DollarSign, Package, LayoutGrid, ArrowUp, ArrowDown, Grid } from 'lucide-react';
 import StatusDot from '../common/StatusDot';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';
 
 const CATEGORY_META = {
-  EQUITIES:    { Icon: TrendingUp,  color: '#2563eb', bgLight: '#eff6ff',  bgDark: 'rgba(37,99,235,0.12)'   },
-  RATES:       { Icon: RefreshCw,   color: '#7c3aed', bgLight: '#f5f3ff',  bgDark: 'rgba(124,58,237,0.12)'  },
-  CURRENCIES:  { Icon: DollarSign,  color: '#d97706', bgLight: '#fffbeb',  bgDark: 'rgba(217,119,6,0.12)'   },
-  COMMODITIES: { Icon: Package,     color: '#059669', bgLight: '#ecfdf5',  bgDark: 'rgba(5,150,105,0.12)'   },
-  OTHER:       { Icon: LayoutGrid,  color: '#6b7280', bgLight: '#f3f4f6',  bgDark: 'rgba(107,114,128,0.12)' },
+  EQUITIES:    { Icon: TrendingUp,  color: '#2563eb', bgLight: '#eff6ff',  bgDark: 'rgba(37,99,235,0.12)',   label: 'EQUITIES'    },
+  RATES:       { Icon: RefreshCw,   color: '#7c3aed', bgLight: '#f5f3ff',  bgDark: 'rgba(124,58,237,0.12)',  label: 'RATES'       },
+  CURRENCIES:  { Icon: DollarSign,  color: '#d97706', bgLight: '#fffbeb',  bgDark: 'rgba(217,119,6,0.12)',   label: 'CURRENCIES'  },
+  COMMODITIES: { Icon: Package,     color: '#059669', bgLight: '#ecfdf5',  bgDark: 'rgba(5,150,105,0.12)',   label: 'COMMODITIES' },
+  OTHER:       { Icon: LayoutGrid,  color: '#6b7280', bgLight: '#f3f4f6',  bgDark: 'rgba(107,114,128,0.12)', label: 'UNKNOWN'     },
+};
+
+const METRIC_EMOJI = {
+  'Corn':        '🌽',
+  'Wheat':       '🌾',
+  'Lean Hogs':   '🐷',
+  'Sugar':       '🍬',
+  'Cotton':      '🧶',
+  'Coffee':      '☕',
+  'Cocoa':       '🍫',
+  'Orange Juice':'🍊',
+  'Soybeans':    '🫘',
+  'Gold':        '🥇',
+  'Silver':      '🥈',
+  'Copper':      '🟤',
+  'Crude Oil':   '🛢️',
+  'Natural Gas': '🔥',
+  'Bitcoin':     '₿',
+  'Ethereum':    '⬡',
 };
 
 const CFTCNetLongCard = () => {
@@ -136,20 +155,21 @@ const CFTCNetLongCard = () => {
         overflow: 'hidden'
       }}
     >
-      <div style={{ padding: '11px 16px', borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, backgroundColor: isDark ? '#1f2937' : '#f9fafb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Title style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', margin: 0 }}>
-            CFTC Non-Commercial Net Long Positioning
-          </Title>
-          <Info size={13} color={isDark ? '#6b7280' : '#9ca3af'} style={{ flexShrink: 0 }} />
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, backgroundColor: isDark ? '#1f2937' : '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <LayoutGrid size={14} color={isDark ? '#60a5fa' : '#2563eb'} strokeWidth={2.5} style={{ flexShrink: 0 }} />
+        <Title style={{ fontSize: '13px', fontWeight: 800, color: isDark ? '#f9fafb' : '#111827', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          CFTC Non-Commercial Net Long Positioning
+        </Title>
+        <Info size={13} color={isDark ? '#6b7280' : '#9ca3af'} style={{ flexShrink: 0 }} />
+        <div style={{ marginLeft: 'auto' }}>
+          <StatusDot
+            updatedAt={data?.date ? new Date(data.date + 'T12:00:00') : null}
+            status={data ? 'active' : loading ? 'stale' : 'inactive'}
+            size={9}
+            label="CFTC Positioning Data"
+            showDateOnly
+          />
         </div>
-        <StatusDot
-          updatedAt={data?.date ? new Date(data.date + 'T12:00:00') : null}
-          status={data ? 'active' : loading ? 'stale' : 'inactive'}
-          size={9}
-          label="CFTC Positioning Data"
-          showDateOnly
-        />
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '0 12px 4px 12px' }}>
@@ -162,17 +182,17 @@ const CFTCNetLongCard = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', backgroundColor: isDark ? meta.bgDark : meta.bgLight, borderRadius: '4px', marginBottom: '6px', borderLeft: `3px solid ${meta.color}` }}>
                 <CatIcon size={12} color={meta.color} />
                 <span style={{ fontSize: '11px', fontWeight: 700, color: meta.color, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-                  {category}
+                  {meta.label || category}
                 </span>
               </div>
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableHeaderCell style={hdr}>Metric</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>Latest</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>W/W Change</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>1Y Z-Score</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>3Y Z-Score</TableHeaderCell>
+                    <TableHeaderCell style={hdr}>CONTRACT</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>LATEST</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>W/W CHANGE</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>1Y Z-SCORE</TableHeaderCell>
+                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>3Y Z-SCORE</TableHeaderCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -185,7 +205,12 @@ const CFTCNetLongCard = () => {
                     return (
                       <TableRow key={idx}>
                         <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 500, color: isDark ? '#d1d5db' : '#374151' }}>
-                          {row.metric}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            {METRIC_EMOJI[row.metric] && (
+                              <span style={{ fontSize: '13px', lineHeight: 1, flexShrink: 0 }}>{METRIC_EMOJI[row.metric]}</span>
+                            )}
+                            {row.metric}
+                          </span>
                         </TableCell>
                         <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: isDark ? '#f3f4f6' : '#111827' }}>
                           {formatNumber(row.latest)}

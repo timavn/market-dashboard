@@ -239,25 +239,40 @@
 .securities-card-header {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   position: relative;
-  padding: 10px 12px 8px;
+  padding: 8px 10px;
   background: #f3f0e6;
   border-bottom: 1px solid #d6d0c3;
-}
-
-.securities-card-header-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   gap: 6px;
 }
 
+.securities-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.securities-icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #dbeafe;
+  flex-shrink: 0;
+}
+
 .securities-card-title {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
   color: #111;
   font-family: inherit;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .securities-view-toggle {
@@ -311,13 +326,11 @@
 }
 
 .securities-expand-btn {
-  position: absolute;
-  right: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border-radius: 4px;
   border: 1px solid #d6d0c3;
@@ -325,6 +338,7 @@
   color: #374151;
   cursor: pointer;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .securities-expand-btn:hover {
@@ -340,9 +354,9 @@
 /* Header Row */
 .securities-header-row {
   display: grid;
-  grid-template-columns: 20px 30px 60px 70px 50px 50px 80px 45px;
+  grid-template-columns: 20px 30px 60px 70px 60px 60px;
   gap: 4px;
-  padding: 8px 4px;
+  padding: 6px 4px;
   border-bottom: 1px solid #d6d0c3;
   background: #f3f0e6;
 }
@@ -381,9 +395,9 @@
 /* Data Rows */
 .securities-data-row {
   display: grid;
-  grid-template-columns: 20px 30px 60px 70px 50px 50px 80px 45px;
+  grid-template-columns: 20px 30px 60px 70px 60px 60px;
   gap: 4px;
-  padding: 6px 4px;
+  padding: 5px 4px;
   border-bottom: 1px solid #ddd7cb;
   cursor: pointer;
   transition: opacity 0.2s ease;
@@ -438,7 +452,7 @@
 
 /* Ticker Cell */
 .data-ticker-cell {
-  /* Uses base styles */
+  min-width: 0;
 }
 
 .data-ticker {
@@ -454,7 +468,7 @@
 
 /* Price Cell */
 .data-price-cell {
-  /* Uses base styles */
+  min-width: 0;
 }
 
 .data-price {
@@ -471,7 +485,7 @@
 
 /* LRR Cell */
 .data-lrr-cell {
-  /* Uses base styles */
+  min-width: 0;
 }
 
 .data-lrr {
@@ -488,7 +502,7 @@
 
 /* HRR Cell */
 .data-hrr-cell {
-  /* Uses base styles */
+  min-width: 0;
 }
 
 .data-hrr {
@@ -505,12 +519,12 @@
 
 /* Odds Header */
 .header-odds {
-  /* Uses base header styles from .securities-header-row > div */
+  min-width: 0;
 }
 
 /* Odds Cell */
 .data-odds-cell {
-  /* Uses base data cell styles from .securities-data-row > div */
+  min-width: 0;
 }
 
 .data-odds {
@@ -596,6 +610,16 @@
   gap: 8px;
 }
 
+.top-movers-sidebyside {
+  flex-direction: row;
+  gap: 6px;
+}
+
+.top-movers-sidebyside .top-movers-table-container {
+  flex: 1;
+  min-width: 0;
+}
+
 .top-movers-table-container {
   background: #f7f3e8;
   border: 1px solid #ddd7cb;
@@ -604,9 +628,9 @@
 }
 
 .top-movers-header {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 4px 6px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-family: inherit;

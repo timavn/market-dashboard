@@ -606,14 +606,13 @@
 }
 
 .region-icon--rates {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 9px;
+  color: #2563eb;
+  font-size: 14px;
   font-weight: 800;
-  letter-spacing: -0.5px;
+}
+
+.dark .region-icon--rates {
+  color: #60a5fa;
 }
 
 .region-icon--crypto {
@@ -878,11 +877,10 @@
 /* Macro / THE CALL card wrapper */
 .macro-call-card {
   flex: 1;
-  background: #f8f6ef;
-  border-radius: 8px;
+  background: #ffffff;
+  border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-  border: 1px solid #d6d0c3;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
   border: 1px solid #e5e7eb;
 }
 
@@ -891,8 +889,41 @@
   border-color: rgb(55 65 81);
 }
 
-.macro-call-header-simple {
-  /* No LONG/SHORT - header ends after label */
+.macro-call-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.dark .macro-call-card-header {
+  background: rgb(31 41 55);
+  border-bottom-color: rgb(55 65 81);
+}
+
+.macro-call-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.macro-call-header-icon {
+  color: #2563eb;
+  flex-shrink: 0;
+}
+
+.macro-call-header-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #111827;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dark .macro-call-header-title {
+  color: #f3f4f6;
 }
 
 .macro-call-row {
@@ -911,17 +942,22 @@
 
 .macro-call-divider {
   height: 1px;
-  background: #d6d0c3;
-  margin: 6px 0;
+  background: #e5e7eb;
+  margin: 5px 0;
 }
 
 .dark .macro-call-divider {
   background: rgb(55 65 81);
 }
 
+
 .macro-call-body {
-  padding: 10px 12px;
-  background: #fcfaf5;
+  padding: 12px 14px;
+  background: #ffffff;
+}
+
+.dark .macro-call-body {
+  background: rgb(31 41 55);
 }
 
 .macro-call-body-days {
@@ -932,9 +968,9 @@
 
 .macro-call-day-row {
   display: flex;
-  gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #d6d0c3;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .macro-call-day-row.last-row {
@@ -946,25 +982,62 @@
   border-bottom-color: rgb(55 65 81);
 }
 
+.macro-call-body-days > .macro-call-day-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
 .macro-call-day-block {
-  min-width: 56px;
+  min-width: 68px;
+  width: 68px;
   align-self: stretch;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  gap: 2px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 4px;
+}
+
+.macro-call-day-block-icon {
+  color: #2563eb;
+  flex-shrink: 0;
+}
+
+.macro-call-day-block-date {
+  font-size: 12px;
   font-weight: 700;
-  color: #1f2937;
-  background: #f3f0e6;
-  border: 1px solid #d6d0c3;
-  border-radius: 6px;
-  padding: 4px 6px;
+  color: #111827;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.macro-call-day-block-dow {
+  font-size: 9px;
+  font-weight: 400;
+  color: #6b7280;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .dark .macro-call-day-block {
-  color: rgb(229 231 235);
-  background: rgb(31 41 55);
+  background: rgb(17 24 39);
   border-color: rgb(55 65 81);
+}
+
+.dark .macro-call-day-block-date {
+  color: rgb(229 231 235);
+}
+
+.dark .macro-call-day-block-dow {
+  color: rgb(156 163 175);
+}
+
+.dark .macro-call-day-block-icon {
+  color: #60a5fa;
 }
 
 .macro-call-day-content {
@@ -991,8 +1064,8 @@
 .macro-call-day-values {
   font-size: 10px;
   line-height: 1.5;
-  font-weight: 600;
-  border-left: 1px solid #d6d0c3;
+  font-weight: 500;
+  border-left: 1px solid #e5e7eb;
   padding-left: 8px;
 }
 
@@ -1012,11 +1085,16 @@
 }
 
 .macro-call-day-values.is-na {
-  color: #111827 !important;
+  color: #9ca3af !important;
 }
 
 .dark .macro-call-day-values {
   border-left-color: rgb(75 85 99);
+}
+
+.dark .macro-call-day-line.neutral .macro-call-side-label,
+.dark .macro-call-day-line.neutral .macro-call-day-values {
+  color: rgb(209 213 219);
 }
 
 @media (max-width: 640px) {
