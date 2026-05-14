@@ -7,11 +7,13 @@ import EtfProCard from './EtfProCard';
 import './SecuritiesList.css';
 
 const VIEW_KEY = 'leftSidebarView_v1';
+const SS_ROWS_PER_PAGE = 10;
 
 const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandToggle }) => {
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
+  const [ssPage, setSsPage] = useState(0);
   const [etfProFresh, setEtfProFresh] = useState(false);
   const [activeView, setActiveView] = useState(() => {
     const saved = localStorage.getItem(VIEW_KEY);
@@ -572,8 +574,8 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
   return (
     <div className="relative securities-card" style={{ overflow: 'hidden' }}>
       <div className="securities-card-header">
-        {/* Left: icon badge + title */}
-        <div className="securities-header-left">
+        {/* Row 1: Title */}
+        <div className="securities-card-title-row">
           {activeView === 'signal' ? (
             <span className="securities-icon-badge">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -593,52 +595,54 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             {activeView === 'etfpro' ? 'ETF PRO' : 'SIGNAL STRENGTH'}
           </span>
         </div>
-        {/* Center: SS / ETFP toggle */}
-        <div className="securities-view-toggle" role="tablist" aria-label="Left sidebar view">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === 'signal'}
-            className={activeView === 'signal' ? 'toggle-btn active' : 'toggle-btn'}
-            onClick={() => setActiveView('signal')}
-          >
-            <span className={`status-dot ${ssFresh ? 'fresh' : 'stale'}`} />
-            SS
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === 'etfpro'}
-            className={activeView === 'etfpro' ? 'toggle-btn active' : 'toggle-btn'}
-            onClick={() => setActiveView('etfpro')}
-          >
-            <span className={`status-dot ${etfProFresh ? 'fresh' : 'stale'}`} />
-            ETFP
-          </button>
+        {/* Row 2: Toggle + Expand */}
+        <div className="securities-card-controls-row">
+          <div className="securities-view-toggle" role="tablist" aria-label="Left sidebar view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === 'signal'}
+              className={activeView === 'signal' ? 'toggle-btn active' : 'toggle-btn'}
+              onClick={() => setActiveView('signal')}
+            >
+              <span className={`status-dot ${ssFresh ? 'fresh' : 'stale'}`} />
+              SS
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === 'etfpro'}
+              className={activeView === 'etfpro' ? 'toggle-btn active' : 'toggle-btn'}
+              onClick={() => setActiveView('etfpro')}
+            >
+              <span className={`status-dot ${etfProFresh ? 'fresh' : 'stale'}`} />
+              ETFP
+            </button>
+          </div>
+          {onExpandToggle && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onExpandToggle();
+              }}
+              className="securities-expand-btn"
+              title={isExpanded ? 'Collapse left sidebar' : 'Expand left sidebar'}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path
+                  d={isExpanded ? "M10 12L6 8L10 4" : "M6 4L10 8L6 12"}
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
-        {/* Right: expand chevron */}
-        {onExpandToggle && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onExpandToggle();
-            }}
-            className="securities-expand-btn"
-            title={isExpanded ? 'Collapse left sidebar' : 'Expand left sidebar'}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path
-                d={isExpanded ? "M10 12L6 8L10 4" : "M6 4L10 8L6 12"}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        )}
       </div>
 
+      <div className="securities-card-body">
       {activeView === 'etfpro' ? (
         <EtfProCard isExpanded={isExpanded} onFreshness={handleEtfProFreshness} />
       ) : (
@@ -871,10 +875,13 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
 
         {/* Data Rows */}
         <div className="securities-data-container">
-          {securities.map((security, index) => (
+          {securities.slice(ssPage * SS_ROWS_PER_PAGE, (ssPage + 1) * SS_ROWS_PER_PAGE).map((security, localIndex) => {
+            const index = ssPage * SS_ROWS_PER_PAGE + localIndex;
+            const isLastOnPage = localIndex === Math.min(SS_ROWS_PER_PAGE, securities.length - ssPage * SS_ROWS_PER_PAGE) - 1;
+            return (
             <div
               key={security.ticker}
-              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${index === securities.length - 1 ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
+              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${isLastOnPage ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
               style={{
                 gridTemplateColumns: isExpanded
                   ? '20px 30px 60px 70px 60px 60px 80px 45px'
@@ -1011,11 +1018,33 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                 </>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
+        {/* Pagination Controls */}
+        {(() => {
+          const totalPages = Math.ceil(securities.length / SS_ROWS_PER_PAGE);
+          if (totalPages <= 1) return null;
+          return (
+            <div className="ss-pagination">
+              <button
+                className="ss-page-btn"
+                onClick={() => setSsPage(p => Math.max(0, p - 1))}
+                disabled={ssPage === 0}
+              >‹</button>
+              <span className="ss-page-info">{ssPage + 1} / {totalPages}</span>
+              <button
+                className="ss-page-btn"
+                onClick={() => setSsPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={ssPage === totalPages - 1}
+              >›</button>
+            </div>
+          );
+        })()}
       </div>
         </>
       )}
+      </div>
     </div>
   );
 };
