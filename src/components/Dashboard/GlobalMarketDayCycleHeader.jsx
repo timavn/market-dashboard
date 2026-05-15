@@ -822,7 +822,7 @@ const MarketDetailModal = ({ market, now, isOpen, onClose, anchorElement }) => {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: -10 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="fixed bg-[#f8f6ef] border border-[#d6d0c3] rounded-lg shadow-2xl z-[9999] p-6 min-w-[320px] max-w-md"
+          className="fixed bg-white border border-[#e5e7eb] rounded-lg shadow-2xl z-[9999] p-6 min-w-[320px] max-w-md"
           style={{
             top: `${position.top}px`,
             left: `${position.left}px`,
@@ -855,7 +855,7 @@ const MarketDetailModal = ({ market, now, isOpen, onClose, anchorElement }) => {
                 <span className="text-[#4b5563]">UTC Offset</span>
                 <span className="text-black">{utcOffset}</span>
               </div>
-              <div className="border-t border-[#d6d0c3] pt-3 mt-3">
+              <div className="border-t border-[#e5e7eb] pt-3 mt-3">
                 <div className="text-[#4b5563] mb-2">Trading Hours</div>
                 {market.preMarketOpen && (
                   <div className="flex justify-between text-xs mb-1">
@@ -881,7 +881,7 @@ const MarketDetailModal = ({ market, now, isOpen, onClose, anchorElement }) => {
                 )}
               </div>
               {countdown && (
-                <div className="border-t border-[#d6d0c3] pt-3 mt-3">
+                <div className="border-t border-[#e5e7eb] pt-3 mt-3">
                   <div className={`text-sm ${status === 'open' ? 'text-emerald-400' : 'text-amber-400'}`}>
                     {countdown}
                   </div>

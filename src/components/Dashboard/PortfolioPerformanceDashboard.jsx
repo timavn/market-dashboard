@@ -57,8 +57,8 @@ const SummaryCard = ({ metricKey, isDark }) => {
   const isNegative = metric.value < 0;
   
   return (
-    <div className="flex items-center gap-4 bg-white dark:bg-gray-800 p-3 rounded-lg border border-[#e5dfce] dark:border-gray-700 shadow-sm relative group cursor-help transition-all">
-      <div className="flex-shrink-0 w-10 h-10 rounded-full bg-[#fcfaf5] dark:bg-gray-700 border border-[#e5dfce] dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300">
+    <div className="flex items-center gap-4 bg-white dark:bg-gray-800 p-3 rounded-lg border border-[#e5e7eb] dark:border-gray-700 shadow-sm relative group cursor-help transition-all">
+      <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white dark:bg-gray-700 border border-[#e5e7eb] dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300">
         {getMetricIcon(metricKey)}
       </div>
       <div className="flex flex-col">
@@ -80,7 +80,7 @@ const SummaryCard = ({ metricKey, isDark }) => {
 };
 
 const RealizedOutcomeCard = ({ label, value, valueClass }) => (
-  <div className="flex-1 flex flex-col items-center justify-center bg-white dark:bg-gray-800 py-4 px-2 rounded-lg border border-[#e5dfce] dark:border-gray-700 shadow-sm">
+  <div className="flex-1 flex flex-col items-center justify-center bg-white dark:bg-gray-800 py-4 px-2 rounded-lg border border-[#e5e7eb] dark:border-gray-700 shadow-sm">
     <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium mb-1 text-center">
       {label}
     </span>
@@ -116,7 +116,7 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
         </div>
       </div>
 
-      <div className="border border-[#e5dfce] dark:border-gray-700 rounded-xl p-5 bg-[#fcfaf5] dark:bg-gray-800/50 shadow-sm flex flex-col gap-6">
+      <div className="border border-[#e5e7eb] dark:border-gray-700 rounded-xl p-5 bg-white dark:bg-gray-800/50 shadow-sm flex flex-col gap-6">
         
         {/* Performance Summary */}
         <div>
@@ -135,16 +135,16 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
           {/* Monthly Returns */}
           <div>
             <h2 className="text-[11px] font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase mb-3">Monthly Returns (2026)</h2>
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-[#e5dfce] dark:border-gray-700 shadow-sm overflow-hidden h-[180px]">
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-[#e5e7eb] dark:border-gray-700 shadow-sm overflow-hidden h-[180px]">
               <table className="w-full text-center border-collapse h-full">
                 <thead>
-                  <tr className="border-b border-[#e5dfce] dark:border-gray-700 bg-[#fcfaf5] dark:bg-gray-800/80">
+                  <tr className="border-b border-[#e5e7eb] dark:border-gray-700 bg-white dark:bg-gray-800/80">
                     {['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(m => (
-                      <th key={m} className="py-3 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 border-r border-[#e5dfce] dark:border-gray-700 last:border-r-0 w-[7.69%]">
+                      <th key={m} className="py-3 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 border-r border-[#e5e7eb] dark:border-gray-700 last:border-r-0 w-[7.69%]">
                         {m}
                       </th>
                     ))}
-                    <th className="py-3 px-2 text-[10px] font-bold text-red-700 dark:text-red-400 bg-[#fcfaf5] dark:bg-gray-800 w-[7.69%]">
+                    <th className="py-3 px-2 text-[10px] font-bold text-red-700 dark:text-red-400 bg-white dark:bg-gray-800 w-[7.69%]">
                       TOTAL
                     </th>
                   </tr>
@@ -153,13 +153,13 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
                   {MOCK_MONTHLY_RETURNS.map((row) => (
                     <tr key={row.year} className="bg-white dark:bg-gray-800 h-full">
                       {row.returns.map((val, i) => (
-                        <td key={i} className="py-4 px-1 border-r border-[#e5dfce] dark:border-gray-700 last:border-r-0 align-top pt-6">
+                        <td key={i} className="py-4 px-1 border-r border-[#e5e7eb] dark:border-gray-700 last:border-r-0 align-top pt-6">
                           <span className={`text-[11px] font-bold ${val > 0 ? 'text-green-600 dark:text-green-400' : val < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
                             {val !== null ? `${val}%` : '–'}
                           </span>
                         </td>
                       ))}
-                      <td className="py-4 px-2 align-top pt-6 border-l border-[#e5dfce] dark:border-gray-700 bg-[#fdfaf4] dark:bg-gray-800/50">
+                      <td className="py-4 px-2 align-top pt-6 border-l border-[#e5e7eb] dark:border-gray-700 bg-[#fdfaf4] dark:bg-gray-800/50">
                         <span className="text-[11px] font-bold text-gray-900 dark:text-white">
                           {row.total > 0 ? '+' : ''}{row.total}%
                         </span>
@@ -175,12 +175,12 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
           <div>
             <h2 className="text-[11px] font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase mb-3 flex justify-between items-center">
               <span>Performance Trend (2026 YTD)</span>
-              <div className="bg-white dark:bg-gray-800 px-3 py-1 rounded-md border border-[#e5dfce] dark:border-gray-700 flex flex-col items-center shadow-sm">
+              <div className="bg-white dark:bg-gray-800 px-3 py-1 rounded-md border border-[#e5e7eb] dark:border-gray-700 flex flex-col items-center shadow-sm">
                 <span className="text-[8px] text-gray-400 uppercase tracking-widest leading-none mb-1">YTD Total</span>
                 <span className="text-[13px] font-bold font-serif leading-none">+19.4%</span>
               </div>
             </h2>
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-[#e5dfce] dark:border-gray-700 shadow-sm p-4 h-[180px]">
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-[#e5e7eb] dark:border-gray-700 shadow-sm p-4 h-[180px]">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#374151' : '#e5dfce'} />
@@ -209,7 +209,7 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
                     dataKey="value" 
                     stroke="#cda875" 
                     strokeWidth={2}
-                    dot={{ r: 3, fill: '#fcfaf5', stroke: '#cda875', strokeWidth: 2 }}
+                    dot={{ r: 3, fill: '#ffffff', stroke: '#cda875', strokeWidth: 2 }}
                     activeDot={{ r: 5, fill: '#cda875' }}
                   />
                 </LineChart>

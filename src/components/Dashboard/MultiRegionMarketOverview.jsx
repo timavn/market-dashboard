@@ -318,8 +318,8 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
     >
       <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
-          <span className="card-icon-badge card-icon-badge--green">
-            <DollarSign size={13} strokeWidth={2.5} />
+          <span className="card-header-icon card-header-icon--green" aria-hidden="true">
+            <DollarSign size={16} strokeWidth={2.25} />
           </span>
           <span className="region-label region-label--lg">Currencies</span>
         </div>
@@ -486,7 +486,7 @@ export function SectorsCompactRail({ data, loading, layout = 'rail' }) {
 
   return (
     <div
-      className={`region-chart-panel region-chart-panel--mw currencies-compact-rail${layout === 'sidebar' ? ' currencies-compact-rail--in-sidebar' : ''} origin-top-left transition-all duration-300 ease-in-out ${isExpanded ? 'relative z-[100] scale-[1.8] shadow-2xl bg-[#f8f6ef]' : 'scale-100'}`}
+      className={`region-chart-panel region-chart-panel--mw currencies-compact-rail${layout === 'sidebar' ? ' currencies-compact-rail--in-sidebar' : ''}${isExpanded ? ' sectors-compact-rail--expanded' : ''} origin-top-left transition-all duration-300 ease-in-out ${isExpanded ? 'relative z-[100] scale-[1.8] shadow-2xl bg-white' : 'scale-100'}`}
     >
       <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
@@ -1263,17 +1263,9 @@ export default function MultiRegionMarketOverview({ marketData, loading, error }
       </div>
 
       <div className="main-markets-grid">
-        {Object.keys(MAIN_MARKET_REGIONS).map((regionKey) => {
-          if (regionKey === 'rates') {
-            return (
-              <RatesCard
-                key={regionKey}
-                data={getRegionData(regionKey)}
-                loading={loading}
-              />
-            );
-          }
-          return (
+        {Object.keys(MAIN_MARKET_REGIONS)
+          .filter((regionKey) => regionKey !== 'rates' && regionKey !== 'crypto')
+          .map((regionKey) => (
             <RegionChartPanel
               key={regionKey}
               region={MAIN_MARKET_REGIONS[regionKey]}
@@ -1281,8 +1273,20 @@ export default function MultiRegionMarketOverview({ marketData, loading, error }
               data={getRegionData(regionKey)}
               loading={loading}
             />
-          );
-        })}
+          ))}
+      </div>
+
+      <div className="bottom-markets-row">
+        <RatesCard
+          data={getRegionData('rates')}
+          loading={loading}
+        />
+        <RegionChartPanel
+          region={MAIN_MARKET_REGIONS.crypto}
+          regionKey="crypto"
+          data={getRegionData('crypto')}
+          loading={loading}
+        />
       </div>
     </div>
   );

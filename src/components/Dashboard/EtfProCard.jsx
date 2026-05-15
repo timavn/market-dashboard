@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { isFreshForToday } from '../../utils/dateFreshness';
 import './EtfProCard.css';
@@ -7,18 +7,6 @@ function formatSignedPercent(value, digits = 2) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '--';
   const sign = value > 0 ? '+' : '';
   return `${sign}${value.toFixed(digits)}%`;
-}
-
-function formatPrice(value) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '--';
-  return value.toFixed(2);
-}
-
-function formatDateTime(iso) {
-  if (!iso) return '--';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '--';
-  return d.toLocaleString();
 }
 
 function compareMaybeNumber(a, b, dir) {
@@ -136,21 +124,59 @@ function EtfProStackedChanges({ changes, snapshotDate }) {
   );
 }
 
-const DEFAULT_VISIBLE = 9;
+const ETFPRO_PAGE_SIZE_FALLBACK = 9;
+const ETFPRO_ROW_APPROX_PX = 26;
+const ETFPRO_THEAD_APPROX_PX = 30;
+const ETFPRO_PAGINATION_RESERVE_PX = 36;
 
-function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
-  const [showAll, setShowAll] = useState(false);
+function EtfProTable({ rows, toggleSort, newlyAdded }) {
+  const [page, setPage] = useState(0);
+  const scrollRef = useRef(null);
+  const [pageSize, setPageSize] = useState(ETFPRO_PAGE_SIZE_FALLBACK);
   const addedSet = useMemo(
     () => new Set((Array.isArray(newlyAdded) ? newlyAdded : []).map((t) => String(t).toUpperCase())),
     [newlyAdded]
   );
 
-  const visibleRows = isExpanded || showAll ? rows : rows.slice(0, DEFAULT_VISIBLE);
-  const hiddenCount = rows.length - visibleRows.length;
+  useEffect(() => {
+    setPage(0);
+  }, [rows]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') {
+      setPageSize(ETFPRO_PAGE_SIZE_FALLBACK);
+      return undefined;
+    }
+    const compute = () => {
+      const thead = el.querySelector('thead');
+      const th = thead?.offsetHeight ?? ETFPRO_THEAD_APPROX_PX;
+      const h = el.clientHeight;
+      const avail = Math.max(0, h - th - ETFPRO_PAGINATION_RESERVE_PX);
+      const n = Math.max(3, Math.min(60, Math.floor(avail / ETFPRO_ROW_APPROX_PX)));
+      setPageSize(n);
+    };
+    const ro = new ResizeObserver(() => compute());
+    ro.observe(el);
+    compute();
+    return () => ro.disconnect();
+  }, [rows]);
+
+  const effectivePageSize = Math.max(pageSize, 1);
+  const totalPages = Math.max(1, Math.ceil(rows.length / effectivePageSize));
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages - 1));
+  }, [totalPages]);
+
+  const visibleRows = rows.slice(page * effectivePageSize, (page + 1) * effectivePageSize);
 
   return (
     <div className="etfpro-pane">
-      <div className={isExpanded ? 'etfpro-pane-scroll expanded' : 'etfpro-pane-scroll'}>
+      <div
+        ref={scrollRef}
+        className="etfpro-pane-scroll"
+      >
         <table className="etfpro-table">
           <thead>
             <tr>
@@ -164,19 +190,6 @@ function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
               <th className="clickable right" onClick={() => toggleSort('daysHeld')}>
                 Days
               </th>
-              {isExpanded && (
-                <>
-                  <th>ETF</th>
-                  <th>Asset Class</th>
-                  <th className="right clickable" onClick={() => toggleSort('absolutePerformance')}>
-                    Abs
-                  </th>
-                  <th className="right">S&amp;P</th>
-                  <th className="right">Last</th>
-                  <th>Date Added</th>
-                  <th>As of</th>
-                </>
-              )}
             </tr>
           </thead>
           <tbody>
@@ -188,59 +201,47 @@ function EtfProTable({ rows, isExpanded, toggleSort, newlyAdded }) {
               const rowHighlight = addedSet.has(tk) ? 'row-added' : '';
               return (
                 <tr key={r.id} className={rowHighlight}>
-                  <td className="etfpro-col-num mono">{idx + 1}</td>
+                  <td className="etfpro-col-num mono">
+                    {page * effectivePageSize + idx + 1}
+                  </td>
                   <td className="mono">{r.ticker}</td>
                   <td className={`right mono ${relClass}`}>{formatSignedPercent(rel)}</td>
                   <td className="right mono">{Number.isFinite(r.daysHeld) ? r.daysHeld : '--'}</td>
-                  {isExpanded && (
-                    <>
-                      <td className="wrap" title={r.etf}>
-                        {r.etf || '--'}
-                      </td>
-                      <td className="wrap">{r.assetClass || '--'}</td>
-                      <td className="right mono">{formatSignedPercent(r.absolutePerformance)}</td>
-                      <td className="right mono">{formatSignedPercent(r.sp500)}</td>
-                      <td className="right mono">{formatPrice(r.lastPrice)}</td>
-                      <td className="mono">{r.dateAdded || '--'}</td>
-                      <td className="mono">{r.asOf ? formatDateTime(r.asOf) : '--'}</td>
-                    </>
-                  )}
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={isExpanded ? 11 : 4} className="etfpro-pane-empty">
+                <td colSpan={4} className="etfpro-pane-empty">
                   None
                 </td>
               </tr>
             )}
           </tbody>
         </table>
-        {hiddenCount > 0 && !isExpanded && (
-          <button
-            type="button"
-            className="etfpro-show-more"
-            onClick={() => setShowAll(true)}
-          >
-            +{hiddenCount} more ∨
-          </button>
-        )}
-        {showAll && !isExpanded && rows.length > DEFAULT_VISIBLE && (
-          <button
-            type="button"
-            className="etfpro-show-more"
-            onClick={() => setShowAll(false)}
-          >
-            ∧ show less
-          </button>
+        {totalPages > 1 && (
+          <div className="etfpro-pagination">
+            <button
+              type="button"
+              className="etfpro-page-btn"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+            >‹</button>
+            <span className="etfpro-page-info">{page + 1}/{totalPages}</span>
+            <button
+              type="button"
+              className="etfpro-page-btn"
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+            >›</button>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-const EtfProCard = ({ isExpanded = false, onFreshness }) => {
+const EtfProCard = ({ onFreshness }) => {
   const [rows, setRows] = useState([]);
   const [changes, setChanges] = useState(EMPTY_CHANGES);
   const [snapshotDate, setSnapshotDate] = useState(null);
@@ -320,7 +321,6 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
               <EtfProPaneTitle title="Longs" count={longRows.length} type="long" />
               <EtfProTable
                 rows={longRows}
-                isExpanded={isExpanded}
                 toggleSort={toggleSort}
                 newlyAdded={changes.addedLongs}
               />
@@ -329,7 +329,6 @@ const EtfProCard = ({ isExpanded = false, onFreshness }) => {
               <EtfProPaneTitle title="Shorts" count={shortRows.length} type="short" />
               <EtfProTable
                 rows={shortRows}
-                isExpanded={isExpanded}
                 toggleSort={toggleSort}
                 newlyAdded={changes.addedShorts}
               />

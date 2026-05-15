@@ -130,9 +130,9 @@ const ExpectedValuesWindow = ({ show, onClose, top, right, width, theme, showPor
         width: width,
         height: '100vh',
         zIndex: 1200,
-        backgroundColor: theme === 'dark' ? '#111827' : '#f8f6ef',
-        borderLeft: '1px solid #d6d0c3',
-        borderRight: '1px solid #d6d0c3',
+        backgroundColor: theme === 'dark' ? '#111827' : '#ffffff',
+        borderLeft: '1px solid #d1d5db',
+        borderRight: '1px solid #d1d5db',
         borderRadius: '0.75rem 0 0 0',
         boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)',
         transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
@@ -148,11 +148,11 @@ const ExpectedValuesWindow = ({ show, onClose, top, right, width, theme, showPor
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          borderBottom: '1px solid #d6d0c3',
-          backgroundColor: theme === 'dark' ? '#1f2937' : '#f3f0e6',
+          borderBottom: '1px solid #d1d5db',
+          backgroundColor: theme === 'dark' ? '#1f2937' : '#f3f4f6',
           cursor: 'pointer',
         }}
-        className="dark:border-gray-700 hover:bg-[#efe9dc] dark:hover:bg-gray-800 transition-colors"
+        className="dark:border-gray-700 hover:bg-[#f3f4f6] dark:hover:bg-gray-800 transition-colors"
         onClick={onClose}
       >
         <Title
@@ -248,7 +248,7 @@ const ExpectedValuesWindow = ({ show, onClose, top, right, width, theme, showPor
             <tbody>
               {quarterlyExpectedValues.map((item, idx) => (
                 <tr key={idx} className="hover:bg-gray-100 dark:hover:bg-gray-800/80 transition-colors">
-                  <td className="sticky left-0 z-10 bg-[#f8f6ef] dark:bg-gray-900 border border-gray-300 dark:border-gray-600 p-0.5 shadow-[2px_0_4px_rgba(0,0,0,0.1)] overflow-hidden">
+                  <td className="sticky left-0 z-10 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 p-0.5 shadow-[2px_0_4px_rgba(0,0,0,0.1)] overflow-hidden">
                     <div className="flex items-center justify-between gap-1">
                       <Text className="font-semibold text-gray-900 dark:text-gray-100 text-[9px] leading-tight truncate">{item.name}</Text>
                       {item.ticker && (

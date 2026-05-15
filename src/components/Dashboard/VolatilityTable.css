@@ -8,9 +8,9 @@
 }
 
 .volatility-table {
-  --vol-grid-border: #d6d0c3;
-  --vol-grid-border-soft: #e7e3d9;
-  --vol-grid-sep: #b8b2a6;
+  --vol-grid-border: #e5e7eb;
+  --vol-grid-border-soft: #f3f4f6;
+  --vol-grid-sep: #d1d5db;
   --vol-series-col: 92px;
   --vol-level-col: 76px;
   --vol-roc-col: 72px;
@@ -34,7 +34,7 @@
     repeat(6, var(--vol-roc-col));
   align-items: stretch;
   padding: 0;
-  background: #efede6;
+  background: #f9fafb;
   border-bottom: 1px solid var(--vol-grid-border);
   font-weight: 600;
   color: #111827;
@@ -65,7 +65,7 @@
   align-items: stretch;
   padding: 0;
   border-bottom: 1px solid var(--vol-grid-border-soft);
-  background: #f8f6ef;
+  background: #ffffff;
 }
 
 .volatility-table-row:last-child {
@@ -434,51 +434,10 @@
   border-left-color: #6b7280;
 }
 
-/* Volatility - header with tabs to the right of "Volatility" */
 .volatility-tabs {
   display: flex;
   flex-direction: column;
   gap: 0;
-}
-
-.volatility-header-with-tabs {
-  /* Chrome handled by region-chart-header--mw */
-  gap: 8px;
-}
-
-.volatility-header-with-tabs .region-label {
-  flex-shrink: 0;
-}
-
-.volatility-tab-buttons-inline {
-  display: flex;
-  gap: 2px;
-  flex: 1;
-  margin-left: 8px;
-}
-
-.volatility-tab-btn {
-  padding: 3px 8px;
-  font-size: 9px;
-  font-weight: 600;
-  background: transparent;
-  border: none;
-  border-radius: 3px;
-  color: #6b7280;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.volatility-tab-btn:hover {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.volatility-tab-btn.active {
-  background: #dbeafe;
-  color: #1d4ed8;
 }
 
 /* Volatility ranges help button */
@@ -492,8 +451,8 @@
   font-weight: 600;
   line-height: 1;
   border-radius: 50%;
-  border: 1px solid #b8b2a6;
-  background: #f8f6ef;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
   color: #6b7280;
   cursor: pointer;
   display: flex;
@@ -503,9 +462,9 @@
 }
 
 .vol-ranges-help-btn:hover {
-  background: #ece8df;
+  background: #f3f4f6;
   color: #374151;
-  border-color: #9b9487;
+  border-color: #9ca3af;
 }
 
 /* Volatility ranges popover */

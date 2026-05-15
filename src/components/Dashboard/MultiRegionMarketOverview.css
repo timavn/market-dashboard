@@ -299,6 +299,20 @@
   }
 }
 
+/* Bottom row: Rates | Crypto — two equal columns */
+.bottom-markets-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  padding: 0 0 12px;
+}
+
+@media (max-width: 768px) {
+  .bottom-markets-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Compact Currencies panel (sidebar under SS/ETF Pro) */
 .currencies-compact-rail .currencies-compact-rail__body {
   flex: 0 0 auto;
@@ -639,22 +653,7 @@
   font-family: inherit;
 }
 
-/* Circular icon badge (e.g. Currencies green $) */
-.card-icon-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.card-icon-badge--green {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
-/* Plain icon (no circle) used on Volume / Correlations / Volatility */
+/* Plain icon (no circle) — Currencies $, Volume, Correlations, Volatility */
 .card-header-icon {
   display: inline-flex;
   align-items: center;
@@ -664,16 +663,18 @@
 .card-header-icon--blue {
   color: #2563eb;
 }
+.card-header-icon--green {
+  color: #0d9488;
+}
 
 .dark .region-label--lg {
   color: #f3f4f6;
 }
-.dark .card-icon-badge--green {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-}
 .dark .card-header-icon--blue {
   color: #60a5fa;
+}
+.dark .card-header-icon--green {
+  color: #2dd4bf;
 }
 
 .region-header-right {
@@ -787,8 +788,8 @@
   padding: 4px 2px;
   font-size: 9px;
   font-weight: 600;
-  background: #f7f4eb;
-  border: 1px solid #dfd9cc;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
   border-radius: 3px;
   color: #374151;
   cursor: pointer;
@@ -802,19 +803,19 @@
 .index-tab:focus,
 .index-tab:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px #c9c3b6;
+  box-shadow: 0 0 0 1px #d1d5db;
 }
 
 .index-tab:hover {
-  background: #efe9dc;
-  border-color: #cfc7b8;
+  background: #f3f4f6;
+  border-color: #d1d5db;
   color: #111827;
 }
 
 .index-tab.active {
-  background: #ece6d8;
-  border-color: #c6beae;
-  color: #111827;
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #1e40af;
   font-weight: 600;
 }
 
@@ -1152,12 +1153,12 @@
 
 /* Secondary cards - Volume and Volatility (separate cards, same dimensions) */
 .secondary-card {
-  background: #f8f6ef;
+  background: #ffffff;
   border-radius: 8px;
   overflow-y: auto;
   overflow-x: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  border: 1px solid #d6d0c3;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+  border: 1px solid #e5e7eb;
   min-height: auto;
   max-height: 80vh;
   display: flex;
@@ -1222,8 +1223,8 @@
 
 .volume-columns {
   padding: 4px 6px;
-  background: #f0eee7;
-  border-bottom: 1px solid #ddd7ca;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .volume-col {
@@ -1242,8 +1243,8 @@
 
 .volume-row {
   padding: 8px 6px;
-  border-bottom: 1px dotted #c8c1b1;
-  background: #f8f6ef;
+  border-bottom: 1px dotted #e5e7eb;
+  background: #ffffff;
 }
 
 .volume-row-last {
@@ -1274,10 +1275,10 @@
 
 .volume-error-state {
   padding: 10px 6px;
-  border: 1px dashed #d6d0c3;
+  border: 1px dashed #e5e7eb;
   border-radius: 4px;
   color: #92400e;
-  background: #faf5e9;
+  background: #fffbeb;
   font-size: 8px;
   line-height: 1.4;
 }

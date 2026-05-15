@@ -582,8 +582,8 @@ const WorkflowStatus = () => {
       <div
         style={{
           display: 'flex',
-          borderBottom: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
-          backgroundColor: isDark ? '#1f2937' : '#f3f0e6',
+          borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+          backgroundColor: isDark ? '#1f2937' : '#ffffff',
           overflowX: 'auto',
           backdropFilter: 'blur(4px)',
         }}
@@ -636,7 +636,7 @@ const WorkflowStatus = () => {
                 width: '32px',
                 height: '32px',
                 border: '3px solid',
-                borderColor: isDark ? '#374151' : '#d6d0c3',
+                borderColor: isDark ? '#374151' : '#e5e7eb',
                 borderTopColor: isDark ? '#3b82f6' : '#2563eb',
                 borderRadius: '50%',
                 animation: 'spin 0.8s linear infinite'
@@ -669,15 +669,15 @@ const WorkflowStatus = () => {
             <Card
               className={isDark ? 'dark:bg-gray-800' : ''}
               style={{
-                border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
+                border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                 borderRadius: '0.5rem',
                 padding: '0',
                 overflow: 'hidden'
               }}
             >
               <div style={{
-                backgroundColor: isDark ? '#374151' : '#f3f0e6',
-                borderBottom: `1px solid ${isDark ? '#4b5563' : '#d6d0c3'}`,
+                backgroundColor: isDark ? '#374151' : '#f9fafb',
+                borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`,
                 padding: '3px 5px'
               }}>
                 <div style={{
@@ -754,7 +754,7 @@ const WorkflowStatus = () => {
                           gridTemplateColumns: '2fr 1fr 2fr',
                           gap: '4px',
                           padding: '4px 5px',
-                          borderBottom: index < dataTypeRows.length - 1 ? `1px solid ${isDark ? '#374151' : '#d6d0c3'}` : 'none',
+                          borderBottom: index < dataTypeRows.length - 1 ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}` : 'none',
                           cursor: 'pointer',
                           transition: 'background-color 0.15s ease',
                           backgroundColor: getBackgroundColor(data.status)
@@ -810,7 +810,7 @@ const WorkflowStatus = () => {
 
             {/* Alerts Section */}
             {freshnessData?.alerts && freshnessData.alerts.length > 0 && (
-              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
                 <Title style={{ fontSize: '14px', marginBottom: '12px', color: isDark ? '#f9fafb' : '#111827' }}>
                   Alerts ({freshnessData.alerts.length})
                 </Title>
@@ -893,9 +893,9 @@ const WorkflowStatus = () => {
                     );
 
                     return (
-                      <Card key={key} className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem', padding: 0, backgroundColor: isDark ? undefined : '#fcfaf5' }}>
+                      <Card key={key} className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem', padding: 0, backgroundColor: isDark ? undefined : '#ffffff' }}>
                         {/* Card Title - Centered for all cards */}
-                        <div style={{ textAlign: 'center', padding: '8px 10px', backgroundColor: isDark ? undefined : '#f3f0e6', borderBottom: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem 0.5rem 0 0' }}>
+                        <div style={{ textAlign: 'center', padding: '8px 10px', backgroundColor: isDark ? undefined : '#f9fafb', borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem 0.5rem 0 0' }}>
                           <Text style={{ fontSize: '10px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                             {key === 'risk-ranges' ? 'Risk Ranges (TREND)' : label}
                           </Text>
@@ -1396,7 +1396,7 @@ const WorkflowStatus = () => {
                                   </div>
                                 </div>
                                 {(diff.added?.length > 0 || diff.removed?.length > 0) && (
-                                  <div style={{ borderTop: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, paddingTop: '6px', marginTop: '2px' }}>
+                                  <div style={{ borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, paddingTop: '6px', marginTop: '2px' }}>
                                     <div style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af', marginBottom: '4px' }}>Changes from previous day</div>
                                     <div style={{ display: 'flex', gap: '8px' }}>
                                       {diff.added?.length > 0 && (
@@ -1535,7 +1535,7 @@ const WorkflowStatus = () => {
           /* OLD Status Overview - keeping for reference but removed from tabs */
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {/* Hedgeye Scraper Status */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
                 <div>
                   <Title style={{ fontSize: '16px', marginBottom: '4px', color: isDark ? '#f9fafb' : '#111827' }}>
@@ -1591,7 +1591,7 @@ const WorkflowStatus = () => {
               </div>
 
               {(!hedgeyeStatus.lastRun || hedgeyeStatus.status === 'unknown') && (
-                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f3f0e6', borderRadius: '6px', border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}` }}>
+                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f7f7f7', borderRadius: '6px', border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}` }}>
                   <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
                     <strong>Status:</strong> Scraper is configured and scheduled. It will run automatically at 8:00 AM EST on market days.
                     {!hedgeyeStatus.lastRun && ' No data has been collected yet.'}
@@ -1601,7 +1601,7 @@ const WorkflowStatus = () => {
             </Card>
 
             {/* CSV Upload Status */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
                 <div>
                   <Title style={{ fontSize: '16px', marginBottom: '4px', color: isDark ? '#f9fafb' : '#111827' }}>
@@ -1658,19 +1658,19 @@ const WorkflowStatus = () => {
             {/* Summary Metrics */}
             {serviceTotals && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
-                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
                   <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Total API Calls/Day</Text>
                   <Metric style={{ color: isDark ? '#f9fafb' : '#111827' }}>
                     {(serviceTotals.internal.callsPerDay + serviceTotals.external.callsPerDay).toLocaleString()}
                   </Metric>
                 </Card>
-                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
                   <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Total API Calls/Month</Text>
                   <Metric style={{ color: isDark ? '#f9fafb' : '#111827' }}>
                     {(serviceTotals.internal.callsPerMonth + serviceTotals.external.callsPerMonth).toLocaleString()}
                   </Metric>
                 </Card>
-                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
                   <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Estimated Monthly Cost</Text>
                   <Metric style={{ color: isDark ? '#f9fafb' : '#111827' }}>
                     ${serviceTotals.grandTotal.toFixed(2)}
@@ -1680,7 +1680,7 @@ const WorkflowStatus = () => {
             )}
 
             {/* Internal APIs */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
               <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
                 Internal API Endpoints
               </Title>
@@ -1721,7 +1721,7 @@ const WorkflowStatus = () => {
             </Card>
 
             {/* External APIs */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
               <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
                 External API Services
               </Title>
@@ -1768,7 +1768,7 @@ const WorkflowStatus = () => {
             </Card>
 
             {/* Automated Workflows */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
               <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
                 Automated Workflows
               </Title>
@@ -1809,7 +1809,7 @@ const WorkflowStatus = () => {
             </Card>
 
             {/* AWS Services */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
               <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
                 AWS Services
               </Title>
@@ -1848,12 +1848,12 @@ const WorkflowStatus = () => {
             </Card>
 
             {/* Service Parameters Example */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, borderRadius: '0.5rem' }}>
+            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
               <Title style={{ fontSize: '16px', marginBottom: '12px', color: isDark ? '#f9fafb' : '#111827' }}>
                 Key Service Parameters
               </Title>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f3f0e6', borderRadius: '6px' }}>
+                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
                   <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
                     Signal Strength Spot Quotes
                   </Text>
@@ -1861,7 +1861,7 @@ const WorkflowStatus = () => {
                     Updates every <strong>30 seconds</strong> • ~1,440 calls/day • ~43,200 calls/month
                   </Text>
                 </div>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f3f0e6', borderRadius: '6px' }}>
+                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
                   <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
                     Multi-Region Markets & Currencies
                   </Text>
@@ -1869,7 +1869,7 @@ const WorkflowStatus = () => {
                     Refreshes every <strong>30 seconds</strong> • Sparklines disabled on recurring polls to cut API usage
                   </Text>
                 </div>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f3f0e6', borderRadius: '6px' }}>
+                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
                   <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
                     USD Macro Dashboard
                   </Text>
@@ -1877,7 +1877,7 @@ const WorkflowStatus = () => {
                     Dashboard refreshes every <strong>15 minutes</strong> • DXY/currency/correlation feeds are aggregated server-side
                   </Text>
                 </div>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f3f0e6', borderRadius: '6px' }}>
+                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
                   <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
                     Hedgeye Risk Range Scraper
                   </Text>
@@ -1908,10 +1908,10 @@ const WorkflowStatus = () => {
                 <div
                   key={key}
                   style={{
-                    border: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
+                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                     borderRadius: '8px',
                     overflow: 'hidden',
-                    backgroundColor: isDark ? '#1f2937' : '#fcfaf5',
+                    backgroundColor: isDark ? '#1f2937' : '#ffffff',
                     flexShrink: 0,
                     display: 'flex',
                     flexDirection: 'column'
@@ -1920,8 +1920,8 @@ const WorkflowStatus = () => {
                   {/* Card Header */}
                   <div style={{
                     padding: '8px 12px',
-                    borderBottom: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
-                    backgroundColor: isDark ? '#111827' : '#f3f0e6',
+                    borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    backgroundColor: isDark ? '#111827' : '#f9fafb',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center'
@@ -1953,7 +1953,7 @@ const WorkflowStatus = () => {
                       />
 
                       {/* View Toggle for Data */}
-                      <div style={{ display: 'flex', backgroundColor: isDark ? '#374151' : '#d6d0c3', borderRadius: '4px', padding: '2px' }}>
+                      <div style={{ display: 'flex', backgroundColor: isDark ? '#374151' : '#e5e7eb', borderRadius: '4px', padding: '2px' }}>
                         <button
                           onClick={() => setPreviewViewMode('table')}
                           style={{
@@ -1995,11 +1995,11 @@ const WorkflowStatus = () => {
                     display: 'grid',
                     gridTemplateColumns: '1fr 1fr',
                     height: '600px',
-                    backgroundColor: isDark ? '#111827' : '#f3f0e6'
+                    backgroundColor: isDark ? '#111827' : '#f9fafb'
                   }}>
                     {/* Left Side: PDF/Screenshot */}
                     <div style={{
-                      borderRight: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`,
+                      borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
                       overflow: 'auto',
                       display: 'flex',
                       flexDirection: 'column',
@@ -2020,7 +2020,7 @@ const WorkflowStatus = () => {
                               width: '24px',
                               height: '24px',
                               border: '2px solid',
-                              borderColor: isDark ? '#374151' : '#d6d0c3',
+                              borderColor: isDark ? '#374151' : '#e5e7eb',
                               borderTopColor: isDark ? '#3b82f6' : '#2563eb',
                               borderRadius: '50%',
                               animation: 'spin 0.8s linear infinite'
@@ -2097,7 +2097,7 @@ const WorkflowStatus = () => {
                     {/* Right Side: Extracted Data */}
                     <div style={{
                       overflow: 'auto',
-                      backgroundColor: isDark ? '#1f2937' : '#fcfaf5',
+                      backgroundColor: isDark ? '#1f2937' : '#ffffff',
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
@@ -2304,7 +2304,7 @@ const WorkflowStatus = () => {
                                 </Text>
                                 {tickerTable(longPos)}
                               </div>
-                              <div style={{ paddingTop: '4px', borderTop: `1px solid ${isDark ? '#374151' : '#d6d0c3'}` }}>
+                              <div style={{ paddingTop: '4px', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}` }}>
                                 <Text style={{
                                   fontSize: '11px',
                                   fontWeight: 700,
@@ -2771,7 +2771,7 @@ const WorkflowStatus = () => {
                               {/* 1-MONTH RE-RANK HISTORY */}
                               {renderMoverSection('1-Month Re-Rank History', topMovers.monthly, bottomMovers.monthly)}
 
-                              <div style={{ marginTop: '12px', borderTop: `1px solid ${isDark ? '#374151' : '#d6d0c3'}`, paddingTop: '12px' }}>
+                              <div style={{ marginTop: '12px', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, paddingTop: '12px' }}>
                                 <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '8px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                   <span>RANKED LIST ({rankings.length})</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({formattedDate})</span>
                                 </div>

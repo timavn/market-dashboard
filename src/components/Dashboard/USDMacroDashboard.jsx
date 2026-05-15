@@ -12,6 +12,9 @@ import CFTCNetLongCard from './CFTCNetLongCard';
 import GlobalQuadsCard from './GlobalQuadsCard';
 import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
 
+/** Leading sidebar flex-basis and full-bleed offsets: 25% narrower than grid sidebarCols/12. */
+const SIDEBAR_WIDTH_SCALE = 0.75;
+
 const NEW_YORK_TZ = 'America/New_York';
 const NEW_YORK_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: NEW_YORK_TZ,
@@ -117,7 +120,9 @@ const USDMacroDashboard = ({
   multiRegionLoading = true,
   multiRegionError = null,
   sidebarCols = 2,
-  centerCols = 10
+  centerCols = 10,
+  leadingSidebar = null,
+  leadingSidebarContainerProps = null
 }) => {
   const initialMarketDays = getRecentMarketDays(5);
   const [data, setData] = useState({
@@ -350,12 +355,9 @@ const USDMacroDashboard = ({
   const latestMacroScrapedAt = getLatestScrapedAt(macroShowRows);
   const latestCallScrapedAt = getLatestScrapedAt(theCallRows);
 
-  return (
-    <div className="space-y-4">
-      {/* Global Market Day-Cycle Header */}
+  const macroBannerColumn = (
+    <>
       <GlobalMarketDayCycleHeader />
-
-      {/* Banner with Title and Metric Bar */}
       <div className="relative rounded-lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <MultiRegionMarketOverview
@@ -365,14 +367,46 @@ const USDMacroDashboard = ({
           />
         </div>
       </div>
+    </>
+  );
+
+  const effectiveSidebarUnits = sidebarCols * SIDEBAR_WIDTH_SCALE;
+  const sidebarBasisPct = `${(effectiveSidebarUnits / 12) * 100}%`;
+
+  const lscp = leadingSidebarContainerProps || {};
+  const { className: lscClassName, style: lscExtraStyle, ...lscRest } = lscp;
+
+  return (
+    <div className="space-y-4">
+      {leadingSidebar != null ? (
+        <div
+          className="usd-macro-banner-with-sidebar"
+          style={{ '--sidebar-flex': sidebarBasisPct }}
+        >
+          <div
+            className={`usd-macro-leading-sidebar${lscClassName ? ` ${lscClassName}` : ''}`}
+            style={{
+              ...(lscExtraStyle || {})
+            }}
+            {...lscRest}
+          >
+            {leadingSidebar}
+          </div>
+          <div className="usd-macro-banner-main">{macroBannerColumn}</div>
+        </div>
+      ) : (
+        <>
+          {macroBannerColumn}
+        </>
+      )}
 
       {/* CFTC, Factor Performance, Global Quads - extend left under sidebar */}
       {(() => {
-        const pct = (sidebarCols / centerCols * 100).toFixed(4);
+        const pct = (effectiveSidebarUnits / centerCols * 100).toFixed(4);
         return (
           <div style={{
             marginLeft: `calc(-${pct}% - 16px)`,
-            width: `calc(${(100 + sidebarCols / centerCols * 100).toFixed(4)}% + 16px)`,
+            width: `calc(${(100 + effectiveSidebarUnits / centerCols * 100).toFixed(4)}% + 16px)`,
           }}>
             {/* CFTC and Factor Performance - Side by Side */}
             <div className="flex flex-col md:flex-row gap-4 mb-4" style={{ alignItems: 'stretch' }}>
@@ -391,11 +425,11 @@ const USDMacroDashboard = ({
 
       {/* MACRO and THE CALL - extend left under sidebar */}
       {(() => {
-        const pct = (sidebarCols / centerCols * 100).toFixed(4);
+        const pct = (effectiveSidebarUnits / centerCols * 100).toFixed(4);
         return (
           <div style={{
             marginLeft: `calc(-${pct}% - 16px)`,
-            width: `calc(${(100 + sidebarCols / centerCols * 100).toFixed(4)}% + 16px)`,
+            width: `calc(${(100 + effectiveSidebarUnits / centerCols * 100).toFixed(4)}% + 16px)`,
           }}>
             <div className="flex flex-col md:flex-row gap-4" style={{ alignItems: 'stretch' }}>
               {/* Left: MACRO SHOW */}

@@ -62,7 +62,7 @@ const PerformanceTracking = () => {
   return (
     <div
       className="performance-tracking-wrap p-2 space-y-2"
-      style={{ backgroundColor: isDark ? '#111827' : '#f8f6ef' }}
+      style={{ backgroundColor: isDark ? '#111827' : '#f9fafb' }}
     >
       <div className="px-1">
         <PortfolioPerformanceDashboard isDark={isDark} realizedKPIs={realizedKPIs} />
@@ -82,7 +82,7 @@ const PerformanceTracking = () => {
               placeholder="Search by ticker, name, asset class, sector, factor exposure, benchmark..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-3 py-1.5 border border-[#d6d0c3] dark:border-gray-600 rounded-lg bg-[#fcfaf5] dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#c9c3b6]"
+              className="w-full px-3 py-1.5 border border-[#e5e7eb] dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#d1d5db]"
               style={{ fontSize: '14px' }}
             />
           </div>
@@ -103,10 +103,10 @@ const PerformanceTracking = () => {
 
       <Card
         className="rounded-lg p-0 overflow-hidden"
-        style={{ backgroundColor: isDark ? '#1f2937' : '#fcfaf5', border: '1px solid #d6d0c3' }}
+        style={{ backgroundColor: isDark ? '#1f2937' : '#f9fafb', border: '1px solid #e5e7eb' }}
       >
         <div
-          className="performance-list-header flex flex-wrap sm:flex-nowrap items-baseline gap-x-3 gap-y-0.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 border-b border-[#d6d0c3] dark:border-gray-600 bg-[#f3f0e6] dark:bg-gray-800/90"
+          className="performance-list-header flex flex-wrap sm:flex-nowrap items-baseline gap-x-3 gap-y-0.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 border-b border-[#e5e7eb] dark:border-gray-600 bg-[#f9fafb] dark:bg-gray-800/90"
           aria-hidden
         >
           <span className="w-16 flex-shrink-0">Symbol</span>
@@ -127,7 +127,7 @@ const PerformanceTracking = () => {
                 setSelectedSecurity(row.ticker);
                 setIsModalOpen(true);
               }}
-              className="performance-universe-row w-full text-left flex flex-wrap sm:flex-nowrap items-baseline gap-x-2 sm:gap-x-3 gap-y-0.5 px-2 py-1.5 border-b border-[#e8e3d8] dark:border-gray-600 hover:bg-[#efe9dc] dark:hover:bg-gray-800/80 transition-colors"
+              className="performance-universe-row w-full text-left flex flex-wrap sm:flex-nowrap items-baseline gap-x-2 sm:gap-x-3 gap-y-0.5 px-2 py-1.5 border-b border-[#f3f4f6] dark:border-gray-600 hover:bg-[#f3f4f6] dark:hover:bg-gray-800/80 transition-colors"
             >
               <span className="font-semibold text-blue-600 dark:text-blue-400 w-16 flex-shrink-0">
                 {row.ticker}

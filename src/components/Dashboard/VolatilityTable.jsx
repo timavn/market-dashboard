@@ -448,16 +448,12 @@ const VolatilityTableWithTabs = ({ statusIndicator }) => {
 
   return (
     <div className="volatility-tabs">
-      <div className="region-chart-header region-chart-header--mw volatility-header-with-tabs">
+      <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
           <span className="card-header-icon card-header-icon--blue">
             <Activity size={16} strokeWidth={2} />
           </span>
           <span className="region-label region-label--lg">Volatility</span>
-        </div>
-        <div className="volatility-tab-buttons-inline">
-          <button type="button" className="volatility-tab-btn active" aria-pressed="true">BPS</button>
-          <button type="button" className="volatility-tab-btn" aria-pressed="false">%</button>
         </div>
         <StatusDot
           updatedAt={lastUpdated}

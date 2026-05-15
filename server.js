@@ -5090,6 +5090,256 @@ app.post('/api/presigned-url', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Prediction Markets API Routes
+// ---------------------------------------------------------------------------
+
+const PM_TABLE = 'PredictionMarkets';
+const PM_SETTINGS_TABLE = 'PredictionMarketSettings';
+const PM_SETTINGS_KEY = 'global';
+
+// GET /api/prediction-markets/contracts — list all (optional ?status=open&assetClass=equities)
+app.get('/api/prediction-markets/contracts', async (req, res) => {
+  try {
+    const { status, assetClass } = req.query;
+    let params;
+
+    if (status) {
+      params = {
+        TableName: PM_TABLE,
+        IndexName: 'status-index',
+        KeyConditionExpression: '#s = :s',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: { ':s': status },
+      };
+    } else if (assetClass) {
+      params = {
+        TableName: PM_TABLE,
+        IndexName: 'assetClass-index',
+        KeyConditionExpression: 'assetClass = :ac',
+        ExpressionAttributeValues: { ':ac': assetClass },
+      };
+    } else {
+      params = { TableName: PM_TABLE };
+    }
+
+    const op = status || assetClass ? dynamodb.query(params) : dynamodb.scan(params);
+    const result = await op.promise();
+    res.json({ contracts: result.Items || [] });
+  } catch (err) {
+    console.error('[PM] GET contracts error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/prediction-markets/contracts — create
+app.post('/api/prediction-markets/contracts', async (req, res) => {
+  try {
+    const now = new Date().toISOString();
+    const contract = {
+      ...req.body,
+      contractId: req.body.contractId || require('crypto').randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+      status: req.body.status || 'watchlist',
+    };
+    await dynamodb.put({ TableName: PM_TABLE, Item: contract }).promise();
+    res.json({ contract });
+  } catch (err) {
+    console.error('[PM] POST contract error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/prediction-markets/contracts/:id — update
+app.put('/api/prediction-markets/contracts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Fetch existing to get createdAt (needed for composite key)
+    const existing = await dynamodb.query({
+      TableName: PM_TABLE,
+      KeyConditionExpression: 'contractId = :id',
+      ExpressionAttributeValues: { ':id': id },
+      Limit: 1,
+    }).promise();
+    if (!existing.Items || !existing.Items.length) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+    const updated = {
+      ...existing.Items[0],
+      ...req.body,
+      contractId: id,
+      createdAt: existing.Items[0].createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    await dynamodb.put({ TableName: PM_TABLE, Item: updated }).promise();
+    res.json({ contract: updated });
+  } catch (err) {
+    console.error('[PM] PUT contract error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/prediction-markets/contracts/:id
+app.delete('/api/prediction-markets/contracts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await dynamodb.query({
+      TableName: PM_TABLE,
+      KeyConditionExpression: 'contractId = :id',
+      ExpressionAttributeValues: { ':id': id },
+      Limit: 1,
+    }).promise();
+    if (!existing.Items || !existing.Items.length) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+    await dynamodb.delete({
+      TableName: PM_TABLE,
+      Key: { contractId: id, createdAt: existing.Items[0].createdAt },
+    }).promise();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[PM] DELETE contract error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prediction-markets/settings
+app.get('/api/prediction-markets/settings', async (req, res) => {
+  try {
+    const result = await dynamodb.get({
+      TableName: PM_SETTINGS_TABLE,
+      Key: { settingKey: PM_SETTINGS_KEY },
+    }).promise();
+    const defaults = {
+      settingKey: PM_SETTINGS_KEY,
+      portfolioEquity: 100000,
+      minNetEdge: 0.02,
+      defaultFeePerContract: 0.02,
+      defaultSlippageBuffer: 0.005,
+      modelErrorBuffer: 0.01,
+      maxRiskPerBet: 500,
+      maxRiskPerDay: 2000,
+      maxPmRiskPct: 0.05,
+      maxRiskByAssetClass: { equities: 5000, rates: 3000, fx: 3000, commodities: 2000, crypto: 2000 },
+      maxRiskByCategory: {},
+      kellyMultiplier: 0.25,
+      defaultConfidenceHaircut: 0.8,
+      stalePriceThresholdHours: 4,
+      minSettlementDays: 0,
+      maxSettlementDays: 90,
+      maxOpenRisk: 10000,
+      maxCorrelatedExposure: 3000,
+      sizingMode: 'fractional_kelly',
+      minConfidence: 0.5,
+    };
+    res.json({ settings: result.Item || defaults });
+  } catch (err) {
+    console.error('[PM] GET settings error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/prediction-markets/settings
+app.put('/api/prediction-markets/settings', async (req, res) => {
+  try {
+    const settings = { ...req.body, settingKey: PM_SETTINGS_KEY, updatedAt: new Date().toISOString() };
+    await dynamodb.put({ TableName: PM_SETTINGS_TABLE, Item: settings }).promise();
+    res.json({ settings });
+  } catch (err) {
+    console.error('[PM] PUT settings error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prediction-markets/analytics — aggregate P&L, win rate, Brier score
+app.get('/api/prediction-markets/analytics', async (req, res) => {
+  try {
+    const result = await dynamodb.scan({ TableName: PM_TABLE }).promise();
+    const all = result.Items || [];
+    const closed = all.filter(c => c.status === 'settled' || c.status === 'closed');
+
+    let totalPnl = 0, wins = 0, totalBrierSum = 0, totalEVAtEntry = 0;
+    closed.forEach(c => {
+      const pnl = c.realizedProfit ?? 0;
+      totalPnl += pnl;
+      if (pnl > 0) wins++;
+      const p = c.adjustedProbability ?? c.myProbability ?? 0.5;
+      const outcome = c.settlementValue >= 0.99 ? 1 : 0;
+      totalBrierSum += Math.pow(p - outcome, 2);
+      const contractPrice = c.entryPrice ?? (c.contractSide === 'Yes' ? c.yesPrice : c.noPrice) ?? 0;
+      const ev = c.contractSide === 'Yes'
+        ? p * (1 - contractPrice) - (1 - p) * contractPrice
+        : (1 - p) * (1 - contractPrice) - p * contractPrice;
+      totalEVAtEntry += ev * (c.numContracts ?? 0) - (c.totalFees ?? 0);
+    });
+
+    const openContracts = all.filter(c => c.status === 'open');
+    let totalOpenRisk = 0;
+    openContracts.forEach(c => {
+      const price = c.entryPrice ?? (c.contractSide === 'Yes' ? c.yesPrice : c.noPrice) ?? 0;
+      totalOpenRisk += price * (c.numContracts ?? 0);
+    });
+
+    res.json({
+      totalContracts: all.length,
+      openCount: openContracts.length,
+      closedCount: closed.length,
+      totalPnl,
+      winRate: closed.length ? wins / closed.length : null,
+      brierScore: closed.length ? totalBrierSum / closed.length : null,
+      totalEVAtEntry,
+      totalOpenRisk,
+      evResidual: totalPnl - totalEVAtEntry,
+    });
+  } catch (err) {
+    console.error('[PM] GET analytics error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/prediction-markets/risk — open risk breakdown by asset class / category
+app.get('/api/prediction-markets/risk', async (req, res) => {
+  try {
+    const result = await dynamodb.query({
+      TableName: PM_TABLE,
+      IndexName: 'status-index',
+      KeyConditionExpression: '#s = :s',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':s': 'open' },
+    }).promise();
+    const open = result.Items || [];
+    const byAssetClass = {}, byCategory = {}, bySettlementDate = {}, byCorrelationGroup = {};
+    let totalMaxLoss = 0, totalMaxProfit = 0;
+
+    open.forEach(c => {
+      const price = c.entryPrice ?? (c.contractSide === 'Yes' ? c.yesPrice : c.noPrice) ?? 0;
+      const n = c.numContracts ?? 0;
+      const ml = price * n;
+      const mp = (1 - price) * n;
+      totalMaxLoss += ml;
+      totalMaxProfit += mp;
+
+      const ac = c.assetClass ?? 'unknown';
+      byAssetClass[ac] = (byAssetClass[ac] ?? 0) + ml;
+
+      const cat = c.eventCategory ?? 'unknown';
+      byCategory[cat] = (byCategory[cat] ?? 0) + ml;
+
+      const sd = c.settlementDate ?? 'unknown';
+      bySettlementDate[sd] = (bySettlementDate[sd] ?? 0) + ml;
+
+      const cg = c.correlationGroup ?? 'none';
+      byCorrelationGroup[cg] = (byCorrelationGroup[cg] ?? 0) + ml;
+    });
+
+    res.json({ totalMaxLoss, totalMaxProfit, byAssetClass, byCategory, bySettlementDate, byCorrelationGroup, openCount: open.length });
+  } catch (err) {
+    console.error('[PM] GET risk error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Serve static files only in production
 // In development, React dev server handles frontend (run separately on port 3000)
 if (process.env.NODE_ENV === 'production') {

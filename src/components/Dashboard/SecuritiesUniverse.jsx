@@ -48,7 +48,7 @@ const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
         textAlign: 'center',
         fontSize: '8px',
         color: '#6b7280',
-        backgroundColor: '#f3f0e6',
+        backgroundColor: '#f9fafb',
         borderRadius: '2px',
         padding: '2px 2px',
         position: 'relative'
@@ -693,7 +693,7 @@ const SecuritiesUniverse = () => {
       width: index === lastIndex ? lastCellWidth : cellWidth,
       textAlign: 'center',
       fontSize: '9px',
-      borderRight: index < lastIndex ? '1px solid #d6d0c3' : 'none', // Vertical divider
+      borderRight: index < lastIndex ? '1px solid #e5e7eb' : 'none', // Vertical divider
       padding: '0 2px',
       color: color,
       fontWeight: 600,
@@ -713,7 +713,7 @@ const SecuritiesUniverse = () => {
                 style={{
                   width: index === lastIndex ? lastCellWidth : cellWidth,
                   textAlign: 'center',
-                  borderRight: index < lastIndex ? '1px solid #d6d0c3' : 'none',
+                  borderRight: index < lastIndex ? '1px solid #e5e7eb' : 'none',
                   padding: '0 2px',
                   fontSize: '8px',
                   color: '#6b7280',
@@ -763,7 +763,7 @@ const SecuritiesUniverse = () => {
                   style={{
                     width: '100%',
                     position: 'relative',
-                    backgroundColor: index === lastIndex ? '#efe9dc' : '#f3f0e6',
+                    backgroundColor: index === lastIndex ? '#f3f4f6' : '#f9fafb',
                     fontWeight: index === lastIndex ? 'bold' : 'normal',
                     color: index === lastIndex ? '#1e40af' : '#6b7280'
                   }}
@@ -835,7 +835,7 @@ const SecuritiesUniverse = () => {
             placeholder="Search by ticker, name, asset class, sector, factor exposure, benchmark..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-3 py-1.5 border border-[#d6d0c3] dark:border-gray-600 rounded-lg bg-[#fcfaf5] dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#c9c3b6]"
+            className="w-full px-3 py-1.5 border border-[#e5e7eb] dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#d1d5db]"
             style={{ fontSize: '14px' }}
           />
         </div>
@@ -913,11 +913,11 @@ const SecuritiesUniverse = () => {
                         key={opt}
                         onClick={() => section.onSelect(opt)}
                         style={{
-                          border: '1px solid #c9c3b6',
+                          border: '1px solid #d1d5db',
                           padding: '4px 12px',
                           fontSize: '11px',
                           fontWeight: 600,
-                          backgroundColor: isActive ? '#e6e0d2' : '#fcfaf5',
+                          backgroundColor: isActive ? '#f3f4f6' : '#ffffff',
                           color: isActive ? '#111' : '#1e293b',
                           borderRightWidth: isLast ? '1px' : '0',
                           borderRadius: isFirst ? '4px 0 0 4px' : isLast ? '0 4px 4px 0' : '0',
@@ -925,7 +925,7 @@ const SecuritiesUniverse = () => {
                           minWidth: '70px',
                           transition: 'background-color 0.1s'
                         }}
-                        className="hover:bg-[#efe9dc]"
+                        className="hover:bg-[#f3f4f6]"
                       >
                         {opt}
                       </button>
@@ -954,7 +954,7 @@ const SecuritiesUniverse = () => {
             },
             {
               title: 'QUAD FILTER',
-              icon: <LayoutGrid size={24} strokeWidth={1.5} className="text-blue-500" />,
+              icon: <LayoutGrid size={24} className="text-blue-500" />,
               options: ['QUAD 1', 'QUAD 2', 'QUAD 3', 'QUAD 4'],
               activeValues: selectedQuad ? [`QUAD ${selectedQuad}`] : [],
               onSelect: (val) => {
@@ -981,11 +981,11 @@ const SecuritiesUniverse = () => {
                         key={opt}
                         onClick={() => section.onSelect(opt)}
                         style={{
-                          border: '1px solid #c9c3b6',
+                          border: '1px solid #d1d5db',
                           padding: '4px 12px',
                           fontSize: '11px',
                           fontWeight: 600,
-                          backgroundColor: isActive ? '#e6e0d2' : '#fcfaf5',
+                          backgroundColor: isActive ? '#f3f4f6' : '#ffffff',
                           color: isActive ? '#111' : '#1e293b',
                           borderRightWidth: isLast ? '1px' : '0',
                           borderRadius: isFirst ? '4px 0 0 4px' : isLast ? '0 4px 4px 0' : '0',
@@ -993,7 +993,7 @@ const SecuritiesUniverse = () => {
                           minWidth: '70px',
                           transition: 'background-color 0.1s'
                         }}
-                        className="hover:bg-[#efe9dc]"
+                        className="hover:bg-[#f3f4f6]"
                       >
                         {opt}
                       </button>
@@ -1007,11 +1007,11 @@ const SecuritiesUniverse = () => {
       </div>
 
       {/* Data Table */}
-      <Card className="dark:bg-gray-800 p-0 rounded-lg overflow-hidden" style={{ backgroundColor: '#fcfaf5', border: '1px solid #d6d0c3', boxShadow: 'none', outline: 'none', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <Card className="dark:bg-gray-800 p-0 rounded-lg overflow-hidden" style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', boxShadow: 'none', outline: 'none', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
-            <thead className="bg-[#f3f0e6] text-slate-800">
-              <tr style={{ borderTop: '1px solid #c9c3b6', borderBottom: '1px solid #c9c3b6' }}>
+            <thead className="bg-[#f9fafb] text-slate-800">
+              <tr style={{ borderTop: '1px solid #d1d5db', borderBottom: '1px solid #d1d5db' }}>
                 {[
                   { key: 'ticker', label: 'Ticker', icon: <div style={{ height: '17px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }} className="text-blue-500">ABC</div>, align: 'center', width: '45px' },
                   {
@@ -1076,20 +1076,20 @@ const SecuritiesUniverse = () => {
                       padding: '3px 3px 4px',
                       textAlign: col.align,
                       verticalAlign: 'middle',
-                      background: '#f3f0e6',
+                      background: '#f9fafb',
                       color: '#1e293b',
-                      borderLeft: index === 0 ? '1px solid #c9c3b6' : 'none',
-                      borderRight: index === arr.length - 1 ? '1px solid #c9c3b6' : '1px solid #d6d0c3',
-                      borderBottom: '1px solid #c9c3b6',
+                      borderLeft: index === 0 ? '1px solid #d1d5db' : 'none',
+                      borderRight: index === arr.length - 1 ? '1px solid #d1d5db' : '1px solid #e5e7eb',
+                      borderBottom: '1px solid #d1d5db',
                       width: col.width,
                       minWidth: col.width,
                       maxWidth: col.width,
                       position: 'sticky',
                       top: 0,
                       zIndex: 10,
-                      boxShadow: 'inset 0 -1px 0 #c9c3b6'
+                      boxShadow: 'inset 0 -1px 0 #d1d5db'
                     }}
-                    className={isSortable ? 'group hover:bg-[#efe9dc] transition-colors' : 'transition-colors'}
+                    className={isSortable ? 'group hover:bg-[#f3f4f6] transition-colors' : 'transition-colors'}
                     onClick={isSortable ? () => handleSort(col.key) : undefined}
                     aria-sort={!isSortable ? 'none' : undefined}
                   >
@@ -1210,14 +1210,14 @@ const SecuritiesUniverse = () => {
                       key={security.ticker}
                       style={{
                         borderBottom: '1px solid #e8e2d5',
-                        backgroundColor: index % 2 === 0 ? 'transparent' : '#f3f0e6'
+                        backgroundColor: index % 2 === 0 ? 'transparent' : '#f9fafb'
                       }}
                       className="dark:border-gray-700 dark:bg-gray-800"
                     >
-                      <td style={{ padding: '2px 3px', fontWeight: '600', borderRight: '1px solid #d6d0c3', textAlign: 'center' }} className="dark:text-white">
+                      <td style={{ padding: '2px 3px', fontWeight: '600', borderRight: '1px solid #e5e7eb', textAlign: 'center' }} className="dark:text-white">
                         {security.ticker}
                       </td>
-                      <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #e5e7eb' }} className="dark:text-gray-300">
                         <span style={{
                           color: security.bias === 'BULLISH' ? '#10b981' :
                             security.bias === 'BEARISH' ? '#ef4444' : '#6b7280'
@@ -1225,7 +1225,7 @@ const SecuritiesUniverse = () => {
                           {security.bias}
                         </span>
                       </td>
-                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }} className="dark:text-gray-300">
                         <div style={{ display: 'flex', justifyContent: 'center' }}>
                           {renderRiskRangeCell(security.riskRangeHistory, security.priceHistory)}
                         </div>
@@ -1237,7 +1237,7 @@ const SecuritiesUniverse = () => {
                           textAlign: 'center',
                           color: volMetrics ? getIvolPremColor(volMetrics.ivolPrem) : '#6b7280',
                           fontWeight: 600,
-                          borderRight: '1px solid #d6d0c3'
+                          borderRight: '1px solid #e5e7eb'
                         }}
                         className="dark:text-white"
                       >
@@ -1249,7 +1249,7 @@ const SecuritiesUniverse = () => {
                           textAlign: 'center',
                           color: volMetrics ? getTTMZScoreColor(volMetrics.ttmZScore) : '#6b7280',
                           fontWeight: 600,
-                          borderRight: '1px solid #d6d0c3'
+                          borderRight: '1px solid #e5e7eb'
                         }}
                         className="dark:text-white"
                       >
@@ -1261,13 +1261,13 @@ const SecuritiesUniverse = () => {
                           textAlign: 'center',
                           color: volMetrics ? getIOVRPercentileColor(volMetrics.iovrPercentile) : '#6b7280',
                           fontWeight: 600,
-                          borderRight: '1px solid #d6d0c3'
+                          borderRight: '1px solid #e5e7eb'
                         }}
                         className="dark:text-white"
                       >
                         {volMetrics ? formatVolatilityMetric(volMetrics.iovrPercentile, true) : '--'}
                       </td>
-                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-white">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }} className="dark:text-white">
                         {(() => {
                           const zScoreColors = getZScoreColor(security.zScore);
                           return (
@@ -1292,11 +1292,11 @@ const SecuritiesUniverse = () => {
                           );
                         })()}
                       </td>
-                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }} className="dark:text-gray-300">
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }} className="dark:text-gray-300">
                         {security.beta}
                       </td>
 
-                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }}>
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
                         {security.quadRanking && security.quadRanking !== '--' ? (
                           <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'center' }}>
                             {security.quadRanking.split('/').map((quadNum, index, array) => {
@@ -1323,7 +1323,7 @@ const SecuritiesUniverse = () => {
                           <span className="dark:text-gray-400">--</span>
                         )}
                       </td>
-                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #d6d0c3' }}>
+                      <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', fontSize: '7px', alignItems: 'center' }}>
                           <span
                             style={{
@@ -1359,7 +1359,7 @@ const SecuritiesUniverse = () => {
                           padding: '2px 3px',
                           textAlign: 'center',
                           fontWeight: 600,
-                          borderRight: '1px solid #d6d0c3'
+                          borderRight: '1px solid #e5e7eb'
                         }}
                         className="dark:text-white"
                       >

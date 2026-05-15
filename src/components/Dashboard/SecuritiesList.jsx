@@ -7,9 +7,10 @@ import EtfProCard from './EtfProCard';
 import './SecuritiesList.css';
 
 const VIEW_KEY = 'leftSidebarView_v1';
-const SS_ROWS_PER_PAGE = 10;
+const SS_ROWS_PER_PAGE_FALLBACK = 10;
+const SS_ROW_APPROX_PX = 31;
 
-const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandToggle }) => {
+const SecuritiesList = ({ isPortfolioOpen = false }) => {
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
@@ -29,9 +30,11 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     monthly: { upside: [], downside: [] }
   });
   const dotLegendRef = useRef(null);
+  const ssDataContainerRef = useRef(null);
   const rowRefs = useRef({});
   const pricesRef = useRef({}); // Ref to track current prices for stale closure prevention
   const riskRangesRef = useRef({}); // Ref to track current risk ranges for stale closure prevention
+  const [ssRowsPerPage, setSsRowsPerPage] = useState(SS_ROWS_PER_PAGE_FALLBACK);
 
   // Asset class color mapping - using more vibrant, distinct colors
   const getAssetClassColor = useCallback((assetClass) => {
@@ -149,48 +152,6 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     } else {
       return { status: 'stale', color: '#EF4444', emoji: '🔴' }; // Red
     }
-  };
-
-  // Calculate odds (upside and downside percentages)
-  const calculateOdds = (spotPrice, lrr, hrr) => {
-    // Handle missing or invalid spot price
-    if (!spotPrice || spotPrice === '--' || spotPrice === 'N/A') {
-      return { upside: null, downside: null };
-    }
-
-    // Extract numeric value from price data
-    let spotValue;
-    if (typeof spotPrice === 'object' && spotPrice !== null) {
-      spotValue = parseFloat(spotPrice.price);
-    } else if (typeof spotPrice === 'string') {
-      spotValue = parseFloat(spotPrice);
-    } else {
-      spotValue = parseFloat(spotPrice);
-    }
-
-    if (isNaN(spotValue) || spotValue <= 0) {
-      return { upside: null, downside: null };
-    }
-
-    // Calculate upside from HRR
-    let upside = null;
-    if (hrr && hrr !== '--' && hrr !== 'N/A') {
-      const hrrValue = parseFloat(hrr);
-      if (!isNaN(hrrValue) && hrrValue > 0) {
-        upside = ((hrrValue - spotValue) / spotValue) * 100;
-      }
-    }
-
-    // Calculate downside from LRR
-    let downside = null;
-    if (lrr && lrr !== '--' && lrr !== 'N/A') {
-      const lrrValue = parseFloat(lrr);
-      if (!isNaN(lrrValue) && lrrValue > 0) {
-        downside = ((spotValue - lrrValue) / spotValue) * 100;
-      }
-    }
-
-    return { upside, downside };
   };
 
   // Helper to format risk levels with max 6 digits to keep columns aligned
@@ -543,6 +504,41 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
     localStorage.setItem(VIEW_KEY, activeView);
   }, [activeView]);
 
+  useEffect(() => {
+    if (activeView !== 'signal') return undefined;
+    const el = ssDataContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') {
+      setSsRowsPerPage(SS_ROWS_PER_PAGE_FALLBACK);
+      return undefined;
+    }
+
+    const computeRowsPerPage = () => {
+      const renderedRow = el.querySelector('.securities-data-row');
+      const rowHeight = renderedRow?.offsetHeight || SS_ROW_APPROX_PX;
+      const nextRowsPerPage = Math.max(
+        1,
+        Math.min(securities.length, Math.floor(el.clientHeight / rowHeight) || SS_ROWS_PER_PAGE_FALLBACK)
+      );
+      setSsRowsPerPage(nextRowsPerPage);
+    };
+
+    const resizeObserver = new ResizeObserver(computeRowsPerPage);
+    resizeObserver.observe(el);
+    computeRowsPerPage();
+
+    return () => resizeObserver.disconnect();
+  }, [activeView, securities.length]);
+
+  const ssEffectiveRowsPerPage = Math.max(1, Math.min(securities.length, ssRowsPerPage));
+  const ssTotalPages = Math.max(1, Math.ceil(securities.length / ssEffectiveRowsPerPage));
+  const ssCurrentPage = Math.min(ssPage, ssTotalPages - 1);
+
+  useEffect(() => {
+    if (ssPage !== ssCurrentPage) {
+      setSsPage(ssCurrentPage);
+    }
+  }, [ssCurrentPage, ssPage]);
+
   const handleEtfProFreshness = useCallback((fresh) => {
     setEtfProFresh(fresh);
   }, []);
@@ -595,7 +591,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
             {activeView === 'etfpro' ? 'ETF PRO' : 'SIGNAL STRENGTH'}
           </span>
         </div>
-        {/* Row 2: Toggle + Expand */}
+        {/* Row 2: Toggle */}
         <div className="securities-card-controls-row">
           <div className="securities-view-toggle" role="tablist" aria-label="Left sidebar view">
             <button
@@ -619,32 +615,12 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
               ETFP
             </button>
           </div>
-          {onExpandToggle && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onExpandToggle();
-              }}
-              className="securities-expand-btn"
-              title={isExpanded ? 'Collapse left sidebar' : 'Expand left sidebar'}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path
-                  d={isExpanded ? "M10 12L6 8L10 4" : "M6 4L10 8L6 12"}
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
         </div>
       </div>
 
       <div className="securities-card-body">
       {activeView === 'etfpro' ? (
-        <EtfProCard isExpanded={isExpanded} onFreshness={handleEtfProFreshness} />
+        <EtfProCard onFreshness={handleEtfProFreshness} />
       ) : (
         <>
           {/* Top Movers Section - Compact Table Format */}
@@ -820,9 +796,7 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
         <div
           className="securities-header-row"
           style={{
-            gridTemplateColumns: isExpanded
-              ? '20px 30px 60px 70px 60px 60px 80px 45px'
-              : '20px 30px 60px 70px 60px 60px'
+            gridTemplateColumns: '20px 30px 60px 70px 60px 60px'
           }}
         >
           <div
@@ -865,27 +839,27 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
           <div className="header-price">Spot Price</div>
           <div className="header-bias">Bias</div>
           <div className="header-lrr">LRR</div>
-          {isExpanded && (
-            <>
-              <div className="header-odds">+/-</div>
-              <div className="header-signal">Signal</div>
-            </>
-          )}
         </div>
 
         {/* Data Rows */}
-        <div className="securities-data-container">
-          {securities.slice(ssPage * SS_ROWS_PER_PAGE, (ssPage + 1) * SS_ROWS_PER_PAGE).map((security, localIndex) => {
-            const index = ssPage * SS_ROWS_PER_PAGE + localIndex;
-            const isLastOnPage = localIndex === Math.min(SS_ROWS_PER_PAGE, securities.length - ssPage * SS_ROWS_PER_PAGE) - 1;
+        <div className="securities-data-container" ref={ssDataContainerRef}>
+          {securities
+            .slice(
+              ssCurrentPage * ssEffectiveRowsPerPage,
+              (ssCurrentPage + 1) * ssEffectiveRowsPerPage
+            )
+            .map((security, localIndex) => {
+            const index = ssCurrentPage * ssEffectiveRowsPerPage + localIndex;
+            const isLastOnPage = localIndex === Math.min(
+              ssEffectiveRowsPerPage,
+              securities.length - ssCurrentPage * ssEffectiveRowsPerPage
+            ) - 1;
             return (
             <div
               key={security.ticker}
               className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${isLastOnPage ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
               style={{
-                gridTemplateColumns: isExpanded
-                  ? '20px 30px 60px 70px 60px 60px 80px 45px'
-                  : '20px 30px 60px 70px 60px 60px'
+                gridTemplateColumns: '20px 30px 60px 70px 60px 60px'
               }}
             >
               <div className="data-dot-cell">
@@ -980,63 +954,25 @@ const SecuritiesList = ({ isPortfolioOpen = false, isExpanded = false, onExpandT
                   })()}
                 </span>
               </div>
-              {isExpanded && (
-                <>
-                  <div className="data-odds-cell">
-                    {(() => {
-                      const priceData = prices[security.ticker];
-                      const spotPrice = priceData?.price || priceData;
-                      const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
-                      const lrr = riskRangeData?.lrr || '--';
-                      const hrr = riskRangeData?.hrr || '--';
-                      const odds = calculateOdds(spotPrice, lrr, hrr);
-
-                      if (odds.upside === null && odds.downside === null) {
-                        return <span className="data-odds">--</span>;
-                      }
-
-                      const upsideStr = odds.upside !== null ? `${odds.upside.toFixed(1)}%` : '--';
-                      const downsideStr = odds.downside !== null ? `~${odds.downside.toFixed(1)}%` : '--';
-
-                      return (
-                        <span className="data-odds">
-                          {odds.upside !== null && (
-                            <span className="odds-upside">{upsideStr}</span>
-                          )}
-                          {odds.upside !== null && odds.downside !== null && ' / '}
-                          {odds.downside !== null && (
-                            <span className="odds-downside">{downsideStr}</span>
-                          )}
-                          {odds.upside === null && odds.downside === null && '--'}
-                        </span>
-                      );
-                    })()}
-                  </div>
-                  <div className="data-signal-cell">
-                    <span className="data-signal">0</span>
-                  </div>
-                </>
-              )}
             </div>
             );
           })}
         </div>
         {/* Pagination Controls */}
         {(() => {
-          const totalPages = Math.ceil(securities.length / SS_ROWS_PER_PAGE);
-          if (totalPages <= 1) return null;
+          if (ssTotalPages <= 1) return null;
           return (
             <div className="ss-pagination">
               <button
                 className="ss-page-btn"
                 onClick={() => setSsPage(p => Math.max(0, p - 1))}
-                disabled={ssPage === 0}
+                disabled={ssCurrentPage === 0}
               >‹</button>
-              <span className="ss-page-info">{ssPage + 1} / {totalPages}</span>
+              <span className="ss-page-info">{ssCurrentPage + 1} / {ssTotalPages}</span>
               <button
                 className="ss-page-btn"
-                onClick={() => setSsPage(p => Math.min(totalPages - 1, p + 1))}
-                disabled={ssPage === totalPages - 1}
+                onClick={() => setSsPage(p => Math.min(ssTotalPages - 1, p + 1))}
+                disabled={ssCurrentPage === ssTotalPages - 1}
               >›</button>
             </div>
           );

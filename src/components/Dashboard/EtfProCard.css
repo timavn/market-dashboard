@@ -1,6 +1,11 @@
 .etfpro-body {
   padding: 3px 6px 6px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
+
 
 .etfpro-error {
   margin-top: 5px;
@@ -24,14 +29,19 @@
 /* Stacked Added/Removed (blue bars) then side-by-side Longs / Shorts tables */
 .etfpro-split-stack {
   margin-top: 5px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .etfpro-stacked-changes {
+  flex-shrink: 0;
   margin-bottom: 8px;
   padding: 4px 3px 6px;
   border-radius: 4px;
-  border: 1px solid rgba(214, 208, 195, 0.9);
-  background: #fcfaf5;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
 }
 
 .etfpro-change-bluebar {
@@ -114,7 +124,9 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
-  align-items: start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 
 .etfpro-column {
@@ -122,6 +134,8 @@
   display: flex;
   flex-direction: column;
   border-radius: 4px;
+  flex: 1;
+  min-height: 0;
 }
 
 .etfpro-column-long {
@@ -134,6 +148,10 @@
 
 .etfpro-pane {
   min-width: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Match .etfpro-table thead th */
@@ -144,8 +162,8 @@
   width: 100%;
   box-sizing: border-box;
   padding: 4px 6px;
-  background: #f3f0e6;
-  border-bottom: 1px solid #d6d0c3;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
   font-size: 11px;
   font-weight: 800;
   color: #111;
@@ -164,10 +182,11 @@
 
 .etfpro-pane-scroll {
   overflow-x: hidden;
-}
-
-.etfpro-pane-scroll.expanded {
-  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
 }
 
 .etfpro-pane-empty {
@@ -181,6 +200,7 @@
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
+  flex-shrink: 0;
 }
 
 .etfpro-col-num {
@@ -195,9 +215,9 @@
   display: block;
   width: 100%;
   padding: 4px 6px;
-  background: #f3f0e6;
+  background: #f9fafb;
   border: none;
-  border-top: 1px solid #d6d0c3;
+  border-top: 1px solid #e5e7eb;
   font-size: 11px;
   font-weight: 600;
   color: #374151;
@@ -207,14 +227,14 @@
 }
 
 .etfpro-show-more:hover {
-  background: #ebe7db;
+  background: #f3f4f6;
 }
 
 .etfpro-table thead th {
   position: sticky;
   top: 0;
-  background: #f3f0e6;
-  border-bottom: 1px solid #d6d0c3;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
   font-size: 11px;
   font-weight: 800;
   color: #111;
@@ -224,7 +244,7 @@
 }
 
 .etfpro-table tbody td {
-  border-bottom: 1px solid rgba(214, 208, 195, 0.65);
+  border-bottom: 1px solid rgba(229, 231, 235, 0.65);
   padding: 4px 3px;
   font-size: 12px;
   color: #111;
@@ -232,7 +252,7 @@
 }
 
 .etfpro-table tbody tr:hover td {
-  background: rgba(239, 233, 220, 0.6);
+  background: rgba(229, 231, 235, 0.5);
 }
 
 .etfpro-table .mono {
@@ -262,8 +282,8 @@
   justify-content: center;
   padding: 1px 4px;
   border-radius: 999px;
-  border: 1px solid #d6d0c3;
-  background: #f8f6ef;
+  border: 1px solid #e5e7eb;
+  background: #f3f4f6;
   font-size: 11px;
   font-weight: 800;
 }
@@ -295,3 +315,54 @@
   background: rgba(16, 185, 129, 0.08);
 }
 
+/* Pagination controls for ETFP pane tables */
+.etfpro-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding: 6px 8px;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.etfpro-page-btn {
+  appearance: none;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #6b7280;
+  border-radius: 5px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+  font-weight: 500;
+}
+
+.etfpro-page-btn:hover:not(:disabled) {
+  background: #111827;
+  border-color: #111827;
+  color: #ffffff;
+}
+
+.etfpro-page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.etfpro-page-info {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  min-width: 32px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

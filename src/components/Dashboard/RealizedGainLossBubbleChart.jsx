@@ -194,13 +194,13 @@ const RealizedGainLossDashboard = ({ lots = [], searchQuery = '', loading = fals
     <div className="flex flex-col gap-3 mb-4">
 
       <div
-        className="realized-gl-chart-card rounded-lg border border-[#d6d0c3] dark:border-gray-600 overflow-hidden"
-        style={{ backgroundColor: isDark ? '#1f2937' : '#fcfaf5' }}
+        className="realized-gl-chart-card rounded-lg border border-[#e5e7eb] dark:border-gray-600 overflow-hidden"
+        style={{ backgroundColor: isDark ? '#1f2937' : '#ffffff' }}
       >
         {/* Header & Controls */}
         <div
-          className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-3 py-2 border-b border-[#d6d0c3] dark:border-gray-600"
-          style={{ backgroundColor: isDark ? '#111827' : '#f3f0e6' }}
+          className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-3 py-2 border-b border-[#e5e7eb] dark:border-gray-600"
+          style={{ backgroundColor: isDark ? '#111827' : '#f9fafb' }}
         >
           <div>
             <h2 className="text-base font-bold text-gray-900 dark:text-white m-0 leading-tight">
@@ -235,7 +235,7 @@ const RealizedGainLossDashboard = ({ lots = [], searchQuery = '', loading = fals
         </div>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-3 py-2 border-b border-[#d6d0c3] dark:border-gray-600">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-3 py-2 border-b border-[#e5e7eb] dark:border-gray-600">
           <div className="flex items-center flex-wrap gap-1">
             {RANGES.map(range => (
               <button
@@ -446,8 +446,8 @@ const RealizedGainLossDashboard = ({ lots = [], searchQuery = '', loading = fals
 
       {/* Biggest Movers Table */}
       {topMovers.length > 0 && (
-        <div className="bg-white dark:bg-[#1f2937] border border-[#d6d0c3] dark:border-gray-600 rounded-lg overflow-hidden">
-          <div className="px-3 py-2 border-b border-[#d6d0c3] dark:border-gray-600 bg-[#f3f0e6] dark:bg-gray-800">
+        <div className="bg-white dark:bg-[#1f2937] border border-[#e5e7eb] dark:border-gray-600 rounded-lg overflow-hidden">
+          <div className="px-3 py-2 border-b border-[#e5e7eb] dark:border-gray-600 bg-[#f9fafb] dark:bg-gray-800">
             <h3 className="text-sm font-bold text-gray-900 dark:text-white m-0">Biggest Movers</h3>
           </div>
           <div className="overflow-x-auto">

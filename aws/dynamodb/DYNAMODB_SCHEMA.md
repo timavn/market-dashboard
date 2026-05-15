@@ -836,6 +836,102 @@ RiskRangeData (ticker="LATEST", date="latest")
 
 ---
 
+## Prediction Markets Tables
+
+### PredictionMarkets
+
+**Purpose**: Store all prediction market contracts (watchlist, open, closed, settled)
+
+**Primary Key**:
+- Partition Key: `contractId` (String) — UUID
+- Sort Key: `createdAt` (String) — ISO timestamp
+
+**Global Secondary Indexes**:
+- `status-index`: PK `status` (S), SK `settlementDate` (S) — query by lifecycle status
+- `assetClass-index`: PK `assetClass` (S), SK `settlementDate` (S) — query by asset class
+
+**Key Attributes**:
+- `contractId` (String): UUID
+- `status` (String): `watchlist | planned | open | closed | settled | canceled`
+- `assetClass` (String): `equities | rates | fx | commodities | crypto`
+- `eventCategory` (String): e.g., `Equity Index | Rates | Inflation | Jobs | FX | Commodities | Crypto`
+- `eventName` (String): Human-readable event name
+- `contractQuestion` (String): Exact binary contract question
+- `yesPrice`, `noPrice` (Number): Current market prices $0–$1
+- `myProbability` (Number): Model probability 0–1
+- `adjustedProbability` (Number): Confidence-haircut probability
+- `confidenceScore` (Number): Model confidence 0–1
+- `contractSide` (String): `Yes | No`
+- `numContracts` (Number): Number of contracts
+- `entryPrice`, `exitPrice`, `settlementValue` (Number)
+- `feesPerContract`, `totalFees` (Number)
+- `realizedProfit` (Number): Actual P&L after settlement
+- `settlementDate` (String): YYYY-MM-DD
+- `sizingMethod` (String): `fixed_dollar | fixed_pct | fractional_kelly | conservative_kelly | manual`
+- `correlationGroup` (String): Macro theme grouping
+- `journal` (Map): Structured bet journal fields
+- `tags` (List): String tags
+- `createdAt`, `updatedAt` (String): ISO timestamps
+
+**AWS CLI Creation**:
+```bash
+aws dynamodb create-table \
+  --table-name PredictionMarkets \
+  --attribute-definitions \
+    AttributeName=contractId,AttributeType=S \
+    AttributeName=createdAt,AttributeType=S \
+    AttributeName=status,AttributeType=S \
+    AttributeName=settlementDate,AttributeType=S \
+    AttributeName=assetClass,AttributeType=S \
+  --key-schema \
+    AttributeName=contractId,KeyType=HASH \
+    AttributeName=createdAt,KeyType=RANGE \
+  --global-secondary-indexes \
+    '[
+      {"IndexName":"status-index","KeySchema":[{"AttributeName":"status","KeyType":"HASH"},{"AttributeName":"settlementDate","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+      {"IndexName":"assetClass-index","KeySchema":[{"AttributeName":"assetClass","KeyType":"HASH"},{"AttributeName":"settlementDate","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}
+    ]' \
+  --billing-mode PAY_PER_REQUEST \
+  --region us-west-1
+```
+
+---
+
+### PredictionMarketSettings
+
+**Purpose**: Single-row settings store for prediction markets module configuration
+
+**Primary Key**:
+- Partition Key: `settingKey` (String) — always `"global"`
+
+**Key Attributes**:
+- `portfolioEquity` (Number): Total portfolio equity for sizing calculations
+- `minNetEdge` (Number): Minimum net edge to qualify for trade recommendation
+- `defaultFeePerContract` (Number): Default fee per contract in $
+- `defaultSlippageBuffer` (Number): Slippage buffer per contract
+- `modelErrorBuffer` (Number): Model error buffer
+- `maxRiskPerBet` (Number): Max dollar risk per single bet
+- `maxRiskPerDay` (Number): Max daily prediction market risk
+- `maxPmRiskPct` (Number): Max PM risk as fraction of portfolio equity
+- `maxRiskByAssetClass` (Map): Per-asset-class risk caps
+- `kellyMultiplier` (Number): Fractional Kelly multiplier (e.g., 0.25)
+- `defaultConfidenceHaircut` (Number): Default confidence multiplier 0–1
+- `maxOpenRisk` (Number): Max total open risk cap
+- `sizingMode` (String): Default sizing mode
+- `updatedAt` (String): ISO timestamp
+
+**AWS CLI Creation**:
+```bash
+aws dynamodb create-table \
+  --table-name PredictionMarketSettings \
+  --attribute-definitions AttributeName=settingKey,AttributeType=S \
+  --key-schema AttributeName=settingKey,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region us-west-1
+```
+
+---
+
 **Last Updated**: January 10, 2026
 
 **Note**: This consolidated schema replaces the following individual documentation files:
