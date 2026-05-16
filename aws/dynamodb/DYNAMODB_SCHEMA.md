@@ -932,7 +932,50 @@ aws dynamodb create-table \
 
 ---
 
-**Last Updated**: January 10, 2026
+### FinancialPredictionEvents
+
+**Purpose**: Cached normalized prediction-market catalog from Kalshi (scheduled ingest) and IBKR (local refresh)
+
+**Primary Key**:
+- Partition Key: `eventId` (String) — `{venue}#{api_raw_id}`
+- Sort Key: `updatedAt` (String) — ISO timestamp of ingest row
+
+**Global Secondary Indexes**:
+- `comparisonGroupId-index`: PK `comparisonGroupId` (S), SK `event_date` (S)
+- `venue-status-index`: PK `venue` (S), SK `status` (S)
+
+**Key Attributes**:
+- `eventId`, `updatedAt`, `venue`, `status`, `comparisonGroupId`, `event_date`
+- `payload` (Map): Full normalized event object (see `src/services/predictionMarketsIngest/`)
+
+**Meta row**: `eventId` = `INGEST_META#global` — last ingest timestamp and counts
+
+**AWS CLI Creation**:
+```bash
+aws dynamodb create-table \
+  --table-name FinancialPredictionEvents \
+  --attribute-definitions \
+    AttributeName=eventId,AttributeType=S \
+    AttributeName=updatedAt,AttributeType=S \
+    AttributeName=comparisonGroupId,AttributeType=S \
+    AttributeName=event_date,AttributeType=S \
+    AttributeName=venue,AttributeType=S \
+    AttributeName=status,AttributeType=S \
+  --key-schema \
+    AttributeName=eventId,KeyType=HASH \
+    AttributeName=updatedAt,KeyType=RANGE \
+  --global-secondary-indexes \
+    '[
+      {"IndexName":"comparisonGroupId-index","KeySchema":[{"AttributeName":"comparisonGroupId","KeyType":"HASH"},{"AttributeName":"event_date","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+      {"IndexName":"venue-status-index","KeySchema":[{"AttributeName":"venue","KeyType":"HASH"},{"AttributeName":"status","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}
+    ]' \
+  --billing-mode PAY_PER_REQUEST \
+  --region us-west-1
+```
+
+---
+
+**Last Updated**: May 15, 2026
 
 **Note**: This consolidated schema replaces the following individual documentation files:
 - CREATE_TABLES.md

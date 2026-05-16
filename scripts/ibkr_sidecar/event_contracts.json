@@ -1,0 +1,22 @@
+{
+  "contracts": [],
+  "example_contract": {
+    "description": "Example only: replace with a real event-contract conid from IBKR",
+    "conId": 0,
+    "venue": "ForecastEx",
+    "category": "Rates",
+    "underlying": "FF",
+    "event_title": "US Fed Funds Target Rate",
+    "contract_title": "Fed Funds target above threshold",
+    "question": "Will the US Fed Funds Target Rate settle above the configured threshold?",
+    "settlement_source": "Federal Reserve",
+    "settlement_rules_summary": "Settles per official Federal Reserve FOMC target-rate announcement",
+    "event_date": null,
+    "secType": "OPT",
+    "exchange": "FORECASTX",
+    "currency": "USD",
+    "localSymbol": "",
+    "max_payout_per_contract": 1,
+    "min_tick": 0.01
+  }
+}

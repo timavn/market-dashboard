@@ -33,6 +33,11 @@ export const ENDPOINTS = {
   // Workflow status
   WORKFLOW_STATUS: '/api/workflow-status',
 
+  // Prediction markets venue catalog
+  PREDICTION_MARKETS_AGGREGATED: '/api/prediction-markets/aggregated-events',
+  PREDICTION_MARKETS_REFRESH_IBKR: '/api/prediction-markets/refresh/ibkr',
+  PREDICTION_MARKETS_PROVIDERS_STATUS: '/api/prediction-markets/providers/status',
+
   // WebSocket endpoints
   WS_MARKET_DATA: '/ws/market',
   WS_OPTIONS: '/ws/options',

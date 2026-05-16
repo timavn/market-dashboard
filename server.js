@@ -104,6 +104,10 @@ function resolveEtfProSnapshotForAnalytics(etf) {
 const performanceRoutes = require('./src/routes/performance');
 app.use('/api/performance', performanceRoutes);
 
+// Prediction markets venue ingestion (aggregated events, IBKR refresh)
+const predictionMarketsIngestRoutes = require('./src/routes/predictionMarketsIngest');
+app.use('/api/prediction-markets', predictionMarketsIngestRoutes);
+
 // Import ticker mapping configuration
 // Note: Since server.js is CommonJS and securitiesConfig.js is ES6, we'll create a helper function
 // that replicates the logic. In the future, consider converting to ES6 modules or creating a shared config.

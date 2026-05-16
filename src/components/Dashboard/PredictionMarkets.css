@@ -678,3 +678,107 @@
 .pmv2-modal-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f3f4f6; font-size: 12px; }
 .pmv2-modal-row span:first-child { color: #9ca3af; }
 .pmv2-modal-row span:last-child { font-weight: 600; color: #111827; }
+
+.pmv2-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.pmv2-error-banner {
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #991b1b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pmv2-retry-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #fca5a5;
+  border-radius: 4px;
+  background: #fff;
+  color: #991b1b;
+  cursor: pointer;
+}
+
+.pmv2-edge-neg { color: #dc2626; font-weight: 600; font-size: 11px; }
+
+.pmv2-status-dot.ready { background: #22c55e; }
+.pmv2-status-dot.error { background: #ef4444; }
+.pmv2-status-dot.warn { background: #f59e0b; }
+
+.pmv2-provider-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.pmv2-provider-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.pmv2-provider-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pmv2-provider-ts {
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.pmv2-provider-hint {
+  color: #92400e;
+  font-size: 11px;
+}
+
+.pmv2-btn-refresh-ibkr {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 1px solid #4682b4;
+  background: #fff;
+  color: #000080;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pmv2-btn-refresh-ibkr:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pmv2-stale-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 1px 4px;
+  border-radius: 3px;
+}

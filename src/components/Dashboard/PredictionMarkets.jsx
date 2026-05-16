@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import './PredictionMarkets.css';
-import { MOCK_CONTRACTS, MOCK_SETTINGS } from '../../utils/predictionMarketsMockData';
+import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
 import {
   adjustProbability,
   grossEdgeYes,
@@ -24,7 +24,81 @@ import {
   validateContract,
 } from '../../utils/predictionMarketsCalc';
 
-const API_BASE = (process.env.REACT_APP_API_URL || 'http://localhost:3001') + '/api/prediction-markets';
+const API_BASE = (process.env.REACT_APP_API_URL || process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001') + '/api/prediction-markets';
+
+async function pmFetch(path) {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+const ASSET_CLASS_DISPLAY = {
+  equities: 'Equities',
+  rates: 'Rates',
+  fx: 'FX',
+  commodities: 'Commodities',
+  crypto: 'Crypto',
+};
+
+function contractToEvent(c) {
+  const yes = Number(c.yesPrice ?? c.yesLast ?? 0);
+  const no = Number(c.noPrice ?? c.noLast ?? 0);
+  const myProb = c.adjustedProbability ?? c.myProbability;
+  return {
+    id: c.contractId,
+    question: c.contractQuestion || c.eventName || '—',
+    category: c.eventCategory || ASSET_CLASS_DISPLAY[c.assetClass] || c.assetClass || 'Other',
+    settle: c.settlementDate || c.expirationDate || '—',
+    yes,
+    no,
+    myProb: myProb != null ? Number(myProb) : null,
+    side: c.contractSide || 'Yes',
+    sizeUsd: (Number(c.entryPrice ?? (c.contractSide === 'No' ? no : yes)) || 0) * (c.numContracts ?? 0),
+    status: c.status,
+    payoutMultiplier: c.payoutMultiplier ?? 1,
+    contract: c,
+  };
+}
+
+function contractToBetRow(c, settings) {
+  const price = Number(c.entryPrice ?? (c.contractSide === 'Yes' ? c.yesPrice : c.noPrice) ?? 0);
+  const n = c.numContracts ?? 0;
+  const cost = price * n;
+  const p = c.adjustedProbability ?? c.myProbability;
+  const fees = settings?.defaultFeePerContract ?? 0.02;
+  const slippage = settings?.defaultSlippageBuffer ?? 0;
+  const modelErr = settings?.modelErrorBuffer ?? 0;
+  let edge = null;
+  let ev = null;
+  if (p != null && c.yesPrice != null && c.noPrice != null) {
+    const adjP = Number(p);
+    const yp = Number(c.yesPrice);
+    const np = Number(c.noPrice);
+    const side = c.contractSide === 'No' ? 'No' : 'Yes';
+    const ge = side === 'Yes' ? grossEdgeYes(adjP, yp) : grossEdgeNo(adjP, np);
+    edge = calcNetEdge(ge, fees, slippage, modelErr);
+    const evPer = side === 'Yes' ? evYesPerContract(adjP, yp) : evNoPerContract(adjP, np);
+    ev = evPer * n - fees * n;
+  }
+  return {
+    id: c.contractId,
+    time: c.updatedAt ? new Date(c.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—',
+    contract: c.contractQuestion || c.eventName || '—',
+    asset: c.eventCategory || ASSET_CLASS_DISPLAY[c.assetClass] || 'Other',
+    side: c.contractSide || 'Yes',
+    price,
+    size: n,
+    cost,
+    myProb: p != null ? Number(p) : null,
+    edge,
+    ev,
+    status: c.status,
+    expiry: c.settlementDate || c.expirationDate || '—',
+  };
+}
 
 const TABS = [
   { id: 'overview',     label: 'Overview' },
@@ -1428,43 +1502,45 @@ function SettingsTab({ settings, onSave, isDark }) {
   );
 }
 
-// ─── V2 Mock Data ─────────────────────────────────────────────────────────────
-
-const EVENTS_MOCK = [
-  { id: 1, question: 'Will SPX close above 5500 on Jun 20, 2026?', category: 'Equities', settle: 'Jun 20, 2026', yes: 0.45, no: 0.55, yesChange: 0.02, noChange: -0.02, myProb: 0.65, side: 'Yes', sizeUsd: 1000, status: 'planned', payoutMultiplier: 1 },
-  { id: 2, question: 'Will the Fed cut rates by Sep 17, 2025?', category: 'Rates', settle: 'Sep 17, 2025', yes: 0.38, no: 0.62, yesChange: 0.01, noChange: 0.01, myProb: 0.60, side: 'No', sizeUsd: 800, status: 'planned', payoutMultiplier: 1 },
-  { id: 3, question: 'US CPI YoY below 2.5% in Dec 2025?', category: 'Inflation', settle: 'Dec 31, 2025', yes: 0.31, no: 0.69, yesChange: -0.02, noChange: 0.02, myProb: 0.55, side: 'Yes', sizeUsd: 600, status: 'watchlist', payoutMultiplier: 1 },
-  { id: 4, question: 'Gold price above $2,500 by Aug 31, 2025?', category: 'Commodities', settle: 'Aug 31, 2025', yes: 0.47, no: 0.53, yesChange: 0.03, noChange: -0.03, myProb: 0.62, side: 'Yes', sizeUsd: 500, status: 'planned', payoutMultiplier: 1 },
-  { id: 5, question: 'Bitcoin above $100k by Dec 31, 2025?', category: 'Crypto', settle: 'Dec 31, 2025', yes: 0.58, no: 0.42, yesChange: 0.04, noChange: -0.04, myProb: 0.70, side: 'Yes', sizeUsd: 750, status: 'open', payoutMultiplier: 1 },
-  { id: 6, question: 'Will 10Y yield be below 4.00% on Jul 31, 2025?', category: 'Rates', settle: 'Jul 31, 2025', yes: 0.62, no: 0.38, yesChange: -0.02, noChange: 0.02, myProb: 0.40, side: 'No', sizeUsd: 400, status: 'watchlist', payoutMultiplier: 1 },
-  { id: 7, question: 'Will WTI crude be above $80 on Jul 31, 2025?', category: 'Commodities', settle: 'Jul 31, 2025', yes: 0.41, no: 0.59, yesChange: 0.01, noChange: -0.01, myProb: 0.55, side: 'No', sizeUsd: 350, status: 'watchlist', payoutMultiplier: 1 },
-];
-
-const RECENT_BETS_MOCK = [
-  { time: 'May 14, 15:20', contract: 'SPX > 5500 on Jun 20, 2026', asset: 'Equities', side: 'Yes', price: 0.45, size: 12, cost: 5400, myProb: 0.65, edge: 0.142, ev: 142, status: 'open', expiry: 'Jun 20, 2026' },
-  { time: 'May 14, 14:55', contract: 'Fed cuts rates by Sep 17, 2025', asset: 'Rates', side: 'No', price: 0.60, size: 8, cost: 4800, myProb: 0.58, edge: 0.087, ev: 87, status: 'open', expiry: 'Sep 17, 2025' },
-  { time: 'May 14, 11:30', contract: 'EUR/USD > 1.12 by Jun 30, 2025', asset: 'FX', side: 'Yes', price: 0.42, size: 10, cost: 4200, myProb: 0.57, edge: 0.063, ev: 63, status: 'open', expiry: 'Jun 30, 2025' },
-  { time: 'May 13, 16:10', contract: 'US CPI YoY < 2.8% in Jun 2025', asset: 'Inflation', side: 'Yes', price: 0.48, size: 9, cost: 4320, myProb: 0.62, edge: 0.071, ev: 71, status: 'settled', expiry: 'Jun 11, 2025' },
-  { time: 'May 13, 10:05', contract: 'Gold > $2,450 by Jul 31, 2025', asset: 'Commodities', side: 'Yes', price: 0.40, size: 7, cost: 2800, myProb: 0.55, edge: 0.049, ev: 49, status: 'open', expiry: 'Jul 31, 2025' },
-];
-
 const V2_FILTERS = [
   { id: 'all', label: 'All' },
-  { id: 'Equities', label: 'Equity Index' },
+  { id: 'Index', label: 'Index' },
   { id: 'Rates', label: 'Rates' },
   { id: 'Inflation', label: 'Inflation' },
+  { id: 'Labor', label: 'Labor' },
+  { id: 'Growth', label: 'Growth' },
   { id: 'FX', label: 'FX' },
   { id: 'Commodities', label: 'Commodities' },
   { id: 'Crypto', label: 'Crypto' },
 ];
 
+const PROVIDER_STATUS_LABEL = {
+  connected: 'Connected',
+  gateway_offline: 'Gateway offline',
+  sidecar_offline: 'Sidecar offline',
+  tws_offline: 'IB Gateway offline',
+  auth_required: 'Login required',
+  stale: 'Stale',
+  error: 'Error',
+  unknown: 'Unknown',
+};
+
+const EVENT_STATUSES = new Set(['watchlist', 'planned', 'open']);
+const BET_STATUSES = new Set(['open', 'closed', 'settled']);
+
 const CAT_COLORS = {
+  Index:       { bg: '#e0f2fe', text: '#0369a1' },
   Equities:    { bg: '#e0f2fe', text: '#0369a1' },
+  'Equity Index': { bg: '#e0f2fe', text: '#0369a1' },
   Rates:       { bg: '#dcfce7', text: '#166534' },
   Inflation:   { bg: '#fef9c3', text: '#92400e' },
+  Labor:       { bg: '#fce7f3', text: '#9d174d' },
+  Growth:      { bg: '#d1fae5', text: '#065f46' },
+  Credit:      { bg: '#e5e7eb', text: '#374151' },
   FX:          { bg: '#ede9fe', text: '#6d28d9' },
   Commodities: { bg: '#ffedd5', text: '#9a3412' },
   Crypto:      { bg: '#fce7f3', text: '#9d174d' },
+  'Other Macro': { bg: '#f3f4f6', text: '#374151' },
 };
 
 const STATUS_STYLE = {
@@ -1505,37 +1581,48 @@ function SideBadge({ side }) {
 
 // ─── V2 Header ────────────────────────────────────────────────────────────────
 
-function PMHeaderV2({ activeTab, setActiveTab }) {
-  const [utc, setUtc] = useState('');
-  useEffect(() => {
-    const upd = () => {
-      const n = new Date();
-      setUtc(n.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }));
-    };
-    upd();
-    const t = setInterval(upd, 30000);
-    return () => clearInterval(t);
-  }, []);
+function ProviderStatusBar({ providers, onRefreshIbkr, ibkrRefreshing, lastIbkrUpdate }) {
+  if (!providers) return null;
+  const ibkr = providers.ibkr || {};
+  const kalshi = providers.kalshi || {};
+  const ibkrClass =
+    ibkr.status === 'connected'
+      ? 'ready'
+      : ['gateway_offline', 'sidecar_offline', 'tws_offline', 'auth_required', 'unknown'].includes(ibkr.status)
+        ? 'warn'
+        : 'error';
+
   return (
-    <div className="pmv2-header">
-      <div className="pmv2-header-left">
-        <div className="pmv2-tabs">
-          {[{ id: 'overview', label: 'Overview' }, { id: 'open', label: 'Open Bets' }].map(t => (
-            <button key={t.id} className={`pmv2-tab${activeTab === t.id ? ' active' : ''}`} onClick={() => setActiveTab(t.id)}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+    <div className="pmv2-provider-bar">
+      <div className="pmv2-provider-items">
+        <span className="pmv2-provider-item">
+          <span className={`pmv2-status-dot ${kalshi.status === 'connected' ? 'ready' : 'warn'}`} />
+          Kalshi: {PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status}
+          {kalshi.last_success_at && (
+            <span className="pmv2-provider-ts"> · {new Date(kalshi.last_success_at).toLocaleTimeString()}</span>
+          )}
+        </span>
+        <span className="pmv2-provider-item">
+          <span className={`pmv2-status-dot ${ibkrClass}`} />
+          IBKR: {PROVIDER_STATUS_LABEL[ibkr.status] || ibkr.status}
+          {lastIbkrUpdate && (
+            <span className="pmv2-provider-ts"> · Last IBKR {new Date(lastIbkrUpdate).toLocaleString()}</span>
+          )}
+        </span>
+        {ibkr.message && <span className="pmv2-provider-hint">{ibkr.message}</span>}
       </div>
-      <div className="pmv2-header-right">
-        <span className="pmv2-status-dot" />
-        <span className="pmv2-status-text">PM Connected</span>
-        <span className="pmv2-utc">UTC {utc}</span>
-        <button className="pmv2-menu-btn">···</button>
-      </div>
+      <button
+        type="button"
+        className="pmv2-btn-refresh-ibkr"
+        onClick={onRefreshIbkr}
+        disabled={ibkrRefreshing}
+      >
+        {ibkrRefreshing ? 'Refreshing IBKR…' : 'Refresh IBKR'}
+      </button>
     </div>
   );
 }
+
 
 // ─── V2 Filter Chips ──────────────────────────────────────────────────────────
 
@@ -1553,15 +1640,29 @@ function FilterChipsV2({ active, onChange }) {
 
 // ─── V2 Events Table ──────────────────────────────────────────────────────────
 
-function EventsTableV2({ events, selectedId, onSelect }) {
+function EventsTableV2({ events, selectedId, onSelect, settings, loading }) {
+  const fees = settings?.defaultFeePerContract ?? 0.02;
+  const slippage = settings?.defaultSlippageBuffer ?? 0;
+  const modelErr = settings?.modelErrorBuffer ?? 0;
+
   return (
     <div className="pmv2-card">
       <div className="pmv2-card-title">≡ EVENTS</div>
+      {loading ? (
+        <div className="pmv2-empty">Loading market events…</div>
+      ) : events.length === 0 ? (
+        <div className="pmv2-empty">
+          <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>No financial events loaded</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>Configure Kalshi API keys or use Refresh IBKR with Client Portal Gateway running.</div>
+        </div>
+      ) : (
       <div className="pmv2-table-wrap">
         <table className="pmv2-table">
           <thead>
             <tr>
               <th style={{ minWidth: 160 }}>EVENT ↕</th>
+              <th>VENUE</th>
               <th>SETTLE ↕</th>
               <th>YES ↕</th>
               <th>NO ↕</th>
@@ -1575,13 +1676,12 @@ function EventsTableV2({ events, selectedId, onSelect }) {
           </thead>
           <tbody>
             {events.map(ev => {
-              const fees = 0.02;
-              const geY = grossEdgeYes(ev.myProb, ev.yes);
-              const geN = grossEdgeNo(ev.myProb, ev.no);
-              const edge = Math.max(
-                calcNetEdge(geY, fees, 0, 0),
-                calcNetEdge(geN, fees, 0, 0)
-              );
+              let edge = null;
+              if (ev.myProb != null) {
+                const geY = grossEdgeYes(ev.myProb, ev.yes);
+                const geN = grossEdgeNo(ev.myProb, ev.no);
+                edge = Math.max(calcNetEdge(geY, fees, slippage, modelErr), calcNetEdge(geN, fees, slippage, modelErr));
+              }
               return (
                 <tr
                   key={ev.id}
@@ -1591,24 +1691,24 @@ function EventsTableV2({ events, selectedId, onSelect }) {
                   <td>
                     <div className="pmv2-event-name">{ev.question}</div>
                     <CatPill cat={ev.category} />
+                    {(ev.data_quality_flags || []).includes('stale_quote') && (
+                      <span className="pmv2-stale-tag">stale</span>
+                    )}
                   </td>
+                  <td className="pmv2-td-sm">{ev.venue || '–'}</td>
                   <td className="pmv2-td-sm">{ev.settle}</td>
+                  <td><div className="pmv2-price">{ev.yes.toFixed(2)}</div></td>
+                  <td><div className="pmv2-price">{ev.no.toFixed(2)}</div></td>
+                  <td className="pmv2-td-sm">{ev.myProb != null ? ev.myProb.toFixed(2) : '–'}</td>
                   <td>
-                    <div className="pmv2-price">{ev.yes.toFixed(2)}</div>
-                    <div className={`pmv2-delta ${ev.yesChange >= 0 ? 'pos' : 'neg'}`}>
-                      {ev.yesChange >= 0 ? '▲' : '▼'} {Math.abs(ev.yesChange).toFixed(2)}
-                    </div>
+                    {edge != null ? (
+                      <span className={edge >= 0 ? 'pmv2-edge-pos' : 'pmv2-edge-neg'}>
+                        {edge >= 0 ? '+' : ''}{(edge * 100).toFixed(1)}%
+                      </span>
+                    ) : '–'}
                   </td>
-                  <td>
-                    <div className="pmv2-price">{ev.no.toFixed(2)}</div>
-                    <div className={`pmv2-delta ${ev.noChange >= 0 ? 'pos' : 'neg'}`}>
-                      {ev.noChange >= 0 ? '▲' : '▼'} {Math.abs(ev.noChange).toFixed(2)}
-                    </div>
-                  </td>
-                  <td className="pmv2-td-sm">{ev.myProb.toFixed(2)}</td>
-                  <td><span className="pmv2-edge-pos">+{(edge * 100).toFixed(1)}%</span></td>
                   <td><SideBadge side={ev.side} /></td>
-                  <td className="pmv2-td-sm">${ev.sizeUsd.toLocaleString()}</td>
+                  <td className="pmv2-td-sm">{ev.sizeUsd > 0 ? `$${ev.sizeUsd.toLocaleString()}` : '–'}</td>
                   <td><StatPill status={ev.status} /></td>
                   <td><button className="pmv2-dots" onClick={e => e.stopPropagation()}>⋮</button></td>
                 </tr>
@@ -1617,40 +1717,64 @@ function EventsTableV2({ events, selectedId, onSelect }) {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
 
 // ─── V2 Bet Builder ───────────────────────────────────────────────────────────
 
-function BetBuilderV2({ event }) {
-  const [confidence, setConfidence] = useState(0.80);
+function BetBuilderV2({ event, settings }) {
+  const [confidence, setConfidence] = useState(settings?.defaultConfidenceHaircut ?? 0.8);
   const [reviewOpen, setReviewOpen] = useState(false);
 
   const calc = useMemo(() => {
-    if (!event) return null;
+    if (!event || event.myProb == null) return null;
     const p = event.myProb;
     const yp = event.yes;
     const np = event.no;
     const pm = event.payoutMultiplier || 1;
-    const fees = 0.02;
+    const fees = settings?.defaultFeePerContract ?? 0.02;
+    const slippage = settings?.defaultSlippageBuffer ?? 0;
+    const modelErr = settings?.modelErrorBuffer ?? 0;
+    const minEdge = settings?.minNetEdge ?? 0.02;
     const geY = grossEdgeYes(p, yp);
     const geN = grossEdgeNo(p, np);
-    const neY = calcNetEdge(geY, fees, 0, 0);
-    const neN = calcNetEdge(geN, fees, 0, 0);
-    const side = neY >= neN && neY > 0.02 ? 'YES' : neN > 0.02 ? 'NO' : 'NONE';
+    const neY = calcNetEdge(geY, fees, slippage, modelErr);
+    const neN = calcNetEdge(geN, fees, slippage, modelErr);
+    const side = neY >= neN && neY > minEdge ? 'YES' : neN > minEdge ? 'NO' : 'NONE';
     const cp = side === 'YES' ? yp : np;
     const safeCp = cp > 0 ? cp : 0.01;
     const kf = Math.max(0, kellyFraction(p, safeCp));
-    const contracts = fractionalKellySizing(p, safeCp, 0.25, 100000, 500, pm);
+    const kMult = settings?.kellyMultiplier ?? 0.25;
+    const equity = settings?.portfolioEquity ?? 0;
+    const maxBet = settings?.maxRiskPerBet ?? 0;
+    const contracts = fractionalKellySizing(p, safeCp, kMult, equity, maxBet, pm);
     const evPer = side === 'YES' ? evYesPerContract(p, yp, pm) : evNoPerContract(p, np, pm);
     const totalEv = evPer * contracts;
     const maxLoss = safeCp * pm * contracts;
-    const edgeVsMkt = side === 'YES' ? geY : geN;
+    const edgeVsMkt = side === 'YES' ? neY : neN;
     return { side, kf, contracts, totalEv, maxLoss, edgeVsMkt, cp: safeCp };
-  }, [event]);
+  }, [event, settings]);
 
-  if (!event || !calc) return null;
+  if (!event) {
+    return (
+      <div className="pmv2-card pmv2-bet-builder">
+        <div className="pmv2-card-title">🎯 BET BUILDER</div>
+        <div className="pmv2-empty">Select a contract with prices and model probability to size a bet.</div>
+      </div>
+    );
+  }
+
+  if (!calc) {
+    return (
+      <div className="pmv2-card pmv2-bet-builder">
+        <div className="pmv2-card-title">🎯 BET BUILDER</div>
+        <div className="pmv2-bb-contract">{event.question}</div>
+        <div className="pmv2-empty" style={{ marginTop: 12 }}>Add market prices and your probability to calculate edge and sizing.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="pmv2-card pmv2-bet-builder">
@@ -1776,52 +1900,91 @@ function BetBuilderV2({ event }) {
 
 // ─── V2 Risk Limits Card ──────────────────────────────────────────────────────
 
-function RiskLimitsCardV2() {
+function RiskLimitsCardV2({ analytics, settings, risk }) {
+  const equity = settings?.portfolioEquity ?? 0;
+  const maxOpen = settings?.maxOpenRisk ?? 0;
+  const maxPmPct = settings?.maxPmRiskPct ?? 0;
+  const openRisk = risk?.totalMaxLoss ?? analytics?.totalOpenRisk ?? 0;
+  const maxProfit = risk?.totalMaxProfit ?? 0;
+  const riskPct = equity > 0 ? (openRisk / equity) * 100 : 0;
+  const capPct = maxPmPct * 100;
+  const openPct = maxOpen > 0 ? (openRisk / maxOpen) * 100 : 0;
+
   return (
     <div className="pmv2-card">
       <div className="pmv2-card-title">🛡 RISK LIMITS</div>
       <table className="pmv2-risk-table">
         <tbody>
-          <tr><td>Total Open Risk</td><td>$0.00 / $10,000.00</td><td className="pmv2-pct-neutral">0.0%</td></tr>
-          <tr><td>PM Risk % of Portfolio</td><td>0.0% / 5.0%</td><td className="pmv2-pct-neutral">0.0%</td></tr>
-          <tr><td>Max Possible Profit</td><td>$0.00</td><td></td></tr>
-          <tr><td>Portfolio Equity</td><td>$100,000.00</td><td></td></tr>
+          <tr>
+            <td>Total Open Risk</td>
+            <td>{fmt$(openRisk)} / {fmt$(maxOpen)}</td>
+            <td className="pmv2-pct-neutral">{openPct.toFixed(1)}%</td>
+          </tr>
+          <tr>
+            <td>PM Risk % of Portfolio</td>
+            <td>{riskPct.toFixed(1)}% / {capPct.toFixed(1)}%</td>
+            <td className="pmv2-pct-neutral">{capPct > 0 ? ((riskPct / capPct) * 100).toFixed(1) : '0.0'}%</td>
+          </tr>
+          <tr><td>Max Possible Profit</td><td>{fmt$(maxProfit)}</td><td></td></tr>
+          <tr><td>Portfolio Equity</td><td>{fmt$(equity)}</td><td></td></tr>
         </tbody>
       </table>
-      <span className="pmv2-manage-link">Manage Risk Limits →</span>
     </div>
   );
 }
 
 // ─── V2 Exposure Card ─────────────────────────────────────────────────────────
 
-function ExposureCardV2() {
+function ExposureCardV2({ risk, settings }) {
+  const equity = settings?.portfolioEquity ?? 0;
+  const byAc = risk?.byAssetClass ?? {};
+  const rows = Object.entries(byAc).map(([key, val]) => ({
+    label: ASSET_CLASS_DISPLAY[key] || key,
+    risk: val,
+    pct: equity > 0 ? (val / equity) * 100 : 0,
+  }));
+  const total = risk?.totalMaxLoss ?? rows.reduce((s, r) => s + r.risk, 0);
+
   return (
     <div className="pmv2-card">
       <div className="pmv2-card-title">⬡ OPEN EXPOSURE BY ASSET CLASS</div>
-      <table className="pmv2-risk-table">
-        <thead>
-          <tr><th>ASSET CLASS</th><th>OPEN RISK (USD)</th><th>% PORTFOLIO</th></tr>
-        </thead>
-        <tbody>
-          {['Equities', 'Rates', 'Inflation', 'FX', 'Commodities', 'Crypto'].map(r => (
-            <tr key={r}><td>{r}</td><td>$0.00</td><td className="pmv2-pct-neutral">0.0%</td></tr>
-          ))}
-          <tr style={{ fontWeight: 700, borderTop: '1px solid #e5e7eb' }}>
-            <td>Total</td><td>$0.00</td><td className="pmv2-pct-neutral">0.0%</td>
-          </tr>
-        </tbody>
-      </table>
+      {rows.length === 0 ? (
+        <div className="pmv2-empty" style={{ padding: 16 }}>No open exposure</div>
+      ) : (
+        <table className="pmv2-risk-table">
+          <thead>
+            <tr><th>ASSET CLASS</th><th>OPEN RISK (USD)</th><th>% PORTFOLIO</th></tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.label}>
+                <td>{r.label}</td>
+                <td>{fmt$(r.risk)}</td>
+                <td className="pmv2-pct-neutral">{r.pct.toFixed(1)}%</td>
+              </tr>
+            ))}
+            <tr style={{ fontWeight: 700, borderTop: '1px solid #e5e7eb' }}>
+              <td>Total</td><td>{fmt$(total)}</td>
+              <td className="pmv2-pct-neutral">{equity > 0 ? ((total / equity) * 100).toFixed(1) : '0.0'}%</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
 
 // ─── V2 Recent Bets Table ─────────────────────────────────────────────────────
 
-function RecentBetsTableV2() {
+function RecentBetsTableV2({ bets = [], loading }) {
   return (
     <div className="pmv2-card">
       <div className="pmv2-card-title">≡ RECENT BETS</div>
+      {loading ? (
+        <div className="pmv2-empty">Loading bets…</div>
+      ) : bets.length === 0 ? (
+        <div className="pmv2-empty">No bets recorded yet.</div>
+      ) : (
       <div className="pmv2-table-wrap">
         <table className="pmv2-table">
           <thead>
@@ -1832,8 +1995,8 @@ function RecentBetsTableV2() {
             </tr>
           </thead>
           <tbody>
-            {RECENT_BETS_MOCK.map((b, i) => (
-              <tr key={i} className="pmv2-row">
+            {bets.map(b => (
+              <tr key={b.id} className="pmv2-row">
                 <td className="pmv2-td-sm pmv2-muted">{b.time}</td>
                 <td style={{ minWidth: 180, fontSize: 12 }}>{b.contract}</td>
                 <td><CatPill cat={b.asset} /></td>
@@ -1841,9 +2004,21 @@ function RecentBetsTableV2() {
                 <td className="pmv2-td-sm">{b.price.toFixed(2)}</td>
                 <td className="pmv2-td-sm">{b.size}</td>
                 <td className="pmv2-td-sm">${b.cost.toLocaleString()}</td>
-                <td className="pmv2-td-sm">{b.myProb.toFixed(2)}</td>
-                <td><span className="pmv2-edge-pos">+{(b.edge * 100).toFixed(1)}%</span></td>
-                <td><span className="pmv2-edge-pos">+${b.ev}</span></td>
+                <td className="pmv2-td-sm">{b.myProb != null ? b.myProb.toFixed(2) : '–'}</td>
+                <td>
+                  {b.edge != null ? (
+                    <span className={b.edge >= 0 ? 'pmv2-edge-pos' : 'pmv2-edge-neg'}>
+                      {b.edge >= 0 ? '+' : ''}{(b.edge * 100).toFixed(1)}%
+                    </span>
+                  ) : '–'}
+                </td>
+                <td>
+                  {b.ev != null ? (
+                    <span className={b.ev >= 0 ? 'pmv2-edge-pos' : 'pmv2-edge-neg'}>
+                      {b.ev >= 0 ? '+' : ''}${Math.abs(b.ev).toFixed(0)}
+                    </span>
+                  ) : '–'}
+                </td>
                 <td><StatPill status={b.status} /></td>
                 <td className="pmv2-td-sm pmv2-muted">{b.expiry}</td>
               </tr>
@@ -1851,89 +2026,191 @@ function RecentBetsTableV2() {
           </tbody>
         </table>
       </div>
-      <div className="pmv2-view-all">View all bets →</div>
-    </div>
-  );
-}
-
-// ─── V2 Open Bets Tab ─────────────────────────────────────────────────────────
-
-function OpenBetsTabV2() {
-  const open = RECENT_BETS_MOCK.filter(b => b.status === 'open');
-  return (
-    <div style={{ padding: '10px 12px' }}>
-      <div className="pmv2-card">
-        <div className="pmv2-card-title">≡ OPEN BETS</div>
-        <div className="pmv2-table-wrap">
-          <table className="pmv2-table">
-            <thead>
-              <tr>
-                <th>TIME</th><th>CONTRACT</th><th>ASSET</th><th>SIDE</th>
-                <th>PRICE</th><th>SIZE</th><th>COST</th>
-                <th>MY PROB</th><th>EDGE</th><th>EV</th><th>EXPIRY</th>
-              </tr>
-            </thead>
-            <tbody>
-              {open.map((b, i) => (
-                <tr key={i} className="pmv2-row">
-                  <td className="pmv2-td-sm pmv2-muted">{b.time}</td>
-                  <td style={{ minWidth: 180, fontSize: 12 }}>{b.contract}</td>
-                  <td><CatPill cat={b.asset} /></td>
-                  <td><SideBadge side={b.side} /></td>
-                  <td className="pmv2-td-sm">{b.price.toFixed(2)}</td>
-                  <td className="pmv2-td-sm">{b.size}</td>
-                  <td className="pmv2-td-sm">${b.cost.toLocaleString()}</td>
-                  <td className="pmv2-td-sm">{b.myProb.toFixed(2)}</td>
-                  <td><span className="pmv2-edge-pos">+{(b.edge * 100).toFixed(1)}%</span></td>
-                  <td><span className="pmv2-edge-pos">+${b.ev}</span></td>
-                  <td className="pmv2-td-sm pmv2-muted">{b.expiry}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
 // ─── Main Component (v2) ──────────────────────────────────────────────────────
 
-export default function PredictionMarkets() {
-  const [activeTab, setActiveTab] = useState('overview');
+export default function PredictionMarkets({ onApiStatusChange }) {
   const [filter, setFilter] = useState('all');
-  const [selectedId, setSelectedId] = useState(EVENTS_MOCK[0].id);
+  const [selectedId, setSelectedId] = useState(null);
+  const [contracts, setContracts] = useState([]);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [analytics, setAnalytics] = useState(null);
+  const [risk, setRisk] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [ingestLoading, setIngestLoading] = useState(true);
+  const [apiStatus, setApiStatus] = useState('loading');
+  const [loadError, setLoadError] = useState(null);
+  const [marketEvents, setMarketEvents] = useState([]);
+  const [providers, setProviders] = useState(null);
+  const [ibkrRefreshing, setIbkrRefreshing] = useState(false);
+  const [lastIbkrUpdate, setLastIbkrUpdate] = useState(null);
+  const [ingestError, setIngestError] = useState(null);
+
+  const loadIngest = useCallback(async (opts = {}) => {
+    setIngestLoading(true);
+    setIngestError(null);
+    try {
+      const data = await predictionMarketsIngestService.getAggregatedEvents({
+        mock: opts.mock,
+        refresh: opts.refreshKalshi !== false ? 'kalshi' : undefined,
+      });
+      const rows = data.dashboardEvents || data.events || [];
+      setMarketEvents(rows);
+      setProviders(data.providers || null);
+      if (data.providers?.ibkr?.last_success_at) {
+        setLastIbkrUpdate(data.providers.ibkr.last_success_at);
+      }
+    } catch (err) {
+      console.error('[PM] ingest load error:', err);
+      setIngestError(err.message);
+    } finally {
+      setIngestLoading(false);
+    }
+  }, []);
+
+  const handleRefreshIbkr = useCallback(async () => {
+    setIbkrRefreshing(true);
+    setIngestError(null);
+    try {
+      const data = await predictionMarketsIngestService.refreshIbkr();
+      const rows = data.dashboardEvents || data.events || [];
+      setMarketEvents(rows);
+      setProviders(data.providers || null);
+      const ts = data.providers?.ibkr?.last_success_at || new Date().toISOString();
+      setLastIbkrUpdate(ts);
+    } catch (err) {
+      console.error('[PM] IBKR refresh error:', err);
+      setIngestError(err.response?.data?.error || err.message);
+      try {
+        const status = await predictionMarketsIngestService.getProviderStatus();
+        setProviders(status.providers || null);
+      } catch (_) { /* ignore */ }
+    } finally {
+      setIbkrRefreshing(false);
+    }
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setApiStatus('loading');
+    setLoadError(null);
+    try {
+      const [contractsRes, settingsRes, analyticsRes, riskRes] = await Promise.all([
+        pmFetch('/contracts'),
+        pmFetch('/settings'),
+        pmFetch('/analytics'),
+        pmFetch('/risk'),
+      ]);
+      const items = contractsRes.contracts || [];
+      setContracts(items);
+      setSettings({ ...DEFAULT_SETTINGS, ...(settingsRes.settings || {}) });
+      setAnalytics(analyticsRes);
+      setRisk(riskRes);
+      setApiStatus('ready');
+    } catch (err) {
+      console.error('[PM] load error:', err);
+      setLoadError(err.message);
+      setApiStatus('error');
+      setContracts([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadIngest(); }, [loadIngest]);
+  useEffect(() => {
+    onApiStatusChange?.(apiStatus);
+  }, [apiStatus, onApiStatusChange]);
+
+  const contractByQuestion = useMemo(() => {
+    const map = new Map();
+    for (const c of contracts) {
+      const q = (c.contractQuestion || c.eventName || '').toLowerCase();
+      if (q) map.set(q, c);
+    }
+    return map;
+  }, [contracts]);
+
+  const events = useMemo(() => {
+    return marketEvents.map((ev) => {
+      const match =
+        ev.contract ||
+        contractByQuestion.get((ev.question || '').toLowerCase());
+      if (!match) return ev;
+      const myProb = match.adjustedProbability ?? match.myProbability;
+      return {
+        ...ev,
+        myProb: myProb != null ? Number(myProb) : ev.myProb,
+        side: match.contractSide || ev.side,
+        contract: match,
+      };
+    });
+  }, [marketEvents, contractByQuestion]);
 
   const filteredEvents = useMemo(
-    () => filter === 'all' ? EVENTS_MOCK : EVENTS_MOCK.filter(e => e.category === filter),
-    [filter]
+    () => (filter === 'all' ? events : events.filter(e => e.category === filter)),
+    [events, filter]
   );
 
   const selectedEvent = useMemo(
-    () => EVENTS_MOCK.find(e => e.id === selectedId) || EVENTS_MOCK[0],
-    [selectedId]
+    () => filteredEvents.find(e => e.id === selectedId) || filteredEvents[0] || null,
+    [filteredEvents, selectedId]
   );
+
+  useEffect(() => {
+    if (filteredEvents.length && !filteredEvents.some(e => e.id === selectedId)) {
+      setSelectedId(filteredEvents[0].id);
+    }
+    if (!filteredEvents.length) setSelectedId(null);
+  }, [filteredEvents, selectedId]);
+
+  const recentBets = useMemo(() => {
+    return contracts
+      .filter(c => BET_STATUSES.has(c.status))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
+      .slice(0, 20)
+      .map(c => contractToBetRow(c, settings));
+  }, [contracts, settings]);
 
   return (
     <div className="pmv2-wrap">
-      <PMHeaderV2 activeTab={activeTab} setActiveTab={setActiveTab} />
-      {activeTab === 'overview' && (
-        <>
-          <FilterChipsV2 active={filter} onChange={setFilter} />
-          <div className="pmv2-main-grid">
-            <EventsTableV2 events={filteredEvents} selectedId={selectedId} onSelect={setSelectedId} />
-            <BetBuilderV2 event={selectedEvent} />
-            <div className="pmv2-right-col">
-              <RiskLimitsCardV2 />
-              <ExposureCardV2 />
-            </div>
-          </div>
-          <div style={{ padding: '0 12px 12px' }}>
-            <RecentBetsTableV2 />
-          </div>
-        </>
+      <ProviderStatusBar
+        providers={providers}
+        onRefreshIbkr={handleRefreshIbkr}
+        ibkrRefreshing={ibkrRefreshing}
+        lastIbkrUpdate={lastIbkrUpdate}
+      />
+      {(ingestError || loadError) && (
+        <div className="pmv2-error-banner">
+          {ingestError || loadError}
+          <button type="button" className="pmv2-retry-btn" onClick={() => { loadData(); loadIngest(); }}>
+            Retry
+          </button>
+        </div>
       )}
-      {activeTab === 'open' && <OpenBetsTabV2 />}
+      <FilterChipsV2 active={filter} onChange={setFilter} />
+      <div className="pmv2-main-grid">
+        <EventsTableV2
+          events={filteredEvents}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          settings={settings}
+          loading={loading || ingestLoading}
+        />
+        <BetBuilderV2 event={selectedEvent} settings={settings} />
+        <div className="pmv2-right-col">
+          <RiskLimitsCardV2 analytics={analytics} settings={settings} risk={risk} />
+          <ExposureCardV2 risk={risk} settings={settings} />
+        </div>
+      </div>
+      <div style={{ padding: '0 12px 12px' }}>
+        <RecentBetsTableV2 bets={recentBets} loading={loading} />
+      </div>
     </div>
   );
 }

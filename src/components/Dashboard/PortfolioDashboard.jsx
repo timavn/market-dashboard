@@ -18,6 +18,7 @@ import CFTCNetLongCard from './CFTCNetLongCard';
 import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
 import GlobalQuadsCard from './GlobalQuadsCard';
 import PredictionMarkets from './PredictionMarkets';
+import './PredictionMarkets.css';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -49,6 +50,8 @@ const PortfolioDashboard = () => {
   const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
   const [performanceImageError, setPerformanceImageError] = useState(false);
   const [portfolioBreakdownImageError, setPortfolioBreakdownImageError] = useState(false);
+  const [predictionMarketsApiStatus, setPredictionMarketsApiStatus] = useState('loading');
+  const [predictionMarketsHeaderUtc, setPredictionMarketsHeaderUtc] = useState('');
 
   const [multiRegionMarketData, setMultiRegionMarketData] = useState({});
   const [multiRegionLoading, setMultiRegionLoading] = useState(true);
@@ -91,6 +94,29 @@ const PortfolioDashboard = () => {
     const interval = setInterval(fetchMultiRegionQuotes, 30000);
     return () => clearInterval(interval);
   }, [fetchMultiRegionQuotes]);
+
+  useEffect(() => {
+    if (!showPredictionMarkets) return;
+    setPredictionMarketsApiStatus('loading');
+  }, [showPredictionMarkets]);
+
+  useEffect(() => {
+    if (!showPredictionMarkets) return;
+    const upd = () => {
+      const n = new Date();
+      setPredictionMarketsHeaderUtc(
+        n.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+          timeZone: 'UTC',
+        })
+      );
+    };
+    upd();
+    const t = setInterval(upd, 30000);
+    return () => clearInterval(t);
+  }, [showPredictionMarkets]);
 
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
@@ -1077,12 +1103,21 @@ const PortfolioDashboard = () => {
             title="Prediction Markets"
           >
             <div className="shrink-0 flex items-center justify-center" style={{ width: '20px', flexShrink: 0 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showPredictionMarkets ? 'text-[#111]' : 'text-[#555] dark:text-gray-300'}>
-                <rect x="2" y="3" width="20" height="14" rx="2"/>
-                <line x1="8" y1="21" x2="16" y2="21"/>
-                <line x1="12" y1="17" x2="12" y2="21"/>
-                <polyline points="5 14 8 10 11 12 15 7 19 9" strokeWidth="2"/>
-              </svg>
+              {predictionMarketsImageError ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showPredictionMarkets ? 'text-[#111]' : 'text-[#555] dark:text-gray-300'}>
+                  <rect x="2" y="3" width="20" height="14" rx="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                  <polyline points="5 14 8 10 11 12 15 7 19 9" strokeWidth="2"/>
+                </svg>
+              ) : (
+                <img
+                  src="/images/icons/prediction-markets.png"
+                  alt="Prediction Markets"
+                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
+                  onError={() => setPredictionMarketsImageError(true)}
+                />
+              )}
             </div>
             {showPortfolioMetrics && (
               <span className={`text-sm font-medium whitespace-nowrap ${showPredictionMarkets ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
@@ -2130,42 +2165,62 @@ const PortfolioDashboard = () => {
           <>
             <div
               style={{
+                position: 'relative',
                 padding: '12px 16px',
                 display: 'flex',
-                justifyContent: 'space-between',
                 alignItems: 'center',
+                justifyContent: 'flex-end',
                 borderBottom: '1px solid #e5e7eb',
                 backgroundColor: '#ffffff',
                 flexShrink: 0,
               }}
               className="dark:border-gray-700 dark:bg-gray-800"
             >
-              <Title
+              <button
+                type="button"
+                onClick={() => setShowPredictionMarkets(false)}
                 className="dark:text-white"
                 style={{
+                  position: 'absolute',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
                   fontSize: '18px',
                   fontWeight: 700,
                   color: '#000',
                   margin: 0,
+                  padding: '2px 8px',
                   userSelect: 'none',
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
                 }}
+                title="Close panel"
               >
                 Prediction Markets
-              </Title>
-              <button
-                onClick={() => setShowPredictionMarkets(false)}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: '#555', fontSize: 18, lineHeight: 1, padding: '2px 6px', borderRadius: 4,
-                }}
-                title="Close"
-              >
-                ✕
               </button>
+              <div className="pmv2-header-right" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  className={`pmv2-status-dot${
+                    predictionMarketsApiStatus === 'error'
+                      ? ' error'
+                      : predictionMarketsApiStatus === 'ready'
+                        ? ' ready'
+                        : ''
+                  }`}
+                />
+                <span className="pmv2-status-text dark:text-gray-200">
+                  {predictionMarketsApiStatus === 'loading'
+                    ? 'Loading…'
+                    : predictionMarketsApiStatus === 'error'
+                      ? 'API Error'
+                      : 'API Ready'}
+                </span>
+                <span className="pmv2-utc dark:text-gray-400">UTC {predictionMarketsHeaderUtc}</span>
+              </div>
             </div>
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <PredictionMarkets />
+              <PredictionMarkets onApiStatusChange={setPredictionMarketsApiStatus} />
             </div>
           </>
         )}
