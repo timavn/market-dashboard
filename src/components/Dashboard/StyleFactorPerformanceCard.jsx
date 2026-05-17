@@ -151,8 +151,9 @@ const StyleFactorPerformanceCard = () => {
     <Card
       className={isDark ? 'dark:bg-gray-800' : ''}
       style={{
-        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-        borderRadius: '0.5rem',
+        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
+        borderRadius: 'var(--dashboard-radius, 6px)',
+        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
         padding: 0,
         height: '100%',
         display: 'flex',
@@ -163,8 +164,8 @@ const StyleFactorPerformanceCard = () => {
       {/* Header */}
       <div
         style={{
-          padding: '10px 12px',
-          borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+          padding: '6px 10px',
+          borderBottom: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`,
           backgroundColor: isDark ? '#1f2937' : '#ffffff'
         }}
       >
@@ -198,12 +199,12 @@ const StyleFactorPerformanceCard = () => {
         style={{
           display: 'grid',
           gridTemplateColumns: '34px 140px repeat(6, 60px)',
-          borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+          borderBottom: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`,
 
           backgroundColor: isDark ? '#1f2937' : '#f9fafb'
         }}
       >
-        <div style={{ borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}` }} />
+        <div style={{ borderRight: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}` }} />
         <div
           style={{
             padding: '6px 8px',
@@ -212,7 +213,7 @@ const StyleFactorPerformanceCard = () => {
             color: isDark ? '#9ca3af' : '#6b7280',
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
-            borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+            borderRight: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`,
             display: 'flex',
             alignItems: 'center'
           }}
@@ -228,7 +229,7 @@ const StyleFactorPerformanceCard = () => {
               fontWeight: 700,
               color: isDark ? '#9ca3af' : '#6b7280',
               textAlign: 'center',
-              borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+              borderRight: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -252,7 +253,7 @@ const StyleFactorPerformanceCard = () => {
               display: 'flex',
               borderBottom: groupIdx !== GROUPS.length - 1
                 ? `2px solid ${isDark ? '#4b5563' : '#d1d5db'}`
-                : `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
+                : `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`
             }}
           >
             {/* Icon Badge - spans full group height */}
@@ -265,7 +266,7 @@ const StyleFactorPerformanceCard = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '3px',
-              borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
+              borderRight: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`
             }}>
               {group.Icon
                 ? <group.Icon size={11} color="#ffffff" strokeWidth={2.5} />
@@ -292,7 +293,7 @@ const StyleFactorPerformanceCard = () => {
                     display: 'grid',
                     gridTemplateColumns: '140px repeat(6, 60px)',
                     borderBottom: rowIdx !== group.rows.length - 1
-                      ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
+                      ? `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`
                       : 'none'
                   }}
                 >
@@ -302,7 +303,7 @@ const StyleFactorPerformanceCard = () => {
                     fontSize: '10px',
                     fontWeight: 500,
                     color: isDark ? '#d1d5db' : '#374151',
-                    borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    borderRight: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`,
                     display: 'flex',
                     alignItems: 'center',
                     backgroundColor: isDark ? '#1f2937' : '#ffffff'
@@ -325,7 +326,7 @@ const StyleFactorPerformanceCard = () => {
           fontSize: '9px',
           fontStyle: 'italic',
           color: isDark ? '#9ca3af' : '#6b7280',
-          borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+          borderTop: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`,
           backgroundColor: isDark ? '#1f2937' : '#f9fafb'
         }}
       >

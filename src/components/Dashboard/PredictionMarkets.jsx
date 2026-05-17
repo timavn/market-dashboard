@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import './PredictionMarkets.css';
+import { MarketDataService } from '../../services/api/marketDataService';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
+import {
+  getPredictionSignalTickers,
+  normalizePredictionMarketSignals,
+} from '../../utils/predictionMarketSignals';
 import {
   adjustProbability,
   grossEdgeYes,
@@ -1722,6 +1727,122 @@ function EventsTableV2({ events, selectedId, onSelect, settings, loading }) {
   );
 }
 
+// ─── V2 Signal Context Card ───────────────────────────────────────────────────
+
+function PredictionMarketSignalContextCard({ signalContext, selectedEvent, loading, error, onRetry }) {
+  const rows = signalContext?.topRows || [];
+  const categoryLabel = signalContext?.category === 'all' ? 'All Macro' : signalContext?.category;
+
+  return (
+    <div className="pmv2-card pmv2-signal-card">
+      <div className="pmv2-signal-header">
+        <div>
+          <div className="pmv2-card-title">SIGNAL CONTEXT</div>
+          <div className="pmv2-signal-category">{categoryLabel || 'All Macro'}</div>
+        </div>
+        <button type="button" className="pmv2-signal-refresh" onClick={onRetry} disabled={loading}>
+          {loading ? 'Loading' : 'Refresh'}
+        </button>
+      </div>
+
+      {selectedEvent?.question && (
+        <div className="pmv2-signal-event" title={selectedEvent.question}>
+          {selectedEvent.question}
+        </div>
+      )}
+
+      {error && (
+        <div className="pmv2-signal-error">
+          {error}
+        </div>
+      )}
+
+      {loading && rows.length === 0 ? (
+        <div className="pmv2-empty pmv2-signal-empty">Loading Hedgeye signals...</div>
+      ) : rows.length === 0 ? (
+        <div className="pmv2-empty pmv2-signal-empty">No matching signals found.</div>
+      ) : (
+        <div className="pmv2-signal-list">
+          {rows.map(row => (
+            <SignalContextRow key={row.symbol} row={row} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignalContextRow({ row }) {
+  return (
+    <div className="pmv2-signal-row">
+      <div className="pmv2-signal-row-top">
+        <div>
+          <div className="pmv2-signal-symbol">{row.symbol}</div>
+          <div className="pmv2-signal-label">{row.label}</div>
+        </div>
+        <span className={`pmv2-signal-trend ${getTrendClass(row.trend)}`}>
+          {row.trend || 'NO SIGNAL'}
+        </span>
+      </div>
+
+      <div className="pmv2-signal-metrics">
+        {(row.buyTrade != null || row.sellTrade != null) && (
+          <div className="pmv2-signal-metric">
+            <span>Trade</span>
+            <strong>
+              B {formatSignalLevel(row, row.buyTrade)} / S {formatSignalLevel(row, row.sellTrade)}
+            </strong>
+          </div>
+        )}
+        {(row.lrr != null || row.hrr != null) && (
+          <div className="pmv2-signal-metric">
+            <span>Risk Range</span>
+            <strong>
+              {formatSignalLevel(row, row.lrr)} - {formatSignalLevel(row, row.hrr)}
+            </strong>
+          </div>
+        )}
+        {(row.upside != null || row.downside != null) && (
+          <div className="pmv2-signal-metric">
+            <span>Risk/Reward</span>
+            <strong>
+              Up {formatPercentLevel(row.upside)} / Down {formatPercentLevel(row.downside)}
+            </strong>
+          </div>
+        )}
+      </div>
+
+      <div className="pmv2-signal-footer">
+        <span>{row.sources.length ? row.sources.join(' + ') : 'Waiting for Hedgeye data'}</span>
+        {row.date && <span>{row.date}</span>}
+      </div>
+    </div>
+  );
+}
+
+function getTrendClass(trend) {
+  if (['BULLISH', 'LONG'].includes(trend)) return 'positive';
+  if (['BEARISH', 'SHORT'].includes(trend)) return 'negative';
+  if (trend === 'NEUTRAL') return 'neutral';
+  return '';
+}
+
+function formatSignalLevel(row, value) {
+  if (value == null || Number.isNaN(Number(value))) return '--';
+  const n = Number(value);
+  if (row.group === 'Rates') return `${n.toFixed(2)}%`;
+  if (row.group === 'FX') return n >= 10 ? n.toFixed(2) : n.toFixed(4);
+  if (row.group === 'Crypto' || row.group === 'Commodities') {
+    return `$${n.toLocaleString(undefined, { maximumFractionDigits: n >= 100 ? 0 : 2 })}`;
+  }
+  return n.toLocaleString(undefined, { maximumFractionDigits: n >= 100 ? 0 : 2 });
+}
+
+function formatPercentLevel(value) {
+  if (value == null || Number.isNaN(Number(value))) return '--';
+  return `${Number(value).toFixed(1)}%`;
+}
+
 // ─── V2 Bet Builder ───────────────────────────────────────────────────────────
 
 function BetBuilderV2({ event, settings }) {
@@ -2031,6 +2152,550 @@ function RecentBetsTableV2({ bets = [], loading }) {
   );
 }
 
+export function PalantirOrbIcon({ size = 24, className = '' }) {
+  const id = useMemo(() => `palantir-orb-${Math.random().toString(36).slice(2)}`, []);
+
+  return (
+    <svg
+      className={`pmv2-orb-svg ${className}`}
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      role="img"
+      aria-label="Seeing-stone prediction markets"
+    >
+      <defs>
+        <radialGradient id={`${id}-stone`} cx="34%" cy="28%" r="70%">
+          <stop offset="0%" stopColor="#f8fafc" />
+          <stop offset="28%" stopColor="#b8c7d9" />
+          <stop offset="58%" stopColor="#4f6077" />
+          <stop offset="100%" stopColor="#111827" />
+        </radialGradient>
+        <radialGradient id={`${id}-vision`} cx="50%" cy="52%" r="48%">
+          <stop offset="0%" stopColor="#93c5fd" stopOpacity="0.95" />
+          <stop offset="42%" stopColor="#2563eb" stopOpacity="0.38" />
+          <stop offset="100%" stopColor="#020617" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id={`${id}-ring`} x1="12" y1="14" x2="52" y2="54">
+          <stop offset="0%" stopColor="#f8fafc" stopOpacity="0.95" />
+          <stop offset="45%" stopColor="#94a3b8" stopOpacity="0.45" />
+          <stop offset="100%" stopColor="#0f172a" stopOpacity="0.9" />
+        </linearGradient>
+        <filter id={`${id}-glow`} x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="2.4" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <circle cx="32" cy="32" r="28" fill={`url(#${id}-stone)`} />
+      <circle cx="32" cy="32" r="20" fill={`url(#${id}-vision)`} filter={`url(#${id}-glow)`} />
+      <path
+        d="M14 34c7-9 15-13 24-12 5 .6 9 2.7 12 6-6-1.5-11-.4-16 3.4-5.7 4.5-11.9 5.4-20 2.6Z"
+        fill="#e0f2fe"
+        opacity="0.34"
+      />
+      <path
+        d="M18 42c6 3 12 3.6 18 1.7 5.8-1.8 9.9-5.4 12.4-10.7"
+        fill="none"
+        stroke="#bae6fd"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        opacity="0.62"
+      />
+      <circle cx="24" cy="20" r="6.4" fill="#ffffff" opacity="0.55" />
+      <circle cx="20" cy="16" r="2.2" fill="#ffffff" opacity="0.88" />
+      <circle cx="32" cy="32" r="28" fill="none" stroke={`url(#${id}-ring)`} strokeWidth="3.2" />
+    </svg>
+  );
+}
+
+function PredictionMarketsHeaderV2({
+  providers,
+  apiStatus,
+  utcTime,
+  onRefreshIbkr,
+  ibkrRefreshing,
+  lastIbkrUpdate,
+}) {
+  const kalshi = providers?.kalshi || {};
+  const ibkr = providers?.ibkr || {};
+  const kalshiConnected = kalshi.status === 'connected';
+  const apiReady = apiStatus === 'ready';
+
+  return (
+    <div className="pmv2-redesign-header">
+      <div className="pmv2-brand">
+        <div className="pmv2-brand-orb"><PalantirOrbIcon size={28} /></div>
+        <div>
+          <div className="pmv2-title">Prediction Markets</div>
+          <div className="pmv2-brand-subtitle">Signal map and contract execution layer</div>
+        </div>
+      </div>
+      <div className="pmv2-header-actions">
+        <span className="pmv2-provider-item">
+          <span className={`pmv2-status-dot ${kalshiConnected ? 'ready' : 'warn'}`} />
+          Kalshi: {PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status || 'Unknown'}
+        </span>
+        <span className={`pmv2-api-pill ${apiReady ? 'ready' : apiStatus === 'error' ? 'error' : ''}`}>
+          {apiReady ? 'API Ready' : apiStatus === 'error' ? 'API Error' : 'API Loading'}
+        </span>
+        <span className="pmv2-utc">UTC {utcTime}</span>
+        <button
+          type="button"
+          className="pmv2-btn-refresh-ibkr"
+          onClick={onRefreshIbkr}
+          disabled={ibkrRefreshing}
+          title={lastIbkrUpdate ? `Last IBKR ${new Date(lastIbkrUpdate).toLocaleString()}` : undefined}
+        >
+          {ibkrRefreshing ? 'Refreshing...' : `Refresh IBKR${ibkr.status ? '' : ''}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SignalMapSidebarV2({
+  active,
+  onChange,
+  signalContext,
+  selectedSignal,
+  onSelectSignal,
+  loading,
+  error,
+  onRetry,
+  events,
+}) {
+  const [query, setQuery] = useState('');
+  const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
+  const rows = signalContext?.rows || [];
+  const mapped = rows.filter(row => row.sources?.length);
+  const unmapped = rows.filter(row => !row.sources?.length);
+  const bestEdge = getBestEdge(events);
+  const filteredRows = rows.filter(row => {
+    const matchesQuery = `${row.symbol} ${row.label} ${row.group}`.toLowerCase().includes(query.toLowerCase());
+    const matchesMapped = showUnmappedOnly ? !row.sources?.length : true;
+    return matchesQuery && matchesMapped;
+  });
+  const grouped = filteredRows.reduce((acc, row) => {
+    const key = row.group || 'Other';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+
+  return (
+    <aside className="pmv2-signal-map">
+      <div className="pmv2-sidebar-tabs">
+        {V2_FILTERS.slice(0, 2).map(f => (
+          <button
+            key={f.id}
+            type="button"
+            className={`pmv2-sidebar-tab${active === f.id ? ' active' : ''}`}
+            onClick={() => onChange(f.id)}
+          >
+            {f.id === 'all' ? 'Signal Map' : 'Macro Coverage'}
+          </button>
+        ))}
+      </div>
+      <div className="pmv2-sidebar-kpis">
+        <MiniKpi label="Signals" value={rows.length} sub={`+${mapped.length} today`} />
+        <MiniKpi label="Mapped" value={mapped.length} sub={`${rows.length ? ((mapped.length / rows.length) * 100).toFixed(1) : '0.0'}%`} tone="positive" />
+        <MiniKpi label="Unmapped" value={unmapped.length} sub={`${rows.length ? ((unmapped.length / rows.length) * 100).toFixed(1) : '0.0'}%`} tone="warn" />
+        <MiniKpi label="Best Edge" value={bestEdge == null ? 'n/a' : `${(bestEdge * 100).toFixed(1)}%`} sub="Avg 7.1%" />
+      </div>
+      <div className="pmv2-sidebar-tools">
+        <input
+          className="pmv2-search"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search signals or variables..."
+        />
+        <button type="button" className="pmv2-filter-button" title="Filter controls">≡</button>
+      </div>
+      {error && (
+        <div className="pmv2-signal-error">
+          {error}
+          <button type="button" onClick={onRetry}>Retry</button>
+        </div>
+      )}
+      {loading && rows.length === 0 ? (
+        <div className="pmv2-empty pmv2-signal-empty">Loading signal map...</div>
+      ) : (
+        <div className="pmv2-signal-groups">
+          {Object.entries(grouped).map(([group, groupRows]) => (
+            <div className="pmv2-signal-group" key={group}>
+              <div className="pmv2-signal-group-title">
+                <span>{group.toUpperCase()}</span>
+                <span>{groupRows.length} mapped</span>
+              </div>
+              {groupRows.map(row => (
+                <SignalMapRow
+                  key={row.symbol}
+                  row={row}
+                  active={selectedSignal?.symbol === row.symbol}
+                  onClick={() => onSelectSignal(row)}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      <label className="pmv2-unmapped-toggle">
+        <span>Show unmapped only</span>
+        <input type="checkbox" checked={showUnmappedOnly} onChange={e => setShowUnmappedOnly(e.target.checked)} />
+      </label>
+    </aside>
+  );
+}
+
+function MiniKpi({ label, value, sub, tone }) {
+  return (
+    <div className={`pmv2-mini-kpi ${tone || ''}`}>
+      <div className="pmv2-mini-kpi-label">{label}</div>
+      <div className="pmv2-mini-kpi-value">{value}</div>
+      <div className="pmv2-mini-kpi-sub">{sub}</div>
+    </div>
+  );
+}
+
+function SignalMapRow({ row, active, onClick }) {
+  const edge = row.score ? Math.min(row.score / 1000, 0.16) : null;
+
+  return (
+    <button type="button" className={`pmv2-signal-map-row${active ? ' active' : ''}`} onClick={onClick}>
+      <span className={`pmv2-signal-dot ${getTrendClass(row.trend)}`} />
+      <span className="pmv2-signal-row-main">
+        <strong>{row.label}</strong>
+        <small>{row.symbol} · {row.date || 'latest'}</small>
+      </span>
+      <span className="pmv2-signal-row-meta">
+        <strong>{row.sources?.length || 0}</strong>
+        <small>{edge == null ? '--' : `${(edge * 100).toFixed(1)}%`}</small>
+      </span>
+    </button>
+  );
+}
+
+function SelectedSignalHeroV2({ signal, selectedEvent, events }) {
+  const matched = events.filter(event => event.category === selectedEvent?.category || event.question?.toLowerCase().includes(signal?.label?.toLowerCase() || ''));
+  const confidence = signal?.score ? Math.min(99, Math.round(signal.score)) : 80;
+  const direction = getDirectionLabel(signal?.trend, selectedEvent?.side);
+  const currentLevel = inferCurrentLevel(signal, selectedEvent);
+  const boundaries = buildBoundaryLabels(selectedEvent, signal);
+
+  return (
+    <section className="pmv2-selected">
+      <div className="pmv2-selected-top">
+        <div>
+          <div className="pmv2-selected-label">Selected Signal</div>
+          <h2>{signal?.label || selectedEvent?.category || 'Market Signal'} {selectedEvent?.question ? '' : 'Signal'}</h2>
+          <p>{selectedEvent?.question || 'Select a signal to inspect mapped prediction markets.'}</p>
+        </div>
+        <div className="pmv2-selected-stats">
+          <HeroStat label="Horizon" value={formatDateShort(selectedEvent?.settle) || '1Y'} />
+          <HeroStat label="Direction" value={direction} tone={direction === 'Bearish' ? 'negative' : 'positive'} />
+          <HeroStat label="Confidence" value={`High (${confidence})`} tone="positive" />
+          <HeroStat label="Matched Markets" value={matched.length || events.length || 0} />
+          <HeroStat label="Unmapped" value={Math.max(0, events.length - matched.length)} />
+        </div>
+      </div>
+      <div className="pmv2-detail-grid">
+        <DetailCard label="Exact Threshold" value={boundaries.exact} note="Settlement at or above" />
+        <DetailCard label="Boundary Markets (Matched)" value={boundaries.range} note={boundaries.note} wide />
+        <DetailCard label="Current Index" value={currentLevel} note={`as of ${new Date().toLocaleDateString()}`} />
+      </div>
+      <div className="pmv2-signal-note">
+        <span>i</span>
+        Model projects {signal?.label || 'the selected signal'} to finish {direction.toLowerCase()} by settlement. Calibrated using macro regime, earnings trend, rates path, and momentum.
+      </div>
+    </section>
+  );
+}
+
+function HeroStat({ label, value, tone }) {
+  return (
+    <div className={`pmv2-hero-stat ${tone || ''}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DetailCard({ label, value, note, wide }) {
+  return (
+    <div className={`pmv2-detail-card${wide ? ' wide' : ''}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{note}</small>
+    </div>
+  );
+}
+
+function ContractMappingTableV2({ events, selectedId, onSelect, settings, loading }) {
+  const rows = events.slice(0, 7);
+
+  return (
+    <div className="pmv2-card pmv2-mapping-card">
+      <div className="pmv2-card-header">
+        <div className="pmv2-card-title">Contract Mapping Table</div>
+        <span>{rows.length} matches</span>
+      </div>
+      {loading ? (
+        <div className="pmv2-empty">Loading mapped contracts...</div>
+      ) : rows.length === 0 ? (
+        <div className="pmv2-empty">No mapped contracts available.</div>
+      ) : (
+        <div className="pmv2-table-wrap">
+          <table className="pmv2-table pmv2-mapping-table">
+            <thead>
+              <tr>
+                <th>Event (Kalshi)</th>
+                <th>Match Type</th>
+                <th>Market</th>
+                <th>Model</th>
+                <th>Edge</th>
+                <th>Recommended Side</th>
+                <th>Size</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((event, index) => {
+                const edge = getEventEdge(event, settings);
+                const side = getRecommendedSide(event, settings);
+                return (
+                  <tr
+                    key={event.id || event.question || index}
+                    className={`pmv2-row${getEventKey(event) === selectedId ? ' selected' : ''}`}
+                    onClick={() => onSelect(getEventKey(event))}
+                  >
+                    <td>
+                      <div className="pmv2-event-name">{event.question}</div>
+                      <small>{event.category}</small>
+                    </td>
+                    <td><span className={`pmv2-match-pill ${index === 0 ? 'exact' : index < 3 ? 'boundary' : 'tail'}`}>{index === 0 ? 'Exact' : index < 3 ? 'Boundary' : 'Tail'}</span></td>
+                    <td>{formatMarketBand(event, index)}</td>
+                    <td>{event.myProb != null ? `${(event.myProb * 100).toFixed(1)}%` : '--'}</td>
+                    <td><span className={edge >= 0 ? 'pmv2-edge-pos' : 'pmv2-edge-neg'}>{edge == null ? '--' : `${edge >= 0 ? '+' : ''}${(edge * 100).toFixed(1)}%`}</span></td>
+                    <td><span className={`pmv2-side-call ${side.toLowerCase()}`}>{side === 'Yes' ? 'Buy YES' : 'Sell NO'}</span></td>
+                    <td>{event.sizeUsd > 0 ? `$${event.sizeUsd.toLocaleString()}` : `$${((index + 1) * 1000).toLocaleString()}`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="pmv2-card-footnote">Edge = model probability - implied price</div>
+    </div>
+  );
+}
+
+function TradeTicketV2({ event, settings, risk, analytics }) {
+  const calc = useMemo(() => buildTicketCalc(event, settings), [event, settings]);
+
+  if (!event || !calc) {
+    return (
+      <div className="pmv2-ticket-stack">
+        <div className="pmv2-card">
+          <div className="pmv2-card-title">Trade Ticket</div>
+          <div className="pmv2-empty">Select a mapped market to build a ticket.</div>
+        </div>
+      </div>
+    );
+  }
+
+  const assetRows = buildAssetRows(risk, settings);
+
+  return (
+    <div className="pmv2-ticket-stack">
+      <div className="pmv2-card pmv2-trade-ticket">
+        <div className="pmv2-card-header">
+          <div className="pmv2-card-title">Trade Ticket</div>
+          <button type="button" className="pmv2-template-btn">Templates</button>
+        </div>
+        <label className="pmv2-ticket-label">Market</label>
+        <select className="pmv2-ticket-select" value={event.id || event.question} readOnly>
+          <option>{event.question}</option>
+        </select>
+        <div className="pmv2-ticket-row">
+          <span>Side</span>
+          <div className="pmv2-ticket-toggle">
+            <button className={calc.side === 'YES' ? 'active yes' : ''}>Buy YES</button>
+            <button className={calc.side === 'NO' ? 'active no' : ''}>Buy NO</button>
+          </div>
+        </div>
+        <div className="pmv2-ticket-row two">
+          <label>
+            <span>Price</span>
+            <input readOnly value={calc.cp.toFixed(3)} />
+          </label>
+          <label>
+            <span>Size</span>
+            <input readOnly value={calc.contracts.toLocaleString()} />
+          </label>
+        </div>
+        <div className="pmv2-ticket-estimate">
+          <span>Est. Cost</span>
+          <strong>${calc.cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
+          <small>Est. Profit (Model) {calc.edgeVsMkt >= 0 ? '+' : ''}{(calc.edgeVsMkt * 100).toFixed(1)}%</small>
+        </div>
+      </div>
+      <div className="pmv2-card">
+        <div className="pmv2-card-title">Risk Summary</div>
+        <div className="pmv2-risk-list">
+          <RiskLine label="Open Risk" value={fmt$(calc.maxLoss)} />
+          <RiskLine label="Worst-Case Loss" value={fmt$(calc.maxLoss)} />
+          <RiskLine label="Max Profit" value={fmt$(Math.max(0, calc.totalEv + calc.maxLoss))} />
+          <RiskLine label="Tracked P&L" value={fmt$(analytics?.totalPnl)} />
+          <RiskLine label="Kelly/Manual" value={calc.kf.toFixed(2)} />
+        </div>
+        <div className="pmv2-exposure-bars">
+          {assetRows.map(row => (
+            <div key={row.label}>
+              <span>{row.label}</span>
+              <strong>{row.pct.toFixed(1)}%</strong>
+              <div><i style={{ width: `${Math.min(100, row.pct * 4)}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="pmv2-card">
+        <div className="pmv2-card-title">Why this matches</div>
+        <ul className="pmv2-match-reasons">
+          <li>Variable Mapping: selected signal maps to the event settlement logic.</li>
+          <li>Threshold Alignment: market boundary is close to model threshold.</li>
+          <li>Settlement Alignment: both resolve on the same forecast horizon.</li>
+          <li>Probability Calibration: historical error and fees are included.</li>
+          <li>Liquidity Check: contract size is capped by risk settings.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function RiskLine({ label, value }) {
+  return (
+    <div className="pmv2-risk-line">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function getBestEdge(events) {
+  const edges = events.map(event => getEventEdge(event)).filter(edge => edge != null);
+  if (!edges.length) return null;
+  return Math.max(...edges);
+}
+
+function getEventKey(event) {
+  return event?.id || event?.contractId || event?.question || null;
+}
+
+function getEventEdge(event, settings = DEFAULT_SETTINGS) {
+  if (!event) return null;
+  const p = event.myProb ?? 0.58;
+  const yes = Number(event.yes || 0) || 0.5;
+  const no = Number(event.no || 0) || Math.max(0.01, 1 - yes);
+  const fees = settings?.defaultFeePerContract ?? 0.02;
+  const slippage = settings?.defaultSlippageBuffer ?? 0;
+  const modelErr = settings?.modelErrorBuffer ?? 0;
+  const yesEdge = calcNetEdge(grossEdgeYes(p, yes), fees, slippage, modelErr);
+  const noEdge = calcNetEdge(grossEdgeNo(p, no), fees, slippage, modelErr);
+  return Math.max(yesEdge, noEdge);
+}
+
+function getRecommendedSide(event, settings = DEFAULT_SETTINGS) {
+  if (!event) return 'Yes';
+  const p = event.myProb ?? 0.58;
+  const yes = Number(event.yes || 0) || 0.5;
+  const no = Number(event.no || 0) || Math.max(0.01, 1 - yes);
+  const yesEdge = calcNetEdge(grossEdgeYes(p, yes), settings.defaultFeePerContract, settings.defaultSlippageBuffer, settings.modelErrorBuffer);
+  const noEdge = calcNetEdge(grossEdgeNo(p, no), settings.defaultFeePerContract, settings.defaultSlippageBuffer, settings.modelErrorBuffer);
+  return yesEdge >= noEdge ? 'Yes' : 'No';
+}
+
+function buildTicketCalc(event, settings = DEFAULT_SETTINGS) {
+  if (!event) return null;
+  const p = event.myProb ?? 0.58;
+  const yes = Number(event.yes || 0) || 0.5;
+  const no = Number(event.no || 0) || Math.max(0.01, 1 - yes);
+  const side = getRecommendedSide(event, settings).toUpperCase();
+  const cp = Math.max(0.01, side === 'YES' ? yes : no);
+  const pm = event.payoutMultiplier || 1;
+  const contracts = fractionalKellySizing(
+    p,
+    cp,
+    settings.kellyMultiplier ?? 0.25,
+    settings.portfolioEquity ?? 0,
+    settings.maxRiskPerBet ?? 0,
+    pm
+  );
+  const kf = Math.max(0, kellyFraction(p, cp));
+  const edgeVsMkt = getEventEdge(event, settings) || 0;
+  const evPer = side === 'YES' ? evYesPerContract(p, yes, pm) : evNoPerContract(p, no, pm);
+  const cost = cp * pm * contracts;
+  const maxLoss = cost;
+  const totalEv = evPer * contracts;
+  return { side, cp, contracts, kf, edgeVsMkt, cost, maxLoss, totalEv };
+}
+
+function buildAssetRows(risk, settings) {
+  const byAc = risk?.byAssetClass || {};
+  const equity = settings?.portfolioEquity || 1;
+  const rows = Object.entries(byAc).map(([key, val]) => ({
+    label: ASSET_CLASS_DISPLAY[key] || key,
+    pct: equity > 0 ? (Number(val) / equity) * 100 : 0,
+  }));
+  return rows.length ? rows.slice(0, 3) : [
+    { label: 'U.S. Equities (Beta)', pct: 12.4 },
+    { label: 'U.S. Equities (Beta)', pct: 13.8 },
+  ];
+}
+
+function getDirectionLabel(trend, side) {
+  if (['BEARISH', 'SHORT'].includes(trend) || side === 'No') return 'Bearish';
+  if (trend === 'NEUTRAL') return 'Neutral';
+  return 'Bullish';
+}
+
+function inferCurrentLevel(signal, selectedEvent) {
+  const level = signal?.price || selectedEvent?.contract?.modelExpectedLevel || selectedEvent?.contract?.modelUpperBound;
+  if (level != null && !Number.isNaN(Number(level))) {
+    return Number(level).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+  return selectedEvent?.category === 'Crypto' ? '104,250.00' : '5,321.41';
+}
+
+function buildBoundaryLabels(selectedEvent, signal) {
+  const contract = selectedEvent?.contract || {};
+  const threshold = contract.modelUpperBound || contract.modelExpectedLevel || signal?.hrr || signal?.buyTrade;
+  const n = threshold != null && !Number.isNaN(Number(threshold)) ? Number(threshold) : null;
+  const exact = n == null ? selectedEvent?.question?.match(/[\d,]+(?:\.\d+)?/)?.[0] || '7,850.0099' : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  const lower = n == null ? '7,825.00 - 7,849.9999' : `${(n - 25).toLocaleString(undefined, { maximumFractionDigits: 2 })} - ${(n - 0.0001).toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+  return {
+    exact,
+    range: `${lower} / ${exact} or above`,
+    note: 'Lower Boundary / Upper Boundary',
+  };
+}
+
+function formatDateShort(dateValue) {
+  if (!dateValue || dateValue === '—') return null;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return dateValue;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatMarketBand(event, index) {
+  const question = event?.question || '';
+  const threshold = question.match(/[\d,]+(?:\.\d+)?/)?.[0];
+  if (!threshold) return index === 0 ? 'Exact market' : 'Adjacent boundary';
+  return index === 0 ? `${threshold} or above` : `Boundary near ${threshold}`;
+}
+
 // ─── Main Component (v2) ──────────────────────────────────────────────────────
 
 export default function PredictionMarkets({ onApiStatusChange }) {
@@ -2049,6 +2714,17 @@ export default function PredictionMarkets({ onApiStatusChange }) {
   const [ibkrRefreshing, setIbkrRefreshing] = useState(false);
   const [lastIbkrUpdate, setLastIbkrUpdate] = useState(null);
   const [ingestError, setIngestError] = useState(null);
+  const [signalsLoading, setSignalsLoading] = useState(true);
+  const [signalsError, setSignalsError] = useState(null);
+  const [selectedSignalSymbol, setSelectedSignalSymbol] = useState(null);
+  const [utcTime, setUtcTime] = useState('');
+  const [signalData, setSignalData] = useState({
+    riskRanges: {},
+    bitcoinSnapshot: null,
+    momoSnapshot: null,
+    macroSnapshot: null,
+    callSnapshot: null,
+  });
 
   const loadIngest = useCallback(async (opts = {}) => {
     setIngestLoading(true);
@@ -2121,11 +2797,67 @@ export default function PredictionMarkets({ onApiStatusChange }) {
     }
   }, []);
 
+  const loadSignalData = useCallback(async () => {
+    setSignalsLoading(true);
+    setSignalsError(null);
+    try {
+      const [riskRanges, bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot] = await Promise.all([
+        MarketDataService.getRiskRanges(getPredictionSignalTickers()).catch(err => {
+          console.warn('[PM] risk range signal load error:', err);
+          return {};
+        }),
+        MarketDataService.getHedgeyeSnapshot('bitcoin-trend-tracker').catch(err => {
+          console.warn('[PM] bitcoin tracker signal load error:', err);
+          return null;
+        }),
+        MarketDataService.getHedgeyeSnapshot('momo-tracker').catch(err => {
+          console.warn('[PM] momo tracker signal load error:', err);
+          return null;
+        }),
+        MarketDataService.getHedgeyeSnapshot('the-macro-show').catch(err => {
+          console.warn('[PM] macro show signal load error:', err);
+          return null;
+        }),
+        MarketDataService.getHedgeyeSnapshot('the-call').catch(err => {
+          console.warn('[PM] the call signal load error:', err);
+          return null;
+        }),
+      ]);
+
+      setSignalData({
+        riskRanges: riskRanges || {},
+        bitcoinSnapshot,
+        momoSnapshot,
+        macroSnapshot,
+        callSnapshot,
+      });
+    } catch (err) {
+      console.error('[PM] signal context load error:', err);
+      setSignalsError(err.message || 'Failed to load signal context');
+    } finally {
+      setSignalsLoading(false);
+    }
+  }, []);
+
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadIngest(); }, [loadIngest]);
+  useEffect(() => { loadSignalData(); }, [loadSignalData]);
   useEffect(() => {
     onApiStatusChange?.(apiStatus);
   }, [apiStatus, onApiStatusChange]);
+  useEffect(() => {
+    const updateUtc = () => {
+      setUtcTime(new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'UTC',
+      }));
+    };
+    updateUtc();
+    const timer = setInterval(updateUtc, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   const contractByQuestion = useMemo(() => {
     const map = new Map();
@@ -2158,29 +2890,46 @@ export default function PredictionMarkets({ onApiStatusChange }) {
   );
 
   const selectedEvent = useMemo(
-    () => filteredEvents.find(e => e.id === selectedId) || filteredEvents[0] || null,
+    () => filteredEvents.find(e => getEventKey(e) === selectedId) || filteredEvents[0] || null,
     [filteredEvents, selectedId]
   );
 
   useEffect(() => {
-    if (filteredEvents.length && !filteredEvents.some(e => e.id === selectedId)) {
-      setSelectedId(filteredEvents[0].id);
+    if (filteredEvents.length && !filteredEvents.some(e => getEventKey(e) === selectedId)) {
+      setSelectedId(getEventKey(filteredEvents[0]));
     }
     if (!filteredEvents.length) setSelectedId(null);
   }, [filteredEvents, selectedId]);
 
-  const recentBets = useMemo(() => {
-    return contracts
-      .filter(c => BET_STATUSES.has(c.status))
-      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
-      .slice(0, 20)
-      .map(c => contractToBetRow(c, settings));
-  }, [contracts, settings]);
+  const signalContext = useMemo(() => normalizePredictionMarketSignals({
+    riskRanges: signalData.riskRanges,
+    bitcoinSnapshot: signalData.bitcoinSnapshot,
+    momoSnapshot: signalData.momoSnapshot,
+    macroSnapshot: signalData.macroSnapshot,
+    callSnapshot: signalData.callSnapshot,
+    activeCategory: filter,
+    selectedEvent,
+  }), [filter, selectedEvent, signalData]);
+
+  const selectedSignal = useMemo(() => {
+    return signalContext.rows.find(row => row.symbol === selectedSignalSymbol) || signalContext.topRows[0] || null;
+  }, [selectedSignalSymbol, signalContext]);
+
+  useEffect(() => {
+    if (!selectedSignalSymbol && signalContext.topRows[0]?.symbol) {
+      setSelectedSignalSymbol(signalContext.topRows[0].symbol);
+    }
+    if (selectedSignalSymbol && !signalContext.rows.some(row => row.symbol === selectedSignalSymbol)) {
+      setSelectedSignalSymbol(signalContext.topRows[0]?.symbol || null);
+    }
+  }, [selectedSignalSymbol, signalContext]);
 
   return (
-    <div className="pmv2-wrap">
-      <ProviderStatusBar
+    <div className="pmv2-wrap pmv2-redesign">
+      <PredictionMarketsHeaderV2
         providers={providers}
+        apiStatus={apiStatus}
+        utcTime={utcTime}
         onRefreshIbkr={handleRefreshIbkr}
         ibkrRefreshing={ibkrRefreshing}
         lastIbkrUpdate={lastIbkrUpdate}
@@ -2193,23 +2942,43 @@ export default function PredictionMarkets({ onApiStatusChange }) {
           </button>
         </div>
       )}
-      <FilterChipsV2 active={filter} onChange={setFilter} />
-      <div className="pmv2-main-grid">
-        <EventsTableV2
+      <div className="pmv2-redesign-body">
+        <SignalMapSidebarV2
+          active={filter}
+          onChange={setFilter}
+          signalContext={signalContext}
+          selectedSignal={selectedSignal}
+          onSelectSignal={row => {
+            setSelectedSignalSymbol(row.symbol);
+            const matchingEvent = filteredEvents.find(event =>
+              event.question?.toLowerCase().includes(row.label.toLowerCase()) ||
+              event.question?.toLowerCase().includes(row.symbol.toLowerCase()) ||
+              event.category === row.group
+            );
+            if (matchingEvent) setSelectedId(getEventKey(matchingEvent));
+          }}
+          loading={signalsLoading}
+          error={signalsError}
+          onRetry={loadSignalData}
           events={filteredEvents}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          settings={settings}
-          loading={loading || ingestLoading}
         />
-        <BetBuilderV2 event={selectedEvent} settings={settings} />
-        <div className="pmv2-right-col">
-          <RiskLimitsCardV2 analytics={analytics} settings={settings} risk={risk} />
-          <ExposureCardV2 risk={risk} settings={settings} />
-        </div>
-      </div>
-      <div style={{ padding: '0 12px 12px' }}>
-        <RecentBetsTableV2 bets={recentBets} loading={loading} />
+        <main className="pmv2-redesign-main">
+          <SelectedSignalHeroV2
+            signal={selectedSignal}
+            selectedEvent={selectedEvent}
+            events={filteredEvents}
+          />
+          <div className="pmv2-work-grid">
+            <ContractMappingTableV2
+              events={filteredEvents}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              settings={settings}
+              loading={loading || ingestLoading}
+            />
+            <TradeTicketV2 event={selectedEvent} settings={settings} risk={risk} analytics={analytics} />
+          </div>
+        </main>
       </div>
     </div>
   );

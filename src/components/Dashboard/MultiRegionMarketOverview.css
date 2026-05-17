@@ -1,10 +1,52 @@
 /* Multi-Region Market Overview - Light Theme */
 
+:root {
+  --dashboard-bg: #eef6fb;
+  --dashboard-card-bg: #ffffff;
+  --dashboard-card-header-bg: #ffffff;
+  --dashboard-border: #d7e5ef;
+  --dashboard-border-soft: #e6eef5;
+  --dashboard-gap: 6px;
+  --dashboard-radius: 6px;
+  --dashboard-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.dashboard-card-chrome {
+  background: var(--dashboard-card-bg);
+  border: 1px solid var(--dashboard-border);
+  border-radius: var(--dashboard-radius);
+  box-shadow: var(--dashboard-shadow);
+  overflow: hidden;
+}
+
+.usd-macro-dashboard-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dashboard-gap);
+}
+
+.usd-macro-main-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dashboard-gap);
+}
+
+.usd-macro-compact-row {
+  gap: var(--dashboard-gap);
+  margin-bottom: var(--dashboard-gap);
+}
+
+.usd-macro-dashboard-shell .tremor-Card {
+  border: 1px solid var(--dashboard-border);
+  border-radius: var(--dashboard-radius);
+  box-shadow: var(--dashboard-shadow);
+}
+
 .multi-region-overview {
   width: 100%;
   background: transparent;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--dashboard-radius);
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -288,8 +330,8 @@
 .main-markets-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  padding: 12px 0;
+  gap: var(--dashboard-gap);
+  padding: var(--dashboard-gap) 0;
 }
 
 /* Responsive: collapse to a single column on narrow screens. */
@@ -303,8 +345,8 @@
 .bottom-markets-row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  padding: 0 0 12px;
+  gap: var(--dashboard-gap);
+  padding: 0 0 var(--dashboard-gap);
 }
 
 @media (max-width: 768px) {
@@ -406,11 +448,11 @@
 
 /* Region Chart Panel - wrapper for each full chart */
 .region-chart-panel {
-  background: #ffffff;
-  border-radius: 8px;
+  background: var(--dashboard-card-bg);
+  border-radius: var(--dashboard-radius);
   overflow: hidden;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
-  border: 1px solid #e5e7eb;
+  box-shadow: var(--dashboard-shadow);
+  border: 1px solid var(--dashboard-border);
 }
 
 .region-chart-panel--mw {
@@ -424,17 +466,17 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 7px 12px;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
-  gap: 12px;
-  min-height: 44px;
+  padding: 6px 10px;
+  background: var(--dashboard-card-header-bg);
+  border-bottom: 1px solid var(--dashboard-border-soft);
+  gap: 8px;
+  min-height: 36px;
 }
 
 .region-chart-header--mw {
-  border-bottom: 1px solid #e5e7eb;
-  min-height: 36px;
-  padding: 6px 10px;
+  border-bottom: 1px solid var(--dashboard-border-soft);
+  min-height: 32px;
+  padding: 5px 9px;
 }
 
 /* Full-width metrics table (no side chart) */
@@ -442,7 +484,7 @@
   display: block;
   flex: 1;
   min-height: 0;
-  background: #ffffff;
+  background: var(--dashboard-card-bg);
 }
 
 .region-mw-table-wrap {
@@ -507,8 +549,8 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #6b7280;
-  padding: 6px 8px 4px 4px;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 4px 6px 3px 4px;
+  border-bottom: 1px solid var(--dashboard-border-soft);
   white-space: nowrap;
 }
 
@@ -546,8 +588,8 @@
 }
 
 .region-mw-td {
-  padding: 5px 8px 5px 4px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 4px 6px 4px 4px;
+  border-bottom: 1px solid #eef2f6;
   vertical-align: middle;
   font-variant-numeric: tabular-nums;
 }
@@ -683,6 +725,13 @@
   justify-content: flex-start;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.region-header-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 /* Region status emoji - shows market open/extended/closed status */
@@ -878,11 +927,11 @@
 /* Macro / THE CALL card wrapper */
 .macro-call-card {
   flex: 1;
-  background: #ffffff;
-  border-radius: 10px;
+  background: var(--dashboard-card-bg);
+  border-radius: var(--dashboard-radius);
   overflow: hidden;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
-  border: 1px solid #e5e7eb;
+  box-shadow: var(--dashboard-shadow);
+  border: 1px solid var(--dashboard-border);
 }
 
 .dark .macro-call-card {
@@ -894,9 +943,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  background: var(--dashboard-card-header-bg);
+  border-bottom: 1px solid var(--dashboard-border-soft);
 }
 
 .dark .macro-call-card-header {
@@ -953,8 +1002,8 @@
 
 
 .macro-call-body {
-  padding: 12px 14px;
-  background: #ffffff;
+  padding: 8px 10px;
+  background: var(--dashboard-card-bg);
 }
 
 .dark .macro-call-body {
@@ -964,14 +1013,14 @@
 .macro-call-body-days {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--dashboard-gap);
 }
 
 .macro-call-day-row {
   display: flex;
-  gap: 10px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #e5e7eb;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--dashboard-border-soft);
 }
 
 .macro-call-day-row.last-row {
@@ -998,9 +1047,9 @@
   justify-content: center;
   gap: 2px;
   background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 6px 4px;
+  border: 1px solid var(--dashboard-border-soft);
+  border-radius: var(--dashboard-radius);
+  padding: 5px 4px;
 }
 
 .macro-call-day-block-icon {
@@ -1126,15 +1175,15 @@
 .secondary-markets-section {
   display: flex;
   align-items: stretch;
-  gap: 12px;
-  padding: 12px 0 16px;
+  gap: var(--dashboard-gap);
+  padding: var(--dashboard-gap) 0;
 }
 
 .secondary-left-column {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--dashboard-gap);
   min-width: 0;
   min-height: 0;
 }
@@ -1153,12 +1202,12 @@
 
 /* Secondary cards - Volume and Volatility (separate cards, same dimensions) */
 .secondary-card {
-  background: #ffffff;
-  border-radius: 8px;
+  background: var(--dashboard-card-bg);
+  border-radius: var(--dashboard-radius);
   overflow-y: auto;
   overflow-x: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
-  border: 1px solid #e5e7eb;
+  box-shadow: var(--dashboard-shadow);
+  border: 1px solid var(--dashboard-border);
   min-height: auto;
   max-height: 80vh;
   display: flex;
@@ -1177,7 +1226,7 @@
 
 /* Volume table - reports & insights style */
 .market-volume-table {
-  margin-top: 8px;
+  margin-top: 0;
   font-size: 10px;
   color: #111827;
   min-width: 0;
@@ -1224,7 +1273,7 @@
 .volume-columns {
   padding: 4px 6px;
   background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--dashboard-border-soft);
 }
 
 .volume-col {
@@ -1242,9 +1291,9 @@
 }
 
 .volume-row {
-  padding: 8px 6px;
-  border-bottom: 1px dotted #e5e7eb;
-  background: #ffffff;
+  padding: 6px;
+  border-bottom: 1px dotted var(--dashboard-border-soft);
+  background: var(--dashboard-card-bg);
 }
 
 .volume-row-last {
@@ -1302,7 +1351,7 @@
 .secondary-cards-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--dashboard-gap);
   flex: 0 0 480px;
   min-height: 0;
 }

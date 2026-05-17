@@ -180,7 +180,7 @@ const GlobalQuadsCard = () => {
     }
   };
 
-  const border = `1px solid ${isDark ? '#374151' : '#e5e7eb'}`;
+  const border = `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`;
   const bg = isDark ? '#1f2937' : '#ffffff';
   const bgHeader = isDark ? '#111827' : '#f8fafc';
 
@@ -345,14 +345,17 @@ const GlobalQuadsCard = () => {
     <Card
       className={isDark ? 'dark:bg-gray-800' : ''}
       style={{
-        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-        borderRadius: '0.5rem', padding: 0, height: '100%',
+        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
+        borderRadius: 'var(--dashboard-radius, 6px)',
+        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
+        padding: 0,
+        height: '100%',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}
     >
       {/* Card Header */}
       <div style={{
-        padding: '8px 14px',
+        padding: '6px 10px',
         borderBottom: border,
         backgroundColor: isDark ? '#1f2937' : '#ffffff',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',

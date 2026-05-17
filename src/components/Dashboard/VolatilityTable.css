@@ -8,8 +8,8 @@
 }
 
 .volatility-table {
-  --vol-grid-border: #e5e7eb;
-  --vol-grid-border-soft: #f3f4f6;
+  --vol-grid-border: var(--dashboard-border, #d7e5ef);
+  --vol-grid-border-soft: var(--dashboard-border-soft, #e6eef5);
   --vol-grid-sep: #d1d5db;
   --vol-series-col: 92px;
   --vol-level-col: 76px;
@@ -252,7 +252,7 @@
 
 .volatility-table--mw .region-mw-body {
   flex: 1 1 auto;
-  background: #ffffff;
+  background: var(--dashboard-card-bg, #ffffff);
 }
 
 .volatility-mw-table {
@@ -261,8 +261,8 @@
 
 .volatility-mw-table .region-mw-td {
   line-height: 1.2;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
 .volatility-mw-table .region-mw-td-num {
@@ -480,10 +480,10 @@
 }
 
 .vol-ranges-popover {
-  background: white;
-  border-radius: 8px;
+  background: var(--dashboard-card-bg, white);
+  border-radius: var(--dashboard-radius, 6px);
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--dashboard-border, #d7e5ef);
   max-width: 420px;
   max-height: 85vh;
   overflow: hidden;
@@ -495,8 +495,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dashboard-border-soft, #e6eef5);
   background: #f8fafc;
 }
 

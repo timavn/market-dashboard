@@ -17,7 +17,7 @@ import ExpectedValuesWindow from './ExpectedValuesWindow';
 import CFTCNetLongCard from './CFTCNetLongCard';
 import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
 import GlobalQuadsCard from './GlobalQuadsCard';
-import PredictionMarkets from './PredictionMarkets';
+import PredictionMarkets, { PalantirOrbIcon } from './PredictionMarkets';
 import './PredictionMarkets.css';
 
 const PortfolioDashboard = () => {
@@ -45,7 +45,6 @@ const PortfolioDashboard = () => {
   const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(false);
   const [showPerformanceTracking, setShowPerformanceTracking] = useState(false);
   const [showPredictionMarkets, setShowPredictionMarkets] = useState(false);
-  const [predictionMarketsImageError, setPredictionMarketsImageError] = useState(false);
   const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
   const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
   const [performanceImageError, setPerformanceImageError] = useState(false);
@@ -583,7 +582,7 @@ const PortfolioDashboard = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen p-2 flex items-center justify-center bg-[#eef6fb] dark:bg-gray-900">
         <div
           style={{
             width: '40px',
@@ -607,7 +606,7 @@ const PortfolioDashboard = () => {
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen p-2 flex items-center justify-center bg-[#eef6fb] dark:bg-gray-900">
         <Card className="text-center max-w-md rounded-lg">
           <Title className="text-red-600 dark:text-red-400 mb-4">Error loading data</Title>
           <Text className="mb-4 dark:text-gray-300">{error}</Text>
@@ -621,7 +620,7 @@ const PortfolioDashboard = () => {
 
   return (
     <div
-      className="min-h-screen p-4 bg-gray-50 dark:bg-gray-900"
+      className="min-h-screen p-2 bg-[#eef6fb] dark:bg-gray-900"
       style={{
         paddingBottom: '1.5rem',
         paddingRight: showPortfolioMetrics ? '0px' : '40px', // No padding when open to extend content closer, matches collapsed width
@@ -646,11 +645,11 @@ const PortfolioDashboard = () => {
         </div>
       )}
 
-      <Grid numItems={12} className="gap-4">
+      <Grid numItems={12} className="gap-1.5">
         <div
           className="col-span-12"
           style={{
-            marginRight: showPortfolioMetrics ? '0px' : '16px',
+            marginRight: showPortfolioMetrics ? '0px' : '8px',
             transition: 'all 0.3s ease-in-out',
             minWidth: 0,
           }}
@@ -1103,21 +1102,7 @@ const PortfolioDashboard = () => {
             title="Prediction Markets"
           >
             <div className="shrink-0 flex items-center justify-center" style={{ width: '20px', flexShrink: 0 }}>
-              {predictionMarketsImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showPredictionMarkets ? 'text-[#111]' : 'text-[#555] dark:text-gray-300'}>
-                  <rect x="2" y="3" width="20" height="14" rx="2"/>
-                  <line x1="8" y1="21" x2="16" y2="21"/>
-                  <line x1="12" y1="17" x2="12" y2="21"/>
-                  <polyline points="5 14 8 10 11 12 15 7 19 9" strokeWidth="2"/>
-                </svg>
-              ) : (
-                <img
-                  src="/images/icons/prediction-markets.png"
-                  alt="Prediction Markets"
-                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                  onError={() => setPredictionMarketsImageError(true)}
-                />
-              )}
+              <PalantirOrbIcon size={20} />
             </div>
             {showPortfolioMetrics && (
               <span className={`text-sm font-medium whitespace-nowrap ${showPredictionMarkets ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
@@ -2142,15 +2127,15 @@ const PortfolioDashboard = () => {
             : '40px',
           width: showPredictionMarkets
             ? (showPortfolioMetrics
-              ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (9/12) - 40px)')
+              ? 'calc(100vw - ((100vw - 16px) * (2/12) + 16px + 128px))'
+              : 'calc(100vw - 40px)')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: showPredictionMarkets ? 1500 : -1,
           borderLeft: showPredictionMarkets ? '1px solid #e5e7eb' : 'none',
           borderRight: showPredictionMarkets ? '1px solid #e5e7eb' : 'none',
-          borderRadius: showPredictionMarkets ? '0.75rem 0 0 0' : '0',
+          borderRadius: '0',
           boxShadow: showPredictionMarkets
             ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',

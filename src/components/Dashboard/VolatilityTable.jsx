@@ -455,14 +455,16 @@ const VolatilityTableWithTabs = ({ statusIndicator }) => {
           </span>
           <span className="region-label region-label--lg">Volatility</span>
         </div>
-        <StatusDot
-          updatedAt={lastUpdated}
-          status={derivedStatus}
-          size={8}
-          label="Volatility data"
-          emoji={status.emoji}
-          sources={volSources}
-        />
+        <div className="region-header-status">
+          <StatusDot
+            updatedAt={lastUpdated}
+            status={derivedStatus}
+            size={8}
+            label="Volatility data"
+            emoji={status.emoji}
+            sources={volSources}
+          />
+        </div>
       </div>
       <VolRangesPopover indicatorKey={openIndicator} onClose={() => setOpenIndicator(null)} />
       <VolatilityTable

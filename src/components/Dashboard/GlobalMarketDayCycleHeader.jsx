@@ -988,10 +988,10 @@ const GlobalMarketDayCycleHeader = () => {
   }, [now]);
 
   return (
-    <div className="w-full mb-4">
-      <div className="relative rounded-lg bg-white shadow-[0_2px_10px_rgba(0,0,0,0.08)] border border-gray-200">
+    <div className="w-full">
+      <div className="relative dashboard-card-chrome">
         {/* Header Bar */}
-        <div className="px-5 py-1 flex items-center justify-between border-b border-gray-100">
+        <div className="px-3 py-1 flex items-center justify-between border-b border-[#e6eef5]">
           <div className="flex items-center gap-2">
             <Globe size={15} className="text-blue-500" />
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-black">
@@ -1004,7 +1004,7 @@ const GlobalMarketDayCycleHeader = () => {
         </div>
 
         {/* City Nodes Row */}
-        <div className="flex items-center justify-around px-4 py-1.5">
+        <div className="flex items-center justify-around px-3 py-1">
           {GLOBAL_MARKETS.map((market) => (
             <CityNode
               key={market.id}

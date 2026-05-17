@@ -358,7 +358,7 @@ const USDMacroDashboard = ({
     <>
       <GlobalMarketDayCycleHeader />
       <div className="relative rounded-lg">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div className="usd-macro-main-stack">
           <MultiRegionMarketOverview
             marketData={multiRegionMarketData}
             loading={multiRegionLoading}
@@ -376,7 +376,7 @@ const USDMacroDashboard = ({
   const { className: lscClassName, style: lscExtraStyle, ...lscRest } = lscp;
 
   return (
-    <div className="space-y-4">
+    <div className="usd-macro-dashboard-shell">
       {leadingSidebar != null ? (
         <div
           className="usd-macro-banner-with-sidebar"
@@ -402,7 +402,7 @@ const USDMacroDashboard = ({
       {/* CFTC, Factor Performance, Global Quads - span full container width */}
       <div>
         {/* CFTC and Factor Performance - Side by Side */}
-        <div className="flex flex-col md:flex-row gap-4 mb-4" style={{ alignItems: 'stretch' }}>
+        <div className="usd-macro-compact-row flex flex-col md:flex-row" style={{ alignItems: 'stretch' }}>
           <div className="flex-1" style={{ height: '400px' }}>
             <CFTCNetLongCard />
           </div>
@@ -416,7 +416,7 @@ const USDMacroDashboard = ({
 
       {/* MACRO and THE CALL - span full container width */}
       <div>
-        <div className="flex flex-col md:flex-row gap-4" style={{ alignItems: 'stretch' }}>
+        <div className="usd-macro-compact-row flex flex-col md:flex-row" style={{ alignItems: 'stretch' }}>
           {/* Left: MACRO SHOW */}
           <div className="flex-1 macro-call-card">
             <div className="macro-call-card-header">

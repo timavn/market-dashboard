@@ -89,8 +89,9 @@ const CFTCNetLongCard = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-        borderRadius: '0.5rem',
+        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
+        borderRadius: 'var(--dashboard-radius, 6px)',
+        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
           <div style={{
@@ -115,8 +116,9 @@ const CFTCNetLongCard = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-        borderRadius: '0.5rem',
+        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
+        borderRadius: 'var(--dashboard-radius, 6px)',
+        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
       }}>
         <Text style={{ color: '#ef4444' }}>{error}</Text>
       </Card>
@@ -146,8 +148,9 @@ const CFTCNetLongCard = () => {
     <Card 
       className={isDark ? 'dark:bg-gray-800' : ''}
       style={{
-        border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-        borderRadius: '0.5rem',
+        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
+        borderRadius: 'var(--dashboard-radius, 6px)',
+        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
         padding: '0',
         height: '100%',
         display: 'flex',
@@ -155,7 +158,7 @@ const CFTCNetLongCard = () => {
         overflow: 'hidden'
       }}
     >
-      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, backgroundColor: isDark ? '#1f2937' : '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ padding: '6px 10px', borderBottom: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`, backgroundColor: isDark ? '#1f2937' : '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <LayoutGrid size={14} color={isDark ? '#60a5fa' : '#2563eb'} strokeWidth={2.5} style={{ flexShrink: 0 }} />
         <Title style={{ fontSize: '13px', fontWeight: 800, color: isDark ? '#f9fafb' : '#111827', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
           CFTC Non-Commercial Net Long Positioning
@@ -172,13 +175,13 @@ const CFTCNetLongCard = () => {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 12px 4px 12px' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '0 8px 4px' }}>
         {categories.map((category) => {
           const meta = CATEGORY_META[category] || CATEGORY_META.OTHER;
           const { Icon: CatIcon } = meta;
           const hdr = { padding: '6px 8px', fontSize: '10px', fontWeight: 700, color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' };
           return (
-            <div key={category} style={{ marginTop: '14px' }}>
+            <div key={category} style={{ marginTop: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', backgroundColor: isDark ? meta.bgDark : meta.bgLight, borderRadius: '4px', marginBottom: '6px', borderLeft: `3px solid ${meta.color}` }}>
                 <CatIcon size={12} color={meta.color} />
                 <span style={{ fontSize: '11px', fontWeight: 700, color: meta.color, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
@@ -237,7 +240,7 @@ const CFTCNetLongCard = () => {
           );
         })}
       </div>
-      <div style={{ padding: '6px 16px', fontSize: '10px', fontStyle: 'italic', color: isDark ? '#9ca3af' : '#6b7280', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, backgroundColor: isDark ? '#1f2937' : '#f9fafb' }}>
+      <div style={{ padding: '5px 10px', fontSize: '10px', fontStyle: 'italic', color: isDark ? '#9ca3af' : '#6b7280', borderTop: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`, backgroundColor: isDark ? '#1f2937' : '#f9fafb' }}>
         All values represent net contracts
       </div>
     </Card>

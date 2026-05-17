@@ -323,14 +323,16 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
           </span>
           <span className="region-label region-label--lg">Currencies</span>
         </div>
-        <StatusDot
-          updatedAt={currenciesLastUpdated}
-          status={currenciesStatus === 'open' ? 'active' : 'inactive'}
-          size={8}
-          label="Currencies"
-          emoji={currStatus.emoji}
-          sources={currencySources}
-        />
+        <div className="region-header-status">
+          <StatusDot
+            updatedAt={currenciesLastUpdated}
+            status={currenciesStatus === 'open' ? 'active' : 'inactive'}
+            size={8}
+            label="Currencies"
+            emoji={currStatus.emoji}
+            sources={currencySources}
+          />
+        </div>
       </div>
       <div className="region-mw-body currencies-compact-rail__body">
         <div className="region-mw-table-wrap currencies-rail-table-wrap">
