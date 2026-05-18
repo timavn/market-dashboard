@@ -17,7 +17,7 @@ import ExpectedValuesWindow from './ExpectedValuesWindow';
 import CFTCNetLongCard from './CFTCNetLongCard';
 import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
 import GlobalQuadsCard from './GlobalQuadsCard';
-import PredictionMarkets, { PalantirOrbIcon } from './PredictionMarkets';
+import PredictionMarkets, { PredictionMarketsLogo } from './PredictionMarkets';
 import './PredictionMarkets.css';
 
 const PortfolioDashboard = () => {
@@ -49,9 +49,6 @@ const PortfolioDashboard = () => {
   const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
   const [performanceImageError, setPerformanceImageError] = useState(false);
   const [portfolioBreakdownImageError, setPortfolioBreakdownImageError] = useState(false);
-  const [predictionMarketsApiStatus, setPredictionMarketsApiStatus] = useState('loading');
-  const [predictionMarketsHeaderUtc, setPredictionMarketsHeaderUtc] = useState('');
-
   const [multiRegionMarketData, setMultiRegionMarketData] = useState({});
   const [multiRegionLoading, setMultiRegionLoading] = useState(true);
   const [multiRegionError, setMultiRegionError] = useState(null);
@@ -93,29 +90,6 @@ const PortfolioDashboard = () => {
     const interval = setInterval(fetchMultiRegionQuotes, 30000);
     return () => clearInterval(interval);
   }, [fetchMultiRegionQuotes]);
-
-  useEffect(() => {
-    if (!showPredictionMarkets) return;
-    setPredictionMarketsApiStatus('loading');
-  }, [showPredictionMarkets]);
-
-  useEffect(() => {
-    if (!showPredictionMarkets) return;
-    const upd = () => {
-      const n = new Date();
-      setPredictionMarketsHeaderUtc(
-        n.toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-          timeZone: 'UTC',
-        })
-      );
-    };
-    upd();
-    const t = setInterval(upd, 30000);
-    return () => clearInterval(t);
-  }, [showPredictionMarkets]);
 
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
@@ -1102,7 +1076,7 @@ const PortfolioDashboard = () => {
             title="Prediction Markets"
           >
             <div className="shrink-0 flex items-center justify-center" style={{ width: '20px', flexShrink: 0 }}>
-              <PalantirOrbIcon size={20} />
+              <PredictionMarketsLogo variant="icon" height={20} />
             </div>
             {showPortfolioMetrics && (
               <span className={`text-sm font-medium whitespace-nowrap ${showPredictionMarkets ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
@@ -2122,14 +2096,12 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
+          left: 0,
           right: showPortfolioMetrics
             ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
             : '40px',
-          width: showPredictionMarkets
-            ? (showPortfolioMetrics
-              ? 'calc(100vw - ((100vw - 16px) * (2/12) + 16px + 128px))'
-              : 'calc(100vw - 40px)')
-            : '0px',
+          width: showPredictionMarkets ? undefined : '0px',
+          boxSizing: 'border-box',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: showPredictionMarkets ? 1500 : -1,
@@ -2147,67 +2119,9 @@ const PortfolioDashboard = () => {
         className="dark:bg-gray-900 dark:border-gray-700"
       >
         {showPredictionMarkets && (
-          <>
-            <div
-              style={{
-                position: 'relative',
-                padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                borderBottom: '1px solid #e5e7eb',
-                backgroundColor: '#ffffff',
-                flexShrink: 0,
-              }}
-              className="dark:border-gray-700 dark:bg-gray-800"
-            >
-              <button
-                type="button"
-                onClick={() => setShowPredictionMarkets(false)}
-                className="dark:text-white"
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  color: '#000',
-                  margin: 0,
-                  padding: '2px 8px',
-                  userSelect: 'none',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-                }}
-                title="Close panel"
-              >
-                Prediction Markets
-              </button>
-              <div className="pmv2-header-right" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span
-                  className={`pmv2-status-dot${
-                    predictionMarketsApiStatus === 'error'
-                      ? ' error'
-                      : predictionMarketsApiStatus === 'ready'
-                        ? ' ready'
-                        : ''
-                  }`}
-                />
-                <span className="pmv2-status-text dark:text-gray-200">
-                  {predictionMarketsApiStatus === 'loading'
-                    ? 'Loading…'
-                    : predictionMarketsApiStatus === 'error'
-                      ? 'API Error'
-                      : 'API Ready'}
-                </span>
-                <span className="pmv2-utc dark:text-gray-400">UTC {predictionMarketsHeaderUtc}</span>
-              </div>
-            </div>
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <PredictionMarkets onApiStatusChange={setPredictionMarketsApiStatus} />
-            </div>
-          </>
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <PredictionMarkets onClose={() => setShowPredictionMarkets(false)} />
+          </div>
         )}
       </div>
 

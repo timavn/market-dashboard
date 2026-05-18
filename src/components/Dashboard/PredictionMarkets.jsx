@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useTheme } from '../../context/ThemeContext';
 import './PredictionMarkets.css';
 import { MarketDataService } from '../../services/api/marketDataService';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
@@ -7,6 +6,7 @@ import {
   getPredictionSignalTickers,
   normalizePredictionMarketSignals,
 } from '../../utils/predictionMarketSignals';
+import { MacroSignalsCard, mapNormalizedRows } from './macroSignals';
 import {
   adjustProbability,
   grossEdgeYes,
@@ -1827,6 +1827,14 @@ function getTrendClass(trend) {
   return '';
 }
 
+function isLongTrend(trend) {
+  return ['BULLISH', 'LONG'].includes(trend);
+}
+
+function isShortTrend(trend) {
+  return ['BEARISH', 'SHORT'].includes(trend);
+}
+
 function formatSignalLevel(row, value) {
   if (value == null || Number.isNaN(Number(value))) return '--';
   const n = Number(value);
@@ -2152,265 +2160,279 @@ function RecentBetsTableV2({ bets = [], loading }) {
   );
 }
 
-export function PalantirOrbIcon({ size = 24, className = '' }) {
-  const id = useMemo(() => `palantir-orb-${Math.random().toString(36).slice(2)}`, []);
+const PREDICTION_MARKETS_LOGO_SRC = '/images/icons/prediction-markets.png';
+
+/** Full horizontal logo or crystal-ball icon crop (sidebar). */
+export function PredictionMarketsLogo({ variant = 'full', height = 28, className = '' }) {
+  const isIcon = variant === 'icon';
 
   return (
-    <svg
-      className={`pmv2-orb-svg ${className}`}
-      width={size}
-      height={size}
-      viewBox="0 0 64 64"
-      role="img"
-      aria-label="Seeing-stone prediction markets"
-    >
-      <defs>
-        <radialGradient id={`${id}-stone`} cx="34%" cy="28%" r="70%">
-          <stop offset="0%" stopColor="#f8fafc" />
-          <stop offset="28%" stopColor="#b8c7d9" />
-          <stop offset="58%" stopColor="#4f6077" />
-          <stop offset="100%" stopColor="#111827" />
-        </radialGradient>
-        <radialGradient id={`${id}-vision`} cx="50%" cy="52%" r="48%">
-          <stop offset="0%" stopColor="#93c5fd" stopOpacity="0.95" />
-          <stop offset="42%" stopColor="#2563eb" stopOpacity="0.38" />
-          <stop offset="100%" stopColor="#020617" stopOpacity="0" />
-        </radialGradient>
-        <linearGradient id={`${id}-ring`} x1="12" y1="14" x2="52" y2="54">
-          <stop offset="0%" stopColor="#f8fafc" stopOpacity="0.95" />
-          <stop offset="45%" stopColor="#94a3b8" stopOpacity="0.45" />
-          <stop offset="100%" stopColor="#0f172a" stopOpacity="0.9" />
-        </linearGradient>
-        <filter id={`${id}-glow`} x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="2.4" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-      <circle cx="32" cy="32" r="28" fill={`url(#${id}-stone)`} />
-      <circle cx="32" cy="32" r="20" fill={`url(#${id}-vision)`} filter={`url(#${id}-glow)`} />
-      <path
-        d="M14 34c7-9 15-13 24-12 5 .6 9 2.7 12 6-6-1.5-11-.4-16 3.4-5.7 4.5-11.9 5.4-20 2.6Z"
-        fill="#e0f2fe"
-        opacity="0.34"
-      />
-      <path
-        d="M18 42c6 3 12 3.6 18 1.7 5.8-1.8 9.9-5.4 12.4-10.7"
-        fill="none"
-        stroke="#bae6fd"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        opacity="0.62"
-      />
-      <circle cx="24" cy="20" r="6.4" fill="#ffffff" opacity="0.55" />
-      <circle cx="20" cy="16" r="2.2" fill="#ffffff" opacity="0.88" />
-      <circle cx="32" cy="32" r="28" fill="none" stroke={`url(#${id}-ring)`} strokeWidth="3.2" />
-    </svg>
+    <img
+      src={PREDICTION_MARKETS_LOGO_SRC}
+      alt={isIcon ? '' : 'Prediction Markets'}
+      aria-hidden={isIcon ? true : undefined}
+      className={`pmv2-logo ${isIcon ? 'pmv2-logo-icon' : 'pmv2-logo-full'} ${className}`}
+      style={{ height }}
+      width={isIcon ? height : undefined}
+    />
   );
 }
 
-function PredictionMarketsHeaderV2({
-  providers,
-  apiStatus,
-  utcTime,
-  onRefreshIbkr,
-  ibkrRefreshing,
-  lastIbkrUpdate,
-}) {
+/** @deprecated Use PredictionMarketsLogo with variant="icon" */
+export function PalantirOrbIcon({ size = 24, className = '' }) {
+  return <PredictionMarketsLogo variant="icon" height={size} className={className} />;
+}
+
+function getIbkrDotClass(status) {
+  if (status === 'connected') return 'ready';
+  if (['gateway_offline', 'sidecar_offline', 'tws_offline', 'auth_required', 'unknown'].includes(status)) {
+    return 'warn';
+  }
+  return 'error';
+}
+
+function PredictionMarketsHeaderV2({ providers, onClose, ibkrLoading, onRefreshIbkr }) {
   const kalshi = providers?.kalshi || {};
   const ibkr = providers?.ibkr || {};
-  const kalshiConnected = kalshi.status === 'connected';
-  const apiReady = apiStatus === 'ready';
 
   return (
-    <div className="pmv2-redesign-header">
-      <div className="pmv2-brand">
-        <div className="pmv2-brand-orb"><PalantirOrbIcon size={28} /></div>
-        <div>
-          <div className="pmv2-title">Prediction Markets</div>
-          <div className="pmv2-brand-subtitle">Signal map and contract execution layer</div>
-        </div>
-      </div>
-      <div className="pmv2-header-actions">
-        <span className="pmv2-provider-item">
-          <span className={`pmv2-status-dot ${kalshiConnected ? 'ready' : 'warn'}`} />
-          Kalshi: {PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status || 'Unknown'}
-        </span>
-        <span className={`pmv2-api-pill ${apiReady ? 'ready' : apiStatus === 'error' ? 'error' : ''}`}>
-          {apiReady ? 'API Ready' : apiStatus === 'error' ? 'API Error' : 'API Loading'}
-        </span>
-        <span className="pmv2-utc">UTC {utcTime}</span>
+    <header className="pmv2-redesign-header">
+      <div className="pmv2-header-left">
         <button
           type="button"
-          className="pmv2-btn-refresh-ibkr"
-          onClick={onRefreshIbkr}
-          disabled={ibkrRefreshing}
-          title={lastIbkrUpdate ? `Last IBKR ${new Date(lastIbkrUpdate).toLocaleString()}` : undefined}
+          className="pmv2-header-brand"
+          onClick={onClose}
+          title={onClose ? 'Close panel' : undefined}
+          disabled={!onClose}
         >
-          {ibkrRefreshing ? 'Refreshing...' : `Refresh IBKR${ibkr.status ? '' : ''}`}
+          <PredictionMarketsLogo variant="icon" height={28} />
+          <span className="pmv2-header-title">Prediction Markets</span>
         </button>
       </div>
-    </div>
-  );
-}
-
-function SignalMapSidebarV2({
-  active,
-  onChange,
-  signalContext,
-  selectedSignal,
-  onSelectSignal,
-  loading,
-  error,
-  onRetry,
-  events,
-}) {
-  const [query, setQuery] = useState('');
-  const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
-  const rows = signalContext?.rows || [];
-  const mapped = rows.filter(row => row.sources?.length);
-  const unmapped = rows.filter(row => !row.sources?.length);
-  const bestEdge = getBestEdge(events);
-  const filteredRows = rows.filter(row => {
-    const matchesQuery = `${row.symbol} ${row.label} ${row.group}`.toLowerCase().includes(query.toLowerCase());
-    const matchesMapped = showUnmappedOnly ? !row.sources?.length : true;
-    return matchesQuery && matchesMapped;
-  });
-  const grouped = filteredRows.reduce((acc, row) => {
-    const key = row.group || 'Other';
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(row);
-    return acc;
-  }, {});
-
-  return (
-    <aside className="pmv2-signal-map">
-      <div className="pmv2-sidebar-tabs">
-        {V2_FILTERS.slice(0, 2).map(f => (
+      <div className="pmv2-header-actions">
+        <span className="pmv2-provider-chip">
+          <span className={`pmv2-status-dot ${kalshi.status === 'connected' ? 'ready' : 'warn'}`} />
+          Kalshi: {PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status || 'Unknown'}
+        </span>
+        <span className="pmv2-provider-chip">
+          <span className={`pmv2-status-dot ${getIbkrDotClass(ibkr.status)}`} />
+          IBKR: {PROVIDER_STATUS_LABEL[ibkr.status] || ibkr.status || 'Unknown'}
           <button
-            key={f.id}
             type="button"
-            className={`pmv2-sidebar-tab${active === f.id ? ' active' : ''}`}
-            onClick={() => onChange(f.id)}
+            className="pmv2-ibkr-refresh-btn"
+            onClick={onRefreshIbkr}
+            disabled={ibkrLoading}
+            title="Refresh IBKR contracts"
           >
-            {f.id === 'all' ? 'Signal Map' : 'Macro Coverage'}
+            {ibkrLoading ? '…' : '↺'}
           </button>
-        ))}
+        </span>
       </div>
-      <div className="pmv2-sidebar-kpis">
-        <MiniKpi label="Signals" value={rows.length} sub={`+${mapped.length} today`} />
-        <MiniKpi label="Mapped" value={mapped.length} sub={`${rows.length ? ((mapped.length / rows.length) * 100).toFixed(1) : '0.0'}%`} tone="positive" />
-        <MiniKpi label="Unmapped" value={unmapped.length} sub={`${rows.length ? ((unmapped.length / rows.length) * 100).toFixed(1) : '0.0'}%`} tone="warn" />
-        <MiniKpi label="Best Edge" value={bestEdge == null ? 'n/a' : `${(bestEdge * 100).toFixed(1)}%`} sub="Avg 7.1%" />
-      </div>
-      <div className="pmv2-sidebar-tools">
-        <input
-          className="pmv2-search"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search signals or variables..."
-        />
-        <button type="button" className="pmv2-filter-button" title="Filter controls">≡</button>
-      </div>
-      {error && (
-        <div className="pmv2-signal-error">
-          {error}
-          <button type="button" onClick={onRetry}>Retry</button>
-        </div>
-      )}
-      {loading && rows.length === 0 ? (
-        <div className="pmv2-empty pmv2-signal-empty">Loading signal map...</div>
-      ) : (
-        <div className="pmv2-signal-groups">
-          {Object.entries(grouped).map(([group, groupRows]) => (
-            <div className="pmv2-signal-group" key={group}>
-              <div className="pmv2-signal-group-title">
-                <span>{group.toUpperCase()}</span>
-                <span>{groupRows.length} mapped</span>
-              </div>
-              {groupRows.map(row => (
-                <SignalMapRow
-                  key={row.symbol}
-                  row={row}
-                  active={selectedSignal?.symbol === row.symbol}
-                  onClick={() => onSelectSignal(row)}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-      <label className="pmv2-unmapped-toggle">
-        <span>Show unmapped only</span>
-        <input type="checkbox" checked={showUnmappedOnly} onChange={e => setShowUnmappedOnly(e.target.checked)} />
-      </label>
-    </aside>
+    </header>
   );
 }
 
-function MiniKpi({ label, value, sub, tone }) {
+
+function normalizeTrendLabel(raw) {
+  if (!raw) return null;
+  const u = raw.toUpperCase();
+  if (u === 'BULLISH' || u === 'LONG') return 'BULLISH';
+  if (u === 'BEARISH' || u === 'SHORT') return 'BEARISH';
+  if (u === 'NEUTRAL') return 'NEUTRAL';
+  return null;
+}
+
+function MscSignalBadge({ value }) {
+  if (!value) return <span className="msc-dash">–</span>;
+  const cls = value === 'BULLISH' ? 'bull' : value === 'BEARISH' ? 'bear' : 'neutral';
+  const short = value === 'BULLISH' ? 'Bull' : value === 'BEARISH' ? 'Bear' : 'Neut';
+  return <span className={`msc-signal-badge msc-signal-badge-${cls}`}>{short}</span>;
+}
+
+function TradePlanCard({ selectedSignal, selectedEvent, settings }) {
+  const tradePlan = useMemo(
+    () => selectedSignal && selectedEvent ? calculatePositionSize(selectedSignal, selectedEvent, settings) : null,
+    [selectedSignal, selectedEvent, settings]
+  );
+
+  if (!selectedSignal) {
+    return (
+      <div className="tp-card tp-card-empty">
+        <div className="tp-empty-icon">◈</div>
+        <div className="tp-empty-title">Select a signal</div>
+        <div className="tp-empty-sub">Choose a signal from the left panel to view related contracts and generate a trade plan.</div>
+      </div>
+    );
+  }
+
+  const trade  = normalizeTrendLabel(selectedSignal.trackerTrend);
+  const trend  = normalizeTrendLabel(selectedSignal.riskTrend);
+  const tail   = normalizeTrendLabel(selectedSignal.macroSide || selectedSignal.callSide);
+  const isLong = isLongTrend(selectedSignal.trend);
+
   return (
-    <div className={`pmv2-mini-kpi ${tone || ''}`}>
-      <div className="pmv2-mini-kpi-label">{label}</div>
-      <div className="pmv2-mini-kpi-value">{value}</div>
-      <div className="pmv2-mini-kpi-sub">{sub}</div>
+    <div className="tp-card">
+      {/* ── 1. Signal block ─────────────────────────────── */}
+      <div className="tp-section">
+        <div className="tp-section-label">Selected Signal</div>
+        <div className="tp-signal-row">
+          <div className="tp-signal-main">
+            <span className="tp-signal-ticker">{selectedSignal.symbol}</span>
+            <span className="tp-signal-name">{selectedSignal.label}</span>
+            <span className={`tp-dir-badge ${isLong ? 'long' : 'short'}`}>
+              {isLong ? '▲ Long' : '▼ Short'}
+            </span>
+          </div>
+          <div className="tp-signal-meta">
+            <span className="tp-meta-chip">{selectedSignal.group}</span>
+            <span className="tp-meta-chip">Score {selectedSignal.score ?? '—'}</span>
+          </div>
+        </div>
+        <div className="tp-signal-cols">
+          <TpStatBox label="Risk Range">
+            {selectedSignal.lrr != null || selectedSignal.hrr != null
+              ? `${formatSignalLevel(selectedSignal, selectedSignal.lrr)} – ${formatSignalLevel(selectedSignal, selectedSignal.hrr)}`
+              : <span className="tp-muted">—</span>}
+            {selectedSignal.price != null && (
+              <div className="tp-stat-sub">Current: {formatSignalLevel(selectedSignal, selectedSignal.price)}</div>
+            )}
+          </TpStatBox>
+          <TpStatBox label="Trade">
+            <MscSignalBadge value={trade} />
+          </TpStatBox>
+          <TpStatBox label="Trend">
+            <MscSignalBadge value={trend} />
+          </TpStatBox>
+          <TpStatBox label="Tail">
+            <MscSignalBadge value={tail} />
+          </TpStatBox>
+        </div>
+      </div>
+
+      <div className="tp-divider" />
+
+      {/* ── 2. Contract block ──────────────────────────── */}
+      {!selectedEvent ? (
+        <div className="tp-prompt">
+          <span className="tp-prompt-icon">↑</span>
+          Select a contract above to generate a trade plan.
+        </div>
+      ) : (
+        <>
+          <div className="tp-section">
+            <div className="tp-section-label">Selected Contract</div>
+            <div className="tp-contract-title">{selectedEvent.question || selectedEvent.event_title}</div>
+            <div className="tp-contract-meta">
+              <span className="tp-meta-chip">{selectedEvent.venue || 'Kalshi'}</span>
+              {selectedEvent.settle && selectedEvent.settle !== '—' && (
+                <span className="tp-meta-chip">Settles {formatDateShort(selectedEvent.settle)}</span>
+              )}
+              {selectedEvent.status && (
+                <span className="tp-meta-chip">{selectedEvent.status}</span>
+              )}
+            </div>
+            <div className="tp-signal-cols" style={{ marginTop: 8 }}>
+              <TpStatBox label="Yes Price">
+                {selectedEvent.yes != null ? fmtPct(selectedEvent.yes) : <span className="tp-muted">—</span>}
+              </TpStatBox>
+              <TpStatBox label="No Price">
+                {selectedEvent.no != null ? fmtPct(selectedEvent.no) : <span className="tp-muted">—</span>}
+              </TpStatBox>
+              <TpStatBox label="Implied Prob">
+                {selectedEvent.yes != null ? fmtPct(selectedEvent.yes) : <span className="tp-muted">—</span>}
+              </TpStatBox>
+              <TpStatBox label="Model Prob">
+                {selectedEvent.myProb != null
+                  ? <span className="tp-model-prob">{fmtPct(selectedEvent.myProb)}</span>
+                  : <span className="tp-muted tp-signal-only">signal-only</span>}
+              </TpStatBox>
+            </div>
+          </div>
+
+          <div className="tp-divider" />
+
+          {/* ── 3. Recommendation block ─────────────────── */}
+          <div className="tp-section">
+            <div className="tp-section-label">Recommendation</div>
+            {tradePlan && (
+              <div className={`tp-rec-box ${tradePlan.suggestedSize > 0 ? (tradePlan.recommendedSide === 'YES' ? 'yes' : 'no') : 'neutral'}`}>
+                <div className="tp-rec-header">
+                  <span className={`tp-rec-side ${tradePlan.recommendedSide === 'YES' ? 'yes' : 'no'}`}>
+                    Buy {tradePlan.recommendedSide}
+                  </span>
+                  <span className={`tp-conf-badge ${tradePlan.confidence.toLowerCase()}`}>
+                    {tradePlan.confidence} Confidence
+                  </span>
+                  {tradePlan.isSignalOnly && (
+                    <span className="tp-signal-only-tag">Signal-Only</span>
+                  )}
+                </div>
+                <div className="tp-rec-grid">
+                  <TpStatBox label="Suggested Size">
+                    <strong>{tradePlan.suggestedSize.toLocaleString()}</strong>
+                    <div className="tp-stat-sub">contracts</div>
+                  </TpStatBox>
+                  <TpStatBox label="Max Size">
+                    <strong>{tradePlan.maxSize.toLocaleString()}</strong>
+                    <div className="tp-stat-sub">contracts</div>
+                  </TpStatBox>
+                  <TpStatBox label="Est. Cost">
+                    <strong>{fmt$(tradePlan.estimatedCost)}</strong>
+                  </TpStatBox>
+                  <TpStatBox label="Expected Value">
+                    <strong className={tradePlan.expectedValue >= 0 ? 'tp-pos' : 'tp-neg'}>
+                      {fmt$(tradePlan.expectedValue)}
+                    </strong>
+                  </TpStatBox>
+                </div>
+                <div className="tp-rec-explanation">{tradePlan.explanation}</div>
+              </div>
+            )}
+          </div>
+
+          <div className="tp-divider" />
+
+          {/* ── 4. IBKR Order Fields block ─────────────── */}
+          <div className="tp-section">
+            <div className="tp-section-label">IBKR Order Fields</div>
+            <div className="tp-ibkr-grid">
+              <TpFieldRow label="Contract / Event" value={selectedEvent.question || selectedEvent.event_title || '—'} fullWidth />
+              <TpFieldRow label="Venue" value={selectedEvent.venue || 'Kalshi / IBKR ForecastEx'} />
+              <TpFieldRow label="Side" value={tradePlan ? `Buy ${tradePlan.recommendedSide}` : '—'} highlight />
+              <TpFieldRow label="Quantity" value={tradePlan ? `${tradePlan.suggestedSize} contracts` : '—'} />
+              <TpFieldRow label="Limit Price" value={
+                tradePlan && tradePlan.recommendedSide === 'YES' && selectedEvent.yes != null
+                  ? fmtPct(selectedEvent.yes)
+                  : tradePlan && selectedEvent.no != null
+                    ? fmtPct(selectedEvent.no)
+                    : '—'
+              } />
+              <TpFieldRow label="Est. Cost" value={tradePlan ? fmt$(tradePlan.estimatedCost) : '—'} />
+              <TpFieldRow label="Worst-Case Loss" value={tradePlan ? fmt$(tradePlan.worstCaseLoss) : '—'} />
+              <TpFieldRow label="Notes" value={`Signal: ${selectedSignal.symbol} ${selectedSignal.trend || ''}. Enter via ForecastEx or Kalshi bridge. Confirm settlement source before entry.`} fullWidth />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function SignalMapRow({ row, active, onClick }) {
-  const edge = row.score ? Math.min(row.score / 1000, 0.16) : null;
-
+function TpStatBox({ label, children }) {
   return (
-    <button type="button" className={`pmv2-signal-map-row${active ? ' active' : ''}`} onClick={onClick}>
-      <span className={`pmv2-signal-dot ${getTrendClass(row.trend)}`} />
-      <span className="pmv2-signal-row-main">
-        <strong>{row.label}</strong>
-        <small>{row.symbol} · {row.date || 'latest'}</small>
-      </span>
-      <span className="pmv2-signal-row-meta">
-        <strong>{row.sources?.length || 0}</strong>
-        <small>{edge == null ? '--' : `${(edge * 100).toFixed(1)}%`}</small>
-      </span>
-    </button>
+    <div className="tp-stat-box">
+      <div className="tp-stat-label">{label}</div>
+      <div className="tp-stat-value">{children}</div>
+    </div>
   );
 }
 
-function SelectedSignalHeroV2({ signal, selectedEvent, events }) {
-  const matched = events.filter(event => event.category === selectedEvent?.category || event.question?.toLowerCase().includes(signal?.label?.toLowerCase() || ''));
-  const confidence = signal?.score ? Math.min(99, Math.round(signal.score)) : 80;
-  const direction = getDirectionLabel(signal?.trend, selectedEvent?.side);
-  const currentLevel = inferCurrentLevel(signal, selectedEvent);
-  const boundaries = buildBoundaryLabels(selectedEvent, signal);
-
+function TpFieldRow({ label, value, highlight, fullWidth }) {
   return (
-    <section className="pmv2-selected">
-      <div className="pmv2-selected-top">
-        <div>
-          <div className="pmv2-selected-label">Selected Signal</div>
-          <h2>{signal?.label || selectedEvent?.category || 'Market Signal'} {selectedEvent?.question ? '' : 'Signal'}</h2>
-          <p>{selectedEvent?.question || 'Select a signal to inspect mapped prediction markets.'}</p>
-        </div>
-        <div className="pmv2-selected-stats">
-          <HeroStat label="Horizon" value={formatDateShort(selectedEvent?.settle) || '1Y'} />
-          <HeroStat label="Direction" value={direction} tone={direction === 'Bearish' ? 'negative' : 'positive'} />
-          <HeroStat label="Confidence" value={`High (${confidence})`} tone="positive" />
-          <HeroStat label="Matched Markets" value={matched.length || events.length || 0} />
-          <HeroStat label="Unmapped" value={Math.max(0, events.length - matched.length)} />
-        </div>
-      </div>
-      <div className="pmv2-detail-grid">
-        <DetailCard label="Exact Threshold" value={boundaries.exact} note="Settlement at or above" />
-        <DetailCard label="Boundary Markets (Matched)" value={boundaries.range} note={boundaries.note} wide />
-        <DetailCard label="Current Index" value={currentLevel} note={`as of ${new Date().toLocaleDateString()}`} />
-      </div>
-      <div className="pmv2-signal-note">
-        <span>i</span>
-        Model projects {signal?.label || 'the selected signal'} to finish {direction.toLowerCase()} by settlement. Calibrated using macro regime, earnings trend, rates path, and momentum.
-      </div>
-    </section>
+    <div className={`tp-field-row${fullWidth ? ' full' : ''}`}>
+      <span className="tp-field-label">{label}</span>
+      <span className={`tp-field-value${highlight ? ' highlight' : ''}`}>{value}</span>
+    </div>
   );
 }
 
@@ -2433,53 +2455,214 @@ function DetailCard({ label, value, note, wide }) {
   );
 }
 
-function ContractMappingTableV2({ events, selectedId, onSelect, settings, loading }) {
-  const rows = events.slice(0, 7);
+// ─── Contract Map helpers ────────────────────────────────────────────────────
+
+function fmtCents(price) {
+  if (price == null || price === '') return '–';
+  const c = Math.round(Number(price) * 100);
+  return `${c}¢`;
+}
+
+function fmtCentsDelta(delta) {
+  if (delta == null || delta === 0) return { text: '0¢', cls: 'cmap-delta-flat' };
+  const c = Math.round(Number(delta) * 100);
+  if (c > 0) return { text: `+${c}¢`, cls: 'cmap-delta-up' };
+  return { text: `${c}¢`, cls: 'cmap-delta-dn' };
+}
+
+function fmtVolume(n) {
+  const v = Number(n);
+  if (!v || Number.isNaN(v)) return '–';
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return v.toLocaleString();
+}
+
+function fmtTimeAgo(dateStr) {
+  if (!dateStr) return '–';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (diff < 0) return '–';
+  const d = Math.floor(diff / 86_400_000);
+  const h = Math.floor((diff % 86_400_000) / 3_600_000);
+  const m = Math.floor((diff % 3_600_000) / 60_000);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function fmtExpiryDate(dateStr) {
+  if (!dateStr) return '–';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '–';
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(2);
+  return `${mm}/${dd}/${yy}`;
+}
+
+const CMAP_COLS = [
+  { id: 'market',   label: 'MARKET',   sortable: false, align: 'left'  },
+  { id: 'delta',    label: '24H Δ',    sortable: true,  align: 'right' },
+  { id: 'bid',      label: 'BID',      sortable: true,  align: 'right' },
+  { id: 'ask',      label: 'ASK',      sortable: true,  align: 'right' },
+  { id: 'spread',   label: 'SPREAD',   sortable: true,  align: 'right' },
+  { id: 'vol24h',   label: '24H',      sortable: true,  align: 'right' },
+  { id: 'total',    label: 'TOTAL',    sortable: true,  align: 'right' },
+  { id: 'oi',       label: 'OI',       sortable: true,  align: 'right' },
+  { id: 'inc',      label: 'INC',      sortable: false, align: 'right' },
+  { id: 'category', label: 'CATEGORY', sortable: true,  align: 'left'  },
+  { id: 'added',    label: 'ADDED',    sortable: true,  align: 'right' },
+  { id: 'expires',  label: 'EXPIRES',  sortable: true,  align: 'right' },
+];
+
+function getEventSortVal(ev, colId) {
+  switch (colId) {
+    case 'delta':    return ev.price_change_24h ?? 0;
+    case 'bid':      return Number(ev.yes_bid ?? ev.yes ?? 0);
+    case 'ask':      return Number(ev.yes_ask ?? 0);
+    case 'spread':   return Number(ev.spread ?? 0);
+    case 'vol24h':   return Number(ev.volume ?? 0);
+    case 'total':    return Number(ev.total_volume ?? ev.open_interest ?? 0);
+    case 'oi':       return Number(ev.open_interest ?? ev.liquidity ?? 0);
+    case 'added':    return ev.updated_at ? new Date(ev.updated_at).getTime() : 0;
+    case 'expires':  return ev.expiration_time ? new Date(ev.expiration_time).getTime() : Infinity;
+    case 'category': return ev.category ?? '';
+    default:         return 0;
+  }
+}
+
+const CMAP_PAGE_SIZE = 20;
+
+function ContractMapCard({ events, selectedId, onSelect, selectedSignal, onClearSignal, settings, loading }) {
+  const [sortCol, setSortCol] = useState('oi');
+  const [sortDir, setSortDir] = useState('desc');
+  const [page, setPage] = useState(0);
+
+  const sorted = useMemo(() => {
+    const arr = [...events];
+    arr.sort((a, b) => {
+      const av = getEventSortVal(a, sortCol);
+      const bv = getEventSortVal(b, sortCol);
+      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+    return arr;
+  }, [events, sortCol, sortDir]);
+
+  // Reset to page 0 when sort or filter changes
+  useEffect(() => { setPage(0); }, [sortCol, sortDir, selectedSignal?.symbol]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / CMAP_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const rows = sorted.slice(safePage * CMAP_PAGE_SIZE, (safePage + 1) * CMAP_PAGE_SIZE);
+
+  function handleSort(colId) {
+    if (!CMAP_COLS.find(c => c.id === colId)?.sortable) return;
+    if (sortCol === colId) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(colId); setSortDir('desc'); }
+  }
+
+  const headerLabel = selectedSignal
+    ? `${events.length} ${selectedSignal.symbol} contract${events.length !== 1 ? 's' : ''}`
+    : `${events.length} contracts`;
 
   return (
-    <div className="pmv2-card pmv2-mapping-card">
-      <div className="pmv2-card-header">
-        <div className="pmv2-card-title">Contract Mapping Table</div>
-        <span>{rows.length} matches</span>
+    <div className="pmv2-card cmap-card">
+      <div className="cmap-header">
+        <div className="cmap-header-left">
+          <div className="pmv2-card-title">Contract Map</div>
+          {selectedSignal && (
+            <span className="cmap-filter-pill">
+              Filtered: {selectedSignal.symbol}
+              <button type="button" className="cmap-filter-clear" onClick={onClearSignal} title="Clear filter">×</button>
+            </span>
+          )}
+        </div>
+        <span className="cmap-count">{headerLabel}</span>
       </div>
+
       {loading ? (
-        <div className="pmv2-empty">Loading mapped contracts...</div>
-      ) : rows.length === 0 ? (
-        <div className="pmv2-empty">No mapped contracts available.</div>
+        <div className="pmv2-empty">Loading contracts…</div>
+      ) : events.length === 0 ? (
+        <div className="pmv2-empty">
+          {selectedSignal
+            ? `No contracts mapped to ${selectedSignal.symbol}.`
+            : 'No contracts available.'}
+        </div>
       ) : (
-        <div className="pmv2-table-wrap">
-          <table className="pmv2-table pmv2-mapping-table">
+        <div className="cmap-table-scroll">
+          <table className="cmap-table">
             <thead>
               <tr>
-                <th>Event (Kalshi)</th>
-                <th>Match Type</th>
-                <th>Market</th>
-                <th>Model</th>
-                <th>Edge</th>
-                <th>Recommended Side</th>
-                <th>Size</th>
+                {CMAP_COLS.map(col => (
+                  <th
+                    key={col.id}
+                    className={`cmap-th${col.align === 'right' ? ' cmap-th-r' : ''}${col.sortable ? ' cmap-th-sort' : ''}`}
+                    onClick={() => handleSort(col.id)}
+                  >
+                    {col.label}
+                    {col.sortable && sortCol === col.id && (
+                      <span className="cmap-sort-icon">{sortDir === 'desc' ? ' ▼' : ' ▲'}</span>
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((event, index) => {
-                const edge = getEventEdge(event, settings);
-                const side = getRecommendedSide(event, settings);
+              {rows.map((ev, i) => {
+                const isSelected = getEventKey(ev) === selectedId;
+                const delta = fmtCentsDelta(ev.price_change_24h);
+                const matchType = selectedSignal ? getMatchType(ev, selectedSignal) : null;
                 return (
                   <tr
-                    key={event.id || event.question || index}
-                    className={`pmv2-row${getEventKey(event) === selectedId ? ' selected' : ''}`}
-                    onClick={() => onSelect(getEventKey(event))}
+                    key={ev.id || ev.question || i}
+                    className={`cmap-row${isSelected ? ' cmap-row-selected' : ''}`}
+                    onClick={() => onSelect(getEventKey(ev))}
                   >
-                    <td>
-                      <div className="pmv2-event-name">{event.question}</div>
-                      <small>{event.category}</small>
+                    {/* MARKET */}
+                    <td className="cmap-td cmap-td-market">
+                      <div className="cmap-market-name">
+                        {ev.contract_title || ev.question || ev.event_title || '—'}
+                      </div>
+                      <div className="cmap-market-sub">
+                        {ev.event_title && ev.contract_title && ev.event_title !== ev.contract_title
+                          ? ev.event_title
+                          : (ev.venue || 'Kalshi')}
+                        {matchType && (
+                          <span className={`cmap-match-tag ${matchType.toLowerCase()}`}>{matchType}</span>
+                        )}
+                      </div>
                     </td>
-                    <td><span className={`pmv2-match-pill ${index === 0 ? 'exact' : index < 3 ? 'boundary' : 'tail'}`}>{index === 0 ? 'Exact' : index < 3 ? 'Boundary' : 'Tail'}</span></td>
-                    <td>{formatMarketBand(event, index)}</td>
-                    <td>{event.myProb != null ? `${(event.myProb * 100).toFixed(1)}%` : '--'}</td>
-                    <td><span className={edge >= 0 ? 'pmv2-edge-pos' : 'pmv2-edge-neg'}>{edge == null ? '--' : `${edge >= 0 ? '+' : ''}${(edge * 100).toFixed(1)}%`}</span></td>
-                    <td><span className={`pmv2-side-call ${side.toLowerCase()}`}>{side === 'Yes' ? 'Buy YES' : 'Sell NO'}</span></td>
-                    <td>{event.sizeUsd > 0 ? `$${event.sizeUsd.toLocaleString()}` : `$${((index + 1) * 1000).toLocaleString()}`}</td>
+                    {/* 24H Δ */}
+                    <td className={`cmap-td cmap-td-r ${delta.cls}`}>{delta.text}</td>
+                    {/* BID */}
+                    <td className="cmap-td cmap-td-r cmap-price">
+                      {fmtCents(ev.yes_bid ?? ev.yes)}
+                    </td>
+                    {/* ASK */}
+                    <td className="cmap-td cmap-td-r cmap-price">
+                      {fmtCents(ev.yes_ask)}
+                    </td>
+                    {/* SPREAD */}
+                    <td className="cmap-td cmap-td-r cmap-muted">
+                      {fmtCents(ev.spread)}
+                    </td>
+                    {/* 24H vol */}
+                    <td className="cmap-td cmap-td-r">{fmtVolume(ev.volume)}</td>
+                    {/* TOTAL */}
+                    <td className="cmap-td cmap-td-r">{fmtVolume(ev.total_volume ?? ev.open_interest)}</td>
+                    {/* OI */}
+                    <td className="cmap-td cmap-td-r cmap-oi">{fmtVolume(ev.open_interest ?? ev.liquidity)}</td>
+                    {/* INC */}
+                    <td className="cmap-td cmap-td-r cmap-muted">
+                      {ev.min_tick != null ? fmtCents(ev.min_tick) : '–'}
+                    </td>
+                    {/* CATEGORY */}
+                    <td className="cmap-td cmap-td-cat">{ev.category || '–'}</td>
+                    {/* ADDED */}
+                    <td className="cmap-td cmap-td-r cmap-muted">{fmtTimeAgo(ev.updated_at)}</td>
+                    {/* EXPIRES */}
+                    <td className="cmap-td cmap-td-r cmap-muted">{fmtExpiryDate(ev.expiration_time || ev.close_time)}</td>
                   </tr>
                 );
               })}
@@ -2487,7 +2670,14 @@ function ContractMappingTableV2({ events, selectedId, onSelect, settings, loadin
           </table>
         </div>
       )}
-      <div className="pmv2-card-footnote">Edge = model probability - implied price</div>
+
+      {totalPages > 1 && (
+        <div className="pmv2-pagination">
+          <button type="button" className="pmv2-page-btn" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0}>← Prev</button>
+          <span className="pmv2-page-label">{safePage + 1} / {totalPages}</span>
+          <button type="button" className="pmv2-page-btn" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage === totalPages - 1}>Next →</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2655,6 +2845,155 @@ function buildAssetRows(risk, settings) {
   ];
 }
 
+// ─── Ticker alias map for contract→signal matching ───────────────────────────
+
+const TICKER_ALIASES = {
+  BTC:    ['BTC', 'Bitcoin', 'XBT', 'KXBTC', 'bitcoin'],
+  ETH:    ['ETH', 'Ethereum', 'ether', 'ethereum'],
+  SOL:    ['SOL', 'Solana', 'solana'],
+  XRP:    ['XRP', 'Ripple', 'ripple'],
+  SPX:    ['SPX', 'S&P', 'SP500', 'S&P500', 'S&P 500', 'ES', 'SPXW'],
+  COMPQ:  ['COMPQ', 'NASDAQ', 'Nasdaq', 'NDX', 'QQQ', 'NQ'],
+  QQQ:    ['QQQ', 'NASDAQ', 'Nasdaq', 'NDX', 'NQ'],
+  IWM:    ['IWM', 'Russell', 'RUT', 'Russell 2000'],
+  VIX:    ['VIX', 'volatility', 'Volatility', 'CBOE VIX'],
+  GOLD:   ['GOLD', 'Gold', 'GC', 'GLD', 'XAUUSD'],
+  SILVER: ['SILVER', 'Silver', 'SI', 'SLV', 'XAGUSD'],
+  WTIC:   ['WTIC', 'WTI', 'CL', 'oil', 'crude', 'Crude Oil', 'OIL'],
+  BRENT:  ['BRENT', 'Brent', 'BZ', 'Brent Crude'],
+  NATGAS: ['NATGAS', 'NatGas', 'Natural Gas', 'NG', 'nat gas'],
+  COPPER: ['COPPER', 'Copper', 'HG'],
+  DXY:    ['DXY', 'Dollar Index', 'USD Index', 'USDX'],
+  USD:    ['USD', 'Dollar', 'DXY', 'dollar'],
+  UST10Y: ['10Y', '10-Year', 'UST10Y', 'TNX', '10yr', 'TMUBMUSD10Y'],
+  UST2Y:  ['2Y', '2-Year', 'UST2Y', '2yr'],
+  UST30Y: ['30Y', '30-Year', 'UST30Y', '30yr'],
+  TLT:    ['TLT', '20Y Treasury', '20-Year', 'TLT'],
+  'EUR/USD': ['EUR/USD', 'EURUSD', 'Euro', 'EUR'],
+  'GBP/USD': ['GBP/USD', 'GBPUSD', 'Pound', 'GBP'],
+  'USD/YEN':  ['USD/YEN', 'USDJPY', 'Yen', 'JPY'],
+};
+
+function getContractsForSignal(signal, allEvents) {
+  if (!signal) {
+    return [...allEvents].sort((a, b) => {
+      const la = Number(a.liquidity ?? a.volume ?? a.open_interest ?? 0);
+      const lb = Number(b.liquidity ?? b.volume ?? b.open_interest ?? 0);
+      return lb - la;
+    });
+  }
+  const ticker = signal.symbol;
+  const rawAliases = TICKER_ALIASES[ticker] || [ticker];
+  const aliases = [...new Set([ticker, signal.label, ...rawAliases].filter(Boolean))];
+  const aliasesLower = aliases.map(a => a.toLowerCase());
+
+  return allEvents
+    .filter(event => {
+      if (event.mappedSignalId === ticker) return true;
+      const ut = (event.underlyingTicker || event.underlying || '').toUpperCase();
+      if (ut && aliases.some(a => a.toUpperCase() === ut)) return true;
+      if (ut && ut.includes(ticker.toUpperCase())) return true;
+      const text = [
+        event.question,
+        event.eventTitle,
+        event.event_title,
+        event.category,
+        event.underlying,
+      ].filter(Boolean).join(' ').toLowerCase();
+      return aliasesLower.some(a => text.includes(a));
+    })
+    .sort((a, b) => {
+      const ea = getEventEdge(a) ?? -99;
+      const eb = getEventEdge(b) ?? -99;
+      return eb - ea;
+    });
+}
+
+function getMatchType(event, signal) {
+  if (!signal) return 'Unmapped';
+  const ticker = signal.symbol;
+  const aliases = TICKER_ALIASES[ticker] || [ticker];
+  const ut = (event.underlyingTicker || event.underlying || '').toUpperCase();
+  if (ut === ticker.toUpperCase() || aliases.some(a => a.toUpperCase() === ut)) return 'Exact';
+  const text = [event.question, event.eventTitle, event.event_title].filter(Boolean).join(' ').toLowerCase();
+  if (text.includes('range') || text.includes('above') || text.includes('below') || text.includes('between')) return 'Boundary';
+  if (text.includes('tail') || text.includes('extreme') || text.includes('crash') || text.includes('surge')) return 'Tail';
+  return 'Related';
+}
+
+const DEFAULT_RISK_SETTINGS = {
+  maxRiskPerTrade: 500,
+  maxPortfolioRisk: 0.05,
+  maxThemeExposure: 2000,
+};
+
+function calculatePositionSize(signal, event, riskSettings = DEFAULT_SETTINGS) {
+  const edge = getEventEdge(event, riskSettings) ?? 0;
+  const maxRisk = riskSettings.maxRiskPerBet ?? riskSettings.maxRiskPerTrade ?? 500;
+  const portfolioEquity = riskSettings.portfolioEquity ?? 100000;
+  const side = getRecommendedSide(event, riskSettings);
+  const price = side === 'Yes' ? (Number(event.yes) || 0.5) : (Number(event.no) || 0.5);
+  const pm = event.payoutMultiplier || 1;
+  const hasModel = event.myProb != null;
+
+  if (!event || edge <= 0) {
+    return {
+      recommendedSide: inferSideFromSignal(signal, event),
+      suggestedSize: 0,
+      maxSize: 0,
+      estimatedCost: 0,
+      worstCaseLoss: 0,
+      expectedValue: 0,
+      confidence: 'Low',
+      explanation: hasModel
+        ? 'No positive edge detected after fees and slippage. Hold off or wait for better pricing.'
+        : 'No model probability available. Recommendation derived from signal direction only — treat as indicative.',
+      isSignalOnly: !hasModel,
+      edge,
+    };
+  }
+
+  const scoreNorm = Math.min(1, Math.max(0, (signal?.score ?? 50) / 130));
+  const edgeMultiplier = Math.min(3, Math.max(0.5, edge / 0.05));
+  const baseRisk = maxRisk * scoreNorm * edgeMultiplier;
+  const cappedRisk = Math.min(baseRisk, maxRisk, portfolioEquity * (riskSettings.maxPmRiskPct ?? 0.05));
+
+  const contracts = price > 0 ? Math.max(0, Math.floor(cappedRisk / (price * pm))) : 0;
+  const maxContracts = price > 0 ? Math.max(0, Math.floor(maxRisk / (price * pm))) : 0;
+  const estimatedCost = contracts * price * pm;
+  const worstCaseLoss = estimatedCost;
+
+  const evPer = side === 'Yes'
+    ? evYesPerContract(event.myProb ?? 0.5, event.yes || 0.5, pm)
+    : evNoPerContract(event.myProb ?? 0.5, event.no || 0.5, pm);
+  const expectedValue = evPer * contracts;
+
+  const confidence = edge > 0.1 ? 'High' : edge > 0.05 ? 'Medium' : 'Low';
+  const explanation = hasModel
+    ? `Model probability ${fmtPct(event.myProb)} vs. implied ${fmtPct(price)}. Signal score ${signal?.score ?? '--'}/100. Edge: ${fmtEdge(edge)}.`
+    : `Signal-only estimate. No model probability. Direction derived from ${signal?.trend || 'signal'} trend — treat as indicative.`;
+
+  return {
+    recommendedSide: side.toUpperCase(),
+    suggestedSize: contracts,
+    maxSize: maxContracts,
+    estimatedCost,
+    worstCaseLoss,
+    expectedValue,
+    confidence,
+    explanation,
+    edge,
+    isSignalOnly: !hasModel,
+  };
+}
+
+function inferSideFromSignal(signal, event) {
+  const trend = signal?.trend;
+  if (isLongTrend(trend)) return 'YES';
+  if (isShortTrend(trend)) return 'NO';
+  return 'YES';
+}
+
 function getDirectionLabel(trend, side) {
   if (['BEARISH', 'SHORT'].includes(trend) || side === 'No') return 'Bearish';
   if (trend === 'NEUTRAL') return 'Neutral';
@@ -2698,8 +3037,7 @@ function formatMarketBand(event, index) {
 
 // ─── Main Component (v2) ──────────────────────────────────────────────────────
 
-export default function PredictionMarkets({ onApiStatusChange }) {
-  const [filter, setFilter] = useState('all');
+export default function PredictionMarkets({ onApiStatusChange, onClose }) {
   const [selectedId, setSelectedId] = useState(null);
   const [contracts, setContracts] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -2711,13 +3049,10 @@ export default function PredictionMarkets({ onApiStatusChange }) {
   const [loadError, setLoadError] = useState(null);
   const [marketEvents, setMarketEvents] = useState([]);
   const [providers, setProviders] = useState(null);
-  const [ibkrRefreshing, setIbkrRefreshing] = useState(false);
-  const [lastIbkrUpdate, setLastIbkrUpdate] = useState(null);
   const [ingestError, setIngestError] = useState(null);
   const [signalsLoading, setSignalsLoading] = useState(true);
   const [signalsError, setSignalsError] = useState(null);
   const [selectedSignalSymbol, setSelectedSignalSymbol] = useState(null);
-  const [utcTime, setUtcTime] = useState('');
   const [signalData, setSignalData] = useState({
     riskRanges: {},
     bitcoinSnapshot: null,
@@ -2725,6 +3060,8 @@ export default function PredictionMarkets({ onApiStatusChange }) {
     macroSnapshot: null,
     callSnapshot: null,
   });
+
+  const [ibkrLoading, setIbkrLoading] = useState(false);
 
   const loadIngest = useCallback(async (opts = {}) => {
     setIngestLoading(true);
@@ -2737,9 +3074,6 @@ export default function PredictionMarkets({ onApiStatusChange }) {
       const rows = data.dashboardEvents || data.events || [];
       setMarketEvents(rows);
       setProviders(data.providers || null);
-      if (data.providers?.ibkr?.last_success_at) {
-        setLastIbkrUpdate(data.providers.ibkr.last_success_at);
-      }
     } catch (err) {
       console.error('[PM] ingest load error:', err);
       setIngestError(err.message);
@@ -2748,25 +3082,20 @@ export default function PredictionMarkets({ onApiStatusChange }) {
     }
   }, []);
 
-  const handleRefreshIbkr = useCallback(async () => {
-    setIbkrRefreshing(true);
-    setIngestError(null);
+  const loadIbkr = useCallback(async () => {
+    setIbkrLoading(true);
     try {
       const data = await predictionMarketsIngestService.refreshIbkr();
-      const rows = data.dashboardEvents || data.events || [];
-      setMarketEvents(rows);
-      setProviders(data.providers || null);
-      const ts = data.providers?.ibkr?.last_success_at || new Date().toISOString();
-      setLastIbkrUpdate(ts);
+      const newEvents = data.dashboardEvents || data.events || [];
+      setMarketEvents(prev => {
+        const existingKeys = new Set(prev.map(e => getEventKey(e)));
+        return [...prev, ...newEvents.filter(e => !existingKeys.has(getEventKey(e)))];
+      });
+      if (data.providers) setProviders(data.providers);
     } catch (err) {
-      console.error('[PM] IBKR refresh error:', err);
-      setIngestError(err.response?.data?.error || err.message);
-      try {
-        const status = await predictionMarketsIngestService.getProviderStatus();
-        setProviders(status.providers || null);
-      } catch (_) { /* ignore */ }
+      console.warn('[PM] IBKR refresh error:', err.message);
     } finally {
-      setIbkrRefreshing(false);
+      setIbkrLoading(false);
     }
   }, []);
 
@@ -2842,22 +3171,10 @@ export default function PredictionMarkets({ onApiStatusChange }) {
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadIngest(); }, [loadIngest]);
   useEffect(() => { loadSignalData(); }, [loadSignalData]);
+  useEffect(() => { loadIbkr(); }, [loadIbkr]);
   useEffect(() => {
     onApiStatusChange?.(apiStatus);
   }, [apiStatus, onApiStatusChange]);
-  useEffect(() => {
-    const updateUtc = () => {
-      setUtcTime(new Date().toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-        timeZone: 'UTC',
-      }));
-    };
-    updateUtc();
-    const timer = setInterval(updateUtc, 30000);
-    return () => clearInterval(timer);
-  }, []);
 
   const contractByQuestion = useMemo(() => {
     const map = new Map();
@@ -2884,22 +3201,7 @@ export default function PredictionMarkets({ onApiStatusChange }) {
     });
   }, [marketEvents, contractByQuestion]);
 
-  const filteredEvents = useMemo(
-    () => (filter === 'all' ? events : events.filter(e => e.category === filter)),
-    [events, filter]
-  );
-
-  const selectedEvent = useMemo(
-    () => filteredEvents.find(e => getEventKey(e) === selectedId) || filteredEvents[0] || null,
-    [filteredEvents, selectedId]
-  );
-
-  useEffect(() => {
-    if (filteredEvents.length && !filteredEvents.some(e => getEventKey(e) === selectedId)) {
-      setSelectedId(getEventKey(filteredEvents[0]));
-    }
-    if (!filteredEvents.length) setSelectedId(null);
-  }, [filteredEvents, selectedId]);
+  const filteredEvents = events;
 
   const signalContext = useMemo(() => normalizePredictionMarketSignals({
     riskRanges: signalData.riskRanges,
@@ -2907,32 +3209,51 @@ export default function PredictionMarkets({ onApiStatusChange }) {
     momoSnapshot: signalData.momoSnapshot,
     macroSnapshot: signalData.macroSnapshot,
     callSnapshot: signalData.callSnapshot,
-    activeCategory: filter,
-    selectedEvent,
-  }), [filter, selectedEvent, signalData]);
+    activeCategory: 'all',
+    // Do not pass selectedEvent — it causes inferPredictionSignalCategory to narrow
+    // the universe to a single category, hiding other asset classes in the sidebar.
+  }), [signalData]);
+
+  const macroSignalViews = useMemo(() => mapNormalizedRows(signalContext.rows || []), [signalContext]);
 
   const selectedSignal = useMemo(() => {
-    return signalContext.rows.find(row => row.symbol === selectedSignalSymbol) || signalContext.topRows[0] || null;
+    if (!selectedSignalSymbol) return null;
+    return signalContext.rows.find(row => row.symbol === selectedSignalSymbol) || null;
   }, [selectedSignalSymbol, signalContext]);
 
+  // If the active signal symbol is no longer present in the loaded data, clear it
   useEffect(() => {
-    if (!selectedSignalSymbol && signalContext.topRows[0]?.symbol) {
-      setSelectedSignalSymbol(signalContext.topRows[0].symbol);
-    }
     if (selectedSignalSymbol && !signalContext.rows.some(row => row.symbol === selectedSignalSymbol)) {
-      setSelectedSignalSymbol(signalContext.topRows[0]?.symbol || null);
+      setSelectedSignalSymbol(null);
     }
   }, [selectedSignalSymbol, signalContext]);
+
+  // Filter contract map to only contracts matching the selected signal
+  const mappedContracts = useMemo(
+    () => getContractsForSignal(selectedSignal, filteredEvents),
+    [selectedSignal, filteredEvents]
+  );
+
+  const selectedEvent = useMemo(
+    () => mappedContracts.find(e => getEventKey(e) === selectedId) || null,
+    [mappedContracts, selectedId]
+  );
+
+  // When selected signal changes, clear contract selection if it's no longer in mapped set
+  useEffect(() => {
+    if (selectedId && !mappedContracts.some(e => getEventKey(e) === selectedId)) {
+      setSelectedId(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSignal?.symbol]);
 
   return (
     <div className="pmv2-wrap pmv2-redesign">
       <PredictionMarketsHeaderV2
         providers={providers}
-        apiStatus={apiStatus}
-        utcTime={utcTime}
-        onRefreshIbkr={handleRefreshIbkr}
-        ibkrRefreshing={ibkrRefreshing}
-        lastIbkrUpdate={lastIbkrUpdate}
+        onClose={onClose}
+        ibkrLoading={ibkrLoading}
+        onRefreshIbkr={loadIbkr}
       />
       {(ingestError || loadError) && (
         <div className="pmv2-error-banner">
@@ -2943,41 +3264,32 @@ export default function PredictionMarkets({ onApiStatusChange }) {
         </div>
       )}
       <div className="pmv2-redesign-body">
-        <SignalMapSidebarV2
-          active={filter}
-          onChange={setFilter}
-          signalContext={signalContext}
+        <MacroSignalsCard
+          signals={macroSignalViews}
           selectedSignal={selectedSignal}
-          onSelectSignal={row => {
-            setSelectedSignalSymbol(row.symbol);
-            const matchingEvent = filteredEvents.find(event =>
-              event.question?.toLowerCase().includes(row.label.toLowerCase()) ||
-              event.question?.toLowerCase().includes(row.symbol.toLowerCase()) ||
-              event.category === row.group
-            );
-            if (matchingEvent) setSelectedId(getEventKey(matchingEvent));
+          onSelectSignal={view => {
+            if (!view?.canonical?.symbol) return;
+            setSelectedSignalSymbol(view.canonical.symbol);
           }}
           loading={signalsLoading}
           error={signalsError}
-          onRetry={loadSignalData}
-          events={filteredEvents}
+          onRefresh={loadSignalData}
         />
         <main className="pmv2-redesign-main">
-          <SelectedSignalHeroV2
-            signal={selectedSignal}
-            selectedEvent={selectedEvent}
-            events={filteredEvents}
+          <ContractMapCard
+            events={mappedContracts}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            selectedSignal={selectedSignal}
+            onClearSignal={() => setSelectedSignalSymbol(null)}
+            settings={settings}
+            loading={loading || ingestLoading}
           />
-          <div className="pmv2-work-grid">
-            <ContractMappingTableV2
-              events={filteredEvents}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              settings={settings}
-              loading={loading || ingestLoading}
-            />
-            <TradeTicketV2 event={selectedEvent} settings={settings} risk={risk} analytics={analytics} />
-          </div>
+          <TradePlanCard
+            selectedSignal={selectedSignal}
+            selectedEvent={selectedEvent}
+            settings={settings}
+          />
         </main>
       </div>
     </div>
