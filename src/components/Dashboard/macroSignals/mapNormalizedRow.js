@@ -1,4 +1,8 @@
 import { GROUP_TO_ASSET_CLASS } from './constants';
+import {
+  resolveReferencePrice,
+  computeRiskRangePercents,
+} from '../../../utils/riskRangePercents';
 
 export function isLongTrend(trend) {
   return ['BULLISH', 'LONG'].includes(trend);
@@ -42,7 +46,8 @@ export function normalizeTail(raw) {
 
 export function mapNormalizedRowToMacroSignal(row) {
   const assetClass = GROUP_TO_ASSET_CLASS[row.group] || 'EQ';
-  const side = isLongTrend(row.trend) ? 'long' : isShortTrend(row.trend) ? 'short' : null;
+  const trendForSide = row.riskTrend || row.trend;
+  const side = isLongTrend(trendForSide) ? 'long' : isShortTrend(trendForSide) ? 'short' : null;
 
   let trade = trackerToTrade(row.trackerTrend);
   if (!trade && side === 'long') trade = 'Buy';
@@ -67,7 +72,22 @@ export function mapNormalizedRowToMacroSignal(row) {
       : row.sellTrade != null && Number.isFinite(Number(row.sellTrade))
         ? Number(row.sellTrade)
         : null;
-  const spotPrice = row.price != null && Number.isFinite(Number(row.price)) ? Number(row.price) : null;
+  const spot = row.price != null && Number.isFinite(Number(row.price)) ? Number(row.price) : null;
+  const prevClose =
+    row.prevClose != null && Number.isFinite(Number(row.prevClose))
+      ? Number(row.prevClose)
+      : null;
+
+  const referencePrice = resolveReferencePrice({
+    spot,
+    previousClose: prevClose,
+    source: row.quoteSource,
+  });
+
+  const percents =
+    referencePrice != null && forecastLow != null && forecastHigh != null
+      ? computeRiskRangePercents(referencePrice, forecastLow, forecastHigh)
+      : null;
 
   return {
     id: String(row.symbol || '').toLowerCase(),
@@ -80,7 +100,10 @@ export function mapNormalizedRowToMacroSignal(row) {
     tail: tailRaw,
     forecastLow,
     forecastHigh,
-    spotPrice,
+    spotPrice: referencePrice,
+    referencePrice,
+    upsidePct: percents?.upsidePct ?? null,
+    downsidePct: percents?.downsidePct ?? null,
     score: Number(row.score) || 0,
     canonical: row,
   };

@@ -13,6 +13,13 @@ uvicorn app:app --host 127.0.0.1 --port 8765 --loop asyncio
 ```
 
 `ib_insync` needs the stdlib asyncio loop (not uvloop). If you omit `--loop asyncio`, startup will fail when `util.patchAsyncio()` runs.
+
+From repo root:
+
+```bash
+npm run ibkr-sidecar          # start sidecar (creates venv on first run)
+npm run ibkr-sidecar:check    # verify Gateway socket port is open
+npm run verify:ibkr           # curl sidecar + Express health
 ```
 
 ## IB Gateway / TWS
@@ -39,5 +46,21 @@ IB_GATEWAY_CLIENT_ID=17
 - `GET /status`: connection and account status
 - `GET /events`: last sidecar snapshot
 - `POST /refresh`: fetch seeded contracts from `event_contracts.json`
+- `POST /discover`: search ForecastEx / CME EC contracts and merge into `event_contracts.json` (requires Gateway online)
+- `GET /accounts`: managed account IDs
+- `POST /quotes`: body `{ "instruments": [{ "symbol", "secType?", "conId?" }] }` — equity/ETF market data
+- `POST /historical`: body `{ "instrument", "range", "interval" }` — historical bars
+- `GET /portfolio/positions?account=`: open positions
+- `GET /portfolio/account-summary?account=`: net liquidation, cash, margins
+- `GET /portfolio/open-orders?account=`: read-only open orders
+- `GET /portfolio/pnl?account=`: account PnL when available
 
-Add known event contract conids to `event_contracts.json` once you have them.
+From repo root, verify market/portfolio providers:
+
+```bash
+npm run verify:ibkr-providers
+```
+
+Gateway install steps: [GATEWAY_SETUP.md](./GATEWAY_SETUP.md)
+
+Add known event contract conids manually, or run `npm run ibkr-sidecar:discover` after Gateway is connected.

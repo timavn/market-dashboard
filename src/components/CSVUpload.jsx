@@ -2,8 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Card, Button, Text, Title, Badge, Flex } from '@tremor/react';
 import { PresignedUploadService } from '../services/presignedUploadService';
 import { MarketDataService } from '../services/api/marketDataService';
+import LoadingIndicator from './common/LoadingIndicator';
 
-const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
+const CSVUpload = ({
+  onUploadSuccess,
+  onUploadError,
+  dataSource,
+  reconciliationWarnings = [],
+}) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
@@ -268,10 +274,12 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
         />
 
         {isUploading ? (
-          <div className="flex items-center justify-center py-4">
-            <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent mr-3"></div>
-            <Text>{uploadStatus?.message || 'Uploading...'}</Text>
-          </div>
+          <LoadingIndicator
+            label={uploadStatus?.message || 'Uploading...'}
+            size="sm"
+            centered
+            className="py-4"
+          />
         ) : (
           <div className="text-center py-4">
             <Text className="text-base font-semibold mb-1">
@@ -282,6 +290,17 @@ const CSVUpload = ({ onUploadSuccess, onUploadError }) => {
                 Viewing: {viewingDate}
               </Text>
             ) : null}
+            {dataSource === 'ibkr_api' && (
+              <Text className="text-xs text-gray-500 mt-1">
+                IBKR API is active. CSV upload remains available as a fallback.
+              </Text>
+            )}
+            {reconciliationWarnings?.length > 0 && (
+              <Text className="text-xs text-amber-700 mt-1">
+                Reconciliation: {reconciliationWarnings.slice(0, 2).join('; ')}
+                {reconciliationWarnings.length > 2 ? '…' : ''}
+              </Text>
+            )}
             <Text className="text-sm text-gray-500 mt-1">
               Click or drag CSV file here
             </Text>

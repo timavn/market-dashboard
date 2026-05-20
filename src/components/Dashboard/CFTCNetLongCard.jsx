@@ -4,6 +4,7 @@ import { Info, TrendingUp, RefreshCw, DollarSign, Package, LayoutGrid, ArrowUp, 
 import StatusDot from '../common/StatusDot';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const CATEGORY_META = {
   EQUITIES:    { Icon: TrendingUp,  color: '#2563eb', bgLight: '#eff6ff',  bgDark: 'rgba(37,99,235,0.12)',   label: 'EQUITIES'    },
@@ -93,18 +94,7 @@ const CFTCNetLongCard = () => {
         borderRadius: 'var(--dashboard-radius, 6px)',
         boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
       }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '24px',
-            height: '24px',
-            border: `2px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-            borderTopColor: isDark ? '#60a5fa' : '#3b82f6',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }} />
-          <Text style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '13px' }}>Loading CFTC Data...</Text>
-        </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <LoadingIndicator label="Loading CFTC Data..." size="md" centered />
       </Card>
     );
   }

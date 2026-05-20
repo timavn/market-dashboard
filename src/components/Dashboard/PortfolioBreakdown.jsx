@@ -12,6 +12,7 @@ import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMappi
 import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
 import PortfolioAnalytics from './PortfolioAnalytics';
 import PerformanceService from '../../services/api/performanceService';
+import LoadingIndicator from '../common/LoadingIndicator';
 const ASSET_CLASS_COLORS = {
   'Equities': '#10B981',      // Emerald green
   'Fixed Income': '#3B82F6',  // Blue
@@ -1382,21 +1383,18 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     return (
       <div style={{ padding: '32px', textAlign: 'center' }}>
         <Text className="text-gray-500 dark:text-gray-400">
-          No portfolio data available. Please upload a Schwab CSV to view portfolio breakdown.
+          No portfolio data available. Connect IBKR or upload a Schwab CSV to view portfolio breakdown.
         </Text>
       </div>
     );
   }
 
+  const reconciliationWarnings = portfolioData?.reconciliationWarnings || [];
+
   // Show loading state if we're actively fetching
   if (isLoading && (!holdings || holdings.length === 0)) {
     return (
-      <div style={{ padding: '32px', textAlign: 'center' }}>
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-        <Text className="text-gray-500 dark:text-gray-400">
-          Loading portfolio data...
-        </Text>
-      </div>
+      <LoadingIndicator label="Loading portfolio data..." size="lg" centered className="p-8" />
     );
   }
 
@@ -1567,8 +1565,21 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     );
   };
 
+  const holdingSourceTitle = (holding) =>
+    [holding.positionSource && `pos: ${holding.positionSource}`, holding.priceSource && `price: ${holding.priceSource}`, holding.warning]
+      .filter(Boolean)
+      .join(' · ');
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {reconciliationWarnings.length > 0 && (
+        <div
+          className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2"
+          role="status"
+        >
+          {reconciliationWarnings.slice(0, 3).join(' · ')}
+        </div>
+      )}
       {/* Portfolio Construction Section */}
       <div className="mb-0">
         <Title className="text-2xl font-semibold mb-1 text-center dark:text-white">
@@ -1975,7 +1986,13 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                                   backgroundColor: bgColor,
                                   flexShrink: 0
                                 }}></div>
-                                <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
+                                <span
+                                  style={{ marginLeft: '10px' }}
+                                  title={holdingSourceTitle(holding) || undefined}
+                                >
+                                  {holding.symbol}
+                                  {holding.warning ? ' ⚠' : ''}
+                                </span>
                               </div>
                             </td>
                             {columnOrder.map(columnKey =>
@@ -2218,7 +2235,13 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                                   backgroundColor: bgColor,
                                   flexShrink: 0
                                 }}></div>
-                                <span style={{ marginLeft: '10px' }}>{holding.symbol}</span>
+                                <span
+                                  style={{ marginLeft: '10px' }}
+                                  title={holdingSourceTitle(holding) || undefined}
+                                >
+                                  {holding.symbol}
+                                  {holding.warning ? ' ⚠' : ''}
+                                </span>
                               </div>
                             </td>
                             {columnOrder.map(columnKey =>

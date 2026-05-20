@@ -3,7 +3,7 @@
 ## Overview
 
 Scheduled ingest for Kalshi financial/macro markets into DynamoDB `FinancialPredictionEvents`.
-IBKR/ForecastEx/CME refresh is **not** scheduled — use local Express `POST /api/prediction-markets/refresh/ibkr` with Client Portal Gateway.
+IBKR/ForecastEx/CME refresh is **not** scheduled — use local Express `POST /api/prediction-markets/refresh/ibkr` with IB Gateway/TWS + Python sidecar (`npm run ibkr-sidecar`).
 
 ## Schedule
 

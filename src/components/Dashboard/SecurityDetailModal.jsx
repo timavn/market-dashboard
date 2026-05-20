@@ -13,6 +13,7 @@ import {
     Legend
 } from 'recharts';
 import { XMarkIcon } from '@heroicons/react/24/solid';
+import LoadingIndicator from '../common/LoadingIndicator';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -128,7 +129,9 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                     <div>
                         <Title className="text-2xl font-bold flex items-center gap-3">
                             {ticker} Details
-                            {loading && <span className="text-sm font-normal text-gray-500 animate-pulse">(Loading...)</span>}
+                            {loading && (
+                              <LoadingIndicator label="Loading..." size="sm" className="inline-flex ml-2" />
+                            )}
                         </Title>
                         {data?.transactions?.length > 0 && (
                             <Text className="text-sm text-gray-500">

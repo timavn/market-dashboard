@@ -1,56 +1,50 @@
 import { formatBoundaryForAsset, formatSpotDisplayForAsset } from './formatNumber';
 
-/**
- * Forecast band + live spot — dot uses clampedPct; label clamps to 0–100 to avoid overflow.
- */
 function RangeWidget({ low, high, spot, tone, canonical }) {
-  const sideClass = tone === 'red' ? 'short' : 'long';
+  const sideClass = tone === 'red' ? 'short' : tone === 'neutral' ? 'neutral' : 'long';
 
   if (low == null || high == null || !Number.isFinite(low) || !Number.isFinite(high)) {
     return (
-      <div className="range-widget range-widget-muted">
+      <div className="range-sparkline range-widget-muted">
         <span>—</span>
       </div>
     );
   }
 
   const span = high - low;
-  let rawPct = 50;
-  if (Number.isFinite(spot) && span !== 0) {
-    rawPct = ((spot - low) / span) * 100;
-  } else if (span === 0 && Number.isFinite(spot)) {
-    rawPct = spot <= low ? 0 : 100;
-  }
+  const rawPct = Number.isFinite(spot) && span !== 0 ? ((spot - low) / span) * 100 : 50;
+  const dotPct = Math.max(0, Math.min(100, rawPct));
+  const outOfRange = Number.isFinite(spot) && (spot < low || spot > high);
 
-  const clampedPct = Math.max(-8, Math.min(108, rawPct));
-  const labelPct = Math.max(0, Math.min(100, clampedPct));
+  const dotClass = `range-dot ${sideClass}${outOfRange ? ' range-dot-alert' : ''}`;
+  const priceClass = `range-spot-price ${sideClass}${outOfRange ? ' range-spot-alert' : ''}`;
 
   const fmtLow = formatBoundaryForAsset(low, canonical);
   const fmtHigh = formatBoundaryForAsset(high, canonical);
   const spotFmt = Number.isFinite(spot) ? formatSpotDisplayForAsset(spot, canonical) : null;
 
   return (
-    <div className="range-widget">
-      <div className="range-labels">
-        <span className="range-label range-label-low">{fmtLow}</span>
-        <span className="range-label range-label-high">{fmtHigh}</span>
+    <div className="range-sparkline" style={{ '--spot-pct': `${dotPct}%` }}>
+      <div className="range-boundary-labels">
+        <span className="range-low">{fmtLow}</span>
+        <span className="range-high">{fmtHigh}</span>
       </div>
 
-      <div className="range-track-wrap">
-        <span className="range-tick range-tick-left" aria-hidden />
-        <span className="range-track" aria-hidden />
-        <span className="range-tick range-tick-right" aria-hidden />
-        <span
-          className={`range-dot ${sideClass}`}
-          style={{ left: `${clampedPct}%` }}
-          aria-hidden
-        />
+      <div className="range-line-wrap">
+        <div className={`range-zone-track ${sideClass}`}>
+          <span className="range-zone range-zone-left" />
+          <span className="range-zone range-zone-middle" />
+          <span className="range-zone range-zone-right" />
+        </div>
+        <span className="range-end-tick range-end-tick-left" aria-hidden />
+        <span className="range-line" aria-hidden />
+        <span className="range-end-tick range-end-tick-right" aria-hidden />
+        <span className={dotClass} aria-hidden />
       </div>
 
       {spotFmt != null && (
-        <div className="range-spot" style={{ left: `${labelPct}%` }}>
-          <div className={`range-spot-price ${sideClass}`}>{spotFmt}</div>
-          <div className="range-spot-caption">Live Spot</div>
+        <div className={priceClass}>
+          {spotFmt}
         </div>
       )}
     </div>

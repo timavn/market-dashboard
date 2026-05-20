@@ -624,8 +624,6 @@
 .pmv2-signal-card { position: sticky; top: 10px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 112px); overflow: hidden; }
 .pmv2-signal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .pmv2-signal-category { font-size: 16px; font-weight: 700; color: #111827; line-height: 1.1; }
-.pmv2-signal-refresh { border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #374151; cursor: pointer; font-size: 11px; font-weight: 600; padding: 5px 8px; }
-.pmv2-signal-refresh:disabled { opacity: 0.6; cursor: not-allowed; }
 .pmv2-signal-event { color: #4b5563; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 11px; line-height: 1.35; max-height: 46px; overflow: hidden; padding: 7px 8px; }
 .pmv2-signal-error { background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; color: #991b1b; font-size: 11px; padding: 7px 8px; }
 .pmv2-signal-empty { padding: 20px 10px; }
@@ -724,17 +722,6 @@
   gap: 12px;
 }
 
-.pmv2-retry-btn {
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid #fca5a5;
-  border-radius: 4px;
-  background: #fff;
-  color: #991b1b;
-  cursor: pointer;
-}
-
 .pmv2-edge-neg { color: #dc2626; font-weight: 600; font-size: 11px; }
 
 .pmv2-status-dot.ready { background: #22c55e; }
@@ -776,31 +763,6 @@
 .pmv2-provider-hint {
   color: #92400e;
   font-size: 11px;
-}
-
-.pmv2-btn-refresh-ibkr {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 7px 14px;
-  border: none;
-  background: #2563eb;
-  color: #ffffff;
-  border-radius: 8px;
-  cursor: pointer;
-  white-space: nowrap;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25);
-}
-
-.pmv2-redesign-header .pmv2-btn-refresh-ibkr:hover:not(:disabled) {
-  background: #1d4ed8;
-}
-
-.pmv2-btn-refresh-ibkr:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .pmv2-stale-tag {
@@ -881,32 +843,8 @@
   white-space: nowrap;
 }
 
-.pmv2-ibkr-refresh-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
+.pmv2-provider-chip .app-refresh-btn {
   margin-left: 2px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: #4682B4;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.12s, color 0.12s;
-}
-
-.pmv2-ibkr-refresh-btn:hover:not(:disabled) {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
-.pmv2-ibkr-refresh-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .pmv2-theme-btn {
@@ -984,10 +922,131 @@
   min-height: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(406px, 516px) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 35fr) minmax(0, 65fr);
+  gap: 16px;
   padding: 10px 12px 12px;
   overflow: hidden;
+  align-items: start;
+}
+
+.pmv2-redesign-body > .pmv2-card-chrome,
+.pmv2-redesign-body > .macro-signals-card {
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+}
+
+.pmv2-redesign-main {
+  align-self: stretch;
+  height: 100%;
+}
+
+/* ── Shared PM card chrome ─────────────────────────────── */
+
+.pmv2-card-chrome {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 12px rgba(15, 23, 42, 0.06);
+  font-family: inherit;
+}
+
+.pmv2-card-chrome-header {
+  flex-shrink: 0;
+  background: #eef4f8;
+  border-bottom: 1px solid #e6eef5;
+}
+
+.pmv2-card-chrome-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 8px 12px 4px;
+  box-sizing: border-box;
+}
+
+.pmv2-card-chrome-title-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pmv2-card-chrome-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #2563eb;
+}
+
+.pmv2-card-chrome-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #000080;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pmv2-card-chrome-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.pmv2-card-chrome-tabs {
+  padding: 0 12px 8px;
+}
+
+.pmv2-card-chrome--with-tabs .pmv2-card-chrome-header {
+  min-height: 72px;
+  box-sizing: border-box;
+}
+
+.pmv2-card-chrome--with-tabs .pmv2-card-chrome-tabs {
+  padding-top: 0;
+}
+
+.pmv2-card-chrome-tabs .macro-tabs {
+  margin-bottom: 0;
+}
+
+.pmv2-card-chrome-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pmv2-card-chrome-footer {
+  flex-shrink: 0;
+  border-top: 1px solid #e6eef5;
+}
+
+.pmv2-card-chrome-footer .info-note {
+  margin: 0;
+  border-radius: 0;
+  height: auto;
+  min-height: 24px;
+  padding: 6px 12px;
+}
+
+.pmv2-card-chrome-footer .tp-prompt {
+  padding: 8px 12px;
+  margin: 0;
 }
 
 /* ── Macro Signals Card ───────────────────────────────── */
@@ -1077,9 +1136,9 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-rows: minmax(0, 65fr) minmax(0, 35fr);
+  gap: 16px;
 }
 
 .pmv2-selected {
@@ -1476,6 +1535,16 @@
     grid-template-columns: 1fr;
   }
 
+  .pmv2-redesign-body > .pmv2-card-chrome,
+  .pmv2-redesign-body > .macro-signals-card {
+    height: auto;
+    min-height: 320px;
+  }
+
+  .pmv2-redesign-main {
+    grid-template-rows: minmax(320px, 1fr) minmax(240px, 1fr);
+  }
+
   .pmv2-signal-map {
     max-height: 360px;
   }
@@ -1501,28 +1570,16 @@
    ═══════════════════════════════════════════════════════ */
 
 .cmap-card {
-  padding: 7px 0 0 !important;
-  flex: 13 1 0;
+  height: 100%;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
 }
 
-.cmap-header {
+.cmap-card .pmv2-card-chrome-body {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 2px;
-  padding: 0 10px;
-}
-
-.cmap-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
 }
 
 .cmap-count {
@@ -1530,42 +1587,6 @@
   color: #94a3b8;
   font-weight: 600;
   white-space: nowrap;
-}
-
-.cmap-filter-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px 3px 10px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #1d4ed8;
-  white-space: nowrap;
-}
-
-.cmap-filter-clear {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: none;
-  background: #bfdbfe;
-  color: #1d4ed8;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  font-weight: 700;
-  transition: background 0.12s;
-}
-
-.cmap-filter-clear:hover {
-  background: #93c5fd;
 }
 
 /* ── Contract Map Table ─────────────────────────────── */
@@ -1689,22 +1710,17 @@
    ═══════════════════════════════════════════════════════ */
 
 .tp-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
-  overflow-y: auto;
-  flex: 7 1 0;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
-.tp-card-empty {
+.tp-card-empty .pmv2-card-chrome-body {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px 24px;
-  min-height: 140px;
+  padding: 24px;
 }
 
 .tp-empty-icon {
@@ -1730,6 +1746,16 @@
 
 .tp-section {
   padding: 12px 14px;
+}
+
+.tp-section-universe {
+  padding-bottom: 8px;
+}
+
+.tp-universe-metrics-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -4px;
 }
 
 .tp-section-label {

@@ -1,0 +1,101 @@
+/* Shared refresh button + loading indicator (Macro Signals standard) */
+
+.app-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 6px;
+  color: #4682b4;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  font-family: inherit;
+}
+
+.app-refresh-btn:hover:not(:disabled) {
+  background: rgba(70, 130, 180, 0.1);
+}
+
+.app-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.app-refresh-btn-icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+  flex-shrink: 0;
+}
+
+.app-refresh-btn--icon-only {
+  padding: 2px;
+}
+
+.app-refresh-btn--icon-only .app-refresh-btn-icon {
+  width: 13px;
+  height: 13px;
+}
+
+@keyframes app-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.app-spin {
+  animation: app-spin 1s linear infinite;
+}
+
+/* Loading indicator */
+.app-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4682b4;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-loading--centered {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 4px;
+  text-align: center;
+}
+
+.app-loading-icon {
+  flex-shrink: 0;
+  stroke-width: 2;
+}
+
+.app-loading--sm .app-loading-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.app-loading--md .app-loading-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.app-loading--lg .app-loading-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.app-loading-label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-loading--centered .app-loading-label {
+  color: #64748b;
+}

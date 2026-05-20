@@ -3,6 +3,7 @@ import { Card, Metric, Text, Grid, Badge, Flex } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { CorrelationHelpers, USDMarketService } from '../../services/api/usdMarketService';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 // Currency index mapping
 const CURRENCY_INDEXES = {
@@ -222,10 +223,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
   if (loading) {
     return (
       <Card>
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-2"></div>
-          <Text>Loading USD data...</Text>
-        </div>
+        <LoadingIndicator label="Loading USD data..." size="lg" centered className="py-8" />
       </Card>
     );
   }

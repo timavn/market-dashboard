@@ -11,7 +11,7 @@ function ibkrEnabled() {
 
 function mapSidecarStatus(status) {
   if (status === 'connected') return 'connected';
-  if (status === 'tws_offline') return 'tws_offline';
+  if (status === 'tws_offline' || status === 'gateway_offline') return 'tws_offline';
   if (status === 'auth_required') return 'auth_required';
   if (status === 'sidecar_offline') return 'sidecar_offline';
   return status || 'unknown';

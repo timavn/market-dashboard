@@ -4,6 +4,7 @@ import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { notesService } from '../../services/api/notesService';
 import MarketCalendar from './MarketCalendar';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const DailyNotepad = () => {
   const [viewMode, setViewMode] = useState('notes'); // 'notes' or 'calendar'
@@ -263,9 +264,7 @@ const DailyNotepad = () => {
       ) : (
         <>
           {loading ? (
-            <div className="flex items-center justify-center" style={{ flex: 1, minHeight: '500px' }}>
-              <Text className="text-gray-500 dark:text-gray-400">Loading...</Text>
-            </div>
+            <LoadingIndicator label="Loading..." size="lg" centered className="flex-1 min-h-[500px]" />
           ) : (
             <div className="bg-white dark:bg-gray-700 rounded-md" style={{ 
               borderRadius: '0.375rem',

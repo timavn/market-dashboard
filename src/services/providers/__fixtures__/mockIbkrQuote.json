@@ -1,0 +1,12 @@
+{
+  "symbol": "AAPL",
+  "conId": 265598,
+  "bid": 189.5,
+  "ask": 189.52,
+  "last": 189.51,
+  "close": 188.0,
+  "currency": "USD",
+  "exchange": "SMART",
+  "dataType": "live",
+  "timestamp": "2026-05-19T15:00:00.000Z"
+}

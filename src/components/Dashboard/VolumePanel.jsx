@@ -4,6 +4,7 @@ import PopoverSelect from '../common/PopoverSelect';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 // Map tickers to their volatility indicators
 const getVolatilityTicker = (ticker) => {
@@ -878,10 +879,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       {/* Chart Area */}
       <div className="flex-1 dark:text-white" style={{ minHeight: 0 }}>
         {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent"></div>
-            <Text className="ml-3 dark:text-gray-300">Loading chart data...</Text>
-          </div>
+          <LoadingIndicator label="Loading chart data..." size="lg" centered className="h-full w-full" />
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData}>

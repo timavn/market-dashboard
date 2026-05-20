@@ -1,3 +1,5 @@
+import { SECURITIES_LIST } from '../constants/securitiesList';
+
 export const PREDICTION_SIGNAL_UNIVERSE = [
   { symbol: 'BTC', label: 'Bitcoin', group: 'Crypto', categories: ['Crypto'] },
   { symbol: 'ETH', label: 'Ethereum', group: 'Crypto', categories: ['Crypto'] },
@@ -40,8 +42,136 @@ const CATEGORY_KEYWORDS = [
 
 const MACRO_CATEGORIES = new Set(['Inflation', 'Labor', 'Growth']);
 
+const ASSET_CLASS_TO_GROUP = {
+  fixedIncome: 'Rates',
+  equity: 'Index',
+  currency: 'FX',
+  commodity: 'Commodities',
+  crypto: 'Crypto',
+};
+
+/** Prefer universe symbol when risk-range DB key is an alias */
+const RISK_RANGE_CANONICAL_SYMBOL = {
+  BITCOIN: 'BTC',
+  GLD: 'GOLD',
+  USO: 'WTIC',
+  OIL: 'WTIC',
+  RUT: 'IWM',
+  NDX: 'QQQ',
+};
+
+const UNIVERSE_BY_SYMBOL = Object.fromEntries(
+  PREDICTION_SIGNAL_UNIVERSE.map(item => [item.symbol, item]),
+);
+
 export function getPredictionSignalTickers() {
   return PREDICTION_SIGNAL_UNIVERSE.map(item => item.symbol);
+}
+
+/**
+ * Resolve display symbol for a risk-range key (dedupe aliases vs universe).
+ * @param {string} symbol
+ * @returns {string}
+ */
+export function canonicalizeRiskRangeSymbol(symbol) {
+  const upper = String(symbol || '').toUpperCase();
+  if (UNIVERSE_BY_SYMBOL[upper]) return upper;
+  if (RISK_RANGE_CANONICAL_SYMBOL[upper]) return RISK_RANGE_CANONICAL_SYMBOL[upper];
+  return upper;
+}
+
+/**
+ * Union of prediction-signal universe + all risk-range tickers (deduped).
+ * @param {Record<string, object>} [riskRanges]
+ * @returns {string[]}
+ */
+export function collectMacroSignalSymbols(riskRanges = {}) {
+  const symbols = new Set(getPredictionSignalTickers());
+  Object.keys(riskRanges || {}).forEach(key => {
+    symbols.add(canonicalizeRiskRangeSymbol(key));
+  });
+  return Array.from(symbols).sort((a, b) => a.localeCompare(b));
+}
+
+/** Tickers to request live quotes for (macro signal card). */
+export function getMacroSignalQuoteTickers(riskRanges = {}) {
+  return collectMacroSignalSymbols(riskRanges);
+}
+
+/** Index/ETF pairs where Hedgeye stores ranges under the index key but UI uses ETF symbol. */
+const MACRO_QUOTE_INDEX_PAIRS = new Set(['RUT/IWM', 'IWM/RUT', 'NDX/QQQ', 'QQQ/NDX']);
+
+/**
+ * Resolve live quote symbol when risk range was stored under an alias key.
+ * @param {string} displaySymbol - UI / universe symbol
+ * @param {string|null} riskRangeSourceKey - DynamoDB key that matched
+ * @returns {string}
+ */
+export function resolveMacroSignalQuoteSymbol(displaySymbol, riskRangeSourceKey) {
+  const display = String(displaySymbol || '').toUpperCase();
+  const source = String(riskRangeSourceKey || display).toUpperCase();
+  if (source !== display && MACRO_QUOTE_INDEX_PAIRS.has(`${source}/${display}`)) {
+    return source;
+  }
+  return display;
+}
+
+/**
+ * Quote fetch plan: display symbol → quote symbol (deduped quote list).
+ * @param {Record<string, object>} [riskRanges]
+ * @returns {Array<{ display: string, quote: string }>}
+ */
+export function getMacroSignalQuotePlan(riskRanges = {}) {
+  const symbols = collectMacroSignalSymbols(riskRanges);
+  return symbols.map(display => {
+    const { sourceKey } = pickRiskRange(riskRanges, display);
+    return {
+      display,
+      quote: resolveMacroSignalQuoteSymbol(display, sourceKey),
+    };
+  });
+}
+
+/**
+ * @param {string} symbol
+ * @returns {{ symbol: string, label: string, group: string, categories: string[] } | null}
+ */
+export function inferSignalGroupFromTicker(symbol) {
+  const upper = String(symbol || '').toUpperCase();
+  if (!upper) return null;
+
+  const universe = UNIVERSE_BY_SYMBOL[upper];
+  if (universe) {
+    return {
+      symbol: universe.symbol,
+      label: universe.label,
+      group: universe.group,
+      categories: [...universe.categories],
+    };
+  }
+
+  const security = SECURITIES_LIST.find(s => s.ticker.toUpperCase() === upper);
+  if (security) {
+    const group = ASSET_CLASS_TO_GROUP[security.assetClass] || 'Index';
+    return {
+      symbol: security.ticker,
+      label: security.name,
+      group,
+      categories: [group],
+    };
+  }
+
+  if (/^UST\d+Y$/.test(upper)) {
+    return { symbol: upper, label: `${upper.replace('UST', '')} Yield`, group: 'Rates', categories: ['Rates'] };
+  }
+  if (upper.includes('/')) {
+    return { symbol: upper, label: upper, group: 'FX', categories: ['FX'] };
+  }
+  if (['BTC', 'ETH', 'SOL', 'XRP', 'BITCOIN'].includes(upper)) {
+    return { symbol: upper, label: upper === 'BITCOIN' ? 'Bitcoin' : upper, group: 'Crypto', categories: ['Crypto'] };
+  }
+
+  return { symbol: upper, label: upper, group: 'Index', categories: ['Index'] };
 }
 
 export function inferPredictionSignalCategory(filter, selectedEvent) {
@@ -66,21 +196,34 @@ export function normalizePredictionMarketSignals({
   momoSnapshot = null,
   macroSnapshot = null,
   callSnapshot = null,
+  spotPrices = {},
   activeCategory = 'all',
   selectedEvent = null,
 } = {}) {
   const inferredCategory = inferPredictionSignalCategory(activeCategory, selectedEvent);
-  const rows = PREDICTION_SIGNAL_UNIVERSE
-    .filter(item => isRelevantForCategory(item, inferredCategory))
-    .map(item => buildSignalRow({
+  const symbols = collectMacroSignalSymbols(riskRanges);
+  const rows = symbols
+    .map(sym => inferSignalGroupFromTicker(sym))
+    .filter(item => item && isRelevantForCategory(item, inferredCategory))
+    .map(item => {
+      const { data: riskRange, sourceKey: riskRangeSourceKey } = pickRiskRange(riskRanges, item.symbol);
+      return buildSignalRow({
       item,
-      riskRange: pickRiskRange(riskRanges, item.symbol),
+      riskRange,
+      riskRangeSourceKey,
       bitcoinSnapshot,
       momoSnapshot,
       macroSnapshot,
       callSnapshot,
       inferredCategory,
-    }))
+      spotPrices,
+    });
+    })
+    .filter(row => {
+      const inUniverse = Boolean(UNIVERSE_BY_SYMBOL[row.symbol]);
+      const hasRange = row.lrr != null || row.hrr != null;
+      return inUniverse || hasRange;
+    })
     .sort(sortSignalRows);
 
   return {
@@ -101,11 +244,13 @@ function isRelevantForCategory(item, category) {
 function buildSignalRow({
   item,
   riskRange,
+  riskRangeSourceKey = null,
   bitcoinSnapshot,
   momoSnapshot,
   macroSnapshot,
   callSnapshot,
   inferredCategory,
+  spotPrices = {},
 }) {
   const trackerSlot = pickTrackerSlot(bitcoinSnapshot, item.symbol) || pickMomoSlot(momoSnapshot, item.symbol);
   const macroSide = pickMacroSide(macroSnapshot?.data, item.symbol);
@@ -142,7 +287,9 @@ function buildSignalRow({
     sellTrade: toNumber(trackerSlot?.sellTrade),
     upside: toNumber(trackerSlot?.upside),
     downside: toNumber(trackerSlot?.downside),
-    price: toNumber(trackerSlot?.price),
+    price: toNumber(trackerSlot?.price) ?? toNumber(spotPrices?.[item.symbol]?.price) ?? toNumber(spotPrices?.[item.symbol]),
+    prevClose: toNumber(spotPrices?.[item.symbol]?.previousClose),
+    quoteSource: spotPrices?.[item.symbol]?.source ?? null,
     date: riskRange?.date || bitcoinSnapshot?.date || momoSnapshot?.date || macroSnapshot?.date || callSnapshot?.date || null,
     sources: Array.from(new Set(sourceLabels)),
     score,
@@ -154,8 +301,35 @@ function sortSignalRows(a, b) {
   return a.symbol.localeCompare(b.symbol);
 }
 
+/** Hedgeye PDF tickers that differ from prediction-signal universe symbols */
+const RISK_RANGE_SYMBOL_ALIASES = {
+  BTC: ['BITCOIN'],
+  BITCOIN: ['BTC'],
+  GOLD: ['GLD'],
+  GLD: ['GOLD'],
+  WTIC: ['USO', 'OIL'],
+  BRENT: ['USO'],
+  OIL: ['USO', 'WTIC'],
+  DXY: ['USD'],
+  USD: ['DXY'],
+  QQQ: ['NDX'],
+  NDX: ['QQQ'],
+  IWM: ['RUT'],
+  RUT: ['IWM'],
+};
+
+/**
+ * @returns {{ data: object|null, sourceKey: string|null }}
+ */
 function pickRiskRange(riskRanges, symbol) {
-  return riskRanges?.[symbol] || riskRanges?.[symbol.toUpperCase()] || null;
+  if (!riskRanges || !symbol) return { data: null, sourceKey: null };
+  const upper = String(symbol).toUpperCase();
+  if (riskRanges[upper]) return { data: riskRanges[upper], sourceKey: upper };
+  if (riskRanges[symbol]) return { data: riskRanges[symbol], sourceKey: symbol };
+  for (const alt of RISK_RANGE_SYMBOL_ALIASES[upper] || []) {
+    if (riskRanges[alt]) return { data: riskRanges[alt], sourceKey: alt };
+  }
+  return { data: null, sourceKey: null };
 }
 
 function pickTrackerSlot(snapshot, symbol) {

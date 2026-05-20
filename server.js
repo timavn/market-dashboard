@@ -19,6 +19,11 @@ const {
   buildHedgeyeVolumeSnapshotResponse
 } = require('./src/utils/hedgeyeVolumeSnapshot.cjs');
 const { determineEtfProSnapshotDate } = require('./src/utils/etfProSnapshotDate.cjs');
+const {
+  HEDGEYE_BUCKET,
+  resolveHedgeyeMedia,
+  buildHedgeyeContentUrlFromRequest,
+} = require('./src/utils/hedgeyeMedia.cjs');
 
 const app = express();
 // In development, use port 3001 so React dev server can use 3000
@@ -108,6 +113,19 @@ app.use('/api/performance', performanceRoutes);
 const predictionMarketsIngestRoutes = require('./src/routes/predictionMarketsIngest');
 app.use('/api/prediction-markets', predictionMarketsIngestRoutes);
 
+// Market / portfolio data providers (IBKR-first, Yahoo fallback)
+const compositeMarketDataProvider = require('./src/services/providers/compositeMarketDataProvider');
+const yahooMarketDataProvider = require('./src/services/providers/yahoo/yahooMarketDataProvider');
+const { createUploadedStatementPortfolioProvider } = require('./src/services/providers/uploadedStatementPortfolioProvider');
+const { createCompositePortfolioDataProvider } = require('./src/services/providers/compositePortfolioDataProvider');
+
+const uploadedStatementPortfolioProvider = createUploadedStatementPortfolioProvider(dynamodb);
+const portfolioDataProvider = createCompositePortfolioDataProvider(uploadedStatementPortfolioProvider);
+app.locals.portfolioDataProvider = portfolioDataProvider;
+
+const providersRoutes = require('./src/routes/providers');
+app.use('/api/providers', providersRoutes);
+
 // Import ticker mapping configuration
 // Note: Since server.js is CommonJS and securitiesConfig.js is ES6, we'll create a helper function
 // that replicates the logic. In the future, consider converting to ES6 modules or creating a shared config.
@@ -174,6 +192,7 @@ const YAHOO_TICKER_MAP = {
   'COMPQ': '^IXIC',
   'IXIC': '^IXIC',
   'RUT': '^RUT',
+  'NDX': '^NDX',
   'VIX': '^VIX',
   'RVX': '^RVX',
   'VXN': '^VXN',
@@ -762,63 +781,48 @@ async function fetchIntlBondQuote(symbol) {
   return null;
 }
 
-// Fetch quote with caching
+// Wire provider layer (Yahoo mapping + FRED/intl bond special quotes)
+yahooMarketDataProvider.setTickerMappingResolver(getTickerMapping);
+compositeMarketDataProvider.setSpecialQuoteFetcher(async (symbol) => {
+  const upperSym = symbol.toUpperCase();
+  const isIntlBond =
+    STOOQ_BOND_SYMBOLS[upperSym] != null || INTL_BOND_FRED_FALLBACK[upperSym] != null;
+  const mapping = getTickerMapping(symbol);
+  let quoteData = null;
+  if (isIntlBond) {
+    quoteData = await fetchIntlBondQuote(upperSym);
+  } else if (mapping.source === 'fred') {
+    quoteData = await fetchFredQuote(mapping.ticker);
+  }
+  if (quoteData && quoteData.price) {
+    return { legacy: { symbol: upperSym, ...quoteData, source: quoteData.source || mapping.source } };
+  }
+  return null;
+});
+
+// Fetch quote with caching (IBKR-first via composite provider)
 async function getQuote(symbol) {
   const now = Date.now();
   const cacheKey = symbol.toUpperCase();
 
-  // Check cache
   const cached = quotesCache.get(cacheKey);
-  if (cached && (now - cached.timestamp) < CACHE_TTL) {
-    console.log(`[Cache] Hit for ${cacheKey}`);
+  if (cached && now - cached.timestamp < CACHE_TTL) {
     return cached.data;
   }
 
-  console.log(`[Cache] Miss for ${cacheKey}, fetching...`);
-
-  // Fetch new data
-  const upperSym = symbol.toUpperCase();
-  const isIntlBond = STOOQ_BOND_SYMBOLS[upperSym] != null || INTL_BOND_FRED_FALLBACK[upperSym] != null;
-  const mapping = getTickerMapping(symbol);
-  let quoteData = null;
-
   try {
-    if (isIntlBond) {
-      quoteData = await fetchIntlBondQuote(upperSym);
-    } else if (mapping.source === 'fred') {
-      quoteData = await fetchFredQuote(mapping.ticker);
-    } else {
-      quoteData = await fetchYahooQuote(mapping.ticker);
-    }
-
-    if (quoteData && quoteData.price) {
-      const quoteResult = { symbol: symbol.toUpperCase(), ...quoteData };
-      // Store in cache
-      quotesCache.set(cacheKey, {
-        data: quoteResult,
-        timestamp: now
-      });
-      console.log(`[Cache] Stored quote for ${cacheKey}: price=${quoteData.price}`);
+    const quoteResult = await compositeMarketDataProvider.getQuote(symbol);
+    if (quoteResult && quoteResult.price) {
+      quotesCache.set(cacheKey, { data: quoteResult, timestamp: now });
       return quoteResult;
-    } else {
-      console.warn(`[Quote] No valid price data returned for ${symbol} (${mapping.ticker})`);
-      if (quoteData) {
-        console.warn(`[Quote] Quote data structure:`, Object.keys(quoteData));
-      }
     }
   } catch (error) {
     console.error(`[Quote] Error fetching quote for ${symbol}:`, error.message);
-    if (error.stack) {
-      console.error(`[Quote] Stack trace:`, error.stack.split('\n').slice(0, 3).join('\n'));
-    }
   }
 
-  // Return cached data even if expired, or null
   if (cached && cached.data && cached.data.price) {
-    console.log(`[Cache] Returning expired cache for ${cacheKey}`);
     return cached.data;
   }
-
   return null;
 }
 
@@ -1609,6 +1613,27 @@ function computeSpreadBpsDeltas(spreadSeries) {
   };
 }
 
+
+const RISK_RANGE_TICKER_ALIASES = {
+  BTC: ['BITCOIN'],
+  GOLD: ['GLD'],
+  GLD: ['GOLD'],
+  WTIC: ['USO', 'OIL'],
+  BRENT: ['USO'],
+  OIL: ['USO'],
+  DXY: ['USD'],
+  USD: ['DXY'],
+};
+
+function lookupRiskRangeData(allData, ticker) {
+  const upper = String(ticker).toUpperCase();
+  if (allData[upper]) return allData[upper];
+  for (const alt of RISK_RANGE_TICKER_ALIASES[upper] || []) {
+    if (allData[alt]) return allData[alt];
+  }
+  return null;
+}
+
 // Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
 app.get('/api/risk-ranges', async (req, res) => {
   const startTime = Date.now();
@@ -1668,18 +1693,24 @@ app.get('/api/risk-ranges', async (req, res) => {
     if (targetDate && byDate[targetDate]) {
       allItems = byDate[targetDate];
     } else {
-      // Find date with most items (best data quality)
-      let bestDate = dates[0];
-      let bestCount = 0;
-      dates.forEach(d => {
-        if (byDate[d].length > bestCount) {
-          bestCount = byDate[d].length;
-          bestDate = d;
-        }
-      });
-      targetDate = bestDate;
-      allItems = byDate[targetDate] || [];
-      console.log(`[API] Selected date ${targetDate} with ${allItems.length} items (best coverage)`);
+      // Prefer latest publication date; fall back to best coverage if latest is empty
+      targetDate = dates[0] || null;
+      allItems = targetDate ? byDate[targetDate] || [] : [];
+      if (allItems.length === 0 && dates.length > 1) {
+        let bestDate = dates[0];
+        let bestCount = 0;
+        dates.forEach(d => {
+          if (byDate[d].length > bestCount) {
+            bestCount = byDate[d].length;
+            bestDate = d;
+          }
+        });
+        targetDate = bestDate;
+        allItems = byDate[targetDate] || [];
+        console.log(`[API] Latest date empty; using ${targetDate} with ${allItems.length} items (best coverage)`);
+      } else {
+        console.log(`[API] Selected latest date ${targetDate} with ${allItems.length} items`);
+      }
     }
 
     const dbTime = Date.now() - dbStartTime;
@@ -1707,8 +1738,12 @@ app.get('/api/risk-ranges', async (req, res) => {
     const riskRanges = tickerList
       ? Object.fromEntries(
         tickerList
-          .map(ticker => [ticker, allData[ticker] || null])
-          .filter(([_, data]) => data !== null)
+          .map(ticker => {
+            const upper = ticker.toUpperCase();
+            const data = lookupRiskRangeData(allData, upper);
+            return data ? [upper, data] : null;
+          })
+          .filter(Boolean)
       )
       : allData;
 
@@ -2197,154 +2232,81 @@ app.get('/api/workflow-status', async (req, res) => {
   }
 });
 
-// Hedgeye Screenshot endpoint - returns presigned S3 URL for screenshot
-// UPDATED: Falls back to local files in aws/lambda if S3/DynamoDB fails
-// Now supports ?type= query param for different data types
+// Hedgeye preview media — stream S3/local file (stable URL, no presign expiry)
+app.get('/api/hedgeye/screenshot/:date/content', async (req, res) => {
+  const { date } = req.params;
+  const snapshotType = req.query.type || 'risk-ranges';
+  console.log(`[API] /api/hedgeye/screenshot/${date}/content?type=${snapshotType} called`);
+
+  try {
+    const media = await resolveHedgeyeMedia(dynamodb, date, snapshotType, {
+      preferPdf: true,
+      lambdaDir: path.join(__dirname, 'aws', 'lambda'),
+    });
+
+    if (!media) {
+      return res.status(404).send('Screenshot not found for this date (checked S3 and local)');
+    }
+
+    res.setHeader('Content-Type', media.contentType);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+
+    if (media.source === 'local') {
+      return res.sendFile(media.localPath);
+    }
+
+    const stream = s3
+      .getObject({ Bucket: HEDGEYE_BUCKET, Key: media.s3Key })
+      .createReadStream();
+
+    stream.on('error', (err) => {
+      console.error(`[API] S3 stream error for ${media.s3Key}:`, err.message);
+      if (!res.headersSent) {
+        res.status(502).send('Failed to load media from storage');
+      } else {
+        res.end();
+      }
+    });
+
+    stream.pipe(res);
+  } catch (error) {
+    console.error(`[API] Error streaming hedgeye media:`, error);
+    res.status(500).send('Failed to load media');
+  }
+});
+
+// Hedgeye Screenshot metadata — returns stable content URL (proxied, not presigned)
 app.get('/api/hedgeye/screenshot/:date', async (req, res) => {
   const { date } = req.params;
-  const snapshotType = req.query.type || 'risk-ranges'; // Default to risk-ranges
+  const snapshotType = req.query.type || 'risk-ranges';
   console.log(`[API] /api/hedgeye/screenshot/${date}?type=${snapshotType} called`);
 
   try {
-    // 1. Try DynamoDB + S3 first
-    const snapshotParams = {
-      TableName: 'HedgeyeDailySnapshot',
-      Key: {
-        date: date,
-        snapshotType: snapshotType
-      }
-    };
+    const media = await resolveHedgeyeMedia(dynamodb, date, snapshotType, {
+      preferPdf: true,
+      lambdaDir: path.join(__dirname, 'aws', 'lambda'),
+    });
 
-    const snapshotResult = await dynamodb.get(snapshotParams).promise();
-
-    // Always prefer PDF if available (for verification purposes)
-    const preferPdf = true;
-
-    if (snapshotResult.Item) {
-      const hasPdf = snapshotResult.Item.pdfSource;
-      const hasScreenshot = snapshotResult.Item.screenshotS3Key;
-
-      // If we prefer PDF and have it, use it
-      if (preferPdf && hasPdf) {
-        const pdfS3Key = snapshotResult.Item.pdfSource;
-        console.log(`[API] Using PDF (preferred) for ${snapshotType}: ${pdfS3Key}`);
-
-        const params = {
-          Bucket: 'market-dashboard-csv-data',
-          Key: pdfS3Key,
-          Expires: 3600 // 1 hour
-        };
-
-        try {
-          const presignedUrl = s3.getSignedUrl('getObject', params);
-          console.log(`[API] Generated presigned URL for PDF: ${pdfS3Key}`);
-          return res.json({
-            url: presignedUrl,
-            s3Key: pdfS3Key,
-            date: date,
-            type: 'pdf',
-            scrapedAt: snapshotResult.Item.scrapedAt
-          });
-        } catch (s3Error) {
-          console.warn(`[API] PDF S3 signing failed, trying screenshot: ${s3Error.message}`);
-          // Fall through to screenshot
-        }
-      }
-
-      // Use screenshot if available
-      if (hasScreenshot) {
-        const s3Key = snapshotResult.Item.screenshotS3Key;
-
-        // Generate presigned URL
-        const params = {
-          Bucket: 'market-dashboard-csv-data',
-          Key: s3Key,
-          Expires: 3600 // 1 hour
-        };
-
-        try {
-          const presignedUrl = s3.getSignedUrl('getObject', params);
-          console.log(`[API] Generated presigned URL for screenshot: ${s3Key}`);
-          return res.json({
-            url: presignedUrl,
-            s3Key: s3Key,
-            date: date,
-            type: 'screenshot',
-            scrapedAt: snapshotResult.Item.scrapedAt
-          });
-        } catch (s3Error) {
-          console.warn(`[API] S3 signing failed, trying PDF fallback: ${s3Error.message}`);
-          // Fall through to PDF check
-        }
-      }
-
-      // Fallback to PDF if no screenshot or screenshot failed
-      if (hasPdf) {
-        const pdfS3Key = snapshotResult.Item.pdfSource;
-        console.log(`[API] Fallback to PDF: ${pdfS3Key}`);
-
-        const params = {
-          Bucket: 'market-dashboard-csv-data',
-          Key: pdfS3Key,
-          Expires: 3600 // 1 hour
-        };
-
-        try {
-          const presignedUrl = s3.getSignedUrl('getObject', params);
-          console.log(`[API] Generated presigned URL for PDF: ${pdfS3Key}`);
-          return res.json({
-            url: presignedUrl,
-            s3Key: pdfS3Key,
-            date: date,
-            type: 'pdf',
-            scrapedAt: snapshotResult.Item.scrapedAt
-          });
-        } catch (s3Error) {
-          console.warn(`[API] PDF S3 signing failed: ${s3Error.message}`);
-          // Fall through to local check
-        }
-      }
+    if (!media) {
+      return res.status(404).json({ error: 'Screenshot not found for this date (checked S3 and local)' });
     }
 
-    console.log(`[API] No S3 key found in DynamoDB for ${date}/${snapshotType}, checking local files...`);
+    const contentUrl = buildHedgeyeContentUrlFromRequest(req, date, snapshotType);
 
+    return res.json({
+      url: contentUrl,
+      s3Key: media.s3Key || null,
+      localFilename: media.localFilename || null,
+      source: media.source,
+      date,
+      type: media.mediaType,
+      scrapedAt: media.scrapedAt || null,
+    });
   } catch (error) {
-    console.warn(`[API] DynamoDB/S3 error for screenshot: ${error.message}`);
-    // Fall through to local check
+    console.error(`[API] Error in hedgeye screenshot metadata:`, error);
+    return res.status(500).json({ error: 'Failed to resolve screenshot', details: error.message });
   }
-
-  // 2. Fallback: Check local aws/lambda directory for matching screenshot
-  try {
-    const fs = require('fs');
-    const lambdaDir = path.join(__dirname, 'aws', 'lambda');
-
-    if (fs.existsSync(lambdaDir)) {
-      const files = fs.readdirSync(lambdaDir);
-      // Look for hedgeye_screenshot_YYYY-MM-DD_HHMMSS.png
-      const matchingFile = files.find(f =>
-        f.startsWith(`hedgeye_screenshot_${date}`) && f.endsWith('.png')
-      );
-
-      if (matchingFile) {
-        console.log(`[API] Found local screenshot: ${matchingFile}`);
-        // Return a URL pointing to our local file server endpoint
-        // Use full URL for robustness if needed, or relative
-        const protocol = req.protocol;
-        const host = req.get('host');
-        const localUrl = `${protocol}://${host}/api/local-screenshots/${matchingFile}`;
-
-        return res.json({
-          url: localUrl,
-          source: 'local',
-          date: date
-        });
-      }
-    }
-  } catch (localError) {
-    console.error(`[API] Error searching for local screenshot: ${localError.message}`);
-  }
-
-  return res.status(404).json({ error: 'Screenshot not found for this date (checked S3 and local)' });
 });
 
 // New Endpoint: Serve local screenshots from aws/lambda
@@ -3902,186 +3864,59 @@ app.get('/api/securities/signal-strength', async (req, res) => {
   }
 });
 
-// Get real portfolio data from DynamoDB
+// Portfolio: IBKR API live when connected, else uploaded Schwab CSV snapshot
 app.get('/api/portfolio', async (req, res) => {
   const startTime = Date.now();
   try {
-    // Get latest portfolio snapshot - scan all and sort by timestamp
-    const snapshotStartTime = Date.now();
-    const snapshotParams = {
-      TableName: 'PortfolioSnapshots'
-    };
+    const accountId = req.query.account || process.env.IBKR_ACCOUNT_ID || undefined;
+    const source = req.query.source;
 
-    const snapshotResult = await dynamodb.scan(snapshotParams).promise();
-    const snapshotTime = Date.now() - snapshotStartTime;
-    console.log(`[API] Portfolio snapshot scan completed in ${snapshotTime}ms, found ${snapshotResult.Items.length} items`);
+    let portfolioData = await portfolioDataProvider.getPortfolioSnapshot(accountId, { source });
 
-    // Sort by timestamp descending to get the latest record
-    const sortedItems = snapshotResult.Items.sort((a, b) =>
-      new Date(b.timestamp) - new Date(a.timestamp)
-    );
+    if (portfolioData.empty) {
+      return res.json(portfolioData);
+    }
 
-    if (!sortedItems || sortedItems.length === 0) {
-      const totalTime = Date.now() - startTime;
-      console.log(`[API] /api/portfolio completed (no data) in ${totalTime}ms`);
-      // No data yet - return empty state
-      return res.json({
-        summary: {
-          totalValue: 0,
-          totalDayChange: 0,
-          totalDayChangePercent: '0.00',
-          totalGainLoss: 0,
-          totalGainLossPercent: '0.00',
-          positionCount: 0
-        },
-        assetAllocation: {},
-        topHoldings: [],
-        lastUpdated: 'No portfolio data - upload a Schwab CSV to get started'
+    const symbols = (portfolioData.holdings || []).map((h) => h.symbol).filter(Boolean);
+    if (symbols.length > 0) {
+      const BATCH_SIZE = 5;
+      const DELAY_MS = 200;
+      const quoteResults = await batchProcess(symbols, BATCH_SIZE, DELAY_MS, async (symbol) => {
+        try {
+          return await getQuote(symbol);
+        } catch (error) {
+          console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
+          return null;
+        }
+      });
+
+      portfolioData.holdings = portfolioData.holdings.map((holding, index) => {
+        const quote = quoteResults[index];
+        const dayChangePercent = quote?.changePercent ? parseFloat(quote.changePercent) : null;
+        return {
+          ...holding,
+          dayChangePercent,
+          priceSource: quote?.source || holding.priceSource,
+          warning: holding.warning || quote?.warning || null,
+        };
       });
     }
 
-    const latestSnapshot = sortedItems[0];
-    const snapshotId = latestSnapshot.snapshotId;
-
-    // Get holdings for this snapshot
-    const holdingsStartTime = Date.now();
-    const holdingsParams = {
-      TableName: 'Holdings',
-      FilterExpression: 'snapshotId = :snapshotId',
-      ExpressionAttributeValues: {
-        ':snapshotId': snapshotId
-      }
-    };
-
-    const holdingsResult = await dynamodb.scan(holdingsParams).promise();
-    const holdingsTime = Date.now() - holdingsStartTime;
-    console.log(`[API] Holdings scan completed in ${holdingsTime}ms, found ${holdingsResult.Items.length} holdings`);
-    const holdings = holdingsResult.Items || [];
-
-    // Fetch real-time quotes for all holdings to get intraday G/L
-    const quotesStartTime = Date.now();
-    const symbols = holdings.map(h => h.symbol).filter(Boolean);
-    let quotes = {};
-
-    if (symbols.length > 0) {
-      try {
-        const BATCH_SIZE = 5;
-        const DELAY_MS = 200;
-        const quoteResults = await batchProcess(
-          symbols,
-          BATCH_SIZE,
-          DELAY_MS,
-          async (symbol) => {
-            try {
-              return await getQuote(symbol);
-            } catch (error) {
-              console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
-              return null;
-            }
-          }
-        );
-
-        symbols.forEach((symbol, index) => {
-          const quote = quoteResults[index];
-          if (quote && quote.changePercent) {
-            quotes[symbol.toUpperCase()] = quote;
-          }
-        });
-
-        const quotesTime = Date.now() - quotesStartTime;
-        console.log(`[API] Quotes fetched for ${Object.keys(quotes).length} holdings in ${quotesTime}ms`);
-      } catch (error) {
-        console.error(`[API] Error fetching quotes for holdings:`, error.message);
-        // Continue without quotes - holdings will have null dayChangePercent
-      }
+    if (typeof portfolioData.lastUpdated === 'string' && portfolioData.lastUpdated.includes('T')) {
+      portfolioData.lastUpdated = portfolioData.lastUpdated;
     }
 
-    // Transform to frontend format
-    const portfolioData = {
-      summary: {
-        totalValue: latestSnapshot.summary?.totalValue || 0,
-        totalDayChange: latestSnapshot.summary?.totalDayChange || 0,
-        totalDayChangePercent: latestSnapshot.summary?.totalDayChangePercent || '0.00',
-        totalGainLoss: latestSnapshot.summary?.totalGainLoss || 0,
-        totalGainLossPercent: latestSnapshot.summary?.totalGainLossPercent || '0.00',
-        totalGainLossPercent: latestSnapshot.summary?.totalGainLossPercent || '0.00',
-        positionCount: latestSnapshot.summary?.positionCount || holdings.length,
-        longCount: latestSnapshot.summary?.longCount || 0,
-        shortCount: latestSnapshot.summary?.shortCount || 0
-      },
-      assetAllocation: latestSnapshot.assetAllocation || {},
-      // Include full holdings array for PortfolioBreakdown component
-      holdings: holdings.map(holding => {
-        const symbolUpper = holding.symbol?.toUpperCase();
-        const quote = quotes[symbolUpper] || null;
-        // dayChangePercent comes from real-time quotes API (intraday change)
-        const dayChangePercent = quote?.changePercent ? parseFloat(quote.changePercent) : null;
-
-        return {
-          symbol: holding.symbol,
-          description: holding.description || '',
-          quantity: holding.quantity || 0,
-          price: holding.price || 0,
-          marketValue: holding.marketValue || 0,
-          costBasis: holding.costBasis || 0,
-          gainLoss: holding.gainLoss || 0,
-          gainLossPercent: holding.gainLossPercent || 0,
-          dayChangePercent: dayChangePercent, // Intraday G/L from real-time market prices
-          assetType: holding.assetType || '',
-          assetClass: holding.assetClass || ''
-        };
-      }),
-      // Keep topHoldings for summary views
-      topHoldings: holdings.slice(0, 10).map(holding => ({
-        symbol: holding.symbol,
-        marketValue: holding.marketValue,
-        accountPercent: holding.accountPercent || '0.00'
-      })),
-      lastUpdated: (() => {
-        // Lambda stores timestamp without 'Z' suffix, so we need to treat it as UTC
-        const timestamp = latestSnapshot.timestamp.endsWith('Z')
-          ? latestSnapshot.timestamp
-          : latestSnapshot.timestamp + 'Z';
-        const date = new Date(timestamp);
-
-        // Format date part (MM/DD/YYYY)
-        const datePart = date.toLocaleDateString('en-US', {
-          timeZone: 'America/Los_Angeles',
-          month: '2-digit',
-          day: '2-digit',
-          year: 'numeric'
-        });
-
-        // Format PST/PDT time
-        const pstTime = date.toLocaleTimeString('en-US', {
-          timeZone: 'America/Los_Angeles',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        });
-
-        // Format EST/EDT time
-        const estTime = date.toLocaleTimeString('en-US', {
-          timeZone: 'America/New_York',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        });
-
-        return `${datePart}, ${pstTime} PST / ${estTime} EST`;
-      })()
-    };
-
     const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/portfolio completed in ${totalTime}ms (snapshot: ${snapshotTime}ms, holdings: ${holdingsTime}ms)`);
+    console.log(
+      `[API] /api/portfolio completed in ${totalTime}ms source=${portfolioData.dataSource} holdings=${portfolioData.holdings?.length || 0}`,
+    );
     res.json(portfolioData);
-
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/portfolio after ${totalTime}ms:`, error);
     res.status(500).json({
       error: 'Failed to fetch portfolio data',
-      details: error.message
+      details: error.message,
     });
   }
 });

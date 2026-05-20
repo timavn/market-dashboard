@@ -10,6 +10,7 @@ export const ENDPOINTS = {
 
   // Portfolio data
   PORTFOLIO: '/api/portfolio',
+  PROVIDERS_STATUS: '/api/providers/status',
   POSITIONS: '/api/positions',
   PERFORMANCE: '/api/performance',
   PERFORMANCE_HISTORY: '/api/performance/history',

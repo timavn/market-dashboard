@@ -15,6 +15,16 @@ const apiClient = axios.create({
 
 // Market Data Service
 export class MarketDataService {
+  static async getProviderStatus() {
+    try {
+      const response = await apiClient.get(ENDPOINTS.PROVIDERS_STATUS);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching provider status:', error);
+      throw error;
+    }
+  }
+
   // Get real-time quotes
   static async getQuotes(symbols) {
     try {

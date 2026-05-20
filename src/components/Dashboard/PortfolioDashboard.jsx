@@ -19,6 +19,9 @@ import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
 import GlobalQuadsCard from './GlobalQuadsCard';
 import PredictionMarkets, { PredictionMarketsLogo } from './PredictionMarkets';
 import './PredictionMarkets.css';
+import RefreshButton from '../common/RefreshButton';
+import LoadingIndicator from '../common/LoadingIndicator';
+import DataSourceStatus from '../common/DataSourceStatus';
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
@@ -461,6 +464,7 @@ const PortfolioDashboard = () => {
     <div className="h-full flex flex-col p-4">
       {/* Upload Section - Primary Hero */}
       <div className="mb-6">
+        <DataSourceStatus className="mb-3" />
         <CSVUpload
           onUploadSuccess={(result) => {
             console.log('CSV uploaded successfully:', result);
@@ -468,6 +472,8 @@ const PortfolioDashboard = () => {
           onUploadError={(error) => {
             console.error('CSV upload failed:', error);
           }}
+          reconciliationWarnings={displayData.reconciliationWarnings}
+          dataSource={displayData.dataSource}
         />
         <Text className="text-xs text-center text-gray-400 mt-2">
           Last updated: {displayData.lastUpdated}
@@ -557,22 +563,7 @@ const PortfolioDashboard = () => {
   if (loading) {
     return (
       <div className="min-h-screen p-2 flex items-center justify-center bg-[#eef6fb] dark:bg-gray-900">
-        <div
-          style={{
-            width: '40px',
-            height: '40px',
-            border: '4px solid',
-            borderColor: theme === 'dark' ? '#374151' : '#e5e7eb',
-            borderTopColor: theme === 'dark' ? '#3b82f6' : '#2563eb',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite'
-          }}
-        />
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+        <LoadingIndicator label="Loading portfolio…" size="lg" centered />
       </div>
     );
   }
@@ -584,9 +575,7 @@ const PortfolioDashboard = () => {
         <Card className="text-center max-w-md rounded-lg">
           <Title className="text-red-600 dark:text-red-400 mb-4">Error loading data</Title>
           <Text className="mb-4 dark:text-gray-300">{error}</Text>
-          <Button onClick={() => window.location.reload()} color="red">
-            Retry
-          </Button>
+          <RefreshButton label="Retry" onClick={() => window.location.reload()} />
         </Card>
       </div>
     );
@@ -2185,38 +2174,15 @@ const PortfolioDashboard = () => {
                 Analytics
               </Title>
 
-              {/* Refresh Button */}
-              <button
+              <RefreshButton
+                iconOnly
+                title="Refresh Analytics"
+                label="Refresh Analytics"
                 onClick={(e) => {
                   e.stopPropagation();
                   setAnalyticsRefreshKey(prev => prev + 1);
                 }}
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '16px',
-                  color: theme === 'dark' ? '#9ca3af' : '#6b7280',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
-                  e.currentTarget.style.color = theme === 'dark' ? '#f3f4f6' : '#111';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = theme === 'dark' ? '#9ca3af' : '#6b7280';
-                }}
-                title="Refresh Analytics"
-              >
-                ↻
-              </button>
+              />
             </div>
 
             {/* Scrollable Content */}

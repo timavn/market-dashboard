@@ -1,0 +1,10 @@
+{
+  "account": "DU123456",
+  "symbol": "AAPL",
+  "conId": 265598,
+  "secType": "STK",
+  "exchange": "NASDAQ",
+  "currency": "USD",
+  "position": 100,
+  "avgCost": 150.5
+}

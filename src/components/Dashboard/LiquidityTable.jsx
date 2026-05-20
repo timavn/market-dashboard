@@ -1,4 +1,5 @@
 import React from 'react';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const LiquidityTable = ({ data, loading }) => {
   // Helper to get color based on value
@@ -43,9 +44,7 @@ const LiquidityTable = ({ data, loading }) => {
         }}>
           LIQUIDITY
         </div>
-        <div style={{ padding: '20px', textAlign: 'center' }} className="dark:text-gray-300">
-          Loading...
-        </div>
+        <LoadingIndicator label="Loading..." size="sm" centered className="p-5" />
       </div>
     );
   }

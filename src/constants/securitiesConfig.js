@@ -25,6 +25,7 @@ const YAHOO_TICKER_MAP = {
   'SPX': '^GSPC',
   'COMPQ': '^IXIC',
   'RUT': '^RUT',
+  'NDX': '^NDX',
   'VIX': '^VIX',
   'DAX': '^GDAXI',
   'NIKK': '^N225',

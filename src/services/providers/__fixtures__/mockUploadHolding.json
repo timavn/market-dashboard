@@ -1,0 +1,12 @@
+{
+  "symbol": "AAPL",
+  "description": "APPLE INC",
+  "quantity": 90,
+  "price": 189,
+  "marketValue": 17010,
+  "costBasis": 13500,
+  "gainLoss": 3510,
+  "gainLossPercent": 26,
+  "assetType": "Equity",
+  "assetClass": "Equities"
+}

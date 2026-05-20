@@ -1,4 +1,15 @@
+import { computeRiskRangePercents } from '../../../utils/riskRangePercents';
+
 /** @typedef {'EQ'|'FI'|'FX'|'CMD'|'CRPT'} MacroAssetClass */
+
+function mockRangePercents(forecastLow, forecastHigh, spotPrice) {
+  const p = computeRiskRangePercents(spotPrice, forecastLow, forecastHigh);
+  return {
+    upsidePct: p?.upsidePct ?? null,
+    downsidePct: p?.downsidePct ?? null,
+    referencePrice: spotPrice,
+  };
+}
 
 /** Default tab (Equities / Index group) */
 export const DEFAULT_ASSET_CLASS = 'EQ';
@@ -14,6 +25,7 @@ export const MACRO_ASSET_TABS = [
 /** Map Hedgeye / universe `group` to segmented tab key */
 export const GROUP_TO_ASSET_CLASS = {
   Index: 'EQ',
+  Equity: 'EQ',
   Rates: 'FI',
   FX: 'FX',
   Commodities: 'CMD',
@@ -37,6 +49,7 @@ export const DEFAULT_MOCK_SIGNALS = [
     forecastLow: 23014,
     forecastHigh: 23926,
     spotPrice: 23652.18,
+    ...mockRangePercents(23014, 23926, 23652.18),
     score: 95,
     canonical: {
       symbol: 'COMPQ',
@@ -65,6 +78,7 @@ export const DEFAULT_MOCK_SIGNALS = [
     forecastLow: 6834,
     forecastHigh: 7026,
     spotPrice: 6928.41,
+    ...mockRangePercents(6834, 7026, 6928.41),
     score: 92,
     canonical: {
       symbol: 'SPX',
@@ -93,6 +107,7 @@ export const DEFAULT_MOCK_SIGNALS = [
     forecastLow: 13.48,
     forecastHigh: 19.1,
     spotPrice: 14.92,
+    ...mockRangePercents(13.48, 19.1, 14.92),
     score: 89,
     canonical: {
       symbol: 'VIX',
@@ -110,6 +125,3 @@ export const DEFAULT_MOCK_SIGNALS = [
     },
   },
 ];
-
-export const MACRO_RANGE_INFO =
-  'Range shows our 7–30 day forecast window. Live spot reflects the latest market price.';

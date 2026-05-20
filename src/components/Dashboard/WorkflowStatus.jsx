@@ -6,6 +6,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { SERVICE_CONFIG, calculateTotals } from '../../constants/serviceTracking';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import axios from 'axios';
+import LoadingIndicator from '../common/LoadingIndicator';
+import { buildHedgeyeContentUrl, appendCacheBust } from '../../utils/hedgeyePreviewUrl';
 
 // Helper to format dates consistently (M/D)
 const formatDate = (dateStr) => {
@@ -198,31 +200,21 @@ const WorkflowStatus = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Helper: Get data from local storage cache
-  const getFromCache = (key, date) => {
-    try {
-      const cacheKey = `hedgeye_pdf_${key}_${date}`;
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch (e) {
-      console.warn('Error reading from cache:', e);
-    }
-    return null;
+  const mediaRetryRef = useRef({});
+
+  const handlePreviewMediaError = (key) => {
+    const retries = mediaRetryRef.current[key] || 0;
+    if (retries >= 1) return;
+    mediaRetryRef.current[key] = retries + 1;
+    setAllPdfData((prev) => {
+      const current = prev[key];
+      if (!current?.url) return prev;
+      return {
+        ...prev,
+        [key]: { ...current, url: appendCacheBust(current.url) },
+      };
+    });
   };
-
-  // Helper: Save data to local storage cache
-  const saveToCache = (key, date, data) => {
-    try {
-      const cacheKey = `hedgeye_pdf_${key}_${date}`;
-      localStorage.setItem(cacheKey, JSON.stringify(data));
-    } catch (e) {
-      console.warn('Error saving to cache:', e);
-    }
-  };
-
-
 
   // Improved parallel fetcher (Data Preview). ETF Pro always uses /api/hedgeye/etfpro (workbook-driven).
   const fetchAllPdfs = async () => {
@@ -302,23 +294,16 @@ const WorkflowStatus = () => {
       }));
 
       try {
-        let pdfResult = null;
-        const cachedPdf = getFromCache(key, date);
-
-        if (cachedPdf) {
-          console.log(`[Cache Hit] ${key}`);
-          pdfResult = cachedPdf;
-        } else {
-          const response = await axios.get(
-            `${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`
-          );
-          pdfResult = {
-            url: response.data.url,
-            type: response.data.type || 'screenshot',
-            error: null,
-          };
-          saveToCache(key, date, pdfResult);
-        }
+        mediaRetryRef.current[key] = 0;
+        const contentUrl = buildHedgeyeContentUrl(backendUrl, date, key);
+        const metaResponse = await axios.get(
+          `${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`
+        );
+        const pdfResult = {
+          url: contentUrl,
+          type: metaResponse.data.type || 'screenshot',
+          error: null,
+        };
 
         setAllPdfData((prev) => ({
           ...prev,
@@ -631,30 +616,7 @@ const WorkflowStatus = () => {
             height: '400px',
             gap: '16px'
           }}>
-            <div
-              style={{
-                width: '32px',
-                height: '32px',
-                border: '3px solid',
-                borderColor: isDark ? '#374151' : '#e5e7eb',
-                borderTopColor: isDark ? '#3b82f6' : '#2563eb',
-                borderRadius: '50%',
-                animation: 'spin 0.8s linear infinite'
-              }}
-            />
-            <Text style={{
-              fontSize: '12px',
-              color: isDark ? '#9ca3af' : '#6b7280',
-              fontWeight: 500,
-              letterSpacing: '0.01em'
-            }}>
-              {loadingStatus}
-            </Text>
-            <style>{`
-              @keyframes spin {
-                to { transform: rotate(360deg); }
-              }
-            `}</style>
+            <LoadingIndicator label={loadingStatus} size="md" centered />
           </div>
         ) : activeTab === 'freshness' ? (
           /* Daily Freshness - New Primary View */
@@ -2015,23 +1977,7 @@ const WorkflowStatus = () => {
                           height: '100%',
                           justifyContent: 'center'
                         }}>
-                          <div
-                            style={{
-                              width: '24px',
-                              height: '24px',
-                              border: '2px solid',
-                              borderColor: isDark ? '#374151' : '#e5e7eb',
-                              borderTopColor: isDark ? '#3b82f6' : '#2563eb',
-                              borderRadius: '50%',
-                              animation: 'spin 0.8s linear infinite'
-                            }}
-                          />
-                          <Text style={{
-                            color: isDark ? '#9ca3af' : '#6b7280',
-                            fontSize: '11px'
-                          }}>
-                            Loading {label}...
-                          </Text>
+                          <LoadingIndicator label={`Loading ${label}...`} size="sm" centered />
                         </div>
                       ) : pdfData.workbookOnly ? (
                         <div style={{
@@ -2061,6 +2007,7 @@ const WorkflowStatus = () => {
                         <iframe
                           src={`${pdfData.url}#toolbar=0&navpanes=0&scrollbar=1`}
                           title={label}
+                          onError={() => handlePreviewMediaError(key)}
                           style={{
                             width: '100%',
                             height: '100%',
@@ -2071,6 +2018,7 @@ const WorkflowStatus = () => {
                         <img
                           src={pdfData.url}
                           alt={label}
+                          onError={() => handlePreviewMediaError(key)}
                           style={{
                             width: '100%',
                             height: 'auto',

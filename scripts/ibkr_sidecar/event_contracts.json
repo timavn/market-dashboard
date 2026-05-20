@@ -1,4 +1,5 @@
 {
+  "_setup": "With IB Gateway running: npm run ibkr-sidecar:discover — or POST /refresh auto-discovers when contracts is empty",
   "contracts": [],
   "example_contract": {
     "description": "Example only: replace with a real event-contract conid from IBKR",

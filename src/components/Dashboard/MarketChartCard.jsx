@@ -14,6 +14,7 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import StatusDot from '../common/StatusDot';
 import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
 import './MarketChartCard.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 // Time range options (keep in sync with /api/chart-data validRanges)
 const TIME_RANGES = [
@@ -290,14 +291,7 @@ const MarketChartCard = ({
 
   const chartInner =
     loading ? (
-      <div className="chart-skeleton">
-        <div className="skeleton-chart-area" />
-        <div className="skeleton-axis-labels">
-          <div className="skeleton-line skeleton-axis-label" />
-          <div className="skeleton-line skeleton-axis-label" />
-          <div className="skeleton-line skeleton-axis-label" />
-        </div>
-      </div>
+      <LoadingIndicator label="Loading chart…" size="md" centered className="chart-loading" />
     ) : error ? (
       <div className="chart-error">{error}</div>
     ) : chartData?.chartData && chartData.chartData.length > 0 ? (

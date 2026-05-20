@@ -1,6 +1,6 @@
 /**
  * Scheduled Kalshi financial/macro prediction market ingest.
- * IBKR ingest runs locally via Express + Client Portal Gateway only.
+ * IBKR ingest runs locally via Express + IB Gateway/TWS + Python sidecar only.
  */
 const path = require('path');
 

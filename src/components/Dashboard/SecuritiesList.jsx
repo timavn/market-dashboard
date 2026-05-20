@@ -5,6 +5,7 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import { isFreshForToday } from '../../utils/dateFreshness';
 import EtfProCard from './EtfProCard';
 import './SecuritiesList.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const VIEW_KEY = 'leftSidebarView_v1';
 const SS_ROWS_PER_PAGE_FALLBACK = 10;
@@ -677,7 +678,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
                     ) : (
                       <tr>
                         <td colSpan="4" className="loading-cell">
-                          Loading...
+                          <LoadingIndicator label="Loading..." size="sm" />
                         </td>
                       </tr>
                     )}
@@ -736,7 +737,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
                     ) : (
                       <tr>
                         <td colSpan="4" className="loading-cell">
-                          Loading...
+                          <LoadingIndicator label="Loading..." size="sm" />
                         </td>
                       </tr>
                     )}

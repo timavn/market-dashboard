@@ -1,6 +1,5 @@
 import SectionIcon from './SectionIcon';
 import SignalRow from './SignalRow';
-import { MACRO_RANGE_INFO } from './constants';
 
 function SignalSection({
   variant,
@@ -11,8 +10,7 @@ function SignalSection({
   rangeHeading,
 }) {
   const count = signals.length;
-  const heading = rangeHeading ?? 'Range (Live Spot)';
-  const help = MACRO_RANGE_INFO;
+  const heading = rangeHeading ?? 'Range';
 
   return (
     <section
@@ -21,7 +19,9 @@ function SignalSection({
     >
       <div className="signal-section-header">
         <span className={`signal-section-icon signal-section-icon-${variant}`}>
-          <SectionIcon variant={variant === 'short' ? 'short' : 'long'} />
+          <SectionIcon
+            variant={variant === 'short' ? 'short' : variant === 'neutral' ? 'neutral' : 'long'}
+          />
         </span>
         <span className="signal-section-heading" id={`macro-section-${variant}`}>
           {title}
@@ -30,17 +30,13 @@ function SignalSection({
       </div>
 
       <div className="signal-table">
-        <div className="signal-table-header" role="row">
+        <div className="signal-header" role="row">
           <span>Ticker</span>
-          <span className="signal-range-heading">
-            {heading}
-            <abbr className="signal-range-help" title={help}>
-              i
-            </abbr>
-          </span>
+          <span className="signal-range-heading">{heading}</span>
           <span className="signal-table-header-span-center">Trade</span>
           <span className="signal-table-header-span-center">Trend</span>
-          <span className="signal-table-header-span-center">Tail</span>
+          <span className="signal-table-header-span-center">Downside</span>
+          <span className="signal-table-header-span-center">Upside</span>
         </div>
         {count === 0 ? (
           <div className="signal-section-empty">No signals</div>

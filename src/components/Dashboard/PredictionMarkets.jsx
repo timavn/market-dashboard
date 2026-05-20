@@ -1,12 +1,24 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Activity, FileText } from 'lucide-react';
 import './PredictionMarkets.css';
 import { MarketDataService } from '../../services/api/marketDataService';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
 import {
-  getPredictionSignalTickers,
+  getMacroSignalQuotePlan,
   normalizePredictionMarketSignals,
 } from '../../utils/predictionMarketSignals';
-import { MacroSignalsCard, mapNormalizedRows } from './macroSignals';
+import {
+  MacroSignalsCard,
+  mapNormalizedRows,
+  AssetTabs,
+  DEFAULT_ASSET_CLASS,
+  inferEventMacroAssetClass,
+} from './macroSignals';
+import { SecuritiesUniverseMetricsTable } from './securitiesUniverse/index';
+import useEnrichedSecurity from '../../hooks/useEnrichedSecurity';
+import RefreshButton from '../common/RefreshButton';
+import LoadingIndicator from '../common/LoadingIndicator';
+import Pmv2CardChrome from './Pmv2CardChrome';
 import {
   adjustProbability,
   grossEdgeYes,
@@ -1616,14 +1628,12 @@ function ProviderStatusBar({ providers, onRefreshIbkr, ibkrRefreshing, lastIbkrU
         </span>
         {ibkr.message && <span className="pmv2-provider-hint">{ibkr.message}</span>}
       </div>
-      <button
-        type="button"
-        className="pmv2-btn-refresh-ibkr"
+      <RefreshButton
+        label="Refresh IBKR"
         onClick={onRefreshIbkr}
+        loading={ibkrRefreshing}
         disabled={ibkrRefreshing}
-      >
-        {ibkrRefreshing ? 'Refreshing IBKR…' : 'Refresh IBKR'}
-      </button>
+      />
     </div>
   );
 }
@@ -1654,12 +1664,12 @@ function EventsTableV2({ events, selectedId, onSelect, settings, loading }) {
     <div className="pmv2-card">
       <div className="pmv2-card-title">≡ EVENTS</div>
       {loading ? (
-        <div className="pmv2-empty">Loading market events…</div>
+        <LoadingIndicator label="Loading market events…" centered className="pmv2-empty" />
       ) : events.length === 0 ? (
         <div className="pmv2-empty">
           <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>No financial events loaded</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>Configure Kalshi API keys or use Refresh IBKR with Client Portal Gateway running.</div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>Configure Kalshi API keys or run IB Gateway + npm run ibkr-sidecar, then Refresh IBKR.</div>
         </div>
       ) : (
       <div className="pmv2-table-wrap">
@@ -1740,9 +1750,7 @@ function PredictionMarketSignalContextCard({ signalContext, selectedEvent, loadi
           <div className="pmv2-card-title">SIGNAL CONTEXT</div>
           <div className="pmv2-signal-category">{categoryLabel || 'All Macro'}</div>
         </div>
-        <button type="button" className="pmv2-signal-refresh" onClick={onRetry} disabled={loading}>
-          {loading ? 'Loading' : 'Refresh'}
-        </button>
+        <RefreshButton onClick={onRetry} loading={loading} />
       </div>
 
       {selectedEvent?.question && (
@@ -2217,15 +2225,14 @@ function PredictionMarketsHeaderV2({ providers, onClose, ibkrLoading, onRefreshI
         <span className="pmv2-provider-chip">
           <span className={`pmv2-status-dot ${getIbkrDotClass(ibkr.status)}`} />
           IBKR: {PROVIDER_STATUS_LABEL[ibkr.status] || ibkr.status || 'Unknown'}
-          <button
-            type="button"
-            className="pmv2-ibkr-refresh-btn"
+          <RefreshButton
+            iconOnly
             onClick={onRefreshIbkr}
+            loading={ibkrLoading}
             disabled={ibkrLoading}
             title="Refresh IBKR contracts"
-          >
-            {ibkrLoading ? '…' : '↺'}
-          </button>
+            label="Refresh IBKR"
+          />
         </span>
       </div>
     </header>
@@ -2250,75 +2257,67 @@ function MscSignalBadge({ value }) {
 }
 
 function TradePlanCard({ selectedSignal, selectedEvent, settings }) {
+  const symbol = selectedSignal?.symbol ?? null;
+  const {
+    security: enrichedSecurity,
+    loading: securityLoading,
+    error: securityError,
+    tradingDays,
+    hasListEntry,
+  } = useEnrichedSecurity(symbol);
+
   const tradePlan = useMemo(
     () => selectedSignal && selectedEvent ? calculatePositionSize(selectedSignal, selectedEvent, settings) : null,
     [selectedSignal, selectedEvent, settings]
   );
 
+  const footerPrompt = selectedSignal && !selectedEvent ? (
+    <div className="tp-prompt">
+      <span className="tp-prompt-icon">↑</span>
+      Select a contract above to generate a trade plan.
+    </div>
+  ) : null;
+
   if (!selectedSignal) {
     return (
-      <div className="tp-card tp-card-empty">
+      <Pmv2CardChrome
+        icon={<Activity size={16} />}
+        title="Signal Strength"
+        titleId="signal-strength-title"
+        className="tp-card tp-card-empty"
+      >
         <div className="tp-empty-icon">◈</div>
         <div className="tp-empty-title">Select a signal</div>
         <div className="tp-empty-sub">Choose a signal from the left panel to view related contracts and generate a trade plan.</div>
-      </div>
+      </Pmv2CardChrome>
     );
   }
 
-  const trade  = normalizeTrendLabel(selectedSignal.trackerTrend);
-  const trend  = normalizeTrendLabel(selectedSignal.riskTrend);
-  const tail   = normalizeTrendLabel(selectedSignal.macroSide || selectedSignal.callSide);
-  const isLong = isLongTrend(selectedSignal.trend);
-
   return (
-    <div className="tp-card">
-      {/* ── 1. Signal block ─────────────────────────────── */}
-      <div className="tp-section">
-        <div className="tp-section-label">Selected Signal</div>
-        <div className="tp-signal-row">
-          <div className="tp-signal-main">
-            <span className="tp-signal-ticker">{selectedSignal.symbol}</span>
-            <span className="tp-signal-name">{selectedSignal.label}</span>
-            <span className={`tp-dir-badge ${isLong ? 'long' : 'short'}`}>
-              {isLong ? '▲ Long' : '▼ Short'}
-            </span>
-          </div>
-          <div className="tp-signal-meta">
-            <span className="tp-meta-chip">{selectedSignal.group}</span>
-            <span className="tp-meta-chip">Score {selectedSignal.score ?? '—'}</span>
-          </div>
-        </div>
-        <div className="tp-signal-cols">
-          <TpStatBox label="Risk Range">
-            {selectedSignal.lrr != null || selectedSignal.hrr != null
-              ? `${formatSignalLevel(selectedSignal, selectedSignal.lrr)} – ${formatSignalLevel(selectedSignal, selectedSignal.hrr)}`
-              : <span className="tp-muted">—</span>}
-            {selectedSignal.price != null && (
-              <div className="tp-stat-sub">Current: {formatSignalLevel(selectedSignal, selectedSignal.price)}</div>
-            )}
-          </TpStatBox>
-          <TpStatBox label="Trade">
-            <MscSignalBadge value={trade} />
-          </TpStatBox>
-          <TpStatBox label="Trend">
-            <MscSignalBadge value={trend} />
-          </TpStatBox>
-          <TpStatBox label="Tail">
-            <MscSignalBadge value={tail} />
-          </TpStatBox>
+    <Pmv2CardChrome
+      icon={<Activity size={16} />}
+      title="Signal Strength"
+      titleId="signal-strength-title"
+      className="tp-card"
+      footer={footerPrompt}
+    >
+      <div className="tp-section tp-section-universe">
+        <div className="tp-universe-metrics-wrap">
+          <SecuritiesUniverseMetricsTable
+            security={enrichedSecurity}
+            loading={securityLoading}
+            error={securityError}
+            compact
+            tradingDays={tradingDays}
+            missingSymbol={!hasListEntry ? symbol : null}
+          />
         </div>
       </div>
 
-      <div className="tp-divider" />
-
-      {/* ── 2. Contract block ──────────────────────────── */}
-      {!selectedEvent ? (
-        <div className="tp-prompt">
-          <span className="tp-prompt-icon">↑</span>
-          Select a contract above to generate a trade plan.
-        </div>
-      ) : (
+      {selectedEvent && (
         <>
+          <div className="tp-divider" />
+
           <div className="tp-section">
             <div className="tp-section-label">Selected Contract</div>
             <div className="tp-contract-title">{selectedEvent.question || selectedEvent.event_title}</div>
@@ -2414,7 +2413,7 @@ function TradePlanCard({ selectedSignal, selectedEvent, settings }) {
           </div>
         </>
       )}
-    </div>
+    </Pmv2CardChrome>
   );
 }
 
@@ -2533,13 +2532,19 @@ function getEventSortVal(ev, colId) {
 
 const CMAP_PAGE_SIZE = 20;
 
-function ContractMapCard({ events, selectedId, onSelect, selectedSignal, onClearSignal, settings, loading }) {
+function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading }) {
+  const [selectedAssetClass, setSelectedAssetClass] = useState(DEFAULT_ASSET_CLASS);
   const [sortCol, setSortCol] = useState('oi');
   const [sortDir, setSortDir] = useState('desc');
   const [page, setPage] = useState(0);
 
+  const tabbedEvents = useMemo(
+    () => events.filter(e => inferEventMacroAssetClass(e) === selectedAssetClass),
+    [events, selectedAssetClass],
+  );
+
   const sorted = useMemo(() => {
-    const arr = [...events];
+    const arr = [...tabbedEvents];
     arr.sort((a, b) => {
       const av = getEventSortVal(a, sortCol);
       const bv = getEventSortVal(b, sortCol);
@@ -2547,10 +2552,15 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, onClear
       return sortDir === 'asc' ? av - bv : bv - av;
     });
     return arr;
-  }, [events, sortCol, sortDir]);
+  }, [tabbedEvents, sortCol, sortDir]);
 
-  // Reset to page 0 when sort or filter changes
-  useEffect(() => { setPage(0); }, [sortCol, sortDir, selectedSignal?.symbol]);
+  useEffect(() => { setPage(0); }, [sortCol, sortDir, selectedAssetClass]);
+
+  useEffect(() => {
+    if (selectedId && !tabbedEvents.some(e => getEventKey(e) === selectedId)) {
+      onSelect(null);
+    }
+  }, [selectedId, tabbedEvents, onSelect]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / CMAP_PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
@@ -2562,32 +2572,24 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, onClear
     else { setSortCol(colId); setSortDir('desc'); }
   }
 
-  const headerLabel = selectedSignal
-    ? `${events.length} ${selectedSignal.symbol} contract${events.length !== 1 ? 's' : ''}`
-    : `${events.length} contracts`;
+  const headerLabel = `${sorted.length} ${selectedAssetClass} contract${sorted.length !== 1 ? 's' : ''}`;
 
   return (
-    <div className="pmv2-card cmap-card">
-      <div className="cmap-header">
-        <div className="cmap-header-left">
-          <div className="pmv2-card-title">Contract Map</div>
-          {selectedSignal && (
-            <span className="cmap-filter-pill">
-              Filtered: {selectedSignal.symbol}
-              <button type="button" className="cmap-filter-clear" onClick={onClearSignal} title="Clear filter">×</button>
-            </span>
-          )}
-        </div>
-        <span className="cmap-count">{headerLabel}</span>
-      </div>
-
+    <Pmv2CardChrome
+      className="cmap-card pmv2-card-chrome--with-tabs"
+      icon={<FileText size={16} />}
+      title="Contracts"
+      titleId="contracts-title"
+      actions={<span className="cmap-count">{headerLabel}</span>}
+      tabs={(
+        <AssetTabs activeAssetClass={selectedAssetClass} onChange={setSelectedAssetClass} />
+      )}
+    >
       {loading ? (
-        <div className="pmv2-empty">Loading contracts…</div>
-      ) : events.length === 0 ? (
+        <LoadingIndicator label="Loading contracts…" centered className="pmv2-empty" />
+      ) : tabbedEvents.length === 0 ? (
         <div className="pmv2-empty">
-          {selectedSignal
-            ? `No contracts mapped to ${selectedSignal.symbol}.`
-            : 'No contracts available.'}
+          {events.length === 0 ? 'No contracts available.' : 'No contracts for this asset class.'}
         </div>
       ) : (
         <div className="cmap-table-scroll">
@@ -2678,7 +2680,7 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, onClear
           <button type="button" className="pmv2-page-btn" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage === totalPages - 1}>Next →</button>
         </div>
       )}
-    </div>
+    </Pmv2CardChrome>
   );
 }
 
@@ -3059,6 +3061,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     momoSnapshot: null,
     macroSnapshot: null,
     callSnapshot: null,
+    spotPrices: {},
   });
 
   const [ibkrLoading, setIbkrLoading] = useState(false);
@@ -3130,11 +3133,14 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     setSignalsLoading(true);
     setSignalsError(null);
     try {
-      const [riskRanges, bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot] = await Promise.all([
-        MarketDataService.getRiskRanges(getPredictionSignalTickers()).catch(err => {
-          console.warn('[PM] risk range signal load error:', err);
-          return {};
-        }),
+      const riskRanges = await MarketDataService.getRiskRanges().catch(err => {
+        console.warn('[PM] risk range signal load error:', err);
+        return {};
+      });
+      const quotePlan = getMacroSignalQuotePlan(riskRanges || {});
+      const quoteTickers = [...new Set(quotePlan.map(entry => entry.quote))];
+
+      const [bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot, rawSpotPrices] = await Promise.all([
         MarketDataService.getHedgeyeSnapshot('bitcoin-trend-tracker').catch(err => {
           console.warn('[PM] bitcoin tracker signal load error:', err);
           return null;
@@ -3151,7 +3157,17 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
           console.warn('[PM] the call signal load error:', err);
           return null;
         }),
+        MarketDataService.getQuotes(quoteTickers).catch(err => {
+          console.warn('[PM] spot price quote load error:', err);
+          return {};
+        }),
       ]);
+
+      const spotPrices = {};
+      for (const { display, quote } of quotePlan) {
+        const q = rawSpotPrices?.[quote] ?? rawSpotPrices?.[quote.toUpperCase()];
+        if (q) spotPrices[display] = q;
+      }
 
       setSignalData({
         riskRanges: riskRanges || {},
@@ -3159,6 +3175,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
         momoSnapshot,
         macroSnapshot,
         callSnapshot,
+        spotPrices: spotPrices || {},
       });
     } catch (err) {
       console.error('[PM] signal context load error:', err);
@@ -3209,6 +3226,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     momoSnapshot: signalData.momoSnapshot,
     macroSnapshot: signalData.macroSnapshot,
     callSnapshot: signalData.callSnapshot,
+    spotPrices: signalData.spotPrices,
     activeCategory: 'all',
     // Do not pass selectedEvent — it causes inferPredictionSignalCategory to narrow
     // the universe to a single category, hiding other asset classes in the sidebar.
@@ -3228,24 +3246,15 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     }
   }, [selectedSignalSymbol, signalContext]);
 
-  // Filter contract map to only contracts matching the selected signal
-  const mappedContracts = useMemo(
-    () => getContractsForSignal(selectedSignal, filteredEvents),
-    [selectedSignal, filteredEvents]
+  const contractMapEvents = useMemo(
+    () => getContractsForSignal(null, filteredEvents),
+    [filteredEvents],
   );
 
   const selectedEvent = useMemo(
-    () => mappedContracts.find(e => getEventKey(e) === selectedId) || null,
-    [mappedContracts, selectedId]
+    () => contractMapEvents.find(e => getEventKey(e) === selectedId) || null,
+    [contractMapEvents, selectedId],
   );
-
-  // When selected signal changes, clear contract selection if it's no longer in mapped set
-  useEffect(() => {
-    if (selectedId && !mappedContracts.some(e => getEventKey(e) === selectedId)) {
-      setSelectedId(null);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSignal?.symbol]);
 
   return (
     <div className="pmv2-wrap pmv2-redesign">
@@ -3258,9 +3267,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
       {(ingestError || loadError) && (
         <div className="pmv2-error-banner">
           {ingestError || loadError}
-          <button type="button" className="pmv2-retry-btn" onClick={() => { loadData(); loadIngest(); }}>
-            Retry
-          </button>
+          <RefreshButton label="Retry" onClick={() => { loadData(); loadIngest(); }} />
         </div>
       )}
       <div className="pmv2-redesign-body">
@@ -3277,12 +3284,10 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
         />
         <main className="pmv2-redesign-main">
           <ContractMapCard
-            events={mappedContracts}
+            events={contractMapEvents}
             selectedId={selectedId}
             onSelect={setSelectedId}
             selectedSignal={selectedSignal}
-            onClearSignal={() => setSelectedSignalSymbol(null)}
-            settings={settings}
             loading={loading || ingestLoading}
           />
           <TradePlanCard

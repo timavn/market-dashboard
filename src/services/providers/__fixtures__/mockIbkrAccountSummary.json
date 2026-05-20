@@ -1,0 +1,15 @@
+{
+  "account": "DU123456",
+  "currency": "USD",
+  "NetLiquidation": 1000000,
+  "TotalCashValue": 50000,
+  "SettledCash": 48000,
+  "BuyingPower": 2000000,
+  "EquityWithLoanValue": 1000000,
+  "InitMarginReq": 100000,
+  "MaintMarginReq": 80000,
+  "AvailableFunds": 900000,
+  "ExcessLiquidity": 920000,
+  "SMA": 950000,
+  "AccruedCash": 1200
+}
