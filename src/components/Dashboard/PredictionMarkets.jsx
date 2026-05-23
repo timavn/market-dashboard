@@ -7,6 +7,7 @@ import {
   getMacroSignalQuotePlan,
   normalizePredictionMarketSignals,
 } from '../../utils/predictionMarketSignals';
+import { isTreasuryYieldSymbol } from '../../utils/treasuryYieldScale';
 import {
   MacroSignalsCard,
   mapNormalizedRows,
@@ -18,7 +19,12 @@ import { SecuritiesUniverseMetricsTable } from './securitiesUniverse/index';
 import useEnrichedSecurity from '../../hooks/useEnrichedSecurity';
 import RefreshButton from '../common/RefreshButton';
 import LoadingIndicator from '../common/LoadingIndicator';
+import StatusDot from '../common/StatusDot';
 import Pmv2CardChrome from './Pmv2CardChrome';
+import {
+  filterContractMapEvents,
+  groupContractMapByEvent,
+} from '../../utils/contractMapFilters';
 import {
   adjustProbability,
   grossEdgeYes,
@@ -1531,6 +1537,21 @@ const V2_FILTERS = [
   { id: 'Crypto', label: 'Crypto' },
 ];
 
+const CMAP_VENUE_FILTERS = [
+  { id: 'all', label: 'All venues' },
+  { id: 'kalshi', label: 'Kalshi' },
+  { id: 'ibkr', label: 'IBKR' },
+  { id: 'merged', label: 'Merged' },
+];
+
+const CMAP_QUALITY_LABELS = {
+  wide_spread: 'Wide spread',
+  thin_liquidity: 'Thin',
+  stale_quote: 'Stale',
+  missing_settlement_source: 'No settlement',
+  not_tradable_in_ibkr: 'Not in IBKR',
+};
+
 const PROVIDER_STATUS_LABEL = {
   connected: 'Connected',
   gateway_offline: 'Gateway offline',
@@ -1846,7 +1867,7 @@ function isShortTrend(trend) {
 function formatSignalLevel(row, value) {
   if (value == null || Number.isNaN(Number(value))) return '--';
   const n = Number(value);
-  if (row.group === 'Rates') return `${n.toFixed(2)}%`;
+  if (isTreasuryYieldSymbol(row.symbol)) return `${n.toFixed(2)}%`;
   if (row.group === 'FX') return n >= 10 ? n.toFixed(2) : n.toFixed(4);
   if (row.group === 'Crypto' || row.group === 'Commodities') {
     return `$${n.toLocaleString(undefined, { maximumFractionDigits: n >= 100 ? 0 : 2 })}`;
@@ -2191,18 +2212,7 @@ export function PalantirOrbIcon({ size = 24, className = '' }) {
   return <PredictionMarketsLogo variant="icon" height={size} className={className} />;
 }
 
-function getIbkrDotClass(status) {
-  if (status === 'connected') return 'ready';
-  if (['gateway_offline', 'sidecar_offline', 'tws_offline', 'auth_required', 'unknown'].includes(status)) {
-    return 'warn';
-  }
-  return 'error';
-}
-
-function PredictionMarketsHeaderV2({ providers, onClose, ibkrLoading, onRefreshIbkr }) {
-  const kalshi = providers?.kalshi || {};
-  const ibkr = providers?.ibkr || {};
-
+function PredictionMarketsHeaderV2({ onClose }) {
   return (
     <header className="pmv2-redesign-header">
       <div className="pmv2-header-left">
@@ -2217,25 +2227,64 @@ function PredictionMarketsHeaderV2({ providers, onClose, ibkrLoading, onRefreshI
           <span className="pmv2-header-title">Prediction Markets</span>
         </button>
       </div>
-      <div className="pmv2-header-actions">
-        <span className="pmv2-provider-chip">
-          <span className={`pmv2-status-dot ${kalshi.status === 'connected' ? 'ready' : 'warn'}`} />
-          Kalshi: {PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status || 'Unknown'}
-        </span>
-        <span className="pmv2-provider-chip">
-          <span className={`pmv2-status-dot ${getIbkrDotClass(ibkr.status)}`} />
-          IBKR: {PROVIDER_STATUS_LABEL[ibkr.status] || ibkr.status || 'Unknown'}
-          <RefreshButton
-            iconOnly
-            onClick={onRefreshIbkr}
-            loading={ibkrLoading}
-            disabled={ibkrLoading}
-            title="Refresh IBKR contracts"
-            label="Refresh IBKR"
-          />
-        </span>
-      </div>
     </header>
+  );
+}
+
+function providerSourceStatus(status) {
+  if (status === 'connected') return 'current';
+  if (['gateway_offline', 'sidecar_offline', 'tws_offline', 'auth_required', 'unknown', 'stale'].includes(status)) {
+    return 'stale';
+  }
+  return 'defective';
+}
+
+function deriveProviderAggregateStatus(kalshi, ibkr) {
+  const kalshiOk = kalshi?.status === 'connected';
+  const ibkrOk = ibkr?.status === 'connected';
+  if (kalshiOk && ibkrOk) return 'active';
+  if (!kalshiOk && !ibkrOk) return 'inactive';
+  return 'stale';
+}
+
+function ContractProviderStatusDot({ providers, ibkrLoading, onRefreshIbkr }) {
+  const kalshi = providers?.kalshi || {};
+  const ibkr = providers?.ibkr || {};
+
+  const sources = useMemo(() => [
+    {
+      id: 'kalshi',
+      label: 'Kalshi',
+      detail: PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status || 'Unknown',
+      status: providerSourceStatus(kalshi.status),
+    },
+    {
+      id: 'ibkr',
+      label: 'IBKR',
+      detail: PROVIDER_STATUS_LABEL[ibkr.status] || ibkr.status || 'Unknown',
+      status: providerSourceStatus(ibkr.status),
+      action: (
+        <RefreshButton
+          iconOnly
+          onClick={onRefreshIbkr}
+          loading={ibkrLoading}
+          disabled={ibkrLoading}
+          title="Refresh IBKR contracts"
+          label="Refresh IBKR"
+        />
+      ),
+    },
+  ], [kalshi.status, ibkr.status, ibkrLoading, onRefreshIbkr]);
+
+  return (
+    <StatusDot
+      status={deriveProviderAggregateStatus(kalshi, ibkr)}
+      size={8}
+      label="Contract providers"
+      overallLabel="Providers"
+      sources={sources}
+      align="right"
+    />
   );
 }
 
@@ -2462,11 +2511,25 @@ function fmtCents(price) {
   return `${c}¢`;
 }
 
-function fmtCentsDelta(delta) {
-  if (delta == null || delta === 0) return { text: '0¢', cls: 'cmap-delta-flat' };
-  const c = Math.round(Number(delta) * 100);
-  if (c > 0) return { text: `+${c}¢`, cls: 'cmap-delta-up' };
-  return { text: `${c}¢`, cls: 'cmap-delta-dn' };
+function fmtVenueLine(event) {
+  const venues = event.venues?.length ? event.venues : [event.venue].filter(Boolean);
+  const unique = [...new Set(venues)];
+  const quote = event.quote_source ? ` · ${event.quote_source} quote` : '';
+  if (event.is_merged) return `${unique.join(' + ')}${quote}`;
+  return unique[0] || '—';
+}
+
+function fmtOiValue(event) {
+  const oi = event.open_interest ?? event.liquidity;
+  if (oi != null && Number(oi) > 0) return fmtVolume(oi);
+  if (event.ibkr_tradable && !event.venues?.includes('Kalshi')) return '–';
+  return fmtVolume(oi);
+}
+
+function fmtTotalVolume(event) {
+  const total = event.total_volume ?? event.open_interest;
+  if (total != null && Number(total) > 0) return fmtVolume(total);
+  return fmtVolume(event.volume);
 }
 
 function fmtVolume(n) {
@@ -2501,13 +2564,12 @@ function fmtExpiryDate(dateStr) {
 
 const CMAP_COLS = [
   { id: 'market',   label: 'MARKET',   sortable: false, align: 'left'  },
-  { id: 'delta',    label: '24H Δ',    sortable: true,  align: 'right' },
   { id: 'bid',      label: 'BID',      sortable: true,  align: 'right' },
   { id: 'ask',      label: 'ASK',      sortable: true,  align: 'right' },
   { id: 'spread',   label: 'SPREAD',   sortable: true,  align: 'right' },
   { id: 'vol24h',   label: '24H',      sortable: true,  align: 'right' },
-  { id: 'total',    label: 'TOTAL',    sortable: true,  align: 'right' },
-  { id: 'oi',       label: 'OI',       sortable: true,  align: 'right' },
+  { id: 'total',    label: 'TOTAL',    sortable: true,  align: 'right', title: 'Lifetime volume (Kalshi) or session volume' },
+  { id: 'oi',       label: 'OI',       sortable: true,  align: 'right', title: 'Open interest (Kalshi only)' },
   { id: 'inc',      label: 'INC',      sortable: false, align: 'right' },
   { id: 'category', label: 'CATEGORY', sortable: true,  align: 'left'  },
   { id: 'added',    label: 'ADDED',    sortable: true,  align: 'right' },
@@ -2516,12 +2578,11 @@ const CMAP_COLS = [
 
 function getEventSortVal(ev, colId) {
   switch (colId) {
-    case 'delta':    return ev.price_change_24h ?? 0;
     case 'bid':      return Number(ev.yes_bid ?? ev.yes ?? 0);
     case 'ask':      return Number(ev.yes_ask ?? 0);
     case 'spread':   return Number(ev.spread ?? 0);
     case 'vol24h':   return Number(ev.volume ?? 0);
-    case 'total':    return Number(ev.total_volume ?? ev.open_interest ?? 0);
+    case 'total':    return Number(ev.total_volume ?? ev.open_interest ?? ev.volume ?? 0);
     case 'oi':       return Number(ev.open_interest ?? ev.liquidity ?? 0);
     case 'added':    return ev.updated_at ? new Date(ev.updated_at).getTime() : 0;
     case 'expires':  return ev.expiration_time ? new Date(ev.expiration_time).getTime() : Infinity;
@@ -2532,16 +2593,27 @@ function getEventSortVal(ev, colId) {
 
 const CMAP_PAGE_SIZE = 20;
 
-function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading }) {
+function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading, providers, ibkrLoading, onRefreshIbkr }) {
   const [selectedAssetClass, setSelectedAssetClass] = useState(DEFAULT_ASSET_CLASS);
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [venueFilter, setVenueFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [groupByEvent, setGroupByEvent] = useState(false);
   const [sortCol, setSortCol] = useState('oi');
   const [sortDir, setSortDir] = useState('desc');
   const [page, setPage] = useState(0);
 
-  const tabbedEvents = useMemo(
-    () => events.filter(e => inferEventMacroAssetClass(e) === selectedAssetClass),
-    [events, selectedAssetClass],
+  const filteredEvents = useMemo(
+    () => filterContractMapEvents(events, { categoryFilter, venueFilter, searchQuery }),
+    [events, categoryFilter, venueFilter, searchQuery],
   );
+
+  const tabbedEvents = useMemo(() => {
+    const assetFiltered = filteredEvents.filter(
+      (e) => inferEventMacroAssetClass(e) === selectedAssetClass,
+    );
+    return groupByEvent ? groupContractMapByEvent(assetFiltered) : assetFiltered;
+  }, [filteredEvents, selectedAssetClass, groupByEvent]);
 
   const sorted = useMemo(() => {
     const arr = [...tabbedEvents];
@@ -2554,7 +2626,7 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading
     return arr;
   }, [tabbedEvents, sortCol, sortDir]);
 
-  useEffect(() => { setPage(0); }, [sortCol, sortDir, selectedAssetClass]);
+  useEffect(() => { setPage(0); }, [sortCol, sortDir, selectedAssetClass, categoryFilter, venueFilter, searchQuery, groupByEvent]);
 
   useEffect(() => {
     if (selectedId && !tabbedEvents.some(e => getEventKey(e) === selectedId)) {
@@ -2572,24 +2644,62 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading
     else { setSortCol(colId); setSortDir('desc'); }
   }
 
-  const headerLabel = `${sorted.length} ${selectedAssetClass} contract${sorted.length !== 1 ? 's' : ''}`;
-
   return (
     <Pmv2CardChrome
       className="cmap-card pmv2-card-chrome--with-tabs"
       icon={<FileText size={16} />}
       title="Contracts"
       titleId="contracts-title"
-      actions={<span className="cmap-count">{headerLabel}</span>}
+      actions={(
+        <>
+          <span className="cmap-count">{tabbedEvents.length} contracts</span>
+          <ContractProviderStatusDot
+            providers={providers}
+            ibkrLoading={ibkrLoading}
+            onRefreshIbkr={onRefreshIbkr}
+          />
+        </>
+      )}
       tabs={(
         <AssetTabs activeAssetClass={selectedAssetClass} onChange={setSelectedAssetClass} />
       )}
     >
+      <div className="cmap-toolbar">
+        <input
+          type="search"
+          className="cmap-search"
+          placeholder="Search contracts…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label="Search contracts"
+        />
+        <label className="cmap-group-toggle">
+          <input
+            type="checkbox"
+            checked={groupByEvent}
+            onChange={(e) => setGroupByEvent(e.target.checked)}
+          />
+          Group by event
+        </label>
+      </div>
+      <FilterChipsV2 active={categoryFilter} onChange={setCategoryFilter} />
+      <div className="cmap-venue-filters">
+        {CMAP_VENUE_FILTERS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            className={`pmv2-chip${venueFilter === f.id ? ' active' : ''}`}
+            onClick={() => setVenueFilter(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       {loading ? (
         <LoadingIndicator label="Loading contracts…" centered className="pmv2-empty" />
       ) : tabbedEvents.length === 0 ? (
         <div className="pmv2-empty">
-          {events.length === 0 ? 'No contracts available.' : 'No contracts for this asset class.'}
+          {events.length === 0 ? 'No contracts available.' : 'No contracts match the current filters.'}
         </div>
       ) : (
         <div className="cmap-table-scroll">
@@ -2601,6 +2711,7 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading
                     key={col.id}
                     className={`cmap-th${col.align === 'right' ? ' cmap-th-r' : ''}${col.sortable ? ' cmap-th-sort' : ''}`}
                     onClick={() => handleSort(col.id)}
+                    title={col.title || undefined}
                   >
                     {col.label}
                     {col.sortable && sortCol === col.id && (
@@ -2613,57 +2724,56 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading
             <tbody>
               {rows.map((ev, i) => {
                 const isSelected = getEventKey(ev) === selectedId;
-                const delta = fmtCentsDelta(ev.price_change_24h);
                 const matchType = selectedSignal ? getMatchType(ev, selectedSignal) : null;
+                const qualityFlags = (ev.data_quality_flags || []).filter(
+                  (flag) => CMAP_QUALITY_LABELS[flag],
+                );
                 return (
                   <tr
                     key={ev.id || ev.question || i}
                     className={`cmap-row${isSelected ? ' cmap-row-selected' : ''}`}
                     onClick={() => onSelect(getEventKey(ev))}
                   >
-                    {/* MARKET */}
                     <td className="cmap-td cmap-td-market">
                       <div className="cmap-market-name">
                         {ev.contract_title || ev.question || ev.event_title || '—'}
+                        {ev.contract_count > 1 && (
+                          <span className="cmap-group-count">{ev.contract_count} contracts</span>
+                        )}
                       </div>
                       <div className="cmap-market-sub">
                         {ev.event_title && ev.contract_title && ev.event_title !== ev.contract_title
                           ? ev.event_title
-                          : (ev.venue || 'Kalshi')}
+                          : fmtVenueLine(ev)}
                         {matchType && (
                           <span className={`cmap-match-tag ${matchType.toLowerCase()}`}>{matchType}</span>
                         )}
+                        {qualityFlags.map((flag) => (
+                          <span key={flag} className="cmap-quality-flag" title={CMAP_QUALITY_LABELS[flag]}>
+                            {CMAP_QUALITY_LABELS[flag]}
+                          </span>
+                        ))}
                       </div>
                     </td>
-                    {/* 24H Δ */}
-                    <td className={`cmap-td cmap-td-r ${delta.cls}`}>{delta.text}</td>
-                    {/* BID */}
                     <td className="cmap-td cmap-td-r cmap-price">
                       {fmtCents(ev.yes_bid ?? ev.yes)}
                     </td>
-                    {/* ASK */}
                     <td className="cmap-td cmap-td-r cmap-price">
                       {fmtCents(ev.yes_ask)}
                     </td>
-                    {/* SPREAD */}
                     <td className="cmap-td cmap-td-r cmap-muted">
                       {fmtCents(ev.spread)}
                     </td>
-                    {/* 24H vol */}
                     <td className="cmap-td cmap-td-r">{fmtVolume(ev.volume)}</td>
-                    {/* TOTAL */}
-                    <td className="cmap-td cmap-td-r">{fmtVolume(ev.total_volume ?? ev.open_interest)}</td>
-                    {/* OI */}
-                    <td className="cmap-td cmap-td-r cmap-oi">{fmtVolume(ev.open_interest ?? ev.liquidity)}</td>
-                    {/* INC */}
+                    <td className="cmap-td cmap-td-r">{fmtTotalVolume(ev)}</td>
+                    <td className="cmap-td cmap-td-r cmap-oi" title="Open interest (Kalshi only)">
+                      {fmtOiValue(ev)}
+                    </td>
                     <td className="cmap-td cmap-td-r cmap-muted">
                       {ev.min_tick != null ? fmtCents(ev.min_tick) : '–'}
                     </td>
-                    {/* CATEGORY */}
                     <td className="cmap-td cmap-td-cat">{ev.category || '–'}</td>
-                    {/* ADDED */}
                     <td className="cmap-td cmap-td-r cmap-muted">{fmtTimeAgo(ev.updated_at)}</td>
-                    {/* EXPIRES */}
                     <td className="cmap-td cmap-td-r cmap-muted">{fmtExpiryDate(ev.expiration_time || ev.close_time)}</td>
                   </tr>
                 );
@@ -2780,6 +2890,17 @@ function getBestEdge(events) {
   const edges = events.map(event => getEventEdge(event)).filter(edge => edge != null);
   if (!edges.length) return null;
   return Math.max(...edges);
+}
+
+function withPricingFields(event) {
+  if (!event) return event;
+  const yes = event.yes ?? event.yes_mid ?? event.last_price ?? event.yes_bid ?? 0;
+  const no = event.no ?? event.no_mid ?? event.no_bid ?? Math.max(0.01, 1 - yes);
+  return {
+    ...event,
+    yes: Number(yes) || 0,
+    no: Number(no) || 0,
+  };
 }
 
 function getEventKey(event) {
@@ -3065,6 +3186,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
   });
 
   const [ibkrLoading, setIbkrLoading] = useState(false);
+  const [uploadFreshness, setUploadFreshness] = useState(null);
 
   const loadIngest = useCallback(async (opts = {}) => {
     setIngestLoading(true);
@@ -3074,7 +3196,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
         mock: opts.mock,
         refresh: opts.refreshKalshi !== false ? 'kalshi' : undefined,
       });
-      const rows = data.dashboardEvents || data.events || [];
+      const rows = data.events || data.dashboardEvents || [];
       setMarketEvents(rows);
       setProviders(data.providers || null);
     } catch (err) {
@@ -3089,11 +3211,8 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     setIbkrLoading(true);
     try {
       const data = await predictionMarketsIngestService.refreshIbkr();
-      const newEvents = data.dashboardEvents || data.events || [];
-      setMarketEvents(prev => {
-        const existingKeys = new Set(prev.map(e => getEventKey(e)));
-        return [...prev, ...newEvents.filter(e => !existingKeys.has(getEventKey(e)))];
-      });
+      const newEvents = data.events || data.dashboardEvents || [];
+      setMarketEvents(newEvents);
       if (data.providers) setProviders(data.providers);
     } catch (err) {
       console.warn('[PM] IBKR refresh error:', err.message);
@@ -3140,7 +3259,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
       const quotePlan = getMacroSignalQuotePlan(riskRanges || {});
       const quoteTickers = [...new Set(quotePlan.map(entry => entry.quote))];
 
-      const [bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot, rawSpotPrices] = await Promise.all([
+      const [bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot, rawSpotPrices, freshness] = await Promise.all([
         MarketDataService.getHedgeyeSnapshot('bitcoin-trend-tracker').catch(err => {
           console.warn('[PM] bitcoin tracker signal load error:', err);
           return null;
@@ -3161,6 +3280,10 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
           console.warn('[PM] spot price quote load error:', err);
           return {};
         }),
+        MarketDataService.getHedgeyeFreshness().catch(err => {
+          console.warn('[PM] hedgeye freshness load error:', err);
+          return null;
+        }),
       ]);
 
       const spotPrices = {};
@@ -3177,6 +3300,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
         callSnapshot,
         spotPrices: spotPrices || {},
       });
+      setUploadFreshness(freshness?.dataTypes ?? null);
     } catch (err) {
       console.error('[PM] signal context load error:', err);
       setSignalsError(err.message || 'Failed to load signal context');
@@ -3207,12 +3331,13 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
       const match =
         ev.contract ||
         contractByQuestion.get((ev.question || '').toLowerCase());
-      if (!match) return ev;
+      const priced = withPricingFields(ev);
+      if (!match) return priced;
       const myProb = match.adjustedProbability ?? match.myProbability;
       return {
-        ...ev,
-        myProb: myProb != null ? Number(myProb) : ev.myProb,
-        side: match.contractSide || ev.side,
+        ...priced,
+        myProb: myProb != null ? Number(myProb) : priced.myProb,
+        side: match.contractSide || priced.side,
         contract: match,
       };
     });
@@ -3247,8 +3372,8 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
   }, [selectedSignalSymbol, signalContext]);
 
   const contractMapEvents = useMemo(
-    () => getContractsForSignal(null, filteredEvents),
-    [filteredEvents],
+    () => getContractsForSignal(selectedSignal, filteredEvents),
+    [filteredEvents, selectedSignal],
   );
 
   const selectedEvent = useMemo(
@@ -3258,12 +3383,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
 
   return (
     <div className="pmv2-wrap pmv2-redesign">
-      <PredictionMarketsHeaderV2
-        providers={providers}
-        onClose={onClose}
-        ibkrLoading={ibkrLoading}
-        onRefreshIbkr={loadIbkr}
-      />
+      <PredictionMarketsHeaderV2 onClose={onClose} />
       {(ingestError || loadError) && (
         <div className="pmv2-error-banner">
           {ingestError || loadError}
@@ -3281,6 +3401,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
           loading={signalsLoading}
           error={signalsError}
           onRefresh={loadSignalData}
+          uploadFreshness={uploadFreshness}
         />
         <main className="pmv2-redesign-main">
           <ContractMapCard
@@ -3289,6 +3410,9 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
             onSelect={setSelectedId}
             selectedSignal={selectedSignal}
             loading={loading || ingestLoading}
+            providers={providers}
+            ibkrLoading={ibkrLoading}
+            onRefreshIbkr={loadIbkr}
           />
           <TradePlanCard
             selectedSignal={selectedSignal}

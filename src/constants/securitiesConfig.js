@@ -66,7 +66,7 @@ const YAHOO_TICKER_MAP = {
   // Additional indices/commodities
   'CRB': '^CRB',       // CRB Commodity Index
   // Rates (CBOE Treasury yield indices)
-  // Yahoo reports these as yield * 10 (e.g., 4.05% ≈ 40.5)
+  // Yahoo may quote percent directly (~4.58) or legacy yield×10 (~45.8); see treasuryYieldScale.cjs
   'UST10Y': '^TNX',    // 10-Year Treasury Yield Index
   'UST30Y': '^TYX',    // 30-Year Treasury Yield Index
   // For 2-year, we currently proxy with the 5-year index due to

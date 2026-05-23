@@ -24,6 +24,12 @@ const {
   resolveHedgeyeMedia,
   buildHedgeyeContentUrlFromRequest,
 } = require('./src/utils/hedgeyeMedia.cjs');
+const { normalizeCboeTreasuryYield } = require('./src/utils/treasuryYieldScale.cjs');
+
+function scaleRateProxyValue(raw, isRateProxy) {
+  if (raw == null || raw === undefined || !isRateProxy) return raw;
+  return normalizeCboeTreasuryYield(raw);
+}
 
 const app = express();
 // In development, use port 3001 so React dev server can use 3000
@@ -116,6 +122,7 @@ app.use('/api/prediction-markets', predictionMarketsIngestRoutes);
 // Market / portfolio data providers (IBKR-first, Yahoo fallback)
 const compositeMarketDataProvider = require('./src/services/providers/compositeMarketDataProvider');
 const yahooMarketDataProvider = require('./src/services/providers/yahoo/yahooMarketDataProvider');
+const ibkrStreamBridge = require('./src/services/ibkr/ibkrStreamBridge');
 const { createUploadedStatementPortfolioProvider } = require('./src/services/providers/uploadedStatementPortfolioProvider');
 const { createCompositePortfolioDataProvider } = require('./src/services/providers/compositePortfolioDataProvider');
 
@@ -511,7 +518,6 @@ async function fetchYahooQuote(yahooTicker) {
     }
     const meta = result.meta || {};
     const isRateProxyTicker = yahooTicker === '^FVX' || yahooTicker === '^TNX' || yahooTicker === '^TYX';
-    const scaleFactor = isRateProxyTicker ? 0.1 : 1;
 
     // Log available price fields for debugging
     const availablePriceFields = Object.keys(meta).filter(key =>
@@ -561,8 +567,10 @@ async function fetchYahooQuote(yahooTicker) {
         previousClose = currentPrice;
       }
 
-      currentPrice *= scaleFactor;
-      previousClose *= scaleFactor;
+      if (isRateProxyTicker) {
+        currentPrice = normalizeCboeTreasuryYield(currentPrice);
+        previousClose = normalizeCboeTreasuryYield(previousClose);
+      }
       const change = currentPrice - previousClose;
       const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
 
@@ -810,6 +818,14 @@ async function getQuote(symbol) {
     return cached.data;
   }
 
+  if (ibkrStreamBridge.STREAM_ENABLED) {
+    const streamLegacy = ibkrStreamBridge.getCachedLegacy(cacheKey);
+    if (streamLegacy && streamLegacy.price) {
+      quotesCache.set(cacheKey, { data: streamLegacy, timestamp: now });
+      return streamLegacy;
+    }
+  }
+
   try {
     const quoteResult = await compositeMarketDataProvider.getQuote(symbol);
     if (quoteResult && quoteResult.price) {
@@ -866,7 +882,10 @@ async function getIntradayData(symbol, range = '1d') {
     const sparklineData = closePrices
       .filter(price => price !== null && price !== undefined)
       .slice(-50)
-      .map(price => parseFloat(price.toFixed(2)));
+      .map(price => {
+        const n = isRateProxy ? normalizeCboeTreasuryYield(price) : price;
+        return parseFloat(Number(n).toFixed(2));
+      });
 
     // Cache for 5 minutes
     intradayCache.set(cacheKey, sparklineData);
@@ -1203,23 +1222,21 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
     const timestamps = result.timestamp || [];
     const quote = result.indicators?.quote?.[0] || {};
 
-    const scaleFactor = isRateProxy ? 0.1 : 1;
-
     // Build chart data array
     const chartData = timestamps.map((ts, i) => ({
       timestamp: ts * 1000, // Convert to milliseconds
-      open: quote.open?.[i] != null ? quote.open[i] * scaleFactor : null,
-      high: quote.high?.[i] != null ? quote.high[i] * scaleFactor : null,
-      low: quote.low?.[i] != null ? quote.low[i] * scaleFactor : null,
-      close: quote.close?.[i] != null ? quote.close[i] * scaleFactor : null,
+      open: quote.open?.[i] != null ? scaleRateProxyValue(quote.open[i], isRateProxy) : null,
+      high: quote.high?.[i] != null ? scaleRateProxyValue(quote.high[i], isRateProxy) : null,
+      low: quote.low?.[i] != null ? scaleRateProxyValue(quote.low[i], isRateProxy) : null,
+      close: quote.close?.[i] != null ? scaleRateProxyValue(quote.close[i], isRateProxy) : null,
       volume: quote.volume?.[i] ?? null
     })).filter(d => d.close !== null); // Filter out null closes
 
     // Get current day's OHLC from meta
     const currentPriceRaw = meta.regularMarketPrice ?? meta.previousClose;
     const previousCloseRaw = meta.chartPreviousClose ?? meta.previousClose;
-    const currentPrice = currentPriceRaw != null ? currentPriceRaw * scaleFactor : null;
-    const previousClose = previousCloseRaw != null ? previousCloseRaw * scaleFactor : null;
+    const currentPrice = currentPriceRaw != null ? scaleRateProxyValue(currentPriceRaw, isRateProxy) : null;
+    const previousClose = previousCloseRaw != null ? scaleRateProxyValue(previousCloseRaw, isRateProxy) : null;
     const change = currentPrice && previousClose ? currentPrice - previousClose : null;
     const changePercent = currentPrice && previousClose ? ((change / previousClose) * 100) : null;
 
@@ -1240,17 +1257,20 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
         open: (() => {
           const raw = meta.regularMarketOpen ?? todayData?.open ?? null;
           if (raw == null) return null;
-          return (raw * (isRateProxy && meta.regularMarketOpen != null ? scaleFactor : 1)).toFixed(2);
+          const v = isRateProxy && meta.regularMarketOpen != null ? scaleRateProxyValue(raw, true) : raw;
+          return Number(v).toFixed(2);
         })(),
         high: (() => {
           const raw = meta.regularMarketDayHigh ?? todayData?.high ?? null;
           if (raw == null) return null;
-          return (raw * (isRateProxy && meta.regularMarketDayHigh != null ? scaleFactor : 1)).toFixed(2);
+          const v = isRateProxy && meta.regularMarketDayHigh != null ? scaleRateProxyValue(raw, true) : raw;
+          return Number(v).toFixed(2);
         })(),
         low: (() => {
           const raw = meta.regularMarketDayLow ?? todayData?.low ?? null;
           if (raw == null) return null;
-          return (raw * (isRateProxy && meta.regularMarketDayLow != null ? scaleFactor : 1)).toFixed(2);
+          const v = isRateProxy && meta.regularMarketDayLow != null ? scaleRateProxyValue(raw, true) : raw;
+          return Number(v).toFixed(2);
         })(),
         close: currentPrice != null ? currentPrice.toFixed(2) : null
       },
@@ -1432,12 +1452,11 @@ async function fetchYahooDailyClosesSeries(symbol) {
   if (!result) return null;
   const timestamps = result.timestamp || [];
   const quote = result.indicators?.quote?.[0] || {};
-  const scaleFactor = isRateProxy ? 0.1 : 1;
   const out = [];
   for (let i = 0; i < timestamps.length; i++) {
     const c = quote.close?.[i];
     if (c == null || c === undefined) continue;
-    out.push({ t: timestamps[i] * 1000, close: c * scaleFactor });
+    out.push({ t: timestamps[i] * 1000, close: scaleRateProxyValue(c, isRateProxy) });
   }
   return out.length >= 2 ? out : null;
 }
@@ -3864,7 +3883,7 @@ app.get('/api/securities/signal-strength', async (req, res) => {
   }
 });
 
-// Portfolio: IBKR API live when connected, else uploaded Schwab CSV snapshot
+// Portfolio: IBKR API live snapshot (read-only)
 app.get('/api/portfolio', async (req, res) => {
   const startTime = Date.now();
   try {
@@ -3877,29 +3896,33 @@ app.get('/api/portfolio', async (req, res) => {
       return res.json(portfolioData);
     }
 
-    const symbols = (portfolioData.holdings || []).map((h) => h.symbol).filter(Boolean);
-    if (symbols.length > 0) {
-      const BATCH_SIZE = 5;
-      const DELAY_MS = 200;
-      const quoteResults = await batchProcess(symbols, BATCH_SIZE, DELAY_MS, async (symbol) => {
-        try {
-          return await getQuote(symbol);
-        } catch (error) {
-          console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
-          return null;
-        }
-      });
+    // IBKR snapshots are already priced in compositePortfolioDataProvider; skip
+    // per-holding quote enrichment to keep sidebar refreshes fast.
+    if (portfolioData.dataSource !== 'ibkr_api') {
+      const symbols = (portfolioData.holdings || []).map((h) => h.symbol).filter(Boolean);
+      if (symbols.length > 0) {
+        const BATCH_SIZE = 5;
+        const DELAY_MS = 200;
+        const quoteResults = await batchProcess(symbols, BATCH_SIZE, DELAY_MS, async (symbol) => {
+          try {
+            return await getQuote(symbol);
+          } catch (error) {
+            console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
+            return null;
+          }
+        });
 
-      portfolioData.holdings = portfolioData.holdings.map((holding, index) => {
-        const quote = quoteResults[index];
-        const dayChangePercent = quote?.changePercent ? parseFloat(quote.changePercent) : null;
-        return {
-          ...holding,
-          dayChangePercent,
-          priceSource: quote?.source || holding.priceSource,
-          warning: holding.warning || quote?.warning || null,
-        };
-      });
+        portfolioData.holdings = portfolioData.holdings.map((holding, index) => {
+          const quote = quoteResults[index];
+          const dayChangePercent = quote?.changePercent ? parseFloat(quote.changePercent) : null;
+          return {
+            ...holding,
+            dayChangePercent,
+            priceSource: quote?.source || holding.priceSource,
+            warning: holding.warning || quote?.warning || null,
+          };
+        });
+      }
     }
 
     if (typeof portfolioData.lastUpdated === 'string' && portfolioData.lastUpdated.includes('T')) {
@@ -5201,6 +5224,11 @@ const server = app.listen(PORT, async () => {
   console.log(`📊 Market data API available at http://localhost:${PORT}/api`);
   console.log(`💼 Portfolio data available at http://localhost:${PORT}/api/portfolio`);
 
+  if (ibkrStreamBridge.STREAM_ENABLED) {
+    ibkrStreamBridge.startIbkrStreamBridge();
+    console.log('📡 IBKR stream bridge enabled (SSE → quotes state cache)');
+  }
+
   // Validate AWS credentials after server starts
   await validateAWSCredentials();
 });
@@ -5230,6 +5258,10 @@ const wss = new WebSocketServer({ server, path: '/ws/market' });
 
 // Simple subscription tracking (by channel)
 const channelToClients = new Map();
+const wsClientSymbols = new Map();
+const symbolRefCount = new Map();
+const wsLastBroadcast = new Map();
+const WS_QUOTE_THROTTLE_MS = Number(process.env.IBKR_WS_QUOTE_THROTTLE_MS || 250);
 
 function addClientToChannel(ws, channel) {
   if (!channelToClients.has(channel)) {
@@ -5258,6 +5290,93 @@ function broadcastToChannel(channel, payload) {
   });
 }
 
+function incrementSymbolRefs(symbols) {
+  const newlySubscribed = [];
+  for (const sym of symbols) {
+    const key = String(sym).toUpperCase();
+    if (!key) continue;
+    const next = (symbolRefCount.get(key) || 0) + 1;
+    symbolRefCount.set(key, next);
+    if (next === 1) newlySubscribed.push(key);
+  }
+  return newlySubscribed;
+}
+
+function decrementSymbolRefs(symbols) {
+  const removed = [];
+  for (const sym of symbols) {
+    const key = String(sym).toUpperCase();
+    const prev = symbolRefCount.get(key) || 0;
+    if (prev <= 1) {
+      symbolRefCount.delete(key);
+      removed.push(key);
+    } else {
+      symbolRefCount.set(key, prev - 1);
+    }
+  }
+  return removed;
+}
+
+function releaseWsSymbols(ws) {
+  const symbols = wsClientSymbols.get(ws);
+  if (!symbols || symbols.size === 0) return;
+  const removed = decrementSymbolRefs([...symbols]);
+  wsClientSymbols.delete(ws);
+  if (removed.length && ibkrStreamBridge.STREAM_ENABLED) {
+    ibkrStreamBridge.sidecarUnsubscribe(removed).catch(err => {
+      console.warn('[WS] sidecar unsubscribe failed:', err.message);
+    });
+  }
+}
+
+async function subscribeWsSymbols(ws, symbols) {
+  const list = [...new Set(symbols.map(s => String(s).toUpperCase()).filter(Boolean))];
+  if (!list.length) return;
+
+  const prev = wsClientSymbols.get(ws) || new Set();
+  const toAdd = list.filter(s => !prev.has(s));
+  const toRemove = [...prev].filter(s => !list.includes(s));
+
+  if (toRemove.length) {
+    decrementSymbolRefs(toRemove);
+    if (ibkrStreamBridge.STREAM_ENABLED) {
+      ibkrStreamBridge.sidecarUnsubscribe(toRemove).catch(() => {});
+    }
+  }
+
+  const newlySubscribed = incrementSymbolRefs(toAdd);
+  wsClientSymbols.set(ws, new Set(list));
+
+  if (newlySubscribed.length && ibkrStreamBridge.STREAM_ENABLED) {
+    try {
+      await ibkrStreamBridge.sidecarSubscribe(newlySubscribed);
+    } catch (err) {
+      console.warn('[WS] sidecar subscribe failed:', err.message);
+    }
+  }
+
+  for (const sym of list) {
+    const cached = ibkrStreamBridge.getCachedLegacy(sym);
+    if (cached && ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ channel: 'quotes', payload: cached }));
+    }
+  }
+}
+
+if (ibkrStreamBridge.STREAM_ENABLED) {
+  ibkrStreamBridge.onQuote(legacy => {
+    const sym = (legacy.symbol || '').toUpperCase();
+    if (!sym || !(symbolRefCount.get(sym) > 0)) return;
+    const clients = channelToClients.get('quotes');
+    if (!clients || clients.size === 0) return;
+
+    const last = wsLastBroadcast.get(sym) || 0;
+    if (Date.now() - last < WS_QUOTE_THROTTLE_MS) return;
+    wsLastBroadcast.set(sym, Date.now());
+    broadcastToChannel('quotes', legacy);
+  });
+}
+
 wss.on('connection', (ws) => {
   console.log('🔌 WebSocket client connected');
 
@@ -5266,13 +5385,25 @@ wss.on('connection', (ws) => {
       const data = JSON.parse(msg.toString());
       if (data && data.action === 'subscribe' && data.channel) {
         addClientToChannel(ws, data.channel);
-        // Acknowledge
+        if (data.channel === 'quotes' && Array.isArray(data.symbols) && data.symbols.length) {
+          subscribeWsSymbols(ws, data.symbols).catch(err => {
+            console.error('[WS] subscribe symbols error:', err.message);
+          });
+        }
         ws.send(JSON.stringify({ channel: 'system', payload: { status: 'subscribed', channel: data.channel } }));
       }
       if (data && data.action === 'unsubscribe' && data.channel) {
         const clients = channelToClients.get(data.channel);
         if (clients) clients.delete(ws);
+        if (data.channel === 'quotes') {
+          releaseWsSymbols(ws);
+        }
         ws.send(JSON.stringify({ channel: 'system', payload: { status: 'unsubscribed', channel: data.channel } }));
+      }
+      if (data && data.action === 'update_symbols' && data.channel === 'quotes' && Array.isArray(data.symbols)) {
+        subscribeWsSymbols(ws, data.symbols).catch(err => {
+          console.error('[WS] update symbols error:', err.message);
+        });
       }
     } catch (err) {
       console.error('WS message parse error:', err);
@@ -5280,21 +5411,11 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    releaseWsSymbols(ws);
     removeClientFromAllChannels(ws);
     console.log('🔌 WebSocket client disconnected');
   });
 });
-
-// Disable broadcaster by default to keep UI stable
-// Set ENABLE_WS_BROADCAST=true to re-enable timed updates
-if (process.env.ENABLE_WS_BROADCAST === 'true') {
-  setInterval(() => {
-    if (!channelToClients.has('quotes') || channelToClients.get('quotes').size === 0) return;
-    const data = generateMockData();
-    const quotes = Object.values(data).slice(0, 5);
-    broadcastToChannel('quotes', quotes);
-  }, 2000);
-}
 
 // Periodic cache eviction. Module-scope Maps are storing entries keyed by
 // either `timestamp` (most caches) or `ts` (periodReturnsCache). Without
@@ -5389,6 +5510,7 @@ const shutdown = (signal) => {
   console.log(`\n[shutdown] Received ${signal}, closing server...`);
   const done = () => process.exit(0);
   try {
+    ibkrStreamBridge.stopIbkrStreamBridge();
     wss.clients.forEach((c) => { try { c.terminate(); } catch (_) {} });
     server.close(done);
     setTimeout(() => process.exit(0), 3000).unref();

@@ -3,7 +3,6 @@ import { Card, Metric, Text, Grid, Title, Button, Badge } from '@tremor/react';
 import ReactMarkdown from 'react-markdown';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
-import CSVUpload from '../CSVUpload';
 import USDMacroDashboard from './USDMacroDashboard';
 import { SectorsCompactRail } from './MultiRegionMarketOverview';
 import SecuritiesList from './SecuritiesList';
@@ -20,16 +19,43 @@ import GlobalQuadsCard from './GlobalQuadsCard';
 import PredictionMarkets, { PredictionMarketsLogo } from './PredictionMarkets';
 import './PredictionMarkets.css';
 import RefreshButton from '../common/RefreshButton';
-import LoadingIndicator from '../common/LoadingIndicator';
-import DataSourceStatus from '../common/DataSourceStatus';
+import PortfolioSidebarSnapshot from './portfolio/PortfolioSidebarSnapshot';
+import { useMarketData } from '../../hooks/useMarketData';
+import { STREAM_PILOT_SYMBOLS } from '../../constants/streamPilotSymbols';
+import { loadSelectedAccount, saveSelectedAccount } from '../../constants/ibkrAccountStorage';
+
+const DEFAULT_OFFLINE_PORTFOLIO_DATA = {
+  summary: {
+    totalValue: 0,
+    totalDayChange: 0,
+    totalDayChangePercent: '0.00',
+    totalGainLoss: 0,
+    totalGainLossPercent: '0.00',
+    positionCount: 0,
+  },
+  assetAllocation: {},
+  topHoldings: [],
+  holdings: [],
+  lastUpdated: '—',
+  dataSource: 'ibkr_offline',
+  empty: true,
+};
+
+const sidebarTabCenteredLabelStyle = {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  textAlign: 'center',
+  pointerEvents: 'none',
+};
 
 const PortfolioDashboard = () => {
   const { theme, toggleTheme } = useTheme();
   const [portfolioData, setPortfolioData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [dataUpdatedNotification, setDataUpdatedNotification] = useState(null); // For optimistic updates
-  const portfolioDataRef = useRef(null); // Ref to track current portfolio data for polling
+  const [portfolioLoading, setPortfolioLoading] = useState(true);
+  const [portfolioError, setPortfolioError] = useState(null);
+  const [selectedAccount, setSelectedAccount] = useState(() => loadSelectedAccount());
+  const portfolioDataRef = useRef(null);
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
   const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
   const [showEVWindow, setShowEVWindow] = useState(false);
@@ -55,6 +81,10 @@ const PortfolioDashboard = () => {
   const [multiRegionMarketData, setMultiRegionMarketData] = useState({});
   const [multiRegionLoading, setMultiRegionLoading] = useState(true);
   const [multiRegionError, setMultiRegionError] = useState(null);
+
+  const { connected: streamConnected } = useMarketData(STREAM_PILOT_SYMBOLS, {
+    enableRealtime: true,
+  });
 
   const fetchMultiRegionQuotes = useCallback(async () => {
     try {
@@ -127,146 +157,71 @@ const PortfolioDashboard = () => {
     podsSearchInputRef.current?.blur();
   };
 
-  // Fetch portfolio data
-  // silent: if true, don't set loading state (for background refreshes)
-  const fetchPortfolio = async (silent = false) => {
+  const fetchPortfolio = useCallback(async (accountId, silent = false) => {
     try {
       if (!silent) {
-        setLoading(true); // Only show loading on initial load
+        setPortfolioLoading(true);
       }
-      setError(null);
-      const data = await MarketDataService.getPortfolio();
+      setPortfolioError(null);
+      const data = await MarketDataService.getPortfolio({ account: accountId || undefined });
       setPortfolioData(data);
-      portfolioDataRef.current = data; // Update ref
-      return data; // Return for polling logic
+      portfolioDataRef.current = data;
+      return data;
     } catch (e) {
       if (!silent) {
-        setError(e.message || 'Failed to load portfolio');
+        setPortfolioError(e.message || 'Failed to load portfolio');
       }
-      throw e; // Re-throw for error handling
+      throw e;
     } finally {
       if (!silent) {
-        setLoading(false);
+        setPortfolioLoading(false);
       }
     }
-  };
+  }, []);
+
+  const handleAccountChange = useCallback((accountId) => {
+    saveSelectedAccount(accountId);
+    setSelectedAccount(accountId);
+  }, []);
 
   useEffect(() => {
-    let isMounted = true;
-    fetchPortfolio();
+    let cancelled = false;
 
-    // Listen for portfolio refresh events (after CSV upload)
-    const handlePortfolioRefresh = () => {
-      if (isMounted) {
-        console.log('Refreshing portfolio data after CSV upload...');
-
-        // Store the current portfolio timestamp to detect when new data arrives
-        // Capture from ref to get current value
-        const currentData = portfolioDataRef.current;
-        let currentTimestamp = currentData?.lastUpdated;
-        let currentHoldingsCount = currentData?.holdings?.length || 0;
-        let currentTotalValue = currentData?.summary?.totalValue || 0;
-        let pollCount = 0;
-        const maxPolls = 10; // Poll for up to 30 seconds (10 polls × 3 seconds)
-        const pollInterval = 3000; // Poll every 3 seconds
-        let pollIntervalId = null;
-
-        // Initial fetch (silent mode - no blank screen)
-        fetchPortfolio(true).then(initialData => {
-          if (!isMounted) return;
-
-          // Update captured values after initial fetch
-          if (initialData) {
-            currentTimestamp = initialData.lastUpdated;
-            currentHoldingsCount = initialData.holdings?.length || 0;
-            currentTotalValue = initialData.summary?.totalValue || 0;
-            console.log('Initial portfolio state:', {
-              timestamp: currentTimestamp,
-              holdingsCount: currentHoldingsCount,
-              totalValue: currentTotalValue
-            });
+    const load = async () => {
+      try {
+        const status = await MarketDataService.getProviderStatus();
+        if (cancelled) return;
+        const accounts = status?.ibkr?.accounts || [];
+        if (accounts.length > 0) {
+          const saved = loadSelectedAccount();
+          const acct = saved && accounts.includes(saved) ? saved : accounts[0];
+          if (acct !== selectedAccount) {
+            handleAccountChange(acct);
+            return;
           }
-
-          // Start polling for new data
-          pollIntervalId = setInterval(() => {
-            pollCount++;
-
-            if (pollCount >= maxPolls) {
-              console.log('Polling timeout reached, stopping...');
-              if (pollIntervalId) clearInterval(pollIntervalId);
-              return;
-            }
-
-            if (!isMounted) {
-              if (pollIntervalId) clearInterval(pollIntervalId);
-              return;
-            }
-
-            // Fetch portfolio and check if timestamp changed
-            MarketDataService.getPortfolio()
-              .then(newData => {
-                if (!isMounted) return;
-
-                const newTimestamp = newData?.lastUpdated;
-                const newHoldingsCount = newData?.holdings?.length || 0;
-                const newTotalValue = newData?.summary?.totalValue || 0;
-
-                // Check if we have NEW data (not just same empty state)
-                const hasNewData = (
-                  (newTimestamp && newTimestamp !== currentTimestamp) ||
-                  (newHoldingsCount > 0 && newHoldingsCount !== currentHoldingsCount) ||
-                  (newTotalValue > 0 && newTotalValue !== currentTotalValue)
-                );
-
-                if (hasNewData) {
-                  console.log('New portfolio data detected:', {
-                    timestamp: newTimestamp,
-                    holdingsCount: newHoldingsCount,
-                    totalValue: newTotalValue,
-                    previousTimestamp: currentTimestamp,
-                    previousHoldingsCount: currentHoldingsCount,
-                    previousTotalValue: currentTotalValue
-                  });
-                  setPortfolioData(newData);
-                  portfolioDataRef.current = newData;
-
-                  // Show optimistic update notification
-                  setDataUpdatedNotification({
-                    message: 'Portfolio data updated',
-                    timestamp: new Date()
-                  });
-
-                  // Clear notification after 3 seconds
-                  setTimeout(() => {
-                    setDataUpdatedNotification(null);
-                  }, 3000);
-
-                  if (pollIntervalId) clearInterval(pollIntervalId);
-                } else {
-                  console.log(`Polling for new data... (${pollCount}/${maxPolls})`, {
-                    current: { timestamp: currentTimestamp, holdings: currentHoldingsCount, value: currentTotalValue },
-                    fetched: { timestamp: newTimestamp, holdings: newHoldingsCount, value: newTotalValue }
-                  });
-                }
-              })
-              .catch(error => {
-                console.warn('Error polling for portfolio data:', error);
-                // Continue polling on error
-              });
-          }, pollInterval);
-        }).catch(error => {
-          console.warn('Error in initial portfolio fetch during refresh:', error);
-        });
+        }
+        await fetchPortfolio(selectedAccount || undefined);
+      } catch (err) {
+        if (!cancelled) {
+          setPortfolioError(err.message || 'Failed to load portfolio');
+          setPortfolioLoading(false);
+        }
       }
     };
 
-    window.addEventListener('portfolioRefresh', handlePortfolioRefresh);
+    load();
+
+    const interval = setInterval(() => {
+      if (selectedAccount) {
+        fetchPortfolio(selectedAccount, true).catch(() => {});
+      }
+    }, 30000);
 
     return () => {
-      isMounted = false;
-      window.removeEventListener('portfolioRefresh', handlePortfolioRefresh);
+      cancelled = true;
+      clearInterval(interval);
     };
-  }, []);
+  }, [selectedAccount, fetchPortfolio, handleAccountChange]);
 
   // Handle clicks outside book menu
   useEffect(() => {
@@ -441,145 +396,23 @@ const PortfolioDashboard = () => {
     }
   };
 
-  // Default zeroed data - will be replaced with Schwab portfolio data
-  const defaultData = {
-    summary: {
-      totalValue: 0,
-      totalDayChange: 0,
-      totalDayChangePercent: '0.00',
-      totalGainLoss: 0,
-      totalGainLossPercent: '0.00',
-      positionCount: 0
-    },
-    assetAllocation: {},
-    topHoldings: [],
-    lastUpdated: 'Schwab Integration Pending'
-  };
+  const displayData = portfolioData || DEFAULT_OFFLINE_PORTFOLIO_DATA;
 
-  const displayData = portfolioData || defaultData;
-
-  // Calculate bottom padding based on panel heights
-  // Portfolio Metrics Content Component (Refactored to Snapshot)
   const PortfolioMetricsContent = () => (
     <div className="h-full flex flex-col p-4">
-      {/* Upload Section - Primary Hero */}
-      <div className="mb-6">
-        <DataSourceStatus className="mb-3" />
-        <CSVUpload
-          onUploadSuccess={(result) => {
-            console.log('CSV uploaded successfully:', result);
-          }}
-          onUploadError={(error) => {
-            console.error('CSV upload failed:', error);
-          }}
-          reconciliationWarnings={displayData.reconciliationWarnings}
-          dataSource={displayData.dataSource}
-        />
-        <Text className="text-xs text-center text-gray-400 mt-2">
-          Last updated: {displayData.lastUpdated}
-        </Text>
-      </div>
-
-      {(() => {
-        // Calculate robust metrics from holdings
-        const totalVal = parseFloat(displayData.summary?.totalValue) || 1;
-        const holdings = displayData.holdings || [];
-
-        let longVal = 0;
-        let shortVal = 0;
-        let netVal = 0;
-        let cashVal = 0;
-
-        holdings.forEach(h => {
-          const val = parseFloat(h.marketValue) || 0;
-          const absVal = Math.abs(val);
-          // Check for cash
-          const isCash = (h.assetClass === 'Cash' || h.symbol === 'Cash & Cash Investments' || h.assetType === 'Cash');
-
-          if (isCash) {
-            cashVal += val;
-          } else if (val > 0) {
-            longVal += absVal;
-            netVal += val;
-          } else if (val < 0) {
-            shortVal += absVal;
-            netVal += val;
-          }
-        });
-
-        const longPct = (longVal / totalVal) * 100;
-        const shortPct = (shortVal / totalVal) * 100;
-        const netPct = (netVal / totalVal) * 100;
-        const grossPct = ((longVal + shortVal) / totalVal) * 100;
-        const calculatedCashPct = Math.max(0, 100 - Math.round(grossPct));
-
-        return (
-          <div className="flex flex-col space-y-8">
-            {/* Exposure metrics: Gross, Net, Long, Short, Cash */}
-            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-100 dark:border-gray-800">
-              <div className="grid grid-cols-5 gap-4">
-                <div className="flex flex-col items-center">
-                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Gross</Text>
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white">{Math.round(grossPct)}%</Text>
-                </div>
-
-                <div className="flex flex-col items-center">
-                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Net</Text>
-                  <Text className={`text-sm font-bold ${netPct > 0 ? 'text-green-600 dark:text-green-400' : (netPct < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white')}`}>
-                    {netPct > 0 ? '+' : ''}{Math.round(netPct)}%
-                  </Text>
-                </div>
-
-                <div className="flex flex-col items-center">
-                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Long</Text>
-                  <Text className="text-sm font-bold text-green-600 dark:text-green-400">{Math.round(longPct)}%</Text>
-                </div>
-
-                <div className="flex flex-col items-center">
-                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Short</Text>
-                  <Text className="text-sm font-bold text-red-600 dark:text-red-400">{Math.round(shortPct)}%</Text>
-                </div>
-
-                <div className="flex flex-col items-center">
-                  <Text className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Cash</Text>
-                  <Text className="text-sm font-bold text-gray-900 dark:text-white">{calculatedCashPct.toFixed(1)}%</Text>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Call to action for full breakdown */}
-      <div className="mt-auto pt-8 text-center">
-        <Text className="text-xs text-gray-400 italic">
-          See Portfolio Analysis tab for detailed analysis
-        </Text>
-      </div>
+      {portfolioError && (
+        <Text className="text-xs text-red-600 dark:text-red-400 mb-2">{portfolioError}</Text>
+      )}
+      <PortfolioSidebarSnapshot
+        portfolioData={displayData}
+        loading={portfolioLoading}
+        streamConnected={streamConnected}
+        selectedAccount={selectedAccount}
+        onAccountChange={handleAccountChange}
+        onRefresh={() => fetchPortfolio(selectedAccount)}
+      />
     </div>
   );
-
-  // Loading state
-  if (loading) {
-    return (
-      <div className="min-h-screen p-2 flex items-center justify-center bg-[#eef6fb] dark:bg-gray-900">
-        <LoadingIndicator label="Loading portfolio…" size="lg" centered />
-      </div>
-    );
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="min-h-screen p-2 flex items-center justify-center bg-[#eef6fb] dark:bg-gray-900">
-        <Card className="text-center max-w-md rounded-lg">
-          <Title className="text-red-600 dark:text-red-400 mb-4">Error loading data</Title>
-          <Text className="mb-4 dark:text-gray-300">{error}</Text>
-          <RefreshButton label="Retry" onClick={() => window.location.reload()} />
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -590,24 +423,6 @@ const PortfolioDashboard = () => {
         transition: 'padding-right 0.3s ease-in-out',
       }}
     >
-      {/* Data Updated Notification (Optimistic Update) */}
-      {dataUpdatedNotification && (
-        <div
-          className="fixed top-4 right-4 z-50 animate-fade-in"
-          style={{
-            animation: 'fadeIn 0.3s ease-in'
-          }}
-        >
-          <Card className="bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800 shadow-lg">
-            <div className="flex items-center gap-2">
-              <Badge color="emerald" size="sm">
-                ✓ {dataUpdatedNotification.message}
-              </Badge>
-            </div>
-          </Card>
-        </div>
-      )}
-
       <Grid numItems={12} className="gap-1.5">
         <div
           className="col-span-12"
@@ -702,7 +517,7 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              gap: showPortfolioMetrics ? '12px' : '0'
+              position: showPortfolioMetrics ? 'relative' : undefined,
             }}
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
@@ -710,7 +525,7 @@ const PortfolioDashboard = () => {
               <span style={{ fontSize: '16px', lineHeight: 1 }}>{theme === 'dark' ? '☀️' : '🌙'}</span>
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
                 {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
               </span>
             )}
@@ -727,7 +542,7 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              gap: showPortfolioMetrics ? '12px' : '0'
+              position: showPortfolioMetrics ? 'relative' : undefined,
             }}
             title="Open X (Twitter) List"
           >
@@ -737,7 +552,7 @@ const PortfolioDashboard = () => {
               </svg>
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
                 X.com
               </span>
             )}
@@ -754,8 +569,8 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="The Pods"
           >
@@ -774,7 +589,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
                 The Pods
               </span>
             )}
@@ -791,8 +606,8 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Expected Values"
           >
@@ -800,7 +615,7 @@ const PortfolioDashboard = () => {
               <span className="font-bold text-black dark:text-white" style={{ fontSize: '12px' }}>+EV</span>
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
                 +EV Data
               </span>
             )}
@@ -818,8 +633,8 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Open Notes"
           >
@@ -838,7 +653,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
                 Notes
               </span>
             )}
@@ -912,9 +727,9 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
               marginTop: '4px',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Portfolio Breakdown"
           >
@@ -936,7 +751,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
+              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 Portfolio
               </span>
             )}
@@ -956,9 +771,9 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
               marginTop: '4px',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Securities Universe"
           >
@@ -996,7 +811,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showSecuritiesUniverse ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
+              <span className={`text-sm font-medium whitespace-nowrap ${showSecuritiesUniverse ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 Securities Universe
               </span>
             )}
@@ -1016,9 +831,9 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
               marginTop: '4px',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Performance Tracking"
           >
@@ -1038,7 +853,7 @@ const PortfolioDashboard = () => {
               )}
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPerformanceTracking ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
+              <span className={`text-sm font-medium whitespace-nowrap ${showPerformanceTracking ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 Performance
               </span>
             )}
@@ -1058,9 +873,9 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
               marginTop: '4px',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Prediction Markets"
           >
@@ -1068,8 +883,8 @@ const PortfolioDashboard = () => {
               <PredictionMarketsLogo variant="icon" height={20} />
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPredictionMarkets ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
-                Pred Markets
+              <span className={`text-sm font-medium whitespace-nowrap ${showPredictionMarkets ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
+                Prediction Markets
               </span>
             )}
           </button>
@@ -1145,8 +960,8 @@ const PortfolioDashboard = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              gap: showPortfolioMetrics ? '12px' : '0'
             }}
             title="Analytics"
           >
@@ -1158,7 +973,7 @@ const PortfolioDashboard = () => {
               />
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showWorkflowStatus ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`}>
+              <span className={`text-sm font-medium whitespace-nowrap ${showWorkflowStatus ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 Analytics
               </span>
             )}
@@ -2074,7 +1889,7 @@ const PortfolioDashboard = () => {
                 padding: '4px 16px 16px 16px',
               }}
             >
-              <PortfolioBreakdown portfolioData={portfolioData} isLoading={loading} />
+              <PortfolioBreakdown portfolioData={portfolioData} isLoading={portfolioLoading} />
             </div>
           </>
         )}

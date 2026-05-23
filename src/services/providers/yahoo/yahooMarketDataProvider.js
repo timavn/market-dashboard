@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { normalizeYahooLegacy } = require('../normalize/normalizeQuote');
+const { normalizeCboeTreasuryYield } = require('../../../utils/treasuryYieldScale.cjs');
 
 /** @type {((symbol: string) => { source: string, ticker: string })|null} */
 let getTickerMappingFn = null;
@@ -29,7 +30,6 @@ async function fetchYahooQuote(yahooTicker) {
 
     const meta = result.meta || {};
     const isRateProxyTicker = yahooTicker === '^FVX' || yahooTicker === '^TNX' || yahooTicker === '^TYX';
-    const scaleFactor = isRateProxyTicker ? 0.1 : 1;
 
     let currentPrice = null;
     let previousClose = null;
@@ -51,8 +51,10 @@ async function fetchYahooQuote(yahooTicker) {
 
     if (currentPrice == null) return null;
 
-    currentPrice *= scaleFactor;
-    previousClose = (previousClose || currentPrice) * scaleFactor;
+    if (isRateProxyTicker) {
+      currentPrice = normalizeCboeTreasuryYield(currentPrice);
+      previousClose = normalizeCboeTreasuryYield(previousClose ?? currentPrice);
+    }
 
     return {
       price: currentPrice.toFixed(2),

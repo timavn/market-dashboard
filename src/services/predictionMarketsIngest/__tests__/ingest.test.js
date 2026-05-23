@@ -2,6 +2,7 @@ const { normalizeEvent, comparisonFingerprint } = require('../normalize/normaliz
 const { isFinancialMacroEvent } = require('../filter/isFinancialMacroEvent');
 const { enrichEvent } = require('../enrich/enrichEvent');
 const { assignComparisonGroup } = require('../group/assignComparisonGroup');
+const { mergeCrossVenueEvents } = require('../merge/mergeCrossVenueEvents');
 const { sortAggregatedEvents } = require('../sortEvents');
 const { fromKalshiCents, deriveNoFromYes } = require('../normalize/priceScaling');
 
@@ -120,5 +121,65 @@ describe('comparisonFingerprint', () => {
       settlement_source: 'Federal Reserve',
     });
     expect(fp1).toBe(fp2);
+  });
+});
+
+describe('mergeCrossVenueEvents', () => {
+  test('prefers IBKR quotes and keeps Kalshi OI', () => {
+    const grouped = assignComparisonGroup([
+      {
+        id: 'kalshi:cpi-1',
+        venue: 'Kalshi',
+        api_raw_id: 'cpi-1',
+        question: 'Will CPI exceed 3%?',
+        underlying: 'CPI',
+        event_date: '2025-06-11',
+        settlement_source: 'BLS',
+        yes_bid: 0.4,
+        yes_ask: 0.42,
+        open_interest: 5000,
+        liquidity: 8000,
+        volume: 1200,
+        url: 'https://kalshi.com/markets/cpi-1',
+      },
+      {
+        id: 'cme:999',
+        venue: 'CME',
+        api_raw_id: '999',
+        tradable_in_ibkr: true,
+        question: 'Will CPI exceed 3%?',
+        underlying: 'CPI',
+        event_date: '2025-06-11',
+        settlement_source: 'BLS',
+        yes_bid: 0.41,
+        yes_ask: 0.43,
+        volume: 50,
+      },
+    ]);
+
+    const merged = mergeCrossVenueEvents(grouped);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].yes_bid).toBeCloseTo(0.41);
+    expect(merged[0].yes_ask).toBeCloseTo(0.43);
+    expect(merged[0].open_interest).toBe(5000);
+    expect(merged[0].liquidity).toBe(8000);
+    expect(merged[0].quote_source).toBe('CME');
+    expect(merged[0].venues).toEqual(expect.arrayContaining(['Kalshi', 'CME']));
+    expect(merged[0].is_merged).toBe(true);
+    expect(merged[0].alt_quotes).toHaveLength(2);
+  });
+
+  test('single venue rows get canonical metadata', () => {
+    const merged = mergeCrossVenueEvents([
+      {
+        id: 'kalshi:only',
+        venue: 'Kalshi',
+        api_raw_id: 'only',
+        question: 'Only on Kalshi',
+        comparison_group_id: 'cg_only',
+      },
+    ]);
+    expect(merged[0].venues).toEqual(['Kalshi']);
+    expect(merged[0].is_merged).toBe(false);
   });
 });

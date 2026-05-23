@@ -2,7 +2,16 @@
 # Start IBKR sidecar (requires IB Gateway or TWS with socket API enabled).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
 cd "$ROOT"
+
+# Load repo .env so IB_GATEWAY_* matches Express (sidecar does not use dotenv).
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.env"
+  set +a
+fi
 
 export IB_GATEWAY_HOST="${IB_GATEWAY_HOST:-127.0.0.1}"
 export IB_GATEWAY_PORT="${IB_GATEWAY_PORT:-4002}"

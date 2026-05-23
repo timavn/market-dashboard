@@ -152,7 +152,10 @@ export function inferSignalGroupFromTicker(symbol) {
 
   const security = SECURITIES_LIST.find(s => s.ticker.toUpperCase() === upper);
   if (security) {
-    const group = ASSET_CLASS_TO_GROUP[security.assetClass] || 'Index';
+    let group = ASSET_CLASS_TO_GROUP[security.assetClass] || 'Index';
+    if (security.assetClass === 'fixedIncome' && !/^UST\d+Y$/.test(upper)) {
+      group = 'Credit';
+    }
     return {
       symbol: security.ticker,
       label: security.name,

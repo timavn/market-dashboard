@@ -10,20 +10,54 @@ export class MarketWebSocketService {
     this.shouldReconnect = true;
   }
 
+  isConnected() {
+    return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN);
+  }
+
   connect() {
     try {
       this.shouldReconnect = true;
-      // Use port 3001 in development (Express server on 3001), 3000 in production (Express serves static files)
+      if (
+        this.ws &&
+        (this.ws.readyState === WebSocket.CONNECTING ||
+          this.ws.readyState === WebSocket.OPEN)
+      ) {
+        return;
+      }
+
+      if (this.ws) {
+        try {
+          this.ws.close();
+        } catch (_) {
+          /* ignore */
+        }
+        this.ws = null;
+      }
+
       const wsPort = process.env.REACT_APP_WS_PORT || 3001;
       const wsUrl = `ws://localhost:${wsPort}${ENDPOINTS.WS_MARKET_DATA}`;
-      this.ws = new WebSocket(wsUrl);
+      const socket = new WebSocket(wsUrl);
+      this.ws = socket;
 
-      this.ws.onopen = () => {
+      socket.onopen = () => {
+        if (this.ws !== socket) return;
         console.log('WebSocket connected');
         this.reconnectAttempts = 0;
+        if (this._pendingSubscribe) {
+          const { channel, symbols } = this._pendingSubscribe;
+          this._sendSubscribe(channel, symbols);
+          this._pendingSubscribe = null;
+        } else if (this._channelSymbols) {
+          this._channelSymbols.forEach((symbols, channel) => {
+            if (this.subscribers.has(channel)) {
+              this._sendSubscribe(channel, symbols);
+            }
+          });
+        }
       };
 
-      this.ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
+        if (this.ws !== socket) return;
         try {
           const data = JSON.parse(event.data);
           this.notifySubscribers(data);
@@ -32,12 +66,14 @@ export class MarketWebSocketService {
         }
       };
 
-      this.ws.onclose = () => {
+      socket.onclose = () => {
+        if (this.ws !== socket) return;
         console.log('WebSocket disconnected');
         this.handleReconnect();
       };
 
-      this.ws.onerror = (error) => {
+      socket.onerror = (error) => {
+        if (this.ws !== socket) return;
         console.error('WebSocket error:', error);
       };
     } catch (error) {
@@ -59,37 +95,72 @@ export class MarketWebSocketService {
     }
   }
 
-  subscribe(channel, callback) {
+  subscribe(channel, callback, options = {}) {
     if (!this.subscribers.has(channel)) {
       this.subscribers.set(channel, new Set());
     }
     this.subscribers.get(channel).add(callback);
 
-    // Send subscription message
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        action: 'subscribe',
-        channel: channel
-      }));
+    const symbols = Array.isArray(options.symbols) ? options.symbols : [];
+    this._channelSymbols = this._channelSymbols || new Map();
+    if (symbols.length) {
+      this._channelSymbols.set(channel, symbols);
     }
 
-    // Return unsubscribe function
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this._sendSubscribe(channel, symbols);
+    } else if (symbols.length) {
+      this._pendingSubscribe = { channel, symbols };
+    }
+
     return () => {
       const channelSubscribers = this.subscribers.get(channel);
       if (channelSubscribers) {
         channelSubscribers.delete(callback);
         if (channelSubscribers.size === 0) {
           this.subscribers.delete(channel);
-          // Send unsubscribe message
+          if (this._channelSymbols) {
+            this._channelSymbols.delete(channel);
+          }
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
               action: 'unsubscribe',
-              channel: channel
+              channel: channel,
             }));
           }
         }
       }
     };
+  }
+
+  _sendSubscribe(channel, symbols = []) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this._pendingSubscribe = { channel, symbols };
+      return;
+    }
+    const payload = {
+      action: 'subscribe',
+      channel,
+    };
+    if (symbols.length) {
+      payload.symbols = symbols.map(s => String(s).toUpperCase());
+    }
+    this.ws.send(JSON.stringify(payload));
+  }
+
+  updateSymbols(channel, symbols) {
+    if (!Array.isArray(symbols) || symbols.length === 0) return;
+    this._channelSymbols = this._channelSymbols || new Map();
+    this._channelSymbols.set(channel, symbols);
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this._pendingSubscribe = { channel, symbols };
+      return;
+    }
+    this.ws.send(JSON.stringify({
+      action: 'update_symbols',
+      channel,
+      symbols: symbols.map(s => String(s).toUpperCase()),
+    }));
   }
 
   notifySubscribers(data) {

@@ -1,3 +1,5 @@
+import { isTreasuryYieldSymbol } from '../../../utils/treasuryYieldScale';
+
 /**
  * Plain numeric display with commas; decimals only when needed (unless forced).
  */
@@ -41,7 +43,7 @@ export function formatIndexSpot(n) {
 export function formatBoundaryForAsset(n, canonical) {
   if (!Number.isFinite(n)) return '—';
   const group = canonical?.group;
-  if (group === 'Rates') return `${n.toFixed(2)}%`;
+  if (isTreasuryYieldSymbol(canonical?.symbol)) return `${n.toFixed(2)}%`;
   if (group === 'FX') return n >= 10 ? formatRangeNumber(n) : n.toFixed(4);
   if (group === 'Crypto' || group === 'Commodities') {
     return `$${Number(n).toLocaleString(undefined, {
@@ -57,7 +59,7 @@ export function formatBoundaryForAsset(n, canonical) {
 export function formatSpotDisplayForAsset(n, canonical) {
   if (!Number.isFinite(n)) return null;
   const group = canonical?.group;
-  if (group === 'Rates') return `${n.toFixed(2)}%`;
+  if (isTreasuryYieldSymbol(canonical?.symbol)) return `${n.toFixed(2)}%`;
   if (group === 'FX') return n >= 10 ? formatIndexSpot(n) : n.toFixed(4);
   if (group === 'Crypto' || group === 'Commodities') {
     return `$${Number(n).toLocaleString(undefined, {

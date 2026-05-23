@@ -157,8 +157,9 @@ export const formatLastUpdatedForSources = (sources) => {
     return {
       id: s.id,
       label: s.label,
-      localeString,
-      status: s.status || 'current'
+      localeString: s.detail ?? localeString,
+      status: s.status || 'current',
+      action: s.action ?? null,
     };
   });
 

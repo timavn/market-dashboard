@@ -3,7 +3,12 @@ import { MarketDataService } from '../services/api/marketDataService';
 import { marketWebSocket } from '../services/websocket/marketWebSocket';
 
 export const useMarketData = (symbols = [], options = {}) => {
-  const { enableRealtime = false } = options;
+  const { enableRealtime = false, streamEnabled } = options;
+  const realtimeOn =
+    enableRealtime &&
+    (streamEnabled !== undefined
+      ? streamEnabled
+      : process.env.REACT_APP_IBKR_STREAM_ENABLED !== 'false');
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -28,34 +33,40 @@ export const useMarketData = (symbols = [], options = {}) => {
 
   // WebSocket real-time updates (optional)
   useEffect(() => {
-    if (!enableRealtime) {
-      // Ensure any existing socket is disconnected and no resubscribe occurs
-      marketWebSocket.disconnect();
+    if (!realtimeOn || symbols.length === 0) {
       setConnected(false);
       return;
     }
 
-    if (!connected) {
-      marketWebSocket.connect();
-      setConnected(true);
-    }
+    marketWebSocket.connect();
 
-    const unsubscribe = marketWebSocket.subscribe('quotes', (payload) => {
-      // Payload can be a single quote or an array of quotes
-      const updates = Array.isArray(payload) ? payload : [payload];
-      setData(prevData => {
-        const next = { ...prevData };
-        updates.forEach(update => {
-          next[update.symbol] = { ...next[update.symbol], ...update };
+    const unsubscribe = marketWebSocket.subscribe(
+      'quotes',
+      payload => {
+        const updates = Array.isArray(payload) ? payload : [payload];
+        setData(prevData => {
+          const next = { ...prevData };
+          updates.forEach(update => {
+            const key = (update.symbol || '').toUpperCase();
+            if (key) next[key] = { ...next[key], ...update };
+          });
+          return next;
         });
-        return next;
-      });
-    });
+        setConnected(true);
+      },
+      { symbols },
+    );
 
     return () => {
       unsubscribe();
+      setConnected(false);
     };
-  }, [connected, enableRealtime]);
+  }, [realtimeOn, symbols.join(',')]);
+
+  useEffect(() => {
+    if (!realtimeOn || symbols.length === 0) return;
+    marketWebSocket.updateSymbols('quotes', symbols);
+  }, [realtimeOn, symbols.join(',')]);
 
   // Initial fetch
   useEffect(() => {

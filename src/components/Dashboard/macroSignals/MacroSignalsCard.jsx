@@ -2,11 +2,17 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { BarChart2, Info } from 'lucide-react';
 import RefreshButton from '../../common/RefreshButton';
 import LoadingIndicator from '../../common/LoadingIndicator';
+import StatusDot from '../../common/StatusDot';
 import Pmv2CardChrome from '../Pmv2CardChrome';
 import AssetTabs from './AssetTabs';
 import SignalSection from './SignalSection';
 import { isInActionZone, isOutOfRange } from './SignalRow';
 import { DEFAULT_MOCK_SIGNALS, DEFAULT_ASSET_CLASS } from './constants';
+import {
+  buildMacroUploadSources,
+  deriveMacroUploadAggregateStatus,
+  deriveMacroUploadUpdatedAt,
+} from './macroSignalUploadStatus';
 import './MacroSignals.css';
 
 /** Tier weight for sorting: breakout (2) > action zone (1) > normal (0). */
@@ -37,6 +43,7 @@ function MacroSignalsCard({
   loading = false,
   error = null,
   onRefresh,
+  uploadFreshness = null,
 }) {
   const [selectedAssetClass, setSelectedAssetClass] = useState(DEFAULT_ASSET_CLASS);
 
@@ -89,6 +96,19 @@ function MacroSignalsCard({
     if (typeof onRefresh === 'function') onRefresh();
   }, [onRefresh]);
 
+  const uploadSources = useMemo(
+    () => buildMacroUploadSources(uploadFreshness),
+    [uploadFreshness],
+  );
+  const uploadAggregateStatus = useMemo(
+    () => deriveMacroUploadAggregateStatus(uploadSources),
+    [uploadSources],
+  );
+  const uploadUpdatedAt = useMemo(
+    () => deriveMacroUploadUpdatedAt(uploadSources),
+    [uploadSources],
+  );
+
   return (
     <Pmv2CardChrome
       as="aside"
@@ -96,6 +116,17 @@ function MacroSignalsCard({
       titleId="macro-signals-title-heading"
       icon={<BarChart2 size={16} />}
       title="Macro Signals"
+      actions={(
+        <StatusDot
+          updatedAt={uploadUpdatedAt}
+          status={uploadAggregateStatus}
+          size={8}
+          label="Macro signal uploads"
+          overallLabel="Uploads"
+          sources={uploadSources}
+          align="right"
+        />
+      )}
       tabs={(
         <AssetTabs activeAssetClass={selectedAssetClass} onChange={setSelectedAssetClass} />
       )}

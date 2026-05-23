@@ -49,6 +49,21 @@ describe('mapNormalizedRowToMacroSignal', () => {
     expect(view.downsidePct).toBeCloseTo(-11.38, 1);
   });
 
+  test('FI tab bond ETF maps to Credit asset class', () => {
+    const view = mapNormalizedRowToMacroSignal({
+      symbol: 'LQD',
+      label: 'Investment Grade Corporate Bonds (LQD)',
+      group: 'Credit',
+      riskTrend: 'BEARISH',
+      lrr: 107.3,
+      hrr: 108.6,
+      price: 107.12,
+      prevClose: 107.0,
+    });
+    expect(view.assetClass).toBe('FI');
+    expect(view.forecastLow).toBe(107.3);
+  });
+
   test('uses previous close as reference when spot equals close', () => {
     const view = mapNormalizedRowToMacroSignal({
       symbol: 'SPX',

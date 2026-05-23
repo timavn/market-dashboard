@@ -106,21 +106,42 @@ async function fetchIBKREvents() {
   }
 }
 
+async function discoverIbkrEventContracts() {
+  if (!ibkrEnabled()) {
+    return { ok: false, contracts_added: 0, contracts_total: 0, message: 'IBKR ingest disabled' };
+  }
+
+  try {
+    return await sidecarRequest('/discover', { method: 'POST', timeoutMs: 60000 });
+  } catch (err) {
+    const reason = err.reason === 'sidecar_offline' ? 'sidecar_offline' : 'error';
+    const message =
+      reason === 'sidecar_offline'
+        ? `IBKR sidecar not reachable at ${SIDECAR_BASE}`
+        : err.message;
+    console.error('[IBKR] discover error:', message);
+    return { ok: false, contracts_added: 0, contracts_total: 0, message };
+  }
+}
+
 async function fetchCategoryTree() {
   return [];
 }
 
 async function discoverForecastExContracts() {
-  return [];
+  const result = await discoverIbkrEventContracts();
+  return result.contracts_total ? [] : [];
 }
 
 async function discoverCmeEventContracts() {
-  return [];
+  const result = await discoverIbkrEventContracts();
+  return result.contracts_total ? [] : [];
 }
 
 module.exports = {
   fetchIBKREvents,
   checkGatewayHealth,
+  discoverIbkrEventContracts,
   fetchCategoryTree,
   discoverForecastExContracts,
   discoverCmeEventContracts,

@@ -4,6 +4,8 @@ const state = {
     lastQuoteAt: null,
     lastPortfolioAt: null,
     message: null,
+    streamMode: 'offline',
+    streamMessage: null,
   },
   market: {
     lastSource: null,
@@ -28,6 +30,11 @@ function setIbkrLastPortfolioAt(iso) {
   state.ibkr.lastPortfolioAt = iso;
 }
 
+function setIbkrStreamMeta(mode, message = null) {
+  state.ibkr.streamMode = mode;
+  state.ibkr.streamMessage = message;
+}
+
 function setMarketMeta(source, warning) {
   state.market.lastSource = source;
   state.market.lastWarning = warning;
@@ -46,6 +53,7 @@ module.exports = {
   setIbkrConnected,
   setIbkrLastQuoteAt,
   setIbkrLastPortfolioAt,
+  setIbkrStreamMeta,
   setMarketMeta,
   setPortfolioMeta,
   getProviderStatusSnapshot,

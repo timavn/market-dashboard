@@ -23,7 +23,27 @@ async function resolveAccountId(accountId) {
   return accounts[0] || null;
 }
 
+async function getCachedPositions(accountId) {
+  const acct = await resolveAccountId(accountId);
+  if (!acct) return null;
+  const res = await sidecarRequest(`/cache/portfolio?account=${encodeURIComponent(acct)}`, {
+    timeoutMs: 2000,
+  });
+  if (!res.ok || !Array.isArray(res.positions) || res.positions.length === 0) {
+    return null;
+  }
+  setIbkrLastPortfolioAt(res.fetched_at || new Date().toISOString());
+  return { positions: res.positions, accountId: acct, fetchedAt: res.fetched_at, fromCache: true };
+}
+
 async function getPositions(accountId) {
+  try {
+    const cached = await getCachedPositions(accountId);
+    if (cached) return cached;
+  } catch {
+    // fall through to REST snapshot
+  }
+
   const acct = await resolveAccountId(accountId);
   if (!acct) return { positions: [], accountId: null };
   const res = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(acct)}`);
@@ -35,7 +55,27 @@ async function getPositions(accountId) {
   return { positions: res.positions || [], accountId: acct, fetchedAt: res.fetched_at };
 }
 
+async function getCachedAccountSummary(accountId) {
+  const acct = await resolveAccountId(accountId);
+  if (!acct) return null;
+  const res = await sidecarRequest(
+    `/cache/account-summary?account=${encodeURIComponent(acct)}`,
+    { timeoutMs: 2000 },
+  );
+  if (!res.ok || !res.summary || Object.keys(res.summary).length === 0) {
+    return null;
+  }
+  return normalizeAccountSummary({ ...res.summary, fetched_at: res.fetched_at });
+}
+
 async function getAccountSummary(accountId) {
+  try {
+    const cached = await getCachedAccountSummary(accountId);
+    if (cached) return cached;
+  } catch {
+    // fall through to REST snapshot
+  }
+
   const acct = await resolveAccountId(accountId);
   if (!acct) return null;
   const res = await sidecarRequest(
@@ -74,36 +114,56 @@ async function getPnL(accountId) {
  * @param {string} [accountId]
  * @param {(symbols: string[]) => Promise<Record<string, object>>} quoteFn
  */
+function buildSnapshotSummary(holdings, accountSummary) {
+  const totalValue =
+    accountSummary?.netLiquidation ??
+    holdings.reduce((sum, h) => sum + (h.marketValue || 0), 0);
+
+  return {
+    totalValue,
+    totalGainLoss: holdings.reduce((s, h) => s + (h.gainLoss || 0), 0),
+    positionCount: holdings.length,
+    longCount: holdings.filter((h) => h.quantity > 0).length,
+    shortCount: holdings.filter((h) => h.quantity < 0).length,
+  };
+}
+
 async function getPortfolioSnapshot(accountId, quoteFn) {
   const { positions: raw, accountId: acct, error, fetchedAt } = await getPositions(accountId);
-  if (error || !raw.length) {
+
+  if (error) {
     return { holdings: [], accountSummary: null, accountId: acct, error, fetchedAt };
   }
 
-  const symbols = [...new Set(raw.map((p) => p.symbol).filter(Boolean))];
-  const quotesBySymbol = quoteFn ? await quoteFn(symbols) : {};
+  const accountSummary = acct ? await getAccountSummary(acct) : null;
+
+  if (!raw.length) {
+    return {
+      holdings: [],
+      accountSummary,
+      accountId: acct,
+      summary: buildSnapshotSummary([], accountSummary),
+      fetchedAt,
+      dataSource: 'ibkr_api',
+    };
+  }
+
+  const needsQuotes = raw.some((p) => p.marketValue == null || Number.isNaN(Number(p.marketValue)));
+  const symbols = needsQuotes
+    ? [...new Set(raw.map((p) => p.symbol).filter(Boolean))]
+    : [];
+  const quotesBySymbol = quoteFn && symbols.length > 0 ? await quoteFn(symbols) : {};
 
   const holdings = raw.map((p) => {
     const q = quotesBySymbol[(p.symbol || '').toUpperCase()];
     return normalizeIbkrPosition(p, q);
   });
 
-  const accountSummary = await getAccountSummary(acct);
-  const totalValue =
-    accountSummary?.netLiquidation ??
-    holdings.reduce((sum, h) => sum + (h.marketValue || 0), 0);
-
   return {
     holdings,
     accountSummary,
     accountId: acct,
-    summary: {
-      totalValue,
-      totalGainLoss: holdings.reduce((s, h) => s + (h.gainLoss || 0), 0),
-      positionCount: holdings.length,
-      longCount: holdings.filter((h) => h.quantity > 0).length,
-      shortCount: holdings.filter((h) => h.quantity < 0).length,
-    },
+    summary: buildSnapshotSummary(holdings, accountSummary),
     fetchedAt,
     dataSource: 'ibkr_api',
   };

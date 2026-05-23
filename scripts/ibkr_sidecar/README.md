@@ -33,6 +33,8 @@ Default ports:
 - IB Gateway paper: `4002`
 - IB Gateway live: `4001`
 
+`npm run ibkr-sidecar` loads `IB_GATEWAY_*` from the repo root `.env` (same as Express). Override in the shell if needed.
+
 The sidecar reads:
 
 ```bash
@@ -41,18 +43,37 @@ IB_GATEWAY_PORT=4002
 IB_GATEWAY_CLIENT_ID=17
 ```
 
+## Streaming (persistent connection)
+
+When `IBKR_PERSISTENT_CONNECT=true` (default), the sidecar keeps a read-only Gateway socket open and maintains in-memory caches.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /subscribe` | Start streaming market data for instruments (ref-counted) |
+| `POST /unsubscribe` | Stop streaming when ref count reaches zero |
+| `GET /stream/quotes` | SSE feed of quote + connection status events |
+| `GET /cache/quotes?symbols=SPY,QQQ` | Latest streamed ticks |
+| `GET /cache/portfolio?account=` | Cached positions from `reqAccountUpdates` |
+| `GET /cache/account-summary?account=` | Cached margin / buying power tags |
+
+Express consumes SSE via `IBKR_STREAM_ENABLED=true` and pushes throttled updates on `/ws/market` channel `quotes`.
+
+Verify streaming: `bash scripts/verify_ibkr_stream.sh` (Gateway must be online).
+
+See [docs/IBKR_READ_ONLY_BOUNDARIES.md](../../docs/IBKR_READ_ONLY_BOUNDARIES.md).
+
 ## Endpoints
 
-- `GET /status`: connection and account status
+- `GET /status`: connection, accounts, and `stream` metadata
 - `GET /events`: last sidecar snapshot
 - `POST /refresh`: fetch seeded contracts from `event_contracts.json`
 - `POST /discover`: search ForecastEx / CME EC contracts and merge into `event_contracts.json` (requires Gateway online)
 - `GET /accounts`: managed account IDs
-- `POST /quotes`: body `{ "instruments": [{ "symbol", "secType?", "conId?" }] }` — equity/ETF market data
+- `POST /quotes`: snapshot fallback; uses stream cache when subscribed
 - `POST /historical`: body `{ "instrument", "range", "interval" }` — historical bars
-- `GET /portfolio/positions?account=`: open positions
-- `GET /portfolio/account-summary?account=`: net liquidation, cash, margins
-- `GET /portfolio/open-orders?account=`: read-only open orders
+- `GET /portfolio/positions?account=`: open positions (cache-first when streaming)
+- `GET /portfolio/account-summary?account=`: net liquidation, cash, margins (cache-first)
+- `GET /portfolio/open-orders?account=`: read-only open orders (dev only; not exposed in dashboard UI)
 - `GET /portfolio/pnl?account=`: account PnL when available
 
 From repo root, verify market/portfolio providers:

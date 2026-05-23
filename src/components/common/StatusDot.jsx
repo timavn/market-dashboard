@@ -21,6 +21,7 @@ import {
  * - sources: optional array of sub-sources to show in popup
  * - overallLabel: optional override label for overall line
  * - showDateOnly: optional boolean to show only the update date
+ * - align: 'left' | 'right' – popover horizontal alignment (default 'left')
  */
 const StatusDot = ({
   updatedAt,
@@ -31,7 +32,8 @@ const StatusDot = ({
   emoji,
   sources,
   overallLabel,
-  showDateOnly = false
+  showDateOnly = false,
+  align = 'left',
 }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
@@ -139,7 +141,7 @@ const StatusDot = ({
           className="absolute z-20 mt-2 px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap"
           style={{
             top: '100%',
-            left: 0
+            ...(align === 'right' ? { right: 0, left: 'auto' } : { left: 0 }),
           }}
         >
           {Array.isArray(sources) && sources.length > 0 ? (
@@ -162,9 +164,12 @@ const StatusDot = ({
                             ? 'text-yellow-300'
                             : 'text-gray-200';
                       return (
-                        <div key={src.id} className={`flex justify-between gap-2 ${rowColor}`}>
+                        <div key={src.id} className={`flex justify-between gap-2 items-center ${rowColor}`}>
                           <span>{src.label}</span>
-                          <span className="opacity-90">{src.localeString}</span>
+                          <span className="opacity-90 flex items-center gap-1">
+                            {src.localeString}
+                            {src.action}
+                          </span>
                         </div>
                       );
                     })}

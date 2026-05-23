@@ -27,6 +27,7 @@ export const GROUP_TO_ASSET_CLASS = {
   Index: 'EQ',
   Equity: 'EQ',
   Rates: 'FI',
+  Credit: 'FI',
   FX: 'FX',
   Commodities: 'CMD',
   Crypto: 'CRPT',

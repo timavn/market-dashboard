@@ -39,9 +39,11 @@ export class MarketDataService {
   }
 
   // Get portfolio summary and holdings
-  static async getPortfolio(snapshotId = null) {
+  static async getPortfolio({ account = null, snapshotId = null } = {}) {
     try {
-      const params = snapshotId ? { snapshotId } : {};
+      const params = {};
+      if (account) params.account = account;
+      if (snapshotId) params.snapshotId = snapshotId;
       const response = await apiClient.get(ENDPOINTS.PORTFOLIO, { params });
       const data = response.data;
 
@@ -119,12 +121,19 @@ export class MarketDataService {
             totalDayChangePercent: data.summary.totalDayChangePercent || '0.00',
             totalGainLoss: data.summary.totalGainLoss || 0,
             totalGainLossPercent: data.summary.totalGainLossPercent || '0.00',
-            positionCount: data.summary.positionCount || 0
+            positionCount: data.summary.positionCount || 0,
+            longCount: data.summary.longCount || 0,
+            shortCount: data.summary.shortCount || 0,
           },
           assetAllocation: data.assetAllocation || {},
           holdings: data.holdings || [],
           topHoldings: data.topHoldings || [],
           lastUpdated: data.lastUpdated || new Date().toLocaleString(),
+          dataSource: data.dataSource || null,
+          accountSummary: data.accountSummary || null,
+          accountId: data.accountId || null,
+          empty: Boolean(data.empty),
+          reconciliationWarnings: data.reconciliationWarnings || [],
 
           // Mock analytics for local development
           riskMetrics: {

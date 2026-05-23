@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from ib_insync import Contract, IB, util
 from pydantic import BaseModel, Field
+
+from stream_manager import PERSISTENT_CONNECT, StreamManager, ticker_to_raw_quote
 
 APP_DIR = Path(__file__).resolve().parent
 SEED_PATH = Path(os.environ.get("IBKR_EVENT_CONTRACTS_PATH", APP_DIR / "event_contracts.json"))
@@ -57,21 +59,40 @@ class HistoricalRequest(BaseModel):
     interval: str = "1d"
 
 
+class SubscribeRequest(BaseModel):
+    instruments: List[InstrumentIn] = Field(default_factory=list)
+
+
+stream_manager: Optional[StreamManager] = None
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    global stream_manager
     # ib_insync Connection uses asyncio.get_event_loop(); align it with uvicorn's loop.
     loop = asyncio.get_running_loop()
     asyncio.set_event_loop(loop)
     util.patchAsyncio()
+    stream_manager = StreamManager(
+        ib,
+        host=IB_HOST,
+        port=IB_PORT,
+        client_id=IB_CLIENT_ID,
+        connect_timeout=CONNECT_TIMEOUT,
+        instrument_to_contract=instrument_to_contract,
+    )
+    await stream_manager.start()
     yield
-    if ib.isConnected():
+    if stream_manager:
+        await stream_manager.stop()
+    elif ib.isConnected():
         try:
             ib.disconnect()
         except Exception:
             pass
 
 
-app = FastAPI(title="IBKR Sidecar", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="IBKR Sidecar", version="1.1.0", lifespan=lifespan)
 last_snapshot: Dict[str, Any] = {
     "events": [],
     "providers": {
@@ -98,6 +119,8 @@ def provider(status: str, message: Optional[str] = None, last_success_at: Option
 
 
 async def ensure_connected() -> Dict[str, Any]:
+    if stream_manager:
+        return await stream_manager.ensure_connected()
     if ib.isConnected():
         return {"ok": True, "status": "connected"}
 
@@ -166,7 +189,9 @@ def contract_to_seed(contract: Contract, venue: str) -> Dict[str, Any]:
     }
 
 
-async def discover_event_contract_seeds(max_per_venue: int = 25) -> List[Dict[str, Any]]:
+async def discover_event_contract_seeds(
+    max_per_venue: int = int(os.environ.get("IBKR_DISCOVER_MAX_PER_VENUE", "25")),
+) -> List[Dict[str, Any]]:
     """Search IB for ForecastEx and CME event (EC*) contracts when Gateway is connected."""
     seeds: List[Dict[str, Any]] = []
     seen: set = set()
@@ -286,6 +311,7 @@ def normalize_seeded_event(seed: Dict[str, Any], ticker: Any) -> Dict[str, Any]:
 @app.get("/status")
 async def status() -> JSONResponse:
     health = await ensure_connected()
+    stream = stream_manager.status_payload() if stream_manager else {}
     if not health["ok"]:
         return JSONResponse(
             {
@@ -295,6 +321,7 @@ async def status() -> JSONResponse:
                 "port": IB_PORT,
                 "client_id": IB_CLIENT_ID,
                 "message": health.get("message"),
+                "stream": stream,
             },
             status_code=200,
         )
@@ -310,8 +337,68 @@ async def status() -> JSONResponse:
             "accounts": accounts,
             "server_version": ib.client.serverVersion(),
             "time": now_iso(),
+            "stream": stream,
         }
     )
+
+
+@app.post("/subscribe")
+async def subscribe(body: SubscribeRequest) -> JSONResponse:
+    if not stream_manager:
+        return JSONResponse({"ok": False, "message": "Stream manager not initialized"}, status_code=200)
+    result = await stream_manager.subscribe(body.instruments)
+    return JSONResponse(result)
+
+
+@app.post("/unsubscribe")
+async def unsubscribe(body: SubscribeRequest) -> JSONResponse:
+    if not stream_manager:
+        return JSONResponse({"ok": False, "message": "Stream manager not initialized"}, status_code=200)
+    result = await stream_manager.unsubscribe(body.instruments)
+    return JSONResponse(result)
+
+
+@app.get("/stream/quotes")
+async def stream_quotes() -> StreamingResponse:
+    if not stream_manager:
+        async def empty():
+            yield f"data: {json.dumps({'type': 'status', 'payload': {'connected': False}})}\n\n"
+
+        return StreamingResponse(empty(), media_type="text/event-stream")
+
+    return StreamingResponse(
+        stream_manager.sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@app.get("/cache/quotes")
+async def cache_quotes(symbols: Optional[str] = Query(None)) -> JSONResponse:
+    if not stream_manager:
+        return JSONResponse({"ok": False, "quotes": []}, status_code=200)
+    sym_list = [s.strip() for s in symbols.split(",")] if symbols else None
+    return JSONResponse(
+        {
+            "ok": True,
+            "quotes": stream_manager.get_quote_cache_list(sym_list),
+            "fetched_at": now_iso(),
+        }
+    )
+
+
+@app.get("/cache/portfolio")
+async def cache_portfolio(account: Optional[str] = Query(None)) -> JSONResponse:
+    if not stream_manager:
+        return JSONResponse({"ok": False, "positions": []}, status_code=200)
+    return JSONResponse(stream_manager.get_portfolio_cache(account))
+
+
+@app.get("/cache/account-summary")
+async def cache_account_summary(account: Optional[str] = Query(None)) -> JSONResponse:
+    if not stream_manager:
+        return JSONResponse({"ok": False, "summary": {}}, status_code=200)
+    return JSONResponse(stream_manager.get_account_summary_cache(account))
 
 
 @app.get("/events")
@@ -438,53 +525,6 @@ def instrument_to_contract(inst: InstrumentIn) -> Contract:
     return c
 
 
-def ticker_to_raw_quote(ticker: Any, contract: Contract) -> Dict[str, Any]:
-    """Return IB-native tick fields; normalization happens in Node."""
-    ts = None
-    if getattr(ticker, "time", None):
-        try:
-            ts = ticker.time.isoformat()
-        except Exception:
-            ts = str(ticker.time)
-
-    market_data_type = getattr(ticker, "marketDataType", None)
-    data_type_map = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed_frozen"}
-    data_type = data_type_map.get(market_data_type, "unknown")
-
-    def safe_float(val: Any) -> Optional[float]:
-        if val is None:
-            return None
-        try:
-            f = float(val)
-            if f != f:  # NaN
-                return None
-            return f
-        except (TypeError, ValueError):
-            return None
-
-    bid = safe_float(ticker.bid)
-    ask = safe_float(ticker.ask)
-    last = safe_float(ticker.last)
-    close = safe_float(ticker.close) or safe_float(getattr(ticker, "prevClose", None))
-
-    return {
-        "symbol": contract.symbol,
-        "conId": int(contract.conId) if contract.conId else None,
-        "secType": contract.secType,
-        "exchange": contract.exchange,
-        "currency": contract.currency or "USD",
-        "localSymbol": contract.localSymbol or contract.symbol,
-        "bid": bid,
-        "ask": ask,
-        "last": last,
-        "close": close,
-        "volume": safe_float(ticker.volume),
-        "dataType": data_type,
-        "timestamp": ts or now_iso(),
-        "fetched_at": now_iso(),
-    }
-
-
 def resolve_account(account: Optional[str]) -> Optional[str]:
     if account:
         return account
@@ -522,6 +562,12 @@ async def quotes(body: QuotesRequest) -> JSONResponse:
 
     for inst in instruments:
         try:
+            if stream_manager:
+                cached = stream_manager.get_cached_quote_for_instrument(inst)
+                if cached:
+                    quotes_out.append(cached)
+                    continue
+
             contract = instrument_to_contract(inst)
             qualified = await ib.qualifyContractsAsync(contract)
             if not qualified:
@@ -620,6 +666,11 @@ async def portfolio_positions(account: Optional[str] = Query(None)) -> JSONRespo
     if not acct:
         return JSONResponse({"ok": False, "message": "No managed accounts", "positions": []}, status_code=200)
 
+    if stream_manager:
+        cached = stream_manager.get_portfolio_cache(acct)
+        if cached.get("ok"):
+            return JSONResponse(cached)
+
     await ib.reqPositionsAsync()
     await asyncio.sleep(0.5)
     positions = []
@@ -659,6 +710,11 @@ async def portfolio_account_summary(account: Optional[str] = Query(None)) -> JSO
     acct = resolve_account(account)
     if not acct:
         return JSONResponse({"ok": False, "message": "No managed accounts", "summary": {}}, status_code=200)
+
+    if stream_manager:
+        cached = stream_manager.get_account_summary_cache(acct)
+        if cached.get("ok"):
+            return JSONResponse(cached)
 
     rows = await ib.accountSummaryAsync(acct)
     summary: Dict[str, Any] = {"account": acct, "currency": "USD"}

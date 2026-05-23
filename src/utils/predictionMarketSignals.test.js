@@ -2,10 +2,12 @@ import {
   collectMacroSignalSymbols,
   getMacroSignalQuotePlan,
   inferPredictionSignalCategory,
+  inferSignalGroupFromTicker,
   normalizePredictionMarketSignals,
   resolveMacroSignalQuoteSymbol,
 } from './predictionMarketSignals';
 import { mapNormalizedRowToMacroSignal } from '../components/Dashboard/macroSignals/mapNormalizedRow';
+import { formatBoundaryForAsset } from '../components/Dashboard/macroSignals/formatNumber';
 
 describe('resolveMacroSignalQuoteSymbol', () => {
   test('quotes RUT index when IWM row uses RUT risk range', () => {
@@ -177,7 +179,57 @@ describe('normalizePredictionMarketSignals', () => {
   });
 });
 
+describe('inferSignalGroupFromTicker', () => {
+  test('classifies bond ETFs as Credit, not Rates', () => {
+    expect(inferSignalGroupFromTicker('LQD')).toMatchObject({ symbol: 'LQD', group: 'Credit' });
+    expect(inferSignalGroupFromTicker('HYG')).toMatchObject({ group: 'Credit' });
+  });
+
+  test('classifies treasury yield proxies as Rates', () => {
+    expect(inferSignalGroupFromTicker('UST10Y')).toMatchObject({ group: 'Rates' });
+  });
+});
+
 describe('macro signal view mapping', () => {
+  test('LQD spot and range produce price formatting and sensible risk-range percents', () => {
+    const result = normalizePredictionMarketSignals({
+      activeCategory: 'all',
+      riskRanges: {
+        LQD: { lrr: 107.3, hrr: 108.6, trend: 'BEARISH', date: '2026-05-19' },
+      },
+      spotPrices: {
+        LQD: { price: '107.12', previousClose: '107.00', source: 'yahoo' },
+      },
+    });
+    const row = result.rows.find(r => r.symbol === 'LQD');
+    expect(row.group).toBe('Credit');
+    const view = mapNormalizedRowToMacroSignal(row);
+    expect(view.referencePrice).toBeCloseTo(107.12, 2);
+    expect(Math.abs(view.upsidePct)).toBeLessThan(5);
+    expect(Math.abs(view.downsidePct)).toBeLessThan(5);
+    expect(formatBoundaryForAsset(107.3, row)).toBe('107.30');
+  });
+
+  test('UST10Y spot aligned with yield range produces modest risk-range percents', () => {
+    const result = normalizePredictionMarketSignals({
+      activeCategory: 'all',
+      riskRanges: {
+        UST10Y: { lrr: 4.45, hrr: 4.64, trend: 'BULLISH', date: '2026-05-19' },
+      },
+      spotPrices: {
+        UST10Y: { price: '4.58', previousClose: '4.55', source: 'yahoo' },
+      },
+    });
+    const row = result.rows.find(r => r.symbol === 'UST10Y');
+    const view = mapNormalizedRowToMacroSignal(row);
+    expect(view.referencePrice).toBeCloseTo(4.58, 2);
+    expect(view.upsidePct).toBeGreaterThan(0);
+    expect(view.upsidePct).toBeLessThan(5);
+    expect(view.downsidePct).toBeLessThan(0);
+    expect(view.downsidePct).toBeGreaterThan(-5);
+    expect(formatBoundaryForAsset(4.45, row)).toBe('4.45%');
+  });
+
   test('NEUTRAL risk rows map to null side for neutral UI section', () => {
     const result = normalizePredictionMarketSignals({
       activeCategory: 'all',

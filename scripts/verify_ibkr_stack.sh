@@ -6,11 +6,24 @@ SIDECAR="${IBKR_SIDECAR_URL:-http://localhost:8765}"
 BACKEND="${REACT_APP_BACKEND_URL:-http://localhost:3001}"
 
 echo "=== 1. Sidecar GET /status ==="
-if ! curl -sf "${SIDECAR%/}/status" | python3 -m json.tool; then
+STATUS_RAW=$(curl -sf "${SIDECAR%/}/status") || {
   echo "FAIL: sidecar not reachable at ${SIDECAR}"
   echo "Start with: npm run ibkr-sidecar"
   exit 1
-fi
+}
+echo "$STATUS_RAW" | python3 -m json.tool
+
+echo ""
+echo "=== 1b. Persistent stream metadata ==="
+echo "$STATUS_RAW" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+s = d.get('stream') or {}
+print('  connected:', d.get('connected'))
+print('  persistent:', s.get('persistent'))
+print('  active_subscriptions:', s.get('active_subscriptions'))
+print('  last_tick_at:', s.get('last_tick_at'))
+"
 
 echo ""
 echo "=== 2. Sidecar POST /refresh ==="

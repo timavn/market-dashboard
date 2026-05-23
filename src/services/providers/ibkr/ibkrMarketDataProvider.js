@@ -1,6 +1,7 @@
 const { sidecarRequest } = require('../ibkrSidecarClient');
 const { normalizeIbkrRaw } = require('../normalize/normalizeQuote');
 const { resolveInstrument } = require('../instruments/instrumentResolver');
+const { getCachedCanonical, STREAM_ENABLED } = require('../../ibkr/ibkrStreamBridge');
 const {
   setIbkrConnected,
   setIbkrLastQuoteAt,
@@ -60,6 +61,14 @@ async function getQuote(symbolOrInstrument) {
   const cached = quoteCache.get(key);
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return { canonical: { ...cached.data, source: 'cache' }, fromCache: true };
+  }
+
+  if (STREAM_ENABLED) {
+    const streamCached = getCachedCanonical(instrument.symbol);
+    if (streamCached?.valid) {
+      setIbkrLastQuoteAt(streamCached.timestamp || new Date().toISOString());
+      return { canonical: { ...streamCached, source: 'ibkr' }, fromStreamCache: true };
+    }
   }
 
   const connected = await checkConnection();

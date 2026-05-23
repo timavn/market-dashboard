@@ -2,6 +2,7 @@ const mockData = require('./mock/aggregatedEvents.mock.json');
 const { enrichEvent } = require('./enrich/enrichEvent');
 const { isFinancialMacroEvent } = require('./filter/isFinancialMacroEvent');
 const { assignComparisonGroup } = require('./group/assignComparisonGroup');
+const { mergeCrossVenueEvents } = require('./merge/mergeCrossVenueEvents');
 const { sortAggregatedEvents } = require('./sortEvents');
 const {
   getCachedEvents,
@@ -11,7 +12,7 @@ const {
 } = require('./cache');
 
 const { fetchKalshiEvents } = require('./providers/kalshiProvider');
-const { fetchIBKREvents } = require('./providers/ibkrProvider');
+const { fetchIBKREvents, checkGatewayHealth } = require('./providers/ibkrProvider');
 const { fetchForecastExEvents } = require('./providers/forecastExProvider');
 const { fetchCMEEvents } = require('./providers/cmeProvider');
 const { fetchReferenceMarketData } = require('./providers/referenceProvider');
@@ -44,7 +45,9 @@ function logProviderError(provider, reason) {
 async function getAggregatedFinancialPredictionEvents(options = {}) {
   const useMock = options.useMock || process.env.PM_USE_MOCK === 'true';
   if (useMock) {
-    const events = mockData.events.map((e) => enrichEvent(e));
+    let events = mockData.events.map((e) => enrichEvent(e));
+    events = assignComparisonGroup(events);
+    events = mergeCrossVenueEvents(events);
     return {
       events: sortAggregatedEvents(events),
       reference: mockData.reference || {},
@@ -56,7 +59,12 @@ async function getAggregatedFinancialPredictionEvents(options = {}) {
   const ibkrEnabled =
     options.ibkrEnabled !== false && process.env.IBKR_INGEST_ENABLED !== 'false';
   const refreshKalshi = options.refreshKalshi === true;
-  const refreshIbkr = options.refreshIbkr === true && ibkrEnabled;
+  let refreshIbkr = options.refreshIbkr === true && ibkrEnabled;
+
+  if (!refreshIbkr && refreshKalshi && ibkrEnabled) {
+    const health = await checkGatewayHealth();
+    if (health.ok) refreshIbkr = true;
+  }
 
   const cached = (await getCachedEvents()) || [];
   const IBKR_VENUES = new Set(['ForecastEx', 'CME', 'IBKR']);
@@ -93,6 +101,7 @@ async function getAggregatedFinancialPredictionEvents(options = {}) {
   merged = merged.filter(isFinancialMacroEvent);
   merged = dedupeByVenueId(merged);
   merged = assignComparisonGroup(merged);
+  merged = mergeCrossVenueEvents(merged);
   merged = merged.map((e) =>
     enrichEvent(e, {
       fairProbability: options.fairProbability,
@@ -132,5 +141,6 @@ module.exports = {
   normalizeEvent: require('./normalize/normalizeEvent').normalizeEvent,
   isFinancialMacroEvent,
   assignComparisonGroup,
+  mergeCrossVenueEvents,
   enrichEvent,
 };

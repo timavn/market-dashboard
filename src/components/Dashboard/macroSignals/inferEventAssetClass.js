@@ -44,6 +44,7 @@ const INGEST_CATEGORY_TO_ASSET_CLASS = {
   Inflation: 'FI',
   Labor: 'EQ',
   Growth: 'EQ',
+  'Other Macro': 'EQ',
 };
 
 /**

@@ -1,10 +1,13 @@
 /**
  * Map normalized ingest event → v2 dashboard row shape.
+ * Passes through quote/market fields used by ContractMapCard while keeping
+ * legacy yes/no mids for TradePlanCard.
  */
 function normalizedToDashboardEvent(event, userContract = null) {
   const yes = event.yes_mid ?? event.last_price ?? event.yes_bid ?? 0;
   const no = event.no_mid ?? event.no_bid ?? 1 - yes;
   return {
+    ...event,
     id: event.id,
     question: event.question || event.contract_title || event.event_title,
     category: event.category || 'Other Macro',
@@ -14,13 +17,7 @@ function normalizedToDashboardEvent(event, userContract = null) {
     myProb: userContract?.adjustedProbability ?? userContract?.myProbability ?? null,
     side: userContract?.contractSide || 'Yes',
     sizeUsd: 0,
-    status: event.status,
     payoutMultiplier: event.max_payout_per_contract || 1,
-    venue: event.venue,
-    url: event.url,
-    spread: event.spread,
-    data_quality_flags: event.data_quality_flags || [],
-    comparison_group_id: event.comparison_group_id,
     normalized: event,
     contract: userContract,
   };

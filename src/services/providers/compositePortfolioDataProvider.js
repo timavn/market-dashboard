@@ -1,16 +1,53 @@
 const ibkrPortfolio = require('./ibkr/ibkrPortfolioDataProvider');
-const { reconcilePositions } = require('./normalize/reconcilePositions');
 const { setPortfolioMeta } = require('./providerStatus');
+const ibkrStreamBridge = require('../ibkr/ibkrStreamBridge');
+const { sidecarRequest } = require('./ibkrSidecarClient');
+const { normalizeIbkrRaw } = require('./normalize/normalizeQuote');
 
-const PREFER_UPLOAD = process.env.IBKR_PREFER_UPLOAD === 'true';
+/**
+ * Cache-only quotes for portfolio enrichment — avoids sequential IBKR/Yahoo fetches.
+ * Positions from IBKR stream cache usually include marketValue already.
+ */
+async function getCachedQuotesForSymbols(symbols) {
+  const map = {};
+  const missing = [];
+
+  for (const sym of symbols) {
+    const canonical = ibkrStreamBridge.getCachedCanonical(sym);
+    if (canonical?.valid && canonical.mark != null) {
+      map[sym.toUpperCase()] = canonical;
+    } else {
+      missing.push(sym);
+    }
+  }
+
+  if (missing.length === 0) return map;
+
+  try {
+    const res = await sidecarRequest(
+      `/cache/quotes?symbols=${encodeURIComponent(missing.join(','))}`,
+      { timeoutMs: 2000 },
+    );
+    for (const raw of res.quotes || []) {
+      const sym = (raw.symbol || '').toUpperCase();
+      if (!sym) continue;
+      const canonical = normalizeIbkrRaw(raw);
+      if (canonical?.valid && canonical.mark != null) {
+        map[sym] = canonical;
+      }
+    }
+  } catch {
+    // Positions may already carry marketValue from IBKR portfolio cache.
+  }
+
+  return map;
+}
 
 /**
  * @param {ReturnType<import('./uploadedStatementPortfolioProvider').createUploadedStatementPortfolioProvider>} uploadProvider
- * @param {(symbols: string[]) => Promise<Record<string, object>>} getCanonicalQuotesMap
  */
-function createCompositePortfolioDataProvider(uploadProvider, getCanonicalQuotesMap) {
-  async function shouldUseIbkr(forceUpload) {
-    if (forceUpload || PREFER_UPLOAD) return false;
+function createCompositePortfolioDataProvider(uploadProvider) {
+  async function isIbkrConnected() {
     if (!ibkrPortfolio.ENABLED) return false;
     try {
       const status = await ibkrPortfolio.getProviderStatus();
@@ -20,89 +57,38 @@ function createCompositePortfolioDataProvider(uploadProvider, getCanonicalQuotes
     }
   }
 
-  async function getPortfolioSnapshot(accountId, options = {}) {
-    const forceUpload = options.source === 'upload';
-    const useIbkr = await shouldUseIbkr(forceUpload);
-
-    const uploadSnap = await uploadProvider.getPortfolioSnapshot();
-
-    if (useIbkr) {
-      try {
-        const quoteFn = async (symbols) => {
-          const map = {};
-          for (const sym of symbols) {
-            const canonical = await require('./compositeMarketDataProvider').getCanonicalQuote(sym);
-            if (canonical) map[sym.toUpperCase()] = canonical;
-          }
-          return map;
-        };
-
-        const ibkrSnap = await ibkrPortfolio.getPortfolioSnapshot(accountId, quoteFn);
-
-        if (ibkrSnap.holdings?.length) {
-          const reconciliationWarnings = uploadSnap.holdings?.length
-            ? reconcilePositions(ibkrSnap.holdings, uploadSnap.holdings)
-            : [];
-
-          setPortfolioMeta('ibkr_api', reconciliationWarnings.length ? reconciliationWarnings.join('; ') : null);
-
-          const holdings = ibkrSnap.holdings.map((h) => ({
-            symbol: h.symbol,
-            description: h.description,
-            quantity: h.quantity,
-            price: h.price ?? 0,
-            marketValue: h.marketValue ?? 0,
-            costBasis: h.costBasis ?? 0,
-            gainLoss: h.gainLoss ?? 0,
-            gainLossPercent: h.gainLossPercent ?? 0,
-            dayChangePercent: null,
-            assetType: h.assetType,
-            assetClass: h.assetClass,
-            conid: h.conid,
-            positionSource: h.positionSource,
-            priceSource: h.priceSource,
-            lastUpdated: h.lastUpdated,
-            warning: h.warning,
-          }));
-
-          return {
-            ...ibkrSnap,
-            holdings,
-            assetAllocation: buildAllocation(holdings),
-            topHoldings: [...holdings]
-              .sort((a, b) => (b.marketValue || 0) - (a.marketValue || 0))
-              .slice(0, 10)
-              .map((h) => ({
-                symbol: h.symbol,
-                marketValue: h.marketValue,
-                accountPercent: ibkrSnap.summary?.totalValue
-                  ? ((h.marketValue / ibkrSnap.summary.totalValue) * 100).toFixed(2)
-                  : '0.00',
-              })),
-            dataSource: 'ibkr_api',
-            positionSource: 'ibkr_api',
-            priceSource: 'ibkr',
-            reconciliationWarnings,
-            providerStatus: await getProviderStatus(),
-            lastUpdated: formatLastUpdated(ibkrSnap.fetchedAt || new Date().toISOString()),
-            accountSummary: ibkrSnap.accountSummary,
-          };
-        }
-      } catch (err) {
-        console.warn('[Portfolio] IBKR snapshot failed, falling back to upload:', err.message);
-      }
-    }
-
-    setPortfolioMeta('uploaded_statement', null);
-    return formatUploadResponse(uploadSnap);
+  function formatIbkrOfflineEmpty() {
+    setPortfolioMeta('ibkr_offline', null);
+    return {
+      summary: {
+        totalValue: 0,
+        totalDayChange: 0,
+        totalDayChangePercent: '0.00',
+        totalGainLoss: 0,
+        totalGainLossPercent: '0.00',
+        positionCount: 0,
+        longCount: 0,
+        shortCount: 0,
+      },
+      assetAllocation: {},
+      holdings: [],
+      topHoldings: [],
+      accountSummary: null,
+      accountId: null,
+      lastUpdated: 'Connect IB Gateway and run npm run ibkr-sidecar',
+      dataSource: 'ibkr_offline',
+      positionSource: null,
+      priceSource: null,
+      empty: true,
+    };
   }
 
   function buildAllocation(holdings) {
-    const total = holdings.reduce((s, h) => s + (h.marketValue || 0), 0);
+    const total = holdings.reduce((s, h) => s + Math.abs(h.marketValue || 0), 0);
     const byClass = {};
     for (const h of holdings) {
       const cls = h.assetClass || 'Other';
-      byClass[cls] = (byClass[cls] || 0) + (h.marketValue || 0);
+      byClass[cls] = (byClass[cls] || 0) + Math.abs(h.marketValue || 0);
     }
     const alloc = {};
     for (const [cls, val] of Object.entries(byClass)) {
@@ -111,24 +97,84 @@ function createCompositePortfolioDataProvider(uploadProvider, getCanonicalQuotes
     return alloc;
   }
 
+  function formatIbkrResponse(ibkrSnap) {
+    const holdings = (ibkrSnap.holdings || []).map((h) => ({
+      symbol: h.symbol,
+      description: h.description,
+      quantity: h.quantity,
+      price: h.price ?? 0,
+      marketValue: h.marketValue ?? 0,
+      costBasis: h.costBasis ?? 0,
+      gainLoss: h.gainLoss ?? 0,
+      gainLossPercent: h.gainLossPercent ?? 0,
+      dayChangePercent: null,
+      assetType: h.assetType,
+      assetClass: h.assetClass,
+      secType: h.secType,
+      conid: h.conid,
+      positionSource: h.positionSource,
+      priceSource: h.priceSource,
+      lastUpdated: h.lastUpdated,
+      warning: h.warning,
+    }));
+
+    setPortfolioMeta('ibkr_api', ibkrSnap.error || null);
+
+    const totalValue =
+      ibkrSnap.accountSummary?.netLiquidation ?? ibkrSnap.summary?.totalValue ?? 0;
+
+    return {
+      ...ibkrSnap,
+      holdings,
+      assetAllocation: buildAllocation(holdings),
+      topHoldings: [...holdings]
+        .sort((a, b) => Math.abs(b.marketValue || 0) - Math.abs(a.marketValue || 0))
+        .slice(0, 10)
+        .map((h) => ({
+          symbol: h.symbol,
+          marketValue: h.marketValue,
+          accountPercent: totalValue
+            ? ((Math.abs(h.marketValue) / totalValue) * 100).toFixed(2)
+            : '0.00',
+        })),
+      dataSource: 'ibkr_api',
+      positionSource: 'ibkr_api',
+      priceSource: 'ibkr',
+      reconciliationWarnings: [],
+      providerStatus: null,
+      lastUpdated: formatLastUpdated(ibkrSnap.fetchedAt || new Date().toISOString()),
+      accountSummary: ibkrSnap.accountSummary,
+      empty: holdings.length === 0 && !ibkrSnap.accountSummary,
+    };
+  }
+
+  async function getPortfolioSnapshot(accountId, options = {}) {
+    if (options.source === 'upload') {
+      const uploadSnap = await uploadProvider.getPortfolioSnapshot();
+      setPortfolioMeta('uploaded_statement', null);
+      return formatUploadResponse(uploadSnap);
+    }
+
+    const connected = await isIbkrConnected();
+    if (!connected) {
+      return formatIbkrOfflineEmpty();
+    }
+
+    try {
+      const ibkrSnap = await ibkrPortfolio.getPortfolioSnapshot(
+        accountId,
+        getCachedQuotesForSymbols,
+      );
+      return formatIbkrResponse(ibkrSnap);
+    } catch (err) {
+      console.warn('[Portfolio] IBKR snapshot failed:', err.message);
+      return formatIbkrOfflineEmpty();
+    }
+  }
+
   function formatUploadResponse(uploadSnap) {
     if (uploadSnap.empty) {
-      return {
-        summary: {
-          totalValue: 0,
-          totalDayChange: 0,
-          totalDayChangePercent: '0.00',
-          totalGainLoss: 0,
-          totalGainLossPercent: '0.00',
-          positionCount: 0,
-        },
-        assetAllocation: {},
-        holdings: [],
-        topHoldings: [],
-        lastUpdated: 'No portfolio data - upload a Schwab CSV or connect IBKR',
-        dataSource: 'uploaded_statement',
-        empty: true,
-      };
+      return formatIbkrOfflineEmpty();
     }
 
     const timestamp = uploadSnap.timestamp;
@@ -167,6 +213,7 @@ function createCompositePortfolioDataProvider(uploadProvider, getCanonicalQuotes
       lastUpdated: formatLastUpdated(timestamp),
       dataSource: 'uploaded_statement',
       positionSource: 'uploaded_statement',
+      empty: false,
     };
   }
 
@@ -209,16 +256,23 @@ function createCompositePortfolioDataProvider(uploadProvider, getCanonicalQuotes
     };
   }
 
-  return {
+  const exposeOpenOrders = process.env.IBKR_EXPOSE_OPEN_ORDERS === 'true';
+
+  const api = {
     getPortfolioSnapshot,
     getProviderStatus,
     getAccounts: ibkrPortfolio.getAccounts,
     getPositions: ibkrPortfolio.getPositions,
     getAccountSummary: ibkrPortfolio.getAccountSummary,
     getBalances: ibkrPortfolio.getBalances,
-    getOpenOrders: ibkrPortfolio.getOpenOrders,
     getPnL: ibkrPortfolio.getPnL,
   };
+
+  if (exposeOpenOrders) {
+    api.getOpenOrders = ibkrPortfolio.getOpenOrders;
+  }
+
+  return api;
 }
 
 module.exports = { createCompositePortfolioDataProvider };
