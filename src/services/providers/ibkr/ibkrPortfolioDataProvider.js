@@ -132,15 +132,19 @@ async function getPortfolioSnapshot(accountId, quoteFn) {
   const { positions: raw, accountId: acct, error, fetchedAt } = await getPositions(accountId);
 
   if (error) {
-    return { holdings: [], accountSummary: null, accountId: acct, error, fetchedAt };
+    return { holdings: [], accountSummary: null, pnl: null, accountId: acct, error, fetchedAt };
   }
 
-  const accountSummary = acct ? await getAccountSummary(acct) : null;
+  const [accountSummary, pnl] = await Promise.all([
+    acct ? getAccountSummary(acct) : null,
+    acct ? getPnL(acct) : null,
+  ]);
 
   if (!raw.length) {
     return {
       holdings: [],
       accountSummary,
+      pnl,
       accountId: acct,
       summary: buildSnapshotSummary([], accountSummary),
       fetchedAt,
@@ -162,6 +166,7 @@ async function getPortfolioSnapshot(accountId, quoteFn) {
   return {
     holdings,
     accountSummary,
+    pnl,
     accountId: acct,
     summary: buildSnapshotSummary(holdings, accountSummary),
     fetchedAt,
@@ -180,7 +185,7 @@ async function getProviderStatus() {
       accounts: status.accounts || [],
     };
   } catch (err) {
-    return { name: 'ibkr_portfolio', connected: false, status: 'sidecar_offline', message: err.message };
+    return { name: 'ibkr_portfolio', connected: false, status: 'sidecar_offline', message: err.message, accounts: [] };
   }
 }
 

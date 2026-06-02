@@ -47,16 +47,6 @@ async function getCachedQuotesForSymbols(symbols) {
  * @param {ReturnType<import('./uploadedStatementPortfolioProvider').createUploadedStatementPortfolioProvider>} uploadProvider
  */
 function createCompositePortfolioDataProvider(uploadProvider) {
-  async function isIbkrConnected() {
-    if (!ibkrPortfolio.ENABLED) return false;
-    try {
-      const status = await ibkrPortfolio.getProviderStatus();
-      return status.connected;
-    } catch {
-      return false;
-    }
-  }
-
   function formatIbkrOfflineEmpty() {
     setPortfolioMeta('ibkr_offline', null);
     return {
@@ -75,7 +65,7 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       topHoldings: [],
       accountSummary: null,
       accountId: null,
-      lastUpdated: 'Connect IB Gateway and run npm run ibkr-sidecar',
+      lastUpdated: null,
       dataSource: 'ibkr_offline',
       positionSource: null,
       priceSource: null,
@@ -155,8 +145,7 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       return formatUploadResponse(uploadSnap);
     }
 
-    const connected = await isIbkrConnected();
-    if (!connected) {
+    if (!ibkrPortfolio.ENABLED) {
       return formatIbkrOfflineEmpty();
     }
 
@@ -165,6 +154,9 @@ function createCompositePortfolioDataProvider(uploadProvider) {
         accountId,
         getCachedQuotesForSymbols,
       );
+      if (ibkrSnap.error && !ibkrSnap.accountSummary && !(ibkrSnap.holdings?.length)) {
+        return formatIbkrOfflineEmpty();
+      }
       return formatIbkrResponse(ibkrSnap);
     } catch (err) {
       console.warn('[Portfolio] IBKR snapshot failed:', err.message);

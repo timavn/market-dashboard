@@ -53,6 +53,7 @@
     "prestart:server": "node scripts/ensure-port.js",
     "server": "npm run prestart:server && cross-env NODE_OPTIONS=--max-old-space-size=2048 node server.js",
     "dev": "concurrently -k --kill-others-on-fail \"npm run server\" \"npm start\"",
+    "dev:ibkr": "concurrently -k --kill-others-on-fail \"npm run ibkr-sidecar\" \"npm run dev\"",
     "collect:market-structure": "node scripts/collect_market_structure_daily.js",
     "report:market-structure": "node scripts/collect_market_structure_daily.js --report-only",
     "collect:etfpro": "node scripts/collect_etfpro_daily.js",

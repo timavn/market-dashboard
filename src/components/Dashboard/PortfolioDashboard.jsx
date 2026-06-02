@@ -23,6 +23,9 @@ import PortfolioSidebarSnapshot from './portfolio/PortfolioSidebarSnapshot';
 import { useMarketData } from '../../hooks/useMarketData';
 import { STREAM_PILOT_SYMBOLS } from '../../constants/streamPilotSymbols';
 import { loadSelectedAccount, saveSelectedAccount } from '../../constants/ibkrAccountStorage';
+import { getIbkrConnectionDisplay } from '../../utils/ibkrConnectionStatus';
+
+const PROVIDER_STATUS_POLL_MS = 45000;
 
 const DEFAULT_OFFLINE_PORTFOLIO_DATA = {
   summary: {
@@ -55,6 +58,9 @@ const PortfolioDashboard = () => {
   const [portfolioLoading, setPortfolioLoading] = useState(true);
   const [portfolioError, setPortfolioError] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(() => loadSelectedAccount());
+  const [ibkrAccounts, setIbkrAccounts] = useState([]);
+  const ibkrAccountsRef = useRef([]);
+  const [ibkrConnection, setIbkrConnection] = useState(null);
   const portfolioDataRef = useRef(null);
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
   const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
@@ -184,14 +190,41 @@ const PortfolioDashboard = () => {
     setSelectedAccount(accountId);
   }, []);
 
+  const refreshProviderStatus = useCallback(async () => {
+    try {
+      const status = await MarketDataService.getProviderStatus();
+      const list = status?.ibkr?.accounts || status?.portfolio?.ibkr?.accounts || [];
+      if (Array.isArray(list) && list.length > 0) {
+        ibkrAccountsRef.current = list;
+        setIbkrAccounts(list);
+      } else if (portfolioDataRef.current?.dataSource === 'ibkr_offline') {
+        ibkrAccountsRef.current = [];
+        setIbkrAccounts([]);
+      } else {
+        setIbkrAccounts(ibkrAccountsRef.current);
+      }
+      setIbkrConnection(getIbkrConnectionDisplay({ status, error: null }));
+      return status;
+    } catch (err) {
+      setIbkrConnection(getIbkrConnectionDisplay({ status: null, error: err.message }));
+      if (portfolioDataRef.current?.dataSource === 'ibkr_offline') {
+        ibkrAccountsRef.current = [];
+        setIbkrAccounts([]);
+      } else {
+        setIbkrAccounts(ibkrAccountsRef.current);
+      }
+      throw err;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
       try {
-        const status = await MarketDataService.getProviderStatus();
+        const status = await refreshProviderStatus();
         if (cancelled) return;
-        const accounts = status?.ibkr?.accounts || [];
+        const accounts = status?.ibkr?.accounts || status?.portfolio?.ibkr?.accounts || [];
         if (accounts.length > 0) {
           const saved = loadSelectedAccount();
           const acct = saved && accounts.includes(saved) ? saved : accounts[0];
@@ -211,17 +244,54 @@ const PortfolioDashboard = () => {
 
     load();
 
-    const interval = setInterval(() => {
+    const portfolioInterval = setInterval(() => {
       if (selectedAccount) {
         fetchPortfolio(selectedAccount, true).catch(() => {});
       }
     }, 30000);
 
+    const statusInterval = setInterval(() => {
+      refreshProviderStatus().catch(() => {});
+    }, PROVIDER_STATUS_POLL_MS);
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      clearInterval(portfolioInterval);
+      clearInterval(statusInterval);
     };
-  }, [selectedAccount, fetchPortfolio, handleAccountChange]);
+  }, [selectedAccount, fetchPortfolio, handleAccountChange, refreshProviderStatus]);
+
+  useEffect(() => {
+    const handler = () => {
+      fetchPortfolio(selectedAccount || undefined, true).catch(() => {});
+    };
+    window.addEventListener('portfolioRefresh', handler);
+    return () => window.removeEventListener('portfolioRefresh', handler);
+  }, [selectedAccount, fetchPortfolio]);
+
+  const handlePortfolioRefresh = useCallback(async () => {
+    const account = selectedAccount || ibkrAccountsRef.current[0];
+    await fetchPortfolio(account || undefined);
+    await refreshProviderStatus();
+  }, [selectedAccount, fetchPortfolio, refreshProviderStatus]);
+
+  useEffect(() => {
+    if (
+      ibkrConnection?.connected &&
+      portfolioData?.dataSource === 'ibkr_offline' &&
+      !portfolioLoading
+    ) {
+      fetchPortfolio(selectedAccount || ibkrAccountsRef.current[0] || undefined, true).catch(
+        () => {},
+      );
+    }
+  }, [
+    ibkrConnection?.connected,
+    portfolioData?.dataSource,
+    portfolioLoading,
+    selectedAccount,
+    fetchPortfolio,
+  ]);
 
   // Handle clicks outside book menu
   useEffect(() => {
@@ -397,22 +467,6 @@ const PortfolioDashboard = () => {
   };
 
   const displayData = portfolioData || DEFAULT_OFFLINE_PORTFOLIO_DATA;
-
-  const PortfolioMetricsContent = () => (
-    <div className="h-full flex flex-col p-4">
-      {portfolioError && (
-        <Text className="text-xs text-red-600 dark:text-red-400 mb-2">{portfolioError}</Text>
-      )}
-      <PortfolioSidebarSnapshot
-        portfolioData={displayData}
-        loading={portfolioLoading}
-        streamConnected={streamConnected}
-        selectedAccount={selectedAccount}
-        onAccountChange={handleAccountChange}
-        onRefresh={() => fetchPortfolio(selectedAccount)}
-      />
-    </div>
-  );
 
   return (
     <div
@@ -924,14 +978,21 @@ const PortfolioDashboard = () => {
 
         {/* Expanded Content Area */}
         {showPortfolioMetrics && (
-          <div
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: '16px',
-            }}
-          >
-            <PortfolioMetricsContent />
+          <div className="portfolio-sidebar-panel" style={{ flex: 1, minHeight: 0 }}>
+            <div className="portfolio-metrics-panel">
+              {portfolioError && (
+                <Text className="text-xs text-red-600 dark:text-red-400 mb-2">{portfolioError}</Text>
+              )}
+              <PortfolioSidebarSnapshot
+                portfolioData={displayData}
+                loading={portfolioLoading}
+                accounts={ibkrAccounts}
+                connection={ibkrConnection}
+                selectedAccount={selectedAccount}
+                onAccountChange={handleAccountChange}
+                onRefresh={handlePortfolioRefresh}
+              />
+            </div>
           </div>
         )}
 

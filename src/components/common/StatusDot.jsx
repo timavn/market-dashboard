@@ -22,6 +22,7 @@ import {
  * - overallLabel: optional override label for overall line
  * - showDateOnly: optional boolean to show only the update date
  * - align: 'left' | 'right' – popover horizontal alignment (default 'left')
+ * - placement: 'bottom' | 'top' – popover opens below or above the dot (default 'bottom')
  */
 const StatusDot = ({
   updatedAt,
@@ -34,6 +35,7 @@ const StatusDot = ({
   overallLabel,
   showDateOnly = false,
   align = 'left',
+  placement = 'bottom',
 }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
@@ -138,9 +140,11 @@ const StatusDot = ({
         <div
           role="dialog"
           aria-modal="false"
-          className="absolute z-20 mt-2 px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap"
+          className="absolute z-50 px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap"
           style={{
-            top: '100%',
+            ...(placement === 'top'
+              ? { bottom: '100%', marginBottom: '8px' }
+              : { top: '100%', marginTop: '8px' }),
             ...(align === 'right' ? { right: 0, left: 'auto' } : { left: 0 }),
           }}
         >

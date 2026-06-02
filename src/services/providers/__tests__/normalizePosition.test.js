@@ -20,4 +20,12 @@ describe('normalizePosition', () => {
     expect(h.positionSource).toBe('uploaded_statement');
     expect(h.positionId).toBe('snap1#AAPL');
   });
+
+  it('estimates marketValue from avgCost when quote and marketValue missing', () => {
+    const p = normalizeIbkrPosition(
+      { symbol: 'AAPL', position: 10, avgCost: 150, account: 'U1', secType: 'STK' },
+      null,
+    );
+    expect(p.marketValue).toBe(1500);
+  });
 });

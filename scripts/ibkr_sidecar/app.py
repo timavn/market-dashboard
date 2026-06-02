@@ -319,7 +319,7 @@ async def status() -> JSONResponse:
                 "connected": False,
                 "host": IB_HOST,
                 "port": IB_PORT,
-                "client_id": IB_CLIENT_ID,
+                "client_id": stream_manager.client_id if stream_manager else IB_CLIENT_ID,
                 "message": health.get("message"),
                 "stream": stream,
             },
@@ -333,7 +333,7 @@ async def status() -> JSONResponse:
             "connected": True,
             "host": IB_HOST,
             "port": IB_PORT,
-            "client_id": IB_CLIENT_ID,
+            "client_id": stream_manager.client_id if stream_manager else IB_CLIENT_ID,
             "accounts": accounts,
             "server_version": ib.client.serverVersion(),
             "time": now_iso(),
@@ -668,7 +668,11 @@ async def portfolio_positions(account: Optional[str] = Query(None)) -> JSONRespo
 
     if stream_manager:
         cached = stream_manager.get_portfolio_cache(acct)
-        if cached.get("ok"):
+        if cached.get("ok") and cached.get("positions"):
+            return JSONResponse(cached)
+        await stream_manager.sync_account_portfolio(acct)
+        cached = stream_manager.get_portfolio_cache(acct)
+        if cached.get("ok") and cached.get("positions"):
             return JSONResponse(cached)
 
     await ib.reqPositionsAsync()
@@ -713,7 +717,13 @@ async def portfolio_account_summary(account: Optional[str] = Query(None)) -> JSO
 
     if stream_manager:
         cached = stream_manager.get_account_summary_cache(acct)
-        if cached.get("ok"):
+        summary = cached.get("summary") or {}
+        if cached.get("ok") and summary.get("NetLiquidation") is not None:
+            return JSONResponse(cached)
+        await stream_manager.sync_account_portfolio(acct)
+        cached = stream_manager.get_account_summary_cache(acct)
+        summary = cached.get("summary") or {}
+        if cached.get("ok") and summary.get("NetLiquidation") is not None:
             return JSONResponse(cached)
 
     rows = await ib.accountSummaryAsync(acct)

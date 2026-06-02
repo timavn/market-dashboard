@@ -1379,7 +1379,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   // Early return after all hooks - check for actual data, not just portfolioData existence
   // The API returns an object with empty values when no data exists, so we need to check for actual holdings
   // Don't show "no data" message if we're actively loading/polling
-  if (!isLoading && (!portfolioData || !holdings || holdings.length === 0 || totalValue === 0)) {
+  if (!isLoading && (!portfolioData || !holdings || (holdings.length === 0 && totalValue === 0 && !portfolioData?.accountSummary?.netLiquidation))) {
     return (
       <div style={{ padding: '32px', textAlign: 'center' }}>
         <Text className="text-gray-500 dark:text-gray-400">

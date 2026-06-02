@@ -40,7 +40,7 @@ async function getProviderStatus() {
     };
   } catch (err) {
     setIbkrConnected(false, err.message);
-    return { name: 'ibkr', connected: false, status: 'sidecar_offline', message: err.message };
+    return { name: 'ibkr', connected: false, status: 'sidecar_offline', message: err.message, accounts: [] };
   }
 }
 

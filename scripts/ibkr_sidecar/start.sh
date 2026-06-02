@@ -14,8 +14,17 @@ if [[ -f "$REPO_ROOT/.env" ]]; then
 fi
 
 export IB_GATEWAY_HOST="${IB_GATEWAY_HOST:-127.0.0.1}"
-export IB_GATEWAY_PORT="${IB_GATEWAY_PORT:-4002}"
 export IB_GATEWAY_CLIENT_ID="${IB_GATEWAY_CLIENT_ID:-17}"
+
+DETECTED="$("$ROOT/detect_gateway_port.sh" 2>/dev/null || true)"
+export IB_GATEWAY_PORT="${DETECTED:-${IB_GATEWAY_PORT:-4002}}"
+
+if command -v lsof >/dev/null 2>&1 && lsof -i :8765 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "ERROR: IBKR sidecar already listening on :8765."
+  echo "Stop the existing process first: pkill -f 'uvicorn app:app'"
+  echo "Or: lsof -i :8765"
+  exit 1
+fi
 
 if [[ ! -d .venv ]]; then
   echo "Creating Python venv..."

@@ -1,6 +1,9 @@
 import {
   computePortfolioExposure,
+  computeMarginMetrics,
+  computeDailyPnLPercent,
   formatExposurePct,
+  formatSignedCurrency,
 } from './portfolioExposureMetrics';
 
 describe('computePortfolioExposure', () => {
@@ -45,5 +48,42 @@ describe('formatExposurePct', () => {
   it('formats signed net exposure', () => {
     expect(formatExposurePct(12, { signed: true })).toBe('+12%');
     expect(formatExposurePct(-8, { signed: true })).toBe('-8%');
+  });
+});
+
+describe('computeMarginMetrics', () => {
+  it('computes margin cushion from excess liquidity and NLV', () => {
+    const result = computeMarginMetrics({
+      netLiquidation: 196187,
+      excessLiquidity: 72450,
+      availableFunds: 88910,
+      initialMargin: 107560,
+    });
+
+    expect(result.hasData).toBe(true);
+    expect(result.marginCushionPct).toBeCloseTo(36.9, 0);
+    expect(result.healthLabel).toBe('Healthy');
+    expect(result.excessLiquidity).toBe(72450);
+  });
+
+  it('falls back to maintenance margin when excess liquidity missing', () => {
+    const result = computeMarginMetrics({
+      netLiquidation: 100000,
+      maintenanceMargin: 60000,
+    });
+
+    expect(result.marginCushionPct).toBeCloseTo(40, 0);
+  });
+});
+
+describe('computeDailyPnLPercent', () => {
+  it('computes daily P&L percent vs prior close', () => {
+    expect(computeDailyPnLPercent(2480, 196187)).toBeCloseTo(1.28, 1);
+  });
+});
+
+describe('formatSignedCurrency', () => {
+  it('prefixes positive values with plus', () => {
+    expect(formatSignedCurrency(2480)).toBe('+$2,480');
   });
 });

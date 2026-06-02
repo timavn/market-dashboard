@@ -13,7 +13,9 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
       ? Number(raw.marketValue)
       : mark != null
         ? quantity * mark
-        : null;
+        : quantity !== 0 && avgCost
+          ? quantity * avgCost
+          : null;
 
   return {
     positionId: conid ? `${accountId}#${conid}` : `${accountId}#${raw.symbol}`,

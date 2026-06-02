@@ -16,6 +16,7 @@ MAX_STREAM_SUBS = int(os.environ.get("IBKR_MAX_STREAM_SUBS", "100"))
 STREAM_DEBOUNCE_MS = int(os.environ.get("IBKR_STREAM_DEBOUNCE_MS", "150"))
 RECONNECT_BASE_MS = int(os.environ.get("IBKR_RECONNECT_BASE_MS", "1000"))
 ACCOUNT_SUMMARY_REFRESH_SEC = float(os.environ.get("IBKR_ACCOUNT_SUMMARY_REFRESH_SEC", "30"))
+CLIENT_ID_MAX_ATTEMPTS = int(os.environ.get("IB_GATEWAY_CLIENT_ID_ATTEMPTS", "10"))
 
 ACCOUNT_SUMMARY_TAG_SET = {
     "NetLiquidation",
@@ -129,6 +130,7 @@ class StreamManager:
         self._reconnect_task: Optional[asyncio.Task] = None
         self._summary_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
         self._started = False
 
     def status_payload(self) -> Dict[str, Any]:
@@ -151,9 +153,16 @@ class StreamManager:
         self.ib.updatePortfolioEvent += self._on_update_portfolio
         self.ib.disconnectedEvent += self._on_disconnected
         if PERSISTENT_CONNECT:
-            await self.connect()
+            asyncio.create_task(self._initial_connect())
             self._reconnect_task = asyncio.create_task(self._reconnect_loop())
             self._summary_task = asyncio.create_task(self._account_summary_loop())
+
+    async def _initial_connect(self) -> None:
+        try:
+            await self.connect()
+        except Exception as exc:
+            self.last_error = str(exc)
+            self.connected = False
 
     async def stop(self) -> None:
         self._started = False
@@ -167,41 +176,69 @@ class StreamManager:
                 pass
         self.connected = False
 
-    async def connect(self) -> Dict[str, Any]:
+    async def _try_connect_once(self, client_id: int) -> bool:
         if self.ib.isConnected():
-            self.connected = True
-            self.reconnecting = False
-            await self._ensure_portfolio_stream()
-            await self._resubscribe_all()
-            return {"ok": True, "status": "connected"}
-
+            try:
+                self.ib.disconnect()
+            except Exception:
+                pass
         try:
             await asyncio.wait_for(
                 self.ib.connectAsync(
-                    self.host, self.port, clientId=self.client_id, readonly=True
+                    self.host, self.port, clientId=client_id, readonly=True
                 ),
                 timeout=self.connect_timeout,
             )
+            return self.ib.isConnected()
+        except (ConnectionRefusedError, TimeoutError, asyncio.TimeoutError, OSError, asyncio.CancelledError):
+            if self.ib.isConnected():
+                try:
+                    self.ib.disconnect()
+                except Exception:
+                    pass
+            return False
+        except Exception:
+            if self.ib.isConnected():
+                try:
+                    self.ib.disconnect()
+                except Exception:
+                    pass
+            return False
+
+    async def connect(self) -> Dict[str, Any]:
+        async with self._connect_lock:
             if self.ib.isConnected():
                 self.connected = True
                 self.reconnecting = False
-                self.last_error = None
                 await self._ensure_portfolio_stream()
                 await self._resubscribe_all()
-                return {"ok": True, "status": "connected"}
-            return {"ok": False, "status": "tws_offline", "message": "IB API socket did not connect"}
-        except (ConnectionRefusedError, TimeoutError, asyncio.TimeoutError, OSError) as exc:
+                return {"ok": True, "status": "connected", "client_id": self.client_id}
+
+            base_id = self.client_id
+            last_msg = None
+            for offset in range(CLIENT_ID_MAX_ATTEMPTS):
+                candidate = base_id + offset
+                if await self._try_connect_once(candidate):
+                    self.client_id = candidate
+                    self.connected = True
+                    self.reconnecting = False
+                    self.last_error = None
+                    await self._ensure_portfolio_stream()
+                    await self._resubscribe_all()
+                    return {"ok": True, "status": "connected", "client_id": self.client_id}
+                last_msg = f"clientId {candidate} unavailable (in use or timed out)"
+
             self.connected = False
-            self.last_error = str(exc)
+            self.last_error = last_msg
             return {
                 "ok": False,
                 "status": "tws_offline",
-                "message": f"IB Gateway/TWS not reachable at {self.host}:{self.port}: {exc}",
+                "message": (
+                    f"IB Gateway/TWS not reachable at {self.host}:{self.port} "
+                    f"(tried clientIds {base_id}-{base_id + CLIENT_ID_MAX_ATTEMPTS - 1}). "
+                    f"Stop duplicate sidecars: pkill -f 'uvicorn app:app'"
+                ),
             }
-        except Exception as exc:
-            self.connected = False
-            self.last_error = str(exc)
-            return {"ok": False, "status": "error", "message": str(exc)}
 
     async def ensure_connected(self) -> Dict[str, Any]:
         if PERSISTENT_CONNECT:
@@ -238,23 +275,38 @@ class StreamManager:
                 self.last_error = result.get("message")
                 self._broadcast_status("reconnecting", result.get("message"))
 
-    async def _ensure_portfolio_stream(self) -> None:
+    async def _ensure_portfolio_stream(self, account: Optional[str] = None) -> None:
         accounts = self.ib.managedAccounts()
         if not accounts:
             return
-        acct = accounts[0]
+        acct = account if account and account in accounts else accounts[0]
         if self._portfolio_account == acct and self._account_updates_active:
             return
+        if self._portfolio_account and self._portfolio_account != acct and self._account_updates_active:
+            try:
+                self.ib.reqAccountUpdates('')
+            except Exception:
+                pass
+            self._account_updates_active = False
         self._portfolio_account = acct
         try:
             self.ib.reqAccountUpdates(acct)
             self._account_updates_active = True
-            await self.ib.reqPositionsAsync()
+            await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10)
             await asyncio.sleep(0.3)
             self._sync_positions_from_ib(acct)
-            await self._refresh_account_summary(acct)
+            await asyncio.wait_for(self._refresh_account_summary(acct), timeout=10)
         except Exception as exc:
             self.last_error = f"portfolio_stream: {exc}"
+
+    async def sync_account_portfolio(self, account: str) -> None:
+        """One-shot sync for a specific account (multi-account support)."""
+        if not self.ib.isConnected():
+            return
+        accounts = self.ib.managedAccounts()
+        if account not in accounts:
+            return
+        await self._ensure_portfolio_stream(account)
 
     def _sync_positions_from_ib(self, acct: str) -> None:
         positions: Dict[int, Dict[str, Any]] = {}

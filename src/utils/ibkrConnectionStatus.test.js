@@ -1,7 +1,8 @@
 import {
   getIbkrConnectionDisplay,
+  getPortfolioOfflinePanel,
   getPortfolioSidebarBanner,
-  OFFLINE_PORTFOLIO_HINT,
+  OFFLINE_SETUP_STEPS,
 } from './ibkrConnectionStatus';
 
 describe('getIbkrConnectionDisplay', () => {
@@ -11,7 +12,7 @@ describe('getIbkrConnectionDisplay', () => {
       error: null,
     });
     expect(result.connected).toBe(true);
-    expect(result.label).toBe('connected');
+    expect(result.label).toBe('Live');
   });
 
   it('returns backend offline on network errors', () => {
@@ -19,8 +20,8 @@ describe('getIbkrConnectionDisplay', () => {
       status: null,
       error: 'Network Error',
     });
-    expect(result.label).toBe('backend offline');
-    expect(result.warn).toMatch(/Backend unreachable/);
+    expect(result.label).toBe('Backend offline');
+    expect(result.kind).toBe('backend_offline');
   });
 
   it('returns sidecar offline when status is sidecar_offline', () => {
@@ -28,7 +29,7 @@ describe('getIbkrConnectionDisplay', () => {
       status: { ibkr: { connected: false, status: 'sidecar_offline' } },
       error: null,
     });
-    expect(result.label).toBe('sidecar offline');
+    expect(result.label).toBe('Sidecar offline');
   });
 
   it('returns gateway offline when status is tws_offline', () => {
@@ -36,26 +37,49 @@ describe('getIbkrConnectionDisplay', () => {
       status: { ibkr: { connected: false, status: 'tws_offline' } },
       error: null,
     });
-    expect(result.label).toBe('gateway offline');
-    expect(result.title).toMatch(/4001/);
+    expect(result.label).toBe('Gateway offline');
+    expect(result.title).toMatch(/Gateway/);
   });
 });
 
-describe('OFFLINE_PORTFOLIO_HINT', () => {
-  it('mentions live and paper ports', () => {
-    expect(OFFLINE_PORTFOLIO_HINT).toMatch(/4001/);
-    expect(OFFLINE_PORTFOLIO_HINT).toMatch(/4002/);
+describe('OFFLINE_SETUP_STEPS', () => {
+  it('lists gateway and sidecar steps only', () => {
+    expect(OFFLINE_SETUP_STEPS).toHaveLength(2);
+    expect(OFFLINE_SETUP_STEPS[0].label).toMatch(/Gateway/);
+    expect(OFFLINE_SETUP_STEPS[1].label).toMatch(/ibkr-sidecar/);
+  });
+});
+
+describe('getPortfolioOfflinePanel', () => {
+  it('shows sync hint when IBKR connected but portfolio offline', () => {
+    const panel = getPortfolioOfflinePanel({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: { dataSource: 'ibkr_offline' },
+    });
+    expect(panel.syncPending).toBe(true);
+    expect(panel.steps).toBeNull();
+    expect(panel.heading).toMatch(/refresh/i);
+  });
+
+  it('shows setup steps when sidecar offline', () => {
+    const panel = getPortfolioOfflinePanel({
+      connection: { connected: false, kind: 'sidecar_offline' },
+      portfolioData: { dataSource: 'ibkr_offline' },
+    });
+    expect(panel.syncPending).toBe(false);
+    expect(panel.steps).toHaveLength(2);
+    expect(panel.steps[0].done).toBe(true);
+    expect(panel.steps[1].done).toBe(false);
   });
 });
 
 describe('getPortfolioSidebarBanner', () => {
-  it('returns offline banner for ibkr_offline', () => {
+  it('returns null for ibkr_offline (setup card handles offline UI)', () => {
     const result = getPortfolioSidebarBanner({
       portfolioData: { dataSource: 'ibkr_offline', empty: true },
       selectedAccount: 'U123',
     });
-    expect(result?.type).toBe('offline');
-    expect(result?.message).toBe(OFFLINE_PORTFOLIO_HINT);
+    expect(result).toBeNull();
   });
 
   it('returns empty banner for connected account with no positions', () => {
@@ -81,6 +105,6 @@ describe('getPortfolioSidebarBanner', () => {
       portfolioData: { dataSource: 'ibkr_api', empty: true },
       selectedAccount: 'U25779973',
     });
-    expect(result?.type).not.toBe('offline');
+    expect(result?.type).toBe('empty');
   });
 });
