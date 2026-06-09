@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   formatDateOnly,
   formatLastUpdated,
@@ -21,7 +21,7 @@ import {
  * - sources: optional array of sub-sources to show in popup
  * - overallLabel: optional override label for overall line
  * - showDateOnly: optional boolean to show only the update date
- * - align: 'left' | 'right' – popover horizontal alignment (default 'left')
+ * - align: 'left' | 'right' | 'after' – popover horizontal alignment (default 'left')
  * - placement: 'bottom' | 'top' – popover opens below or above the dot (default 'bottom')
  */
 const StatusDot = ({
@@ -38,7 +38,9 @@ const StatusDot = ({
   placement = 'bottom',
 }) => {
   const [open, setOpen] = useState(false);
+  const [popupPos, setPopupPos] = useState({ top: 0, left: 0, right: 'auto' });
   const containerRef = useRef(null);
+  const buttonRef = useRef(null);
 
   const updatedDate = updatedAt ? new Date(updatedAt) : null;
 
@@ -88,7 +90,49 @@ const StatusDot = ({
     };
   }, [open]);
 
+  const calculatePosition = useCallback(() => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const popupWidth = 200; // approximate width
+    const popupHeight = 80; // approximate height
+    const margin = 8;
+
+    let top, left, right = 'auto';
+
+    if (placement === 'top') {
+      top = rect.top - popupHeight - margin;
+    } else {
+      top = rect.bottom + margin;
+    }
+
+    if (align === 'after') {
+      left = rect.right + margin;
+      if (left + popupWidth > window.innerWidth) {
+        left = Math.max(8, rect.left - popupWidth - margin);
+      }
+    } else if (align === 'right') {
+      right = window.innerWidth - rect.right;
+      left = 'auto';
+    } else {
+      left = rect.left;
+      // Ensure popup doesn't go off-screen on the right
+      if (left + popupWidth > window.innerWidth) {
+        left = Math.max(8, window.innerWidth - popupWidth - 8);
+      }
+    }
+
+    // Ensure popup doesn't go off-screen at the top
+    if (top < 8) {
+      top = rect.bottom + margin;
+    }
+
+    setPopupPos({ top, left, right });
+  }, [align, placement]);
+
   const handleToggle = () => {
+    if (!open) {
+      calculatePosition();
+    }
     setOpen((prev) => !prev);
   };
 
@@ -105,6 +149,7 @@ const StatusDot = ({
       className={`relative inline-flex items-center ${className}`}
     >
       <button
+        ref={buttonRef}
         type="button"
         onClick={handleToggle}
         onKeyDown={handleKeyDown}
@@ -115,15 +160,18 @@ const StatusDot = ({
             ? `Show last updated time for ${label}`
             : 'Show last updated time'
         }
-        className={`rounded-full cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 ${
+        className={`appearance-none border-0 rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-indigo-500 ${
           emoji ? '' : colorClass
         }`}
         style={{
           width: `${size + (emoji ? 2 : 0)}px`,
           height: `${size + (emoji ? 2 : 0)}px`,
+          padding: 0,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          background: emoji ? 'transparent' : undefined,
+          boxShadow: emoji ? 'none' : 'inset 0 1px 1px rgba(255,255,255,0.55), 0 0 0 1px rgba(15,23,42,0.12)',
         }}
       >
         {emoji && (
@@ -140,12 +188,11 @@ const StatusDot = ({
         <div
           role="dialog"
           aria-modal="false"
-          className="absolute z-50 px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap"
+          className="fixed z-[9999] px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap"
           style={{
-            ...(placement === 'top'
-              ? { bottom: '100%', marginBottom: '8px' }
-              : { top: '100%', marginTop: '8px' }),
-            ...(align === 'right' ? { right: 0, left: 'auto' } : { left: 0 }),
+            top: popupPos.top,
+            left: popupPos.left,
+            right: popupPos.right,
           }}
         >
           {Array.isArray(sources) && sources.length > 0 ? (

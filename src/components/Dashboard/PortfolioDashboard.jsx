@@ -22,10 +22,13 @@ import RefreshButton from '../common/RefreshButton';
 import PortfolioSidebarSnapshot from './portfolio/PortfolioSidebarSnapshot';
 import { useMarketData } from '../../hooks/useMarketData';
 import { STREAM_PILOT_SYMBOLS } from '../../constants/streamPilotSymbols';
-import { loadSelectedAccount, saveSelectedAccount } from '../../constants/ibkrAccountStorage';
-import { getIbkrConnectionDisplay } from '../../utils/ibkrConnectionStatus';
+import { loadSelectedAccount, saveSelectedAccount, saveIbkrAccounts } from '../../constants/ibkrAccountStorage';
+import { getIbkrConnectionDisplay, getPreferredIbkrAccount } from '../../utils/ibkrConnectionStatus';
 
-const PROVIDER_STATUS_POLL_MS = 45000;
+const PORTFOLIO_POLL_MS = 2000;
+const RTA_POLL_MS = 30000;
+const PROVIDER_STATUS_POLL_MS = 2000;
+const PROVIDER_STATUS_POLL_FAST_MS = 1500;
 
 const DEFAULT_OFFLINE_PORTFOLIO_DATA = {
   summary: {
@@ -57,10 +60,13 @@ const PortfolioDashboard = () => {
   const [portfolioData, setPortfolioData] = useState(null);
   const [portfolioLoading, setPortfolioLoading] = useState(true);
   const [portfolioError, setPortfolioError] = useState(null);
+  const [rtaPositions, setRtaPositions] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(() => loadSelectedAccount());
   const [ibkrAccounts, setIbkrAccounts] = useState([]);
   const ibkrAccountsRef = useRef([]);
+  const selectedAccountRef = useRef(loadSelectedAccount());
   const [ibkrConnection, setIbkrConnection] = useState(null);
+  const ibkrConnectionRef = useRef(null);
   const portfolioDataRef = useRef(null);
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
   const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
@@ -81,6 +87,7 @@ const PortfolioDashboard = () => {
   const [showPerformanceTracking, setShowPerformanceTracking] = useState(false);
   const [showPredictionMarkets, setShowPredictionMarkets] = useState(false);
   const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
+  const [portfolioExpandedUp, setPortfolioExpandedUp] = useState(false);
   const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
   const [performanceImageError, setPerformanceImageError] = useState(false);
   const [portfolioBreakdownImageError, setPortfolioBreakdownImageError] = useState(false);
@@ -185,8 +192,21 @@ const PortfolioDashboard = () => {
     }
   }, []);
 
+  const fetchRtaPositions = useCallback(async () => {
+    try {
+      const data = await MarketDataService.getRealTimeAlertPositions();
+      setRtaPositions(data);
+      return data;
+    } catch (e) {
+      console.error('Failed to load real-time alert positions:', e);
+      setRtaPositions((current) => current || { available: false });
+      return null;
+    }
+  }, []);
+
   const handleAccountChange = useCallback((accountId) => {
     saveSelectedAccount(accountId);
+    selectedAccountRef.current = accountId || '';
     setSelectedAccount(accountId);
   }, []);
 
@@ -197,6 +217,7 @@ const PortfolioDashboard = () => {
       if (Array.isArray(list) && list.length > 0) {
         ibkrAccountsRef.current = list;
         setIbkrAccounts(list);
+        saveIbkrAccounts(list);
       } else if (portfolioDataRef.current?.dataSource === 'ibkr_offline') {
         ibkrAccountsRef.current = [];
         setIbkrAccounts([]);
@@ -217,6 +238,25 @@ const PortfolioDashboard = () => {
     }
   }, []);
 
+  const resolvePortfolioAccount = useCallback((status = null) => {
+    const explicit = selectedAccountRef.current || selectedAccount || '';
+    if (status) {
+      return getPreferredIbkrAccount(status, explicit) || undefined;
+    }
+    if (explicit) {
+      return explicit;
+    }
+    return ibkrAccountsRef.current[0] || undefined;
+  }, [selectedAccount]);
+
+  useEffect(() => {
+    ibkrConnectionRef.current = ibkrConnection;
+  }, [ibkrConnection]);
+
+  useEffect(() => {
+    selectedAccountRef.current = selectedAccount || '';
+  }, [selectedAccount]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -224,16 +264,15 @@ const PortfolioDashboard = () => {
       try {
         const status = await refreshProviderStatus();
         if (cancelled) return;
-        const accounts = status?.ibkr?.accounts || status?.portfolio?.ibkr?.accounts || [];
-        if (accounts.length > 0) {
-          const saved = loadSelectedAccount();
-          const acct = saved && accounts.includes(saved) ? saved : accounts[0];
-          if (acct !== selectedAccount) {
-            handleAccountChange(acct);
-            return;
-          }
+        const acct = resolvePortfolioAccount(status);
+        if (acct && acct !== selectedAccountRef.current) {
+          handleAccountChange(acct);
+          return;
         }
-        await fetchPortfolio(selectedAccount || undefined);
+        await Promise.all([
+          fetchPortfolio(acct),
+          fetchRtaPositions(),
+        ]);
       } catch (err) {
         if (!cancelled) {
           setPortfolioError(err.message || 'Failed to load portfolio');
@@ -245,35 +284,50 @@ const PortfolioDashboard = () => {
     load();
 
     const portfolioInterval = setInterval(() => {
-      if (selectedAccount) {
-        fetchPortfolio(selectedAccount, true).catch(() => {});
-      }
-    }, 30000);
+      fetchPortfolio(resolvePortfolioAccount(), true).catch(() => {});
+    }, PORTFOLIO_POLL_MS);
 
-    const statusInterval = setInterval(() => {
-      refreshProviderStatus().catch(() => {});
-    }, PROVIDER_STATUS_POLL_MS);
+    const rtaInterval = setInterval(() => {
+      fetchRtaPositions().catch(() => {});
+    }, RTA_POLL_MS);
+
+    let statusTimeout;
+    const scheduleStatusPoll = () => {
+      const delay = ibkrConnectionRef.current?.connected
+        ? PROVIDER_STATUS_POLL_MS
+        : PROVIDER_STATUS_POLL_FAST_MS;
+      statusTimeout = setTimeout(async () => {
+        try { await refreshProviderStatus(); } catch {}
+        if (!cancelled) scheduleStatusPoll();
+      }, delay);
+    };
+    scheduleStatusPoll();
 
     return () => {
       cancelled = true;
       clearInterval(portfolioInterval);
-      clearInterval(statusInterval);
+      clearInterval(rtaInterval);
+      clearTimeout(statusTimeout);
     };
-  }, [selectedAccount, fetchPortfolio, handleAccountChange, refreshProviderStatus]);
+  }, [fetchPortfolio, fetchRtaPositions, handleAccountChange, refreshProviderStatus, resolvePortfolioAccount]);
 
   useEffect(() => {
     const handler = () => {
-      fetchPortfolio(selectedAccount || undefined, true).catch(() => {});
+      fetchPortfolio(resolvePortfolioAccount(), true).catch(() => {});
+      fetchRtaPositions().catch(() => {});
     };
     window.addEventListener('portfolioRefresh', handler);
     return () => window.removeEventListener('portfolioRefresh', handler);
-  }, [selectedAccount, fetchPortfolio]);
+  }, [fetchPortfolio, fetchRtaPositions, resolvePortfolioAccount]);
 
   const handlePortfolioRefresh = useCallback(async () => {
-    const account = selectedAccount || ibkrAccountsRef.current[0];
-    await fetchPortfolio(account || undefined);
+    const account = resolvePortfolioAccount();
+    await Promise.all([
+      fetchPortfolio(account || undefined),
+      fetchRtaPositions(),
+    ]);
     await refreshProviderStatus();
-  }, [selectedAccount, fetchPortfolio, refreshProviderStatus]);
+  }, [fetchPortfolio, fetchRtaPositions, refreshProviderStatus, resolvePortfolioAccount]);
 
   useEffect(() => {
     if (
@@ -281,7 +335,7 @@ const PortfolioDashboard = () => {
       portfolioData?.dataSource === 'ibkr_offline' &&
       !portfolioLoading
     ) {
-      fetchPortfolio(selectedAccount || ibkrAccountsRef.current[0] || undefined, true).catch(
+      fetchPortfolio(resolvePortfolioAccount(), true).catch(
         () => {},
       );
     }
@@ -289,8 +343,8 @@ const PortfolioDashboard = () => {
     ibkrConnection?.connected,
     portfolioData?.dataSource,
     portfolioLoading,
-    selectedAccount,
     fetchPortfolio,
+    resolvePortfolioAccount,
   ]);
 
   // Handle clicks outside book menu
@@ -946,15 +1000,17 @@ const PortfolioDashboard = () => {
           {/* Expand/Collapse Portfolio Bar Button */}
           <button
             onClick={() => setShowPortfolioMetrics(!showPortfolioMetrics)}
-            className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors mt-2 w-full"
+            className="rounded-md border border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors mt-2"
             title={showPortfolioMetrics ? "Collapse Portfolio" : "Expand Portfolio"}
             style={{
-              minWidth: '32px',
+              width: '32px',
               height: '30px',
               padding: '0',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              marginTop: '8px',
+              alignSelf: 'center'
             }}
           >
             <svg
@@ -963,7 +1019,7 @@ const PortfolioDashboard = () => {
               viewBox="0 0 16 16"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
-              className="text-gray-700 dark:text-gray-300"
+              className="text-blue-600 dark:text-blue-400"
             >
               <path
                 d={showPortfolioMetrics ? "M6 12L10 8L6 4" : "M10 12L6 8L10 4"}
@@ -978,19 +1034,33 @@ const PortfolioDashboard = () => {
 
         {/* Expanded Content Area */}
         {showPortfolioMetrics && (
-          <div className="portfolio-sidebar-panel" style={{ flex: 1, minHeight: 0 }}>
+          <div
+            className={`portfolio-sidebar-panel${portfolioExpandedUp ? ' bg-white dark:bg-gray-900' : ''}`}
+            style={portfolioExpandedUp ? {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: '58px',
+              zIndex: 10,
+              overflowY: 'hidden',
+            } : { flex: 1, minHeight: 0 }}
+          >
             <div className="portfolio-metrics-panel">
               {portfolioError && (
-                <Text className="text-xs text-red-600 dark:text-red-400 mb-2">{portfolioError}</Text>
+                <Text className="text-xs text-blue-600 dark:text-blue-400 mb-2">{portfolioError}</Text>
               )}
               <PortfolioSidebarSnapshot
                 portfolioData={displayData}
                 loading={portfolioLoading}
+                rtaPositions={rtaPositions}
                 accounts={ibkrAccounts}
                 connection={ibkrConnection}
                 selectedAccount={selectedAccount}
                 onAccountChange={handleAccountChange}
                 onRefresh={handlePortfolioRefresh}
+                expandedUp={portfolioExpandedUp}
+                onToggleExpandUp={() => setPortfolioExpandedUp(v => !v)}
               />
             </div>
           </div>
@@ -1950,7 +2020,12 @@ const PortfolioDashboard = () => {
                 padding: '4px 16px 16px 16px',
               }}
             >
-              <PortfolioBreakdown portfolioData={portfolioData} isLoading={portfolioLoading} />
+              <PortfolioBreakdown
+                portfolioData={portfolioData}
+                isLoading={portfolioLoading}
+                connection={ibkrConnection}
+                onRefresh={handlePortfolioRefresh}
+              />
             </div>
           </>
         )}

@@ -1,18 +1,16 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Card, Title, Text } from '@tremor/react';
-import { Badge } from '@tremor/react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { Card, Text } from '@tremor/react';
+import { ChevronDown, Download, Filter, Search } from 'lucide-react';
 import {
   separateLongsAndShorts,
-  formatPerformance,
-  getPerformanceColor,
-  formatDate
+  formatPerformance
 } from '../../utils/portfolioBreakdownUtils';
+import { getIbkrPortfolioStatusDot } from '../../utils/ibkrConnectionStatus';
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
-import { FACTOR_DEFINITIONS } from '../../constants/factorDefinitions';
-import PortfolioAnalytics from './PortfolioAnalytics';
-import PerformanceService from '../../services/api/performanceService';
+import { SECURITIES_LIST } from '../../constants/securitiesList';
 import LoadingIndicator from '../common/LoadingIndicator';
+import StatusDot from '../common/StatusDot';
+import './PortfolioConstructionIdeas.css';
 const ASSET_CLASS_COLORS = {
   'Equities': '#10B981',      // Emerald green
   'Fixed Income': '#3B82F6',  // Blue
@@ -122,68 +120,229 @@ const getAssetClassForTicker = (ticker, holding = null) => {
   return 'Equities';
 };
 
-/**
- * Calculate asset class allocation using securities universe mapping
- * Always includes all 5 core asset classes in the result, even if 0%
- */
-const calculateAssetClassAllocationFromUniverse = (holdings) => {
-  // Define all 5 core asset classes
-  const allAssetClasses = ['Equities', 'Fixed Income', 'Commodities', 'Currencies', 'Cryptocurrency'];
-
-  const allocation = {};
-  let totalValue = 0;
-
-  // Initialize all asset classes to 0
-  allAssetClasses.forEach(assetClass => {
-    allocation[assetClass] = 0;
-  });
-
-  // Calculate allocation from holdings
-  if (holdings && holdings.length > 0) {
-    holdings.forEach(holding => {
-      const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
-      const assetClass = getAssetClassForTicker(holding.symbol, holding);
-
-      // Ensure the asset class is one of the 5 core classes
-      const normalizedAssetClass = allAssetClasses.includes(assetClass) ? assetClass : 'Equities';
-
-      if (!allocation[normalizedAssetClass]) {
-        allocation[normalizedAssetClass] = 0;
-      }
-      allocation[normalizedAssetClass] += marketValue;
-      totalValue += marketValue;
-    });
-  }
-
-  // Convert to percentage and always include all 5 asset classes
-  return allAssetClasses.map(name => ({
-    name,
-    value: totalValue > 0 ? parseFloat(((allocation[name] / totalValue) * 100).toFixed(2)) : 0,
-    rawValue: allocation[name] || 0
-  })).sort((a, b) => {
-    // Sort by value descending, but keep all items
-    if (b.value !== a.value) {
-      return b.value - a.value;
-    }
-    // If values are equal, maintain consistent order
-    return allAssetClasses.indexOf(a.name) - allAssetClasses.indexOf(b.name);
-  });
+const SLEEVE_TARGETS = {
+  Credit: 7.5,
+  Growth: 0,
+  Defensive: 0,
+  Inflation: 0,
+  Volatility: 0,
+  Cash: 15
 };
 
-const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
-  const [showFactorExposureInfo, setShowFactorExposureInfo] = useState(false);
-  const [selectedFactor, setSelectedFactor] = useState(null);
-  // Portfolio performance chart (Schwab-style)
-  const [equityCurve, setEquityCurve] = useState({ dates: [], values: [], returns: [] });
-  const [performanceChartLoading, setPerformanceChartLoading] = useState(false);
-  const [performanceRange, setPerformanceRange] = useState('YTD');
+const SLEEVE_ORDER = ['Growth', 'Credit', 'Inflation', 'Defensive', 'Volatility', 'Cash'];
+const EXCEPTION_ORDER = ['Growth', 'Credit', 'Inflation', 'Cash', 'Small Cap', 'Defensive', 'Volatility', 'USD'];
 
-  const holdings = portfolioData?.holdings || [];
+const SECURITY_NAME_BY_TICKER = SECURITIES_LIST.reduce((acc, security) => {
+  acc[security.ticker.toUpperCase()] = security.name;
+  return acc;
+}, {});
 
+const OVEREXPOSURE_META = {
+  Credit: { descriptor: 'Concentration', target: SLEEVE_TARGETS.Credit },
+  Growth: { descriptor: 'Factor', target: SLEEVE_TARGETS.Growth },
+  Defensive: { descriptor: 'Sleeve', target: SLEEVE_TARGETS.Defensive },
+  Inflation: { descriptor: 'Sleeve', target: SLEEVE_TARGETS.Inflation },
+  Volatility: { descriptor: 'Risk', target: SLEEVE_TARGETS.Volatility },
+  Cash: { descriptor: 'Sleeve', target: SLEEVE_TARGETS.Cash },
+  'Small Cap': { descriptor: 'Size', target: 0 },
+  USD: { descriptor: 'Currency', target: 0 }
+};
+
+const CREDIT_CATEGORIES = new Set([
+  'HY Credit',
+  'IG Credit',
+  'Leveraged Loans',
+  'Convertibles',
+  'EM $ Debt',
+  'MBS',
+  'Preferreds'
+]);
+
+const DEFENSIVE_CATEGORIES = new Set([
+  'Treasury Belly',
+  'Short Duration Treasurys',
+  'Long Bond',
+  'Utilities',
+  'Consumer Staples',
+  'Health Care'
+]);
+
+const INFLATION_CATEGORIES = new Set([
+  'Commodities',
+  'Energy',
+  'Materials',
+  'TIPS',
+  'FX',
+  'Gold',
+  'Currencies'
+]);
+
+const VOLATILITY_CATEGORIES = new Set(['Low Beta']);
+
+const POSITION_SIZE_PARAMETERS = {
+  long: {
+    Currencies: '4-12%',
+    'Fixed Income': '3-10%',
+    Equities: '2-6%',
+    Commodities: '2-4%',
+    Cryptocurrency: '1-3%',
+  },
+  short: {
+    Currencies: '2-6%',
+    'Fixed Income': '2-5%',
+    Equities: '1-3%',
+    Commodities: '1-2%',
+    Cryptocurrency: '0.5-1%',
+  },
+};
+
+const ASSET_CLASS_ABBREVIATIONS = {
+  Equities: 'EQ',
+  'Fixed Income': 'FI',
+  Commodities: 'COM',
+  Currencies: 'FX',
+  Cryptocurrency: 'CRYPTO',
+};
+
+const isCashHolding = (holding) => {
+  const symbol = (holding?.symbol || '').toUpperCase();
+  const assetClass = (holding?.assetClass || holding?.assetType || '').toLowerCase();
+  const description = (holding?.description || holding?.name || '').toLowerCase();
+  return (
+    symbol === 'CASH & CASH INVESTMENTS' ||
+    symbol === 'CASH' ||
+    assetClass.includes('cash') ||
+    description.includes('money market')
+  );
+};
+
+const getSleeveForHolding = (holding) => {
+  if (isCashHolding(holding)) return 'Cash';
+
+  const symbol = (holding?.symbol || '').toUpperCase();
+  const mapping = SECURITY_CATEGORY_MAPPING[symbol];
+  const category = mapping?.category || getAssetClassForTicker(symbol, holding);
+  const normalized = (category || '').toLowerCase();
+  const description = (holding?.description || holding?.name || '').toLowerCase();
+
+  if (CREDIT_CATEGORIES.has(category) || normalized.includes('credit') || normalized.includes('loan')) return 'Credit';
+  if (DEFENSIVE_CATEGORIES.has(category) || normalized.includes('treasury') || normalized.includes('staples') || normalized.includes('utilities')) return 'Defensive';
+  if (INFLATION_CATEGORIES.has(category) || normalized.includes('commodity') || normalized.includes('energy') || normalized.includes('materials') || description.includes('tips')) return 'Inflation';
+  if (VOLATILITY_CATEGORIES.has(category) || symbol.includes('VIX') || ['VXX', 'UVXY', 'BTAL'].includes(symbol)) return 'Volatility';
+  return 'Growth';
+};
+
+const getHoldingCategory = (holding) => {
+  const symbol = (holding?.symbol || '').toUpperCase();
+  return SECURITY_CATEGORY_MAPPING[symbol]?.category || '';
+};
+
+const getSecurityName = (holding) => {
+  const symbol = (holding?.symbol || '').toUpperCase();
+  return holding?.description || holding?.name || SECURITY_NAME_BY_TICKER[symbol] || holding?.symbol || '--';
+};
+
+const getPositionSizeParameter = (holding, isLongs) => {
+  const assetClass = getAssetClassForTicker(holding?.symbol, holding);
+  const sizeMap = isLongs ? POSITION_SIZE_PARAMETERS.long : POSITION_SIZE_PARAMETERS.short;
+  return sizeMap[assetClass] || '--';
+};
+
+const getAssetClassAbbreviation = (holding) => {
+  const assetClass = getAssetClassForTicker(holding?.symbol, holding);
+  return ASSET_CLASS_ABBREVIATIONS[assetClass] || assetClass || '--';
+};
+
+const isSmallCapHolding = (holding) => {
+  const symbol = (holding?.symbol || '').toUpperCase();
+  const haystack = [
+    holding?.description,
+    holding?.name,
+    SECURITY_NAME_BY_TICKER[symbol],
+    getHoldingCategory(holding)
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return ['IWM', 'RUT'].includes(symbol) || haystack.includes('small cap') || haystack.includes('russell 2000');
+};
+
+const isUsdHolding = (holding) => {
+  const symbol = (holding?.symbol || '').toUpperCase();
+  const category = getHoldingCategory(holding).toLowerCase();
+  const haystack = [
+    holding?.description,
+    holding?.name,
+    SECURITY_NAME_BY_TICKER[symbol],
+    category
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return (
+    symbol === 'USD' ||
+    symbol === 'UUP' ||
+    symbol.includes('/USD') ||
+    symbol.includes('USD/') ||
+    category === 'fx' ||
+    haystack.includes('u.s. dollar') ||
+    haystack.includes('us dollar') ||
+    haystack.includes('usd')
+  );
+};
+
+const formatPct = (value, decimals = 1, { signed = false } = {}) => {
+  const num = Number(value) || 0;
+  const sign = signed && num > 0 ? '+' : '';
+  return `${sign}${num.toFixed(decimals)}%`;
+};
+
+const formatBps = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
+  const rounded = Math.round(Number(value) * 100);
+  if (rounded > 0) return `+${rounded}`;
+  return `${rounded}`;
+};
+
+const formatSignedCurrency = (value, { compact = false } = {}) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '--';
+  const absValue = Math.abs(num);
+  const sign = num > 0 ? '+' : num < 0 ? '-' : '';
+
+  if (compact) {
+    if (absValue >= 1000000) return `${sign}$${(absValue / 1000000).toFixed(1)}M`;
+    if (absValue >= 1000) return `${sign}$${(absValue / 1000).toFixed(1)}K`;
+  }
+
+  return `${sign}$${absValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
+
+const formatAsOf = (value) => {
+  if (!value) return 'As of --';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'As of --';
+  return `As of ${date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/New_York',
+    timeZoneName: 'short'
+  })}`;
+};
+
+const csvEscape = (value) => {
+  const str = value === null || value === undefined ? '' : String(value);
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+};
+
+const PortfolioBreakdown = ({
+  portfolioData,
+  isLoading = false,
+  connection = null,
+  onRefresh = null,
+}) => {
+  const holdings = useMemo(() => portfolioData?.holdings || [], [portfolioData?.holdings]);
 
   const totalValue = portfolioData?.summary?.totalValue || 0;
-  const factorExposures = portfolioData?.factorExposures || {};
-
   // Column visibility state (shared for both tables)
   // Default selection: % Acct, % Portfolio, Buy/Sell, Intraday G/L
   const [columnVisibility, setColumnVisibility] = useState({
@@ -220,29 +379,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     return () => window.removeEventListener('resize', updateWidths);
   }, [columnVisibility]);
 
-  // Fetch equity curve for portfolio performance chart
-  useEffect(() => {
-    let cancelled = false;
-    setPerformanceChartLoading(true);
-    PerformanceService.getEquityCurve()
-      .then((data) => {
-        if (!cancelled && data?.dates?.length) {
-          setEquityCurve({
-            dates: data.dates,
-            values: data.values || [],
-            returns: data.returns || []
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setEquityCurve({ dates: [], values: [], returns: [] });
-      })
-      .finally(() => {
-        if (!cancelled) setPerformanceChartLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, []);
-
   // Sorting state for longs and shorts tables
   const [longsSortConfig, setLongsSortConfig] = useState({ field: null, direction: 'desc' });
   const [shortsSortConfig, setShortsSortConfig] = useState({ field: null, direction: 'desc' });
@@ -250,6 +386,10 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   // Search filters for tickers
   const [longsSearchFilter, setLongsSearchFilter] = useState('');
   const [shortsSearchFilter, setShortsSearchFilter] = useState('');
+  const [ledgerSearchFilter, setLedgerSearchFilter] = useState('');
+  const [ledgerSortField, setLedgerSortField] = useState('weight');
+  const [ledgerSideFilter, setLedgerSideFilter] = useState('all');
+  const [ledgerSleeveFilter, setLedgerSleeveFilter] = useState('all');
 
   // Column order state (Intraday G/L after Mkt Value by default, % Portfolio after Basis Pts)
   const [columnOrder, setColumnOrder] = useState([
@@ -962,71 +1102,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     }
   };
 
-  // State for highlighted asset classes in pie charts
-  const [highlightedLongsAssetClasses, setHighlightedLongsAssetClasses] = useState(new Set());
-  const [highlightedShortsAssetClasses, setHighlightedShortsAssetClasses] = useState(new Set());
-
-  // State for animated radius (for smooth scale animation)
-  const [longsHighlightRadius, setLongsHighlightRadius] = useState(96);
-  const [shortsHighlightRadius, setShortsHighlightRadius] = useState(96);
-
-  // Animate radius when highlighted classes change
-  useEffect(() => {
-    if (highlightedLongsAssetClasses.size > 0) {
-      // Smoothly animate from 96 to 106 over 500ms
-      const startRadius = 96;
-      const endRadius = 106;
-      const duration = 500;
-      const startTime = Date.now();
-
-      const animate = () => {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        // Ease-out function for smooth deceleration
-        const easeProgress = 1 - Math.pow(1 - progress, 3);
-        const currentRadius = startRadius + (endRadius - startRadius) * easeProgress;
-
-        setLongsHighlightRadius(currentRadius);
-
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        }
-      };
-
-      requestAnimationFrame(animate);
-    } else {
-      setLongsHighlightRadius(96);
-    }
-  }, [highlightedLongsAssetClasses.size]);
-
-  useEffect(() => {
-    if (highlightedShortsAssetClasses.size > 0) {
-      // Smoothly animate from 96 to 106 over 500ms
-      const startRadius = 96;
-      const endRadius = 106;
-      const duration = 500;
-      const startTime = Date.now();
-
-      const animate = () => {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        // Ease-out function for smooth deceleration
-        const easeProgress = 1 - Math.pow(1 - progress, 3);
-        const currentRadius = startRadius + (endRadius - startRadius) * easeProgress;
-
-        setShortsHighlightRadius(currentRadius);
-
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        }
-      };
-
-      requestAnimationFrame(animate);
-    } else {
-      setShortsHighlightRadius(96);
-    }
-  }, [highlightedShortsAssetClasses.size]);
-
   // State for basis points and % portfolio inputs for each holding
   const [longsBasisPoints, setLongsBasisPoints] = useState({});
   const [longsPercentPortfolio, setLongsPercentPortfolio] = useState({});
@@ -1042,7 +1117,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
   }, [holdings]);
 
   // Helper function to sort holdings
-  const sortHoldings = (holdings, sortConfig) => {
+  const sortHoldings = useCallback((holdings, sortConfig) => {
     if (!sortConfig.field) return holdings;
 
     return [...holdings].sort((a, b) => {
@@ -1083,7 +1158,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         return bValue - aValue;
       }
     });
-  };
+  }, [totalValue]);
 
   // Handle sort click
   const handleSort = (field, isLongs) => {
@@ -1112,114 +1187,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
         {sortConfig.direction === 'desc' ? '↓' : '↑'}
       </span>
     );
-  };
-
-  // Calculate asset class allocation for longs using securities universe
-  const longsAssetAllocation = useMemo(() => {
-    return calculateAssetClassAllocationFromUniverse(longs);
-  }, [longs]);
-
-  // Calculate asset class allocation for shorts using securities universe
-  const shortsAssetAllocation = useMemo(() => {
-    return calculateAssetClassAllocationFromUniverse(shorts);
-  }, [shorts]);
-
-  // Calculate net long/short percentage
-  const netLongShortPercentage = useMemo(() => {
-    if (!totalValue || totalValue === 0) return 0;
-
-    // Calculate total long and short values
-    const totalLongValue = longs.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
-    const totalShortValue = shorts.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
-
-    // Net long percentage = (total long - total short) / total value * 100
-    const netLong = ((totalLongValue - totalShortValue) / totalValue) * 100;
-
-    return netLong;
-  }, [longs, shorts, totalValue]);
-
-  // Toggle asset class highlight for longs
-  const toggleLongsAssetClass = (assetClass) => {
-    setHighlightedLongsAssetClasses(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(assetClass)) {
-        newSet.delete(assetClass);
-      } else {
-        newSet.add(assetClass);
-      }
-      return newSet;
-    });
-  };
-
-  // Toggle asset class highlight for shorts
-  const toggleShortsAssetClass = (assetClass) => {
-    setHighlightedShortsAssetClasses(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(assetClass)) {
-        newSet.delete(assetClass);
-      } else {
-        newSet.add(assetClass);
-      }
-      return newSet;
-    });
-  };
-
-  // Calculate start and end angles for a slice in the pie chart
-  const calculateSliceAngles = (allocationData, targetName) => {
-    const total = allocationData.reduce((sum, entry) => sum + entry.value, 0);
-    if (total === 0) return { startAngle: 0, endAngle: 0 };
-
-    const targetIndex = allocationData.findIndex(entry => entry.name === targetName);
-    if (targetIndex === -1) return { startAngle: 0, endAngle: 0 };
-
-    // Safety check: if the target slice has 0% value, return early to prevent rendering
-    const targetValue = allocationData[targetIndex].value;
-    if (targetValue === 0 || !(typeof targetValue === 'number' && targetValue > 0)) {
-      return { startAngle: 0, endAngle: 0 };
-    }
-
-    // Calculate cumulative percentage before this slice
-    const startPercent = allocationData
-      .slice(0, targetIndex)
-      .reduce((sum, entry) => sum + entry.value, 0) / total;
-
-    // Calculate this slice's percentage
-    const slicePercent = targetValue / total;
-
-    // Safety check: if slicePercent is 0, return early
-    if (slicePercent === 0) {
-      return { startAngle: 0, endAngle: 0 };
-    }
-
-    // Convert to angles (start from -90 degrees, going clockwise)
-    const startAngle = -90 + startPercent * 360;
-    const endAngle = -90 + (startPercent + slicePercent) * 360;
-
-    return { startAngle, endAngle };
-  };
-
-  // Generate legend payload with all 5 asset classes with interactive styling
-  const generateLegendPayload = (allocationData, highlightedSet, onToggle) => {
-    const allAssetClasses = ['Equities', 'Fixed Income', 'Commodities', 'Currencies', 'Cryptocurrency'];
-    return allAssetClasses.map(name => {
-      const dataItem = allocationData.find(item => item.name === name);
-      const isHighlighted = highlightedSet.has(name);
-      return {
-        value: name,
-        type: 'square',
-        color: ASSET_CLASS_COLORS[name] || ASSET_CLASS_COLORS['Equities'],
-        id: name,
-        payload: {
-          onClick: () => onToggle(name),
-          style: {
-            cursor: 'pointer',
-            fontWeight: isHighlighted ? 'bold' : 'normal',
-            opacity: isHighlighted ? 1 : 0.5,
-            transition: 'all 0.2s ease'
-          }
-        }
-      };
-    });
   };
 
   // Calculate shares needed based on basis points
@@ -1283,35 +1250,66 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     return Math.round(shares);
   };
 
-  // Calculate top 5 factor exposures from all holdings
-  const topFactorExposures = useMemo(() => {
-    const factorMap = {};
+  const getHoldingTargetPercent = useCallback((holding, isLongs) => {
+    const percentPortfolioState = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
+    const basisPointsState = isLongs ? longsBasisPoints : shortsBasisPoints;
+    const absolutePct = totalValue > 0 ? ((Math.abs(holding.marketValue || 0) / totalValue) * 100) : 0;
+    const currentPct = isLongs ? absolutePct : -absolutePct;
+    if (percentPortfolioState[holding.symbol] !== undefined) return Number(percentPortfolioState[holding.symbol]);
+    if (basisPointsState[holding.symbol] !== undefined) return currentPct + (Number(basisPointsState[holding.symbol]) / 100);
+    return currentPct;
+  }, [longsBasisPoints, longsPercentPortfolio, shortsBasisPoints, shortsPercentPortfolio, totalValue]);
 
-    holdings.forEach(holding => {
-      const marketValue = Math.abs(parseFloat(holding.marketValue) || 0);
-      const mapping = SECURITY_CATEGORY_MAPPING[holding.symbol?.toUpperCase()];
+  const getHoldingGap = useCallback((holding, isLongs) => {
+    const target = getHoldingTargetPercent(holding, isLongs);
+    if (target === null || Number.isNaN(target)) return null;
+    const absolutePct = totalValue > 0 ? ((Math.abs(holding.marketValue || 0) / totalValue) * 100) : 0;
+    const currentPct = isLongs ? absolutePct : -absolutePct;
+    return currentPct - target;
+  }, [getHoldingTargetPercent, totalValue]);
 
-      if (mapping && mapping.category) {
-        const factor = mapping.category;
-        if (!factorMap[factor]) {
-          factorMap[factor] = 0;
-        }
-        factorMap[factor] += marketValue;
-      }
-    });
+  const getResizeShares = (holding, isLongs) => {
+    const percentPortfolioState = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
+    const basisPointsState = isLongs ? longsBasisPoints : shortsBasisPoints;
+    const targetPercent = percentPortfolioState[holding.symbol];
+    const basisPoints = basisPointsState[holding.symbol];
 
-    // Convert to array and calculate percentages
-    const factorArray = Object.entries(factorMap)
-      .map(([factor, value]) => ({
-        factor,
-        value,
-        percentage: totalValue > 0 ? ((value / totalValue) * 100) : 0
-      }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5); // Top 5
+    if (targetPercent !== undefined) {
+      return calculateSharesFromPercent(holding, Math.abs(Number(targetPercent)), totalValue, !isLongs);
+    }
 
-    return factorArray;
-  }, [holdings, totalValue]);
+    if (basisPoints) {
+      return calculateSharesFromBasisPoints(holding, basisPoints, totalValue, !isLongs);
+    }
+
+    return 0;
+  };
+
+  const getActionForResize = (shares, isLongs) => {
+    const absShares = Math.abs(Number(shares) || 0);
+    if (!absShares) return { label: 'Hold', tone: 'neutral' };
+
+    if (isLongs) {
+      return shares < 0
+        ? { label: `Trim ${absShares}`, tone: 'trim' }
+        : { label: `Add ${absShares}`, tone: 'add' };
+    }
+
+    return shares > 0
+      ? { label: `Cover ${absShares}`, tone: 'add' }
+      : { label: `Short ${absShares}`, tone: 'trim' };
+  };
+
+  const getDayGainLossValue = (holding) => {
+    const explicit = Number(holding.dayChange ?? holding.dayGainLoss ?? holding.dailyPnL);
+    if (Number.isFinite(explicit)) return explicit;
+    const pct = Number(holding.dayChangePercent);
+    const marketValue = Number(holding.marketValue);
+    if (Number.isFinite(pct) && Number.isFinite(marketValue)) {
+      return Math.abs(marketValue) * (pct / 100);
+    }
+    return null;
+  };
 
   // Apply filtering and sorting to longs and shorts
   const sortedLongs = useMemo(() => {
@@ -1321,7 +1319,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
       )
       : longs;
     return sortHoldings(filtered, longsSortConfig);
-  }, [longs, longsSortConfig, longsSearchFilter, totalValue]);
+  }, [longs, longsSortConfig, longsSearchFilter, sortHoldings]);
 
   const sortedShorts = useMemo(() => {
     const filtered = shortsSearchFilter
@@ -1330,51 +1328,254 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
       )
       : shorts;
     return sortHoldings(filtered, shortsSortConfig);
-  }, [shorts, shortsSortConfig, shortsSearchFilter, totalValue]);
+  }, [shorts, shortsSortConfig, shortsSearchFilter, sortHoldings]);
 
-  // Prepare combined allocation data for the double pie chart
-  const { innerData, outerData } = useMemo(() => {
-    const allAllocation = calculateAssetClassAllocationFromUniverse(holdings);
-    return { innerData: allAllocation, outerData: allAllocation };
-  }, [holdings]);
+  const sortLedgerHoldings = useCallback((rows, isLongs) => {
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      const getValue = (holding) => {
+        const weight = totalValue > 0 ? ((Math.abs(Number(holding.marketValue) || 0) / totalValue) * 100) : 0;
+        switch (ledgerSortField) {
+          case 'ticker':
+            return (holding.symbol || '').toUpperCase();
+          case 'name':
+            return getSecurityName(holding).toUpperCase();
+          case 'gap':
+            return Math.abs(getHoldingGap(holding, isLongs) || 0);
+          case 'dayGainLoss':
+            return Math.abs(getDayGainLossValue(holding) || 0);
+          case 'weight':
+          default:
+            return weight;
+        }
+      };
 
-  // Filter equity curve by selected range for performance chart (must be before any early return)
-  const performanceChartData = useMemo(() => {
-    const { dates, values } = equityCurve;
-    if (!dates.length || !values.length) return { chartData: [], periodChange: null, currentValue: null, startValue: null };
-    const now = new Date();
-    const endDate = dates[dates.length - 1];
-    const endIdx = dates.length - 1;
-    let startDateStr;
-    if (performanceRange === 'YTD') {
-      startDateStr = `${now.getFullYear()}-01-01`;
-    } else {
-      const days = { '1D': 1, '5D': 5, '1M': 30, '3M': 90, '6M': 180, '1Y': 365, '3Y': 1095, '5Y': 1825 }[performanceRange] ?? 365;
-      const start = new Date(endDate);
-      start.setDate(start.getDate() - days);
-      startDateStr = start.toISOString().split('T')[0];
-    }
-    let startIdx = 0;
-    for (let i = 0; i < dates.length; i++) {
-      if (dates[i] >= startDateStr) {
-        startIdx = i;
-        break;
+      const aValue = getValue(a);
+      const bValue = getValue(b);
+      if (typeof aValue === 'string' || typeof bValue === 'string') {
+        return String(aValue).localeCompare(String(bValue));
       }
-    }
-    const chartData = dates.slice(startIdx, endIdx + 1).map((d, i) => ({
-      date: d,
-      value: values[startIdx + i],
-      displayDate: formatDate(d)
-    }));
-    const startValue = values[startIdx];
-    const currentValue = values[endIdx];
-    const periodChange = startValue > 0 && currentValue != null
-      ? ((currentValue - startValue) / startValue) * 100
-      : null;
-    return { chartData, periodChange, currentValue, startValue };
-  }, [equityCurve, performanceRange]);
+      return Number(bValue) - Number(aValue);
+    });
+    return sorted;
+  }, [getHoldingGap, ledgerSortField, totalValue]);
 
-  const PERFORMANCE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y'];
+  const filterLedgerHoldings = useCallback((rows) => {
+    const query = ledgerSearchFilter.trim().toLowerCase();
+    return rows.filter(holding => {
+      if (ledgerSleeveFilter !== 'all' && getSleeveForHolding(holding) !== ledgerSleeveFilter) return false;
+      if (!query) return true;
+      const name = getSecurityName(holding).toLowerCase();
+      const symbol = (holding.symbol || '').toLowerCase();
+      return symbol.includes(query) || name.includes(query);
+    });
+  }, [ledgerSearchFilter, ledgerSleeveFilter]);
+
+  const ledgerLongs = useMemo(() => {
+    if (ledgerSideFilter === 'short') return [];
+    return sortLedgerHoldings(filterLedgerHoldings(longs), true);
+  }, [filterLedgerHoldings, ledgerSideFilter, longs, sortLedgerHoldings]);
+
+  const ledgerShorts = useMemo(() => {
+    if (ledgerSideFilter === 'long') return [];
+    return sortLedgerHoldings(filterLedgerHoldings(shorts), false);
+  }, [filterLedgerHoldings, ledgerSideFilter, shorts, sortLedgerHoldings]);
+
+  const ledgerRows = useMemo(() => ([
+    ...ledgerLongs.map((holding, index) => ({ holding, index, isLongs: true })),
+    ...ledgerShorts.map((holding, index) => ({ holding, index, isLongs: false }))
+  ]), [ledgerLongs, ledgerShorts]);
+
+  const sleeveExposureRows = useMemo(() => {
+    const rowsBySleeve = SLEEVE_ORDER.reduce((acc, sleeve) => {
+      acc[sleeve] = {
+        sleeve,
+        target: SLEEVE_TARGETS[sleeve],
+        longValue: 0,
+        shortValue: 0,
+        netValue: 0
+      };
+      return acc;
+    }, {});
+
+    holdings.forEach((holding) => {
+      const sleeve = getSleeveForHolding(holding);
+      const row = rowsBySleeve[sleeve] || rowsBySleeve.Growth;
+      const marketValue = Number(holding.marketValue) || 0;
+      const absoluteValue = Math.abs(marketValue);
+      if (absoluteValue === 0) return;
+
+      if (isCashHolding(holding)) {
+        row.longValue += absoluteValue;
+        row.netValue += absoluteValue;
+      } else if (marketValue < 0 || Number(holding.quantity) < 0) {
+        row.shortValue += absoluteValue;
+        row.netValue -= absoluteValue;
+      } else {
+        row.longValue += absoluteValue;
+        row.netValue += absoluteValue;
+      }
+    });
+
+    const accountCash = Number(portfolioData?.accountSummary?.totalCashValue);
+    const cashRow = rowsBySleeve.Cash;
+    if (Number.isFinite(accountCash) && accountCash > cashRow.longValue) {
+      cashRow.longValue = accountCash;
+      cashRow.netValue = accountCash;
+    }
+
+    return SLEEVE_ORDER.map((sleeve) => {
+      const row = rowsBySleeve[sleeve];
+      const longPct = totalValue > 0 ? (row.longValue / totalValue) * 100 : 0;
+      const shortPct = totalValue > 0 ? (row.shortValue / totalValue) * 100 : 0;
+      const netPct = longPct - shortPct;
+      const gap = netPct - row.target;
+      return {
+        ...row,
+        longPct,
+        shortPct,
+        netPct,
+        gap
+      };
+    });
+  }, [holdings, portfolioData, totalValue]);
+
+  const sleeveExposureTotals = useMemo(() => (
+    sleeveExposureRows.reduce((acc, row) => ({
+      longPct: acc.longPct + row.longPct,
+      shortPct: acc.shortPct + row.shortPct,
+      netPct: acc.netPct + row.netPct,
+      target: acc.target + row.target,
+      gap: acc.gap + row.gap
+    }), { longPct: 0, shortPct: 0, netPct: 0, target: 0, gap: 0 })
+  ), [sleeveExposureRows]);
+
+  const exceptionRows = useMemo(() => {
+    const getDriver = (matcher, fallback = '--') => {
+      const driver = holdings.reduce((largest, holding) => {
+        if (!matcher(holding)) return largest;
+        const marketValue = Number(holding.marketValue) || 0;
+        const absoluteValue = Math.abs(marketValue);
+        if (absoluteValue <= largest.absoluteValue) return largest;
+        return { symbol: holding.symbol || fallback, absoluteValue };
+      }, { symbol: fallback, absoluteValue: 0 });
+      return driver.symbol || fallback;
+    };
+
+    const buildDerivedBucket = (label, matcher) => {
+      const bucket = holdings.reduce((acc, holding) => {
+        if (!matcher(holding)) return acc;
+        const marketValue = Number(holding.marketValue) || 0;
+        const absoluteValue = Math.abs(marketValue);
+        if (marketValue < 0 || Number(holding.quantity) < 0) {
+          acc.shortValue += absoluteValue;
+        } else {
+          acc.longValue += absoluteValue;
+        }
+        return acc;
+      }, { longValue: 0, shortValue: 0 });
+
+      const longPct = totalValue > 0 ? (bucket.longValue / totalValue) * 100 : 0;
+      const shortPct = totalValue > 0 ? (bucket.shortValue / totalValue) * 100 : 0;
+      const netPct = longPct - shortPct;
+      const target = OVEREXPOSURE_META[label].target;
+      return {
+        label,
+        gap: netPct - target,
+        driver: getDriver(matcher)
+      };
+    };
+
+    const candidates = [
+      ...sleeveExposureRows.map((row) => ({
+        label: row.sleeve,
+        gap: row.gap,
+        driver: getDriver(
+          (holding) => getSleeveForHolding(holding) === row.sleeve,
+          row.sleeve === 'Cash' ? 'Cash' : '--'
+        )
+      })),
+      buildDerivedBucket('Small Cap', isSmallCapHolding),
+      buildDerivedBucket('USD', isUsdHolding)
+    ].sort((a, b) => EXCEPTION_ORDER.indexOf(a.label) - EXCEPTION_ORDER.indexOf(b.label));
+
+    const exceptions = candidates.filter((row) => Math.abs(row.gap) >= 0.25);
+    const fillers = candidates.filter((row) => Math.abs(row.gap) < 0.25 && !exceptions.some((item) => item.label === row.label));
+
+    return [...exceptions, ...fillers].slice(0, 5).map((row) => ({
+      ...row,
+      type: Math.abs(row.gap) < 0.25 ? 'In Range' : row.gap > 0 ? 'Over Target' : 'Under Target',
+      action: Math.abs(row.gap) < 0.25 ? 'Monitor' : row.gap > 0 ? 'Consider Trim' : 'Consider Add'
+    }));
+  }, [holdings, sleeveExposureRows, totalValue]);
+
+  const latestHoldingTimestamp = useMemo(() => {
+    const timestamps = (portfolioData?.holdings || [])
+      .map((holding) => holding?.lastUpdated || holding?.timestamp || null)
+      .filter(Boolean)
+      .map((value) => new Date(value))
+      .filter((date) => !Number.isNaN(date.getTime()))
+      .map((date) => date.getTime());
+
+    if (timestamps.length === 0) {
+      return null;
+    }
+
+    return new Date(Math.max(...timestamps)).toISOString();
+  }, [portfolioData?.holdings]);
+
+  const portfolioUpdatedAt =
+    portfolioData?.accountSummary?.lastUpdated ||
+    portfolioData?.lastUpdated ||
+    portfolioData?.snapshotDate ||
+    portfolioData?.summary?.lastUpdated ||
+    latestHoldingTimestamp;
+
+  const asOfLabel = formatAsOf(portfolioUpdatedAt);
+  const statusDot = useMemo(
+    () => getIbkrPortfolioStatusDot({ connection, portfolioData, loading: isLoading }),
+    [connection, portfolioData, isLoading],
+  );
+
+  const handleExportCsv = () => {
+    const rows = [
+      ['Rank', 'Ticker', 'Name', 'Side', 'Weight % (NAV)', 'Target % (NAV)', 'Gap (bps)', 'Sleeve', 'Factor Ctrb', 'Resize (Shares)', 'Day G/L (USD)', 'Action']
+    ];
+
+    ledgerRows.forEach(({ holding, index, isLongs }) => {
+      const currentPct = totalValue > 0 ? ((Math.abs(Number(holding.marketValue) || 0) / totalValue) * 100) : 0;
+      const targetPct = getHoldingTargetPercent(holding, isLongs);
+      const gap = getHoldingGap(holding, isLongs);
+      const sleeve = getSleeveForHolding(holding);
+      const shares = getResizeShares(holding, isLongs);
+      const action = getActionForResize(shares, isLongs);
+      const dayGainLoss = getDayGainLossValue(holding);
+
+      rows.push([
+        index + 1,
+        holding.symbol || '',
+        getSecurityName(holding),
+        isLongs ? 'Long' : 'Short',
+        (isLongs ? currentPct : -currentPct).toFixed(2),
+        Number.isFinite(targetPct) ? targetPct.toFixed(2) : '',
+        gap === null ? '' : Math.round(gap * 100),
+        sleeve,
+        formatPct(isLongs ? currentPct : -currentPct, 1, { signed: true }),
+        shares ?? '',
+        dayGainLoss === null ? '' : dayGainLoss.toFixed(2),
+        action.label
+      ]);
+    });
+
+    const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `portfolio-construction-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Early return after all hooks - check for actual data, not just portfolioData existence
   // The API returns an object with empty values when no data exists, so we need to check for actual holdings
@@ -1383,7 +1584,7 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
     return (
       <div style={{ padding: '32px', textAlign: 'center' }}>
         <Text className="text-gray-500 dark:text-gray-400">
-          No portfolio data available. Connect IBKR or upload a Schwab CSV to view portfolio breakdown.
+          No portfolio data available. Connect IB Gateway and the IBKR API to view portfolio breakdown.
         </Text>
       </div>
     );
@@ -1397,144 +1598,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
       <LoadingIndicator label="Loading portfolio data..." size="lg" centered className="p-8" />
     );
   }
-
-  // Custom label for pie charts - centered in each slice with black text
-  // Label renderer for base pie (non-highlighted slices only) - positioned outside pie
-  const renderBasePieLabelLongs = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
-    // Don't show label if this slice is highlighted
-    if (highlightedLongsAssetClasses.has(name)) return null;
-
-    const RADIAN = Math.PI / 180;
-    if (percent < 0.05) return null; // Don't show labels for slices < 5%
-
-    // Position 15px outside the outer edge
-    const radius = outerRadius + 15;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#000000"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={7.4}
-        fontWeight="600"
-      >
-        {`${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
-
-  // Label renderer for base pie (non-highlighted slices only) - shorts
-  const renderBasePieLabelShorts = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
-    // Don't show label if this slice is highlighted
-    if (highlightedShortsAssetClasses.has(name)) return null;
-
-    const RADIAN = Math.PI / 180;
-    if (percent < 0.05) return null;
-
-    // Position 15px outside the outer edge
-    const radius = outerRadius + 15;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#000000"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={7.4}
-        fontWeight="600"
-      >
-        {`${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
-
-  // Label renderer for highlighted pie (highlighted slices only) - longs
-  const renderHighlightedPieLabelLongs = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
-    // Only show label if this slice is highlighted
-    if (!highlightedLongsAssetClasses.has(name)) return null;
-
-    const RADIAN = Math.PI / 180;
-    if (percent < 0.05) return null;
-
-    // Position 15px outside the outer edge (grows with animated radius)
-    const radius = outerRadius + 15;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#000000"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={7.4}
-        fontWeight="600"
-      >
-        {`${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
-
-  // Label renderer for highlighted pie (highlighted slices only) - shorts
-  const renderHighlightedPieLabelShorts = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
-    // Only show label if this slice is highlighted
-    if (!highlightedShortsAssetClasses.has(name)) return null;
-
-    const RADIAN = Math.PI / 180;
-    if (percent < 0.05) return null;
-
-    // Position 15px outside the outer edge (grows with animated radius)
-    const radius = outerRadius + 15;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#000000"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={7.4}
-        fontWeight="600"
-      >
-        {`${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
-
-  // Generic label renderer for other pie charts (positioned outside edge)
-  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-    const RADIAN = Math.PI / 180;
-    if (percent < 0.05) return null;
-
-    // Position 15px outside the outer edge
-    const radius = outerRadius + 15;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#000000"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={7.4}
-        fontWeight="600"
-      >
-        {`${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
 
   // Render performance cell without color coding
   const renderPerformanceCell = (value) => {
@@ -1570,6 +1633,352 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
       .filter(Boolean)
       .join(' · ');
 
+  const constructionStats = (() => {
+    const totalLongValue = longs.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
+    const totalShortValue = shorts.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
+    const cashPct = sleeveExposureRows.find((row) => row.sleeve === 'Cash')?.netPct || 0;
+    const grossExposure = totalValue > 0 ? ((totalLongValue + totalShortValue) / totalValue) * 100 : 0;
+    const netExposure = totalValue > 0 ? ((totalLongValue - totalShortValue) / totalValue) * 100 : 0;
+    const longWeight = totalValue > 0 ? (totalLongValue / totalValue) * 100 : 0;
+    const shortWeight = totalValue > 0 ? (totalShortValue / totalValue) * 100 : 0;
+
+    return {
+      totalLongValue,
+      totalShortValue,
+      grossExposure,
+      netExposure,
+      longWeight,
+      shortWeight,
+      cashPct,
+      longCount: longs.length,
+      shortCount: shorts.length
+    };
+  })();
+
+  const renderGapPill = (value, className = '') => (
+    <span className={`pcv2-gap-pill ${Math.abs(value) < 0.25 ? 'is-neutral' : value >= 0 ? 'is-over' : 'is-under'} ${className}`}>
+      {formatPct(value, 1, { signed: true })}
+    </span>
+  );
+
+  const renderExposureExceptions = () => (
+    <section className="pcv2-card pcv2-exceptions-card">
+      <div className="pcv2-card-title">Exposure Exceptions</div>
+      <table className="pcv2-exceptions-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Type</th>
+            <th>Sleeve</th>
+            <th className="pcv2-num">Gap</th>
+            <th>Driver</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {exceptionRows.map((row, index) => (
+            <tr key={row.label}>
+              <td>{index + 1}</td>
+              <td>{row.type}</td>
+              <td>{row.label}</td>
+              <td className={`pcv2-num ${Math.abs(row.gap) < 0.25 ? '' : row.gap > 0 ? 'pcv2-negative' : 'pcv2-under'}`}>
+                {formatPct(row.gap, 1, { signed: true })}
+              </td>
+              <td>{row.driver}</td>
+              <td>{row.action}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="pcv2-exceptions-footer">
+        <span>Gap = Net % minus Target %.</span>
+        <span><i className="is-over" /> Overweight (&gt; +1%)</span>
+        <span><i className="is-neutral" /> In range (+/-1%)</span>
+        <span><i className="is-under" /> Underweight (&lt; -1%)</span>
+      </div>
+    </section>
+  );
+
+  const renderExposureTables = () => (
+    <section className="pcv2-card pcv2-sleeve-card">
+      <div className="pcv2-card-title">Exposure By Sleeve</div>
+      <table className="pcv2-sleeve-table">
+        <thead>
+          <tr>
+            <th>Sleeve</th>
+            <th className="pcv2-num">Long %</th>
+            <th className="pcv2-num">Short %</th>
+            <th className="pcv2-num">Net %</th>
+            <th className="pcv2-num">Target %</th>
+            <th className="pcv2-num">Gap %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sleeveExposureRows.map((row) => (
+            <tr key={row.sleeve}>
+              <td>{row.sleeve}</td>
+              <td className="pcv2-num pcv2-positive">{formatPct(row.longPct)}</td>
+              <td className="pcv2-num pcv2-negative">{formatPct(-row.shortPct)}</td>
+              <td className={`pcv2-num ${row.netPct < 0 ? 'pcv2-under' : ''}`}>{formatPct(row.netPct)}</td>
+              <td className="pcv2-num">{formatPct(row.target, 1)}</td>
+              <td className="pcv2-num">{renderGapPill(row.gap)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Total</td>
+            <td className="pcv2-num pcv2-positive">{formatPct(sleeveExposureTotals.longPct)}</td>
+            <td className="pcv2-num pcv2-negative">{formatPct(-sleeveExposureTotals.shortPct)}</td>
+            <td className={`pcv2-num ${sleeveExposureTotals.netPct < 0 ? 'pcv2-under' : 'pcv2-positive'}`}>{formatPct(sleeveExposureTotals.netPct)}</td>
+            <td className="pcv2-num">{formatPct(sleeveExposureTotals.target, 1)}</td>
+            <td className="pcv2-num">{renderGapPill(sleeveExposureTotals.gap)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+  );
+
+  const renderTargetControl = (holding, isLongs, pctOfAccount) => {
+    const percentPortfolioState = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
+    const setPercentPortfolioState = isLongs ? setLongsPercentPortfolio : setShortsPercentPortfolio;
+    const setBasisPointsState = isLongs ? setLongsBasisPoints : setShortsBasisPoints;
+    const targetPercent = percentPortfolioState[holding.symbol];
+    const displayPercent = targetPercent !== undefined ? Number(targetPercent) : (isLongs ? Number(pctOfAccount) : -Number(pctOfAccount));
+    const editingKey = `${isLongs ? 'long' : 'short'}_${holding.symbol}`;
+    const isEditing = editingPercentPortfolio[editingKey] !== undefined;
+
+    const commitValue = (value) => {
+      if (value === '') {
+        setPercentPortfolioState(prev => {
+          const next = { ...prev };
+          delete next[holding.symbol];
+          return next;
+        });
+        setBasisPointsState(prev => {
+          const next = { ...prev };
+          delete next[holding.symbol];
+          return next;
+        });
+        return;
+      }
+
+      const parsed = Number(value);
+      if (!Number.isNaN(parsed)) {
+        setPercentPortfolioState(prev => ({ ...prev, [holding.symbol]: Math.round(parsed * 100) / 100 }));
+        setBasisPointsState(prev => {
+          const next = { ...prev };
+          delete next[holding.symbol];
+          return next;
+        });
+      }
+    };
+
+    const bump = (direction) => {
+      const current = Number(isEditing ? editingPercentPortfolio[editingKey] : displayPercent) || 0;
+      const next = Math.round((current + direction * 0.01) * 100) / 100;
+      setPercentPortfolioState(prev => ({ ...prev, [holding.symbol]: next }));
+      if (isEditing) {
+        setEditingPercentPortfolio(prev => ({ ...prev, [editingKey]: next.toFixed(2) }));
+      }
+    };
+
+    return (
+      <div className="pcv2-target-control">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={isEditing ? editingPercentPortfolio[editingKey] : displayPercent.toFixed(2)}
+          onFocus={(e) => {
+            setEditingPercentPortfolio(prev => ({ ...prev, [editingKey]: displayPercent.toFixed(2) }));
+            e.target.select();
+          }}
+          onChange={(e) => {
+            if (e.target.value === '' || e.target.value === '-' || /^-?\d*\.?\d*$/.test(e.target.value)) {
+              setEditingPercentPortfolio(prev => ({ ...prev, [editingKey]: e.target.value }));
+            }
+          }}
+          onBlur={(e) => {
+            commitValue(e.target.value);
+            setEditingPercentPortfolio(prev => {
+              const next = { ...prev };
+              delete next[editingKey];
+              return next;
+            });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Escape') {
+              setEditingPercentPortfolio(prev => {
+                const next = { ...prev };
+                delete next[editingKey];
+                return next;
+              });
+              e.currentTarget.blur();
+            }
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              e.preventDefault();
+              bump(e.key === 'ArrowUp' ? 1 : -1);
+            }
+          }}
+        />
+        <span aria-hidden="true">▲<br />▼</span>
+      </div>
+    );
+  };
+
+  const renderLedgerRows = (rows, isLongs) => {
+    if (rows.length === 0) {
+      return (
+        <tr>
+          <td colSpan={11} className="pcv2-empty">
+            No {isLongs ? 'long' : 'short'} positions
+          </td>
+        </tr>
+      );
+    }
+
+    return rows.map((holding, index) => {
+      const pctOfAccount = totalValue > 0 ? ((Math.abs(Number(holding.marketValue) || 0) / totalValue) * 100) : 0;
+      const sleeve = getSleeveForHolding(holding);
+      const assetClass = getAssetClassAbbreviation(holding);
+      const gap = getHoldingGap(holding, isLongs);
+      const shares = getResizeShares(holding, isLongs);
+      const action = getActionForResize(shares, isLongs);
+      const dayGainLoss = getDayGainLossValue(holding);
+      const positionSizeParameter = getPositionSizeParameter(holding, isLongs);
+
+      return (
+        <tr key={`${isLongs ? 'long' : 'short'}-${holding.symbol}-${index}`} className="pcv2-ledger-row">
+          <td className="pcv2-ticker">
+            <span title={holdingSourceTitle(holding) || undefined}>
+              {holding.symbol}
+              {holding.warning ? ' ⚠' : ''}
+            </span>
+          </td>
+          <td className="pcv2-num">{assetClass}</td>
+          <td className="pcv2-num">{formatPct(isLongs ? pctOfAccount : -pctOfAccount, 2)}</td>
+          <td className="pcv2-num">{renderTargetControl(holding, isLongs, pctOfAccount)}</td>
+          <td className={`pcv2-num ${gap === null ? '' : gap >= 0 ? 'pcv2-negative' : 'pcv2-under'}`}>{gap === null ? '--' : formatBps(gap)}</td>
+          <td>{sleeve}</td>
+          <td className="pcv2-num">{positionSizeParameter}</td>
+          <td className={`pcv2-num ${isLongs ? 'pcv2-positive' : 'pcv2-negative'}`}>{formatPct(isLongs ? pctOfAccount : -pctOfAccount, 1, { signed: true })}</td>
+          <td className="pcv2-num">{shares ? (shares > 0 ? `+${shares}` : shares) : '0'}</td>
+          <td className={`pcv2-num ${dayGainLoss > 0 ? 'pcv2-positive' : dayGainLoss < 0 ? 'pcv2-negative' : ''}`}>{dayGainLoss === null ? '--' : formatSignedCurrency(dayGainLoss)}</td>
+          <td className={`pcv2-action-cell ${action.tone === 'trim' ? 'pcv2-negative' : action.tone === 'add' ? 'pcv2-positive' : ''}`}>{action.label}</td>
+        </tr>
+      );
+    });
+  };
+
+  const renderLedgerSectionLabel = (label) => (
+    <tr className={`pcv2-ledger-divider ${label === 'LONGS' ? 'pcv2-ledger-divider--long' : label === 'SHORTS' ? 'pcv2-ledger-divider--short' : ''}`}>
+      <td colSpan={11}>{label}</td>
+    </tr>
+  );
+
+  const renderUnifiedLedger = () => {
+    const portfolioDayGainLoss = [...ledgerLongs, ...ledgerShorts].reduce((sum, holding) => sum + (getDayGainLossValue(holding) || 0), 0);
+    return (
+      <section className="pcv2-card pcv2-ledger-card">
+        <div className="pcv2-ledger-toolbar">
+          <label className="pcv2-search">
+            <input
+              type="text"
+              placeholder="Search ticker or name..."
+              value={ledgerSearchFilter}
+              onChange={(e) => setLedgerSearchFilter(e.target.value)}
+            />
+            <Search aria-hidden="true" />
+          </label>
+          <label className="pcv2-field">
+            <span>Sort:</span>
+            <select value={ledgerSortField} onChange={(e) => setLedgerSortField(e.target.value)}>
+              <option value="weight">Weight</option>
+              <option value="ticker">Ticker</option>
+              <option value="name">Name</option>
+              <option value="gap">Gap</option>
+              <option value="dayGainLoss">Day G/L</option>
+            </select>
+            <ChevronDown aria-hidden="true" />
+          </label>
+          <div className="pcv2-segmented" aria-label="Side filter">
+            <span>Side:</span>
+            {['all', 'long', 'short'].map((side) => (
+              <button
+                type="button"
+                key={side}
+                className={ledgerSideFilter === side ? 'is-active' : ''}
+                onClick={() => setLedgerSideFilter(side)}
+              >
+                {side.charAt(0).toUpperCase() + side.slice(1)}
+              </button>
+            ))}
+          </div>
+          <label className="pcv2-field">
+            <span>Sleeve:</span>
+            <select value={ledgerSleeveFilter} onChange={(e) => setLedgerSleeveFilter(e.target.value)}>
+              <option value="all">All</option>
+              {SLEEVE_ORDER.map((sleeve) => (
+                <option value={sleeve} key={sleeve}>{sleeve}</option>
+              ))}
+            </select>
+            <ChevronDown aria-hidden="true" />
+          </label>
+          <button type="button" className="pcv2-toolbar-icon" title="Filter options">
+            <Filter size={14} />
+          </button>
+          <button type="button" className="pcv2-columns-button">
+            Columns
+            <ChevronDown size={13} />
+          </button>
+        </div>
+        <div className="pcv2-ledger-scroll">
+          <table className="pcv2-ledger-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th className="pcv2-num">AC</th>
+                <th className="pcv2-num">Weight %<br />(NAV)</th>
+                <th className="pcv2-num">Target %<br />(NAV)</th>
+                <th className="pcv2-num">Gap<br />(BPS)</th>
+                <th>Sleeve</th>
+                <th className="pcv2-num">Pos Size<br />Params</th>
+                <th className="pcv2-num">Factor Ctrb</th>
+                <th className="pcv2-num">Resize<br />(Shares)</th>
+                <th className="pcv2-num">Day G/L<br />(USD)</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledgerSideFilter !== 'short' && renderLedgerSectionLabel('LONGS')}
+              {ledgerSideFilter !== 'short' && renderLedgerRows(ledgerLongs, true)}
+              {ledgerSideFilter !== 'long' && renderLedgerSectionLabel('SHORTS')}
+              {ledgerSideFilter !== 'long' && renderLedgerRows(ledgerShorts, false)}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td>Total Portfolio</td>
+                <td className="pcv2-num">{formatPct(constructionStats.netExposure)}</td>
+                <td className="pcv2-num">{formatPct(sleeveExposureTotals.target)}</td>
+                <td className="pcv2-num">{formatBps(constructionStats.netExposure - sleeveExposureTotals.target)}</td>
+                <td />
+                <td />
+                <td />
+                <td />
+                <td className={`pcv2-num ${portfolioDayGainLoss > 0 ? 'pcv2-positive' : portfolioDayGainLoss < 0 ? 'pcv2-negative' : ''}`}>{formatSignedCurrency(portfolioDayGainLoss)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div className="pcv2-ledger-note">
+          Weights and targets are % of Net Liquidation Value (NAV). Gap in basis points (bps). Factor Contribution shows estimated impact on factor exposure.
+        </div>
+      </section>
+    );
+  };
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {reconciliationWarnings.length > 0 && (
@@ -1580,181 +1989,44 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
           {reconciliationWarnings.slice(0, 3).join(' · ')}
         </div>
       )}
-      {/* Portfolio Construction Section */}
-      <div className="mb-0">
-        <Title className="text-2xl font-semibold mb-1 text-center dark:text-white">
-          Portfolio Construction
-        </Title>
-
-        {/* Sticky Header - Top 5 Factors */}
-        <div
-          style={{
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-            backgroundColor: '#ffffff',
-            padding: '6px 12px',
-            borderBottom: '1px solid #e5e7eb',
-            marginBottom: '12px'
-          }}
-          className="dark:bg-gray-900 dark:border-gray-700"
-        >
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '10px' }}>
-            {/* Left Column - Top 5 Factor Exposures */}
-            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-blue-50 dark:bg-blue-900/10 rounded border border-blue-200 dark:border-blue-700 relative">
-              <div className="flex items-center gap-1" style={{ marginBottom: '2px' }}>
-                <div className="font-medium text-blue-700 dark:text-blue-400">Top 5 Factors:</div>
-                <button
-                  onClick={() => setShowFactorExposureInfo(!showFactorExposureInfo)}
-                  className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-300"
-                  title="Factor Exposure Information"
-                  style={{
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '50%',
-                    border: '1px solid currentColor',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '8px',
-                    cursor: 'pointer',
-                    lineHeight: '1'
-                  }}
-                >
-                  i
-                </button>
-              </div>
-              {showFactorExposureInfo && (
-                <div
-                  className="absolute z-50 mt-2 p-3 bg-white dark:bg-gray-800 border border-[#e5e7eb] dark:border-gray-700 rounded-lg shadow-lg"
-                  style={{
-                    maxWidth: '400px',
-                    maxHeight: '500px',
-                    overflowY: 'auto',
-                    left: '0',
-                    top: '100%',
-                    marginTop: '4px'
-                  }}
-                >
-                  <Text className="text-xs font-semibold mb-2 block dark:text-white">Factor Definitions</Text>
-                  <div className="space-y-3">
-                    {Object.entries(FACTOR_DEFINITIONS.factors).map(([factorName, factorData]) => (
-                      <div key={factorName} className="border-b border-[#e5e7eb] dark:border-gray-700 pb-2 last:border-b-0">
-                        <Text className="text-xs font-semibold dark:text-white">{factorData.title || factorName}</Text>
-                        <Text className="text-xs text-gray-600 dark:text-gray-400 mt-1 block">
-                          {factorData.description}
-                        </Text>
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setShowFactorExposureInfo(false)}
-                    className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    Close
-                  </button>
-                </div>
-              )}
-              <div>
-                {topFactorExposures.length > 0 ? (
-                  topFactorExposures.map((item, idx) => (
-                    <div key={idx}>
-                      {item.factor}: {item.percentage.toFixed(1)}%
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-gray-400">No data</div>
-                )}
-              </div>
-            </div>
-
-            {/* Middle Column - Basis Points */}
-            <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-[#f9fafb] dark:bg-gray-800 rounded border border-[#e5e7eb] dark:border-gray-700">
-              <div className="font-medium text-gray-700 dark:text-gray-300" style={{ marginBottom: '2px' }}>Basis Points:</div>
-              <div className="grid grid-cols-2 gap-x-2">
-                <div>25: ${Math.floor(totalValue * 0.0025).toLocaleString()}</div>
-                <div>50: ${Math.floor(totalValue * 0.005).toLocaleString()}</div>
-                <div>75: ${Math.floor(totalValue * 0.0075).toLocaleString()}</div>
-                <div>100: ${Math.floor(totalValue * 0.01).toLocaleString()}</div>
-                <div>125: ${Math.floor(totalValue * 0.0125).toLocaleString()}</div>
-                <div>150: ${Math.floor(totalValue * 0.015).toLocaleString()}</div>
-                <div>175: ${Math.floor(totalValue * 0.0175).toLocaleString()}</div>
-                <div>200: ${Math.floor(totalValue * 0.02).toLocaleString()}</div>
-                <div>225: ${Math.floor(totalValue * 0.0225).toLocaleString()}</div>
-                <div>250: ${Math.floor(totalValue * 0.025).toLocaleString()}</div>
-              </div>
-            </div>
-
-            {/* Right Column - Position Sizing */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-              {/* Long Position Sizing */}
-              <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-green-50 dark:bg-green-900/10 rounded border border-green-200 dark:border-green-800">
-                <div className="font-medium text-green-700 dark:text-green-400" style={{ marginBottom: '2px' }}>Longs:</div>
-                <div>
-                  <div>FX: 4-12%</div>
-                  <div>FI: 4-10%</div>
-                  <div>Eq: 2-6%</div>
-                  <div>Com: 2-4%</div>
-                  <div>Crypto: 1-3%</div>
-                </div>
-              </div>
-
-              {/* Short Position Sizing */}
-              <div className="text-gray-600 dark:text-gray-400 p-1.5 bg-red-50 dark:bg-red-900/10 rounded border border-red-200 dark:border-red-800">
-                <div className="font-medium text-red-700 dark:text-red-400" style={{ marginBottom: '2px' }}>Shorts:</div>
-                <div>
-                  <div>FX: 2-6%</div>
-                  <div>FI: 2-5%</div>
-                  <div>Eq: 1-3%</div>
-                  <div>Com: 1-2%</div>
-                  <div>Crypto: 0.5-1%</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Scrollable Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px 2px' }}>
 
-        {/* Longs/Shorts Breakdown Section */}
-        <div style={{ marginBottom: '32px' }}>
-          {/* Shared Header with Long/Short counts and net percentage */}
-          <div
-            className="mb-4 rounded-lg p-4 bg-white dark:bg-gray-800"
-            style={{
-              border: `1px solid ${netLongShortPercentage >= 0 ? '#10B981' : '#EF4444'}`,
-              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginBottom: '8px' }}>
-              <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
-                <Title className="text-xl dark:text-white" style={{ color: '#10B981', fontWeight: 700, margin: 0 }}>
-                  LONG : {longs.length}
-                </Title>
-              </div>
-              <div style={{ width: '1px', height: '40px', backgroundColor: '#3b82f6', margin: '0 8px' }}></div>
-              <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-start' }}>
-                <Title className="text-xl dark:text-white" style={{ color: '#EF4444', fontWeight: 700, margin: 0 }}>
-                  SHORT : {shorts.length}
-                </Title>
+        <section className="pcv2-shell">
+          <header className="pcv2-header">
+            <div className="pcv2-header-main">
+              <h2>Portfolio Construction</h2>
+              <div className="pcv2-header-meta">
+                <StatusDot
+                  updatedAt={statusDot.updatedAt || portfolioUpdatedAt}
+                  status={statusDot.status}
+                  size={9}
+                  className="pcv2-header-status"
+                  label="Portfolio data"
+                  align="after"
+                  placement="bottom"
+                />
+                <span>{asOfLabel}</span>
               </div>
             </div>
-            {/* Net Long/Short Percentage */}
-            <div style={{ textAlign: 'center', marginTop: '8px' }}>
-              {netLongShortPercentage >= 0 ? (
-                <Text className="text-sm dark:text-white" style={{ fontWeight: 600 }}>
-                  {netLongShortPercentage.toFixed(1)}% NET <span style={{ color: '#10B981' }}>LONG</span>
-                </Text>
-              ) : (
-                <Text className="text-sm dark:text-white" style={{ fontWeight: 600 }}>
-                  {Math.abs(netLongShortPercentage).toFixed(1)}% NET <span style={{ color: '#EF4444' }}>SHORT</span>
-                </Text>
-              )}
+            <div className="pcv2-header-actions">
+              <button type="button" className="pcv2-export" onClick={handleExportCsv}>
+                <Download size={16} />
+                Export CSV
+              </button>
             </div>
+          </header>
+
+          <div className="pcv2-top-grid">
+            {renderExposureExceptions()}
+            {renderExposureTables()}
           </div>
 
+          {renderUnifiedLedger()}
+        </section>
+
+        {false && (
+        <div style={{ marginBottom: '32px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
             {/* Longs Section */}
             <Card className="dark:bg-gray-800 rounded-lg" style={{ padding: 0, backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }}>
@@ -1772,120 +2044,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
               }}>
                 LONG
               </div>
-
-              {/* Longs Pie Chart */}
-              {longsAssetAllocation.length > 0 ? (
-                <div style={{ marginBottom: '24px', padding: '0 16px', display: 'flex', alignItems: 'center', height: '250px' }}>
-                  {/* Custom Legend (Left Side) */}
-                  <div style={{ width: '240px', flexShrink: 0 }}>
-                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                      {['Equities', 'Fixed Income', 'Commodities', 'Currencies', 'Cryptocurrency'].map((name, index) => {
-                        // Find data for this asset class
-                        const dataItem = longsAssetAllocation ? longsAssetAllocation.find(item => item.name === name) : null;
-                        const isHighlighted = highlightedLongsAssetClasses.has(name);
-                        const color = ASSET_CLASS_COLORS[name] || ASSET_CLASS_COLORS['Equities'];
-
-                        return (
-                          <li
-                            key={`item-${index}`}
-                            onClick={() => toggleLongsAssetClass(name)}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              marginBottom: '8px',
-                              cursor: 'pointer',
-                              fontWeight: isHighlighted ? 'bold' : 'normal',
-                              opacity: isHighlighted ? 1 : 0.5,
-                              transition: 'all 0.2s ease'
-                            }}
-                          >
-                            <span
-                              style={{
-                                display: 'inline-block',
-                                width: '16px',
-                                height: '16px',
-                                backgroundColor: color,
-                                marginRight: '8px',
-                                borderRadius: '2px'
-                              }}
-                            />
-                            <span style={{ fontSize: '16px' }}>{name}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-
-                  {/* Pie Chart (Right Side) */}
-                  <div style={{ flex: 1, height: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        {/* Base pie chart - all slices at normal size (filter out 0% slices) */}
-                        <Pie
-                          data={longsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={renderBasePieLabelLongs}
-                          outerRadius={96}
-                          fill="#8884d8"
-                          dataKey="value"
-                          isAnimationActive={false}
-                        >
-                          {longsAssetAllocation
-                            .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                            .map((entry, index) => {
-                              const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                              return (
-                                <Cell
-                                  key={`cell-${index}`}
-                                  fill={baseColor}
-                                  style={{
-                                    opacity: 0.6
-                                  }}
-                                />
-                              );
-                            })}
-                        </Pie>
-                        {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
-                        {highlightedLongsAssetClasses.size > 0 && (
-                          <Pie
-                            data={longsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={renderHighlightedPieLabelLongs}
-                            outerRadius={longsHighlightRadius}
-                            fill="#8884d8"
-                            dataKey="value"
-                            isAnimationActive={false}
-                          >
-                            {longsAssetAllocation
-                              .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                              .map((entry, index) => {
-                                const isHighlighted = highlightedLongsAssetClasses.has(entry.name);
-                                const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                                return (
-                                  <Cell
-                                    key={`cell-highlight-${index}`}
-                                    fill={baseColor}
-                                    style={{
-                                      opacity: isHighlighted ? 1 : 0,
-                                      filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
-                                      transition: 'opacity 0.5s ease, filter 0.5s ease'
-                                    }}
-                                  />
-                                );
-                              })}
-                          </Pie>
-                        )}
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              ) : (
-                <Text className="text-sm text-gray-500 dark:text-gray-400">No long positions</Text>
-              )}
 
               {/* Longs Data Table */}
               {longs.length > 0 && (
@@ -2024,118 +2182,6 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
                 SHORT
               </div>
 
-              {/* Shorts Pie Chart */}
-              {shortsAssetAllocation.length > 0 ? (
-                <div style={{ marginBottom: '24px', padding: '0 16px', display: 'flex', alignItems: 'center', height: '250px' }}>
-                  {/* Custom Legend (Left Side) */}
-                  <div style={{ width: '240px', flexShrink: 0 }}>
-                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                      {['Equities', 'Fixed Income', 'Commodities', 'Currencies', 'Cryptocurrency'].map((name, index) => {
-                        const isHighlighted = highlightedShortsAssetClasses.has(name);
-                        const color = ASSET_CLASS_COLORS[name] || ASSET_CLASS_COLORS['Equities'];
-
-                        return (
-                          <li
-                            key={`item-${index}`}
-                            onClick={() => toggleShortsAssetClass(name)}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              marginBottom: '8px',
-                              cursor: 'pointer',
-                              fontWeight: isHighlighted ? 'bold' : 'normal',
-                              opacity: isHighlighted ? 1 : 0.5,
-                              transition: 'all 0.2s ease'
-                            }}
-                          >
-                            <span
-                              style={{
-                                display: 'inline-block',
-                                width: '16px',
-                                height: '16px',
-                                backgroundColor: color,
-                                marginRight: '8px',
-                                borderRadius: '2px'
-                              }}
-                            />
-                            <span style={{ fontSize: '16px' }}>{name}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-
-                  {/* Pie Chart (Right Side) */}
-                  <div style={{ flex: 1, height: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        {/* Base pie chart - all slices at normal size (filter out 0% slices) */}
-                        <Pie
-                          data={shortsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={renderBasePieLabelShorts}
-                          outerRadius={96}
-                          fill="#8884d8"
-                          dataKey="value"
-                          isAnimationActive={false}
-                        >
-                          {shortsAssetAllocation
-                            .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                            .map((entry, index) => {
-                              const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                              return (
-                                <Cell
-                                  key={`cell-${index}`}
-                                  fill={baseColor}
-                                  style={{
-                                    opacity: 0.6
-                                  }}
-                                />
-                              );
-                            })}
-                        </Pie>
-                        {/* Highlighted slices - rendered on top with larger radius and enhanced styling */}
-                        {highlightedShortsAssetClasses.size > 0 && (
-                          <Pie
-                            data={shortsAssetAllocation.filter(entry => entry.value > 0 && typeof entry.value === 'number')}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={renderHighlightedPieLabelShorts}
-                            outerRadius={shortsHighlightRadius}
-                            fill="#8884d8"
-                            dataKey="value"
-                            isAnimationActive={false}
-                          >
-                            {shortsAssetAllocation
-                              .filter(entry => entry.value > 0 && typeof entry.value === 'number')
-                              .map((entry, index) => {
-                                const isHighlighted = highlightedShortsAssetClasses.has(entry.name);
-                                const baseColor = ASSET_CLASS_COLORS[entry.name] || ASSET_CLASS_COLORS['Equities'];
-                                return (
-                                  <Cell
-                                    key={`cell-highlight-${index}`}
-                                    fill={baseColor}
-                                    style={{
-                                      opacity: isHighlighted ? 1 : 0,
-                                      filter: isHighlighted ? 'brightness(1.25) drop-shadow(0 0 6px rgba(0,0,0,0.4))' : 'none',
-                                      transition: 'opacity 0.5s ease, filter 0.5s ease'
-                                    }}
-                                  />
-                                );
-                              })}
-                          </Pie>
-                        )}
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              ) : (
-                <Text className="text-sm text-gray-500 dark:text-gray-400">No short positions</Text>
-              )}
-
               {/* Shorts Data Table */}
               {shorts.length > 0 && (
                 <div style={{ overflowX: 'auto' }}>
@@ -2257,90 +2303,8 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
             </Card>
           </div>
         </div>
+        )}
 
-        {/* Portfolio Analysis Section (Macro Factor Exposure + factor tables) */}
-        <div style={{ marginTop: '24px' }}>
-          <PortfolioAnalytics portfolioData={portfolioData} />
-        </div>
-
-        {/* Portfolio performance chart: very bottom, full width */}
-        <div className="mt-6 w-full min-w-0 rounded-lg border border-[#e5e7eb] dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden" style={{ width: '100%' }}>
-          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-[#e5e7eb] dark:border-gray-700">
-            {PERFORMANCE_RANGES.map((range) => (
-              <button
-                key={range}
-                type="button"
-                onClick={() => setPerformanceRange(range)}
-                className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
-                  performanceRange === range
-                    ? 'bg-[#374151] text-white border-[#374151] dark:bg-blue-500'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-[#e5e7eb] dark:border-gray-600 hover:bg-[#f3f4f6] dark:hover:bg-gray-700'
-                }`}
-              >
-                {range}
-              </button>
-            ))}
-          </div>
-          <div className="relative px-2 pb-2 pt-1 w-full">
-            {performanceChartLoading ? (
-              <div className="h-[220px] flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
-                Loading chart...
-              </div>
-            ) : performanceChartData.chartData.length === 0 ? (
-              <div className="h-[220px] flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
-                No performance data yet. Upload statements to see your portfolio performance over time.
-              </div>
-            ) : (
-              <>
-                <div className="absolute top-2 right-4 z-10 text-right">
-                  <div className="text-sm font-bold text-gray-900 dark:text-white">
-                    ${performanceChartData.currentValue != null
-                      ? Number(performanceChartData.currentValue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
-                      : '--'}
-                  </div>
-                  {performanceChartData.periodChange != null && (
-                    <div className={`text-xs font-medium ${performanceChartData.periodChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {performanceChartData.periodChange >= 0 ? '+' : ''}
-                      {(performanceChartData.periodChange).toFixed(2)}%
-                    </div>
-                  )}
-                </div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={performanceChartData.chartData} margin={{ top: 8, right: 48, left: 8, bottom: 24 }}>
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={(d) => formatDate(d)}
-                      tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                      axisLine={{ stroke: '#D1D5DB' }}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      domain={['auto', 'auto']}
-                      tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                      axisLine={{ stroke: '#D1D5DB' }}
-                      tickLine={false}
-                      tickFormatter={(v) => `$${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v.toFixed(0)}`}
-                      width={44}
-                    />
-                    <Tooltip
-                      formatter={(value) => [`$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`, 'Value']}
-                      labelFormatter={(label) => formatDate(label)}
-                      contentStyle={{ fontSize: '12px' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke="#2563eb"
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive={true}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </>
-            )}
-          </div>
-        </div>
       </div>
     </div>
 
@@ -2348,8 +2312,3 @@ const PortfolioBreakdown = ({ portfolioData, isLoading = false }) => {
 };
 
 export default PortfolioBreakdown;
-
-
-
-
-
