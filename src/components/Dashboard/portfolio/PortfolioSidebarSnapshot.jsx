@@ -1,8 +1,10 @@
-import React, { useMemo, useEffect, useCallback } from 'react';
+import React, { useMemo, useEffect, useCallback, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import StatusDot from '../../common/StatusDot';
 import LoadingIndicator from '../../common/LoadingIndicator';
 import PopoverSelect from '../../common/PopoverSelect';
+import RefreshButton from '../../common/RefreshButton';
+import { usePortfolioCorrelationConcentration } from '../../../hooks/usePortfolioCorrelationConcentration';
 import {
   getIbkrPortfolioStatusDot,
   getPortfolioOfflinePanel,
@@ -14,13 +16,59 @@ import {
   formatExposurePct,
   formatCurrency,
   IDLE_CASH_TOOLTIP,
+  isUsEquitySessionActive,
+  resolvePortfolioHeaderSnapshot,
 } from '../../../utils/portfolioExposureMetrics';
 import { saveSelectedAccount, loadIbkrAccounts, saveIbkrAccounts } from '../../../constants/ibkrAccountStorage';
-import { SECURITY_CATEGORY_MAPPING } from '../../../constants/securityCategoryMapping';
 import { formatIbkrAccountLabel, IBKR_ACCOUNT_LABELS } from '../../../constants/ibkrAccountLabels';
 import './PortfolioSidebarSnapshot.css';
 
 const STRATEGY_SUBTITLE = 'Long/Short Global Macro';
+const PORTFOLIO_CLOSE_CACHE_PREFIX = 'portfolioCloseSnapshot:';
+
+function formatLensPct(value, decimals = 0, { signed = false } = {}) {
+  if (value == null || !Number.isFinite(Number(value))) return '--';
+  const number = Number(value);
+  const sign = signed && number > 0 ? '+' : '';
+  return `${sign}${number.toFixed(decimals)}%`;
+}
+
+function getClusterTone(cluster = {}) {
+  const netPct = Number((cluster || {}).netClusterPct) || 0;
+  if (netPct > 2) return { key: 'long', label: 'Long-biased' };
+  if (netPct < -2) return { key: 'short', label: 'Short-biased' };
+  return { key: 'offset', label: 'Offsetting' };
+}
+
+function AccountDropdownLabel({ accountId, value, currency, dailyPct }) {
+  const label = formatIbkrAccountLabel(accountId);
+  const hasDailyPct = dailyPct != null && Number.isFinite(dailyPct);
+  const pctText = hasDailyPct
+    ? `${dailyPct > 0 ? '+' : ''}${dailyPct.toFixed(2)}%`
+    : '--';
+  const pctTone = hasDailyPct
+    ? dailyPct > 0
+      ? 'positive'
+      : dailyPct < 0
+        ? 'negative'
+        : 'neutral'
+    : 'neutral';
+
+  return (
+    <span className="pf-account-label">
+      <span className="pf-account-label__main">
+        {label}: {formatCurrency(value, currency)}
+      </span>
+      <span className="pf-account-label__pct-wrap" aria-label={`Daily change ${pctText}`}>
+        <span className="pf-account-label__paren">(</span>
+        <span className={`pf-account-label__pct pf-account-label__pct--${pctTone}`}>
+          {pctText}
+        </span>
+        <span className="pf-account-label__paren">)</span>
+      </span>
+    </span>
+  );
+}
 
 function SetupStep({ done, label }) {
   return (
@@ -112,7 +160,9 @@ const KNOWN_ACCOUNT_IDS = Object.keys(IBKR_ACCOUNT_LABELS);
 
 const PortfolioSidebarSnapshot = ({
   portfolioData,
+  portfolioAccountsData = [],
   rtaPositions,
+  etfProSnapshot,
   loading = false,
   accounts = [],
   connection = null,
@@ -122,6 +172,28 @@ const PortfolioSidebarSnapshot = ({
   expandedUp = false,
   onToggleExpandUp,
 }) => {
+  const [sessionClock, setSessionClock] = useState(() => Date.now());
+  const [cachedCloseSnapshot, setCachedCloseSnapshot] = useState(null);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setSessionClock(Date.now()), 60000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedAccount || typeof window === 'undefined') {
+      setCachedCloseSnapshot(null);
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(`${PORTFOLIO_CLOSE_CACHE_PREFIX}${selectedAccount}`);
+      setCachedCloseSnapshot(raw ? JSON.parse(raw) : null);
+    } catch {
+      setCachedCloseSnapshot(null);
+    }
+  }, [selectedAccount]);
+
   // Persist accounts to localStorage when they come from API
   useEffect(() => {
     if (Array.isArray(accounts) && accounts.length > 0) {
@@ -140,6 +212,29 @@ const PortfolioSidebarSnapshot = ({
   });
   const currency = portfolioData?.accountSummary?.currency || 'USD';
   const sidebarBanner = getPortfolioSidebarBanner({ portfolioData, selectedAccount });
+  const qualityWarnings = useMemo(() => {
+    const warnings = [];
+    if (Array.isArray(portfolioData?.reconciliationWarnings)) {
+      warnings.push(...portfolioData.reconciliationWarnings);
+    }
+    if (Array.isArray(portfolioData?.dataQuality?.warnings)) {
+      warnings.push(...portfolioData.dataQuality.warnings);
+    }
+    if (etfProSnapshot?.dataQuality?.status && etfProSnapshot.dataQuality.status !== 'ok') {
+      warnings.push(...(etfProSnapshot.dataQuality.warnings || ['ETF Pro update is partial']));
+    }
+    const rtaWarnings = rtaPositions?.sourceDiagnostics?.reconstructionWarnings || rtaPositions?.reconstructionWarnings || [];
+    if (Array.isArray(rtaWarnings) && rtaWarnings.length > 0) {
+      warnings.push(...rtaWarnings.map((warning) => `RTA: ${warning}`));
+    }
+    return [...new Set(warnings)].slice(0, 3);
+  }, [
+    portfolioData?.reconciliationWarnings,
+    portfolioData?.dataQuality,
+    etfProSnapshot?.dataQuality,
+    rtaPositions?.sourceDiagnostics,
+    rtaPositions?.reconstructionWarnings,
+  ]);
   const showMetrics =
     showPortfolioContent && exposure.nlv != null && Number.isFinite(exposure.nlv);
 
@@ -156,28 +251,20 @@ const PortfolioSidebarSnapshot = ({
     return ids;
   }, [accounts, selectedAccount]);
 
+  const accountSnapshotsById = useMemo(() => {
+    const entries = Array.isArray(portfolioAccountsData) ? portfolioAccountsData : [];
+    return entries.reduce((acc, entry) => {
+      if (entry?.accountId) {
+        acc[entry.accountId] = entry;
+      }
+      return acc;
+    }, {});
+  }, [portfolioAccountsData]);
+
   const statusDot = useMemo(
     () => getIbkrPortfolioStatusDot({ connection, portfolioData, loading }),
     [connection, portfolioData, loading],
   );
-
-  const topFactorExposures = useMemo(() => {
-    const holdings = portfolioData?.holdings || [];
-    const totalValue = exposure.nlv || 0;
-    if (totalValue === 0 || holdings.length === 0) return [];
-    const factorMap = {};
-    holdings.forEach(holding => {
-      const mv = Math.abs(parseFloat(holding.marketValue) || 0);
-      const mapping = SECURITY_CATEGORY_MAPPING[holding.symbol?.toUpperCase()];
-      if (mapping?.category) {
-        factorMap[mapping.category] = (factorMap[mapping.category] || 0) + mv;
-      }
-    });
-    return Object.entries(factorMap)
-      .map(([factor, value]) => ({ factor, pct: (value / totalValue) * 100 }))
-      .sort((a, b) => b.pct - a.pct)
-      .slice(0, 5);
-  }, [portfolioData?.holdings, exposure.nlv]);
 
   const offlinePanel = useMemo(
     () => getPortfolioOfflinePanel({ connection, portfolioData }),
@@ -193,6 +280,20 @@ const PortfolioSidebarSnapshot = ({
   );
   const rtaLongCount = rtaPositions?.available ? (rtaPositions.longCount || 0) : null;
   const rtaShortCount = rtaPositions?.available ? (rtaPositions.shortCount || 0) : null;
+  const { etfProLongCount, etfProShortCount, etfProAvailable } = useMemo(() => {
+    const rows = Array.isArray(etfProSnapshot?.rows) ? etfProSnapshot.rows : [];
+    if (rows.length === 0) {
+      return { etfProLongCount: null, etfProShortCount: null, etfProAvailable: false };
+    }
+    return rows.reduce((acc, row) => {
+      if (String(row.call || '').toLowerCase() === 'short') {
+        acc.etfProShortCount += 1;
+      } else {
+        acc.etfProLongCount += 1;
+      }
+      return acc;
+    }, { etfProLongCount: 0, etfProShortCount: 0, etfProAvailable: true });
+  }, [etfProSnapshot?.rows]);
   const buildNetDisplay = useCallback((longCount, shortCount) => {
     const total = (longCount || 0) + (shortCount || 0);
     if (!total) {
@@ -223,6 +324,124 @@ const PortfolioSidebarSnapshot = ({
   const rtaNetBar = useMemo(() => {
     return buildNetDisplay(rtaLongCount || 0, rtaShortCount || 0);
   }, [buildNetDisplay, rtaLongCount, rtaShortCount]);
+  const etfProNetBar = useMemo(() => {
+    return buildNetDisplay(etfProLongCount || 0, etfProShortCount || 0);
+  }, [buildNetDisplay, etfProLongCount, etfProShortCount]);
+
+  const usEquitySessionActive = useMemo(
+    () => isUsEquitySessionActive(new Date(sessionClock)),
+    [sessionClock],
+  );
+
+  const headerSnapshot = useMemo(
+    () => resolvePortfolioHeaderSnapshot({
+      nlv: exposure.nlv,
+      dailyPnL: portfolioData?.pnl?.dailyPnL,
+      dailyPnLPercent: portfolioData?.pnl?.dailyPnLPercent,
+      sessionActive: usEquitySessionActive,
+      cachedCloseSnapshot,
+    }),
+    [cachedCloseSnapshot, exposure.nlv, portfolioData?.pnl?.dailyPnL, portfolioData?.pnl?.dailyPnLPercent, usEquitySessionActive],
+  );
+
+  useEffect(() => {
+    if (!selectedAccount || typeof window === 'undefined') return;
+    const storageKey = `${PORTFOLIO_CLOSE_CACHE_PREFIX}${selectedAccount}`;
+
+    if (usEquitySessionActive) {
+      window.localStorage.removeItem(storageKey);
+      if (cachedCloseSnapshot != null) {
+        setCachedCloseSnapshot(null);
+      }
+      return;
+    }
+
+    const snapshotToCache = headerSnapshot.snapshotToCache;
+    if (!snapshotToCache) return;
+
+    try {
+      const nextSnapshot = {
+        ...snapshotToCache,
+        capturedAt: new Date().toISOString(),
+      };
+      window.localStorage.setItem(storageKey, JSON.stringify(nextSnapshot));
+      setCachedCloseSnapshot((prev) => {
+        if (
+          prev?.netLiquidation === nextSnapshot.netLiquidation &&
+          prev?.dailyPct === nextSnapshot.dailyPct
+        ) {
+          return prev;
+        }
+        return nextSnapshot;
+      });
+    } catch {
+      // Ignore localStorage failures; header falls back to live data / (--).
+    }
+  }, [cachedCloseSnapshot, headerSnapshot.snapshotToCache, selectedAccount, usEquitySessionActive]);
+
+  const accountValueLabel = useMemo(() => {
+    if (!selectedAccount || !showMetrics) return null;
+    const displayNlv = headerSnapshot.displayNlv ?? exposure.nlv;
+    const dailyPct = headerSnapshot.displayDailyPct;
+    return (
+      <AccountDropdownLabel
+        accountId={selectedAccount}
+        value={displayNlv}
+        currency={currency}
+        dailyPct={dailyPct}
+      />
+    );
+  }, [currency, exposure.nlv, headerSnapshot.displayDailyPct, headerSnapshot.displayNlv, selectedAccount, showMetrics]);
+
+  const buildAccountOptionLabel = useCallback((accountId) => {
+    if (!accountId) return '';
+
+    if (accountId === selectedAccount && accountValueLabel) {
+      return accountValueLabel;
+    }
+
+    const snapshot = accountSnapshotsById[accountId];
+    const snapshotNlv = snapshot?.accountSummary?.netLiquidation;
+    const snapshotCurrency = snapshot?.accountSummary?.currency || 'USD';
+    const snapshotDailyPnl = snapshot?.pnl?.dailyPnL;
+
+    if (!Number.isFinite(Number(snapshotNlv))) {
+      return formatIbkrAccountLabel(accountId);
+    }
+
+    const derivedSnapshot = resolvePortfolioHeaderSnapshot({
+      nlv: snapshotNlv,
+      dailyPnL: snapshotDailyPnl,
+      dailyPnLPercent: snapshot?.pnl?.dailyPnLPercent,
+      sessionActive: usEquitySessionActive,
+      cachedCloseSnapshot: null,
+    });
+    const dailyPct = derivedSnapshot.displayDailyPct;
+
+    return (
+      <AccountDropdownLabel
+        accountId={accountId}
+        value={derivedSnapshot.displayNlv}
+        currency={snapshotCurrency}
+        dailyPct={dailyPct}
+      />
+    );
+  }, [accountSnapshotsById, accountValueLabel, selectedAccount, usEquitySessionActive]);
+
+  const correlationLens = usePortfolioCorrelationConcentration({
+    holdings: portfolioData?.holdings || [],
+    totalValue: exposure.nlv,
+    enabled: showMetrics,
+  });
+
+  const correlationClusters = useMemo(() => (
+    [...(correlationLens.data?.clusters || [])]
+      .sort((a, b) => (b.correlationAdjustedGrossPct || 0) - (a.correlationAdjustedGrossPct || 0))
+      .slice(0, 3)
+  ), [correlationLens.data?.clusters]);
+  const topCorrelationCluster = correlationClusters[0] || null;
+  const topClusterTone = getClusterTone(topCorrelationCluster);
+  const unscoredCorrelationItems = (correlationLens.data?.unscored || []).slice(0, 3);
 
   return (
     <div className="pf-snapshot">
@@ -250,7 +469,7 @@ const PortfolioSidebarSnapshot = ({
               type="button"
               onClick={onToggleExpandUp}
               className="rounded-md border border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors"
-              title={expandedUp ? "Collapse construction" : "Expand construction"}
+              title={expandedUp ? "Collapse portfolio panel" : "Expand portfolio panel"}
               style={{
                 width: '24px',
                 height: '24px',
@@ -311,14 +530,17 @@ const PortfolioSidebarSnapshot = ({
             value={selectedAccount || ''}
             options={accountOptions.map((acct) => ({
               value: acct,
-              label: formatIbkrAccountLabel(acct),
+              label: buildAccountOptionLabel(acct),
             }))}
             onChange={(value) => {
               saveSelectedAccount(value);
               onAccountChange(value);
             }}
             buttonClassName="pf-account-select"
-            menuClassName="min-w-[200px]"
+            menuClassName="pf-account-select-menu"
+            optionClassName="pf-account-select-option"
+            menuMatchButtonWidth
+            menuOffset={0}
           />
         </div>
 
@@ -351,19 +573,13 @@ const PortfolioSidebarSnapshot = ({
       {showMetrics && (
         <div className="pf-body">
 
-          {/* 3-col top metrics */}
+          {/* Portfolio / signal count comparison */}
           <div className="pf-metrics-row">
-            <div className="pf-metric">
-              <span className="pf-label">Net Liquidation</span>
-              <span className="pf-metric__value tabular-nums">
-                {formatCurrency(exposure.nlv, currency)}
-              </span>
-              <span className="pf-metric__hint">Total account value</span>
-            </div>
-            <div className="pf-position-compare" role="table" aria-label="Portfolio versus RTA position comparison">
+            <div className="pf-position-compare" role="table" aria-label="Portfolio versus RTA and ETF Pro position comparison">
               <div className="pf-position-compare__header pf-position-compare__cell" />
               <div className="pf-position-compare__header pf-position-compare__cell">Portfolio count</div>
               <div className="pf-position-compare__header pf-position-compare__cell">RTA signal count</div>
+              <div className="pf-position-compare__header pf-position-compare__cell">ETF Pro</div>
 
               <div className="pf-position-compare__label pf-position-compare__label--long pf-position-compare__cell">Long</div>
               <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums">
@@ -372,6 +588,9 @@ const PortfolioSidebarSnapshot = ({
               <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums">
                 {rtaLongCount ?? '—'}
               </div>
+              <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums">
+                {etfProLongCount ?? '—'}
+              </div>
 
               <div className="pf-position-compare__label pf-position-compare__label--short pf-position-compare__cell">Short</div>
               <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums">
@@ -379,6 +598,9 @@ const PortfolioSidebarSnapshot = ({
               </div>
               <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums">
                 {rtaShortCount ?? '—'}
+              </div>
+              <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums">
+                {etfProShortCount ?? '—'}
               </div>
 
               <div className="pf-position-compare__label pf-position-compare__cell">Net</div>
@@ -402,6 +624,16 @@ const PortfolioSidebarSnapshot = ({
                   </div>
                 </div>
               </div>
+              <div className="pf-position-compare__cell">
+                <div className={`pf-netbar-wrap${etfProAvailable ? '' : ' pf-netbar-wrap--muted'}`}>
+                  <div className={`pf-netbar__pct pf-netbar__pct--${etfProNetBar.tone}`}>{etfProNetBar.netPctText}</div>
+                  <div className="pf-netbar" aria-hidden="true">
+                    <div className="pf-netbar__segment pf-netbar__segment--long" style={{ width: `${etfProNetBar.longWidth}%` }} />
+                    <div className="pf-netbar__segment pf-netbar__segment--short" style={{ width: `${etfProNetBar.shortWidth}%` }} />
+                    <div className="pf-netbar__marker" style={{ left: `${etfProNetBar.markerLeft}%` }} />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -416,72 +648,111 @@ const PortfolioSidebarSnapshot = ({
             </div>
           </div>
 
-          {/* Portfolio Construction - only shown when expanded */}
-          {expandedUp && (topFactorExposures.length > 0 || exposure.nlv != null) && (
-            <div className="pf-section">
-              <div className="pf-section__head">Portfolio Construction</div>
-              <div className="pf-section__divider" />
-
-              {/* Top 5 Factors */}
-              {topFactorExposures.length > 0 && (
-                <div className="pf-construct-card pf-construct-card--blue">
-                  <div className="pf-construct-card__title" style={{ color: 'var(--pf-blue)' }}>Top 5 Factors</div>
-                  <div className="pf-construct-list">
-                    {topFactorExposures.map((item, idx) => (
-                      <div key={idx} className="pf-construct-row">
-                        <span>{item.factor}</span>
-                        <span className="pf-construct-row__val">{item.pct.toFixed(1)}%</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Basis Points */}
-              {exposure.nlv != null && (
-                <div className="pf-construct-card pf-construct-card--neutral" style={{ marginTop: '4px' }}>
-                  <div className="pf-construct-card__title">Basis Points</div>
-                  <div className="pf-construct-bps">
-                    {[25, 75, 125, 175, 225].map((bps, i) => (
-                      <React.Fragment key={bps}>
-                        <div className="pf-construct-row">
-                          <span>{bps}:</span>
-                          <span className="pf-construct-row__val">${Math.floor(exposure.nlv * bps / 10000).toLocaleString()}</span>
-                        </div>
-                        <div className="pf-construct-row">
-                          <span>{bps + 25}:</span>
-                          <span className="pf-construct-row__val">${Math.floor(exposure.nlv * (bps + 25) / 10000).toLocaleString()}</span>
-                        </div>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Longs / Shorts sizing */}
-              <div className="pf-construct-ls" style={{ marginTop: '4px' }}>
-                <div className="pf-construct-card pf-construct-card--green">
-                  <div className="pf-construct-card__title" style={{ color: 'var(--pf-green)' }}>Longs</div>
-                  <div className="pf-construct-list">
-                    <div className="pf-construct-row"><span>FX:</span><span className="pf-construct-row__val">4–12%</span></div>
-                    <div className="pf-construct-row"><span>FI:</span><span className="pf-construct-row__val">3–10%</span></div>
-                    <div className="pf-construct-row"><span>Eq:</span><span className="pf-construct-row__val">2–6%</span></div>
-                    <div className="pf-construct-row"><span>Com:</span><span className="pf-construct-row__val">2–4%</span></div>
-                    <div className="pf-construct-row"><span>Crypto:</span><span className="pf-construct-row__val">1–3%</span></div>
-                  </div>
-                </div>
-                <div className="pf-construct-card pf-construct-card--red">
-                  <div className="pf-construct-card__title" style={{ color: 'var(--pf-red)' }}>Shorts</div>
-                  <div className="pf-construct-list">
-                    <div className="pf-construct-row"><span>FX:</span><span className="pf-construct-row__val">2–6%</span></div>
-                    <div className="pf-construct-row"><span>FI:</span><span className="pf-construct-row__val">2–5%</span></div>
-                    <div className="pf-construct-row"><span>Eq:</span><span className="pf-construct-row__val">1–3%</span></div>
-                    <div className="pf-construct-row"><span>Com:</span><span className="pf-construct-row__val">1–2%</span></div>
-                    <div className="pf-construct-row"><span>Crypto:</span><span className="pf-construct-row__val">0.5–1%</span></div>
-                  </div>
-                </div>
+          <div className="pf-section pf-corr-lens">
+            <div className="pf-corr-lens__head">
+              <div className="pf-section__head">Correlation / Exposure</div>
+              <div className="pf-corr-lens__actions">
+                {correlationLens.loading && correlationLens.data ? (
+                  <LoadingIndicator label="Updating..." size="sm" className="pf-corr-lens__updating" />
+                ) : null}
+                <RefreshButton
+                  onClick={correlationLens.refresh}
+                  loading={correlationLens.loading}
+                  disabled={!correlationLens.hasInput}
+                  label={correlationLens.data ? 'Refresh' : 'Calculate'}
+                  className="pf-corr-lens__refresh"
+                />
               </div>
+            </div>
 
+            {correlationLens.loading && !correlationLens.data ? (
+              <LoadingIndicator label="Calculating correlation..." size="sm" centered className="pf-corr-lens__loading" />
+            ) : null}
+
+            {!correlationLens.loading && correlationLens.error && !correlationLens.data ? (
+              <div className="pf-corr-lens__state pf-corr-lens__state--error">{correlationLens.error}</div>
+            ) : null}
+
+            {!correlationLens.loading && !correlationLens.error && !correlationLens.data ? (
+              <div className="pf-corr-lens__state">No correlation data available.</div>
+            ) : null}
+
+            {correlationLens.data && correlationLens.error ? (
+              <div className="pf-corr-lens__state pf-corr-lens__state--error">
+                Showing previous snapshot. Refresh failed: {correlationLens.error}
+              </div>
+            ) : null}
+
+            {correlationLens.data ? (
+              <>
+                <div className="pf-corr-lens__kpis">
+                  <div>
+                    <span>Effective Bets</span>
+                    <strong>{correlationLens.data.scores?.effectiveIndependentBets ?? '--'}</strong>
+                  </div>
+                  <div>
+                    <span>Concentration</span>
+                    <strong>{correlationLens.data.scores?.concentrationScore ?? '--'}</strong>
+                  </div>
+                  <div>
+                    <span>Largest</span>
+                    <strong>{formatLensPct(correlationLens.data.scores?.largestClusterPct || 0)}</strong>
+                  </div>
+                  <div>
+                    <span>Coverage</span>
+                    <strong>{formatLensPct(correlationLens.data.coverage?.scoredPct || 0)}</strong>
+                  </div>
+                </div>
+
+                {topCorrelationCluster ? (
+                  <div className={`pf-corr-lens__hero pf-corr-lens__hero--${topClusterTone.key}`}>
+                    <div className="pf-corr-lens__hero-main">
+                      <span>{topClusterTone.label}</span>
+                      <strong>{topCorrelationCluster.label}</strong>
+                    </div>
+                    <div className="pf-corr-lens__hero-stats">
+                      <span>Gross {formatLensPct(topCorrelationCluster.grossClusterPct || 0)}</span>
+                      <span>Net {formatLensPct(topCorrelationCluster.netClusterPct || 0, 1, { signed: true })}</span>
+                    </div>
+                    <div className="pf-corr-lens__members">
+                      {(topCorrelationCluster.members || []).slice(0, 5).map((member) => (
+                        <span key={member.symbol}>{member.symbol}</span>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="pf-corr-lens__state">No correlated clusters yet.</div>
+                )}
+
+                {correlationClusters.length > 0 ? (
+                  <div className="pf-corr-lens__clusters" aria-label="Top correlated clusters">
+                    {correlationClusters.map((cluster) => {
+                      const tone = getClusterTone(cluster);
+                      return (
+                        <div key={cluster.id} className="pf-corr-lens__cluster-row">
+                          <span className={`pf-corr-lens__tone pf-corr-lens__tone--${tone.key}`}>{tone.label}</span>
+                          <span className="pf-corr-lens__cluster-name">{cluster.label}</span>
+                          <span className="pf-corr-lens__cluster-value">{formatLensPct(cluster.correlationAdjustedGrossPct || cluster.grossClusterPct || 0)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                <div className="pf-corr-lens__coverage">
+                  <span>Cash {formatLensPct(correlationLens.data.coverage?.cashPct || 0)}</span>
+                  <span>Unscored {correlationLens.data.coverage?.unscoredCount || 0}</span>
+                  {unscoredCorrelationItems.map((item) => (
+                    <span key={`${item.symbol}-${item.reason}`}>{item.symbol}</span>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          {showPortfolioContent && qualityWarnings.length > 0 && !loading && (
+            <div className="pf-banner pf-banner--warning">
+              {qualityWarnings.join(' · ')}
             </div>
           )}
 

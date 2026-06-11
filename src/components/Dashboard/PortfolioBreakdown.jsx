@@ -11,6 +11,7 @@ import { SECURITIES_LIST } from '../../constants/securitiesList';
 import LoadingIndicator from '../common/LoadingIndicator';
 import StatusDot from '../common/StatusDot';
 import './PortfolioConstructionIdeas.css';
+
 const ASSET_CLASS_COLORS = {
   'Equities': '#10B981',      // Emerald green
   'Fixed Income': '#3B82F6',  // Blue
@@ -18,6 +19,7 @@ const ASSET_CLASS_COLORS = {
   'FX': '#8B5CF6',            // Violet (includes Gold, USD, and other currencies)
   'Currencies': '#8B5CF6',    // Violet (alias for FX)
   'Cryptocurrency': '#F59E0B', // Amber
+  'CASH': '#6B7280',          // Neutral gray
   // Note: "Other" category has been removed - all holdings are now properly classified
 };
 
@@ -27,6 +29,8 @@ const CATEGORY_DISPLAY_NAMES = {
   'Equities': 'Equities',
   'Fixed Income': 'Fixed Income',
   'Commodities': 'Commodities',
+  'Cash': 'CASH',
+  'CASH': 'CASH',
   'FX': 'Currencies',           // FX (includes Gold, USD, and other currencies) → Currencies
   'USD': 'Currencies',          // Legacy USD category → Currencies
   'Gold': 'Currencies',         // Legacy Gold category → Currencies (due to volatility characteristics)
@@ -79,6 +83,9 @@ const getAssetClassForTicker = (ticker, holding = null) => {
     if (lower.includes('equity') || lower.includes('stock') || lower.includes('etf') || lower.includes('equities')) {
       return 'Equities';
     }
+    if (lower.includes('cash') || lower.includes('money market') || lower.includes('t-bill') || lower.includes('treasury bill')) {
+      return 'CASH';
+    }
     if (lower.includes('fixed income') || lower.includes('bond') || lower.includes('treasury') || lower.includes('credit')) {
       return 'Fixed Income';
     }
@@ -97,6 +104,9 @@ const getAssetClassForTicker = (ticker, holding = null) => {
   const tickerUpper = (ticker || '').toUpperCase();
   if (tickerUpper.includes('USD') || tickerUpper.includes('EUR') || tickerUpper.includes('GBP') || tickerUpper.includes('JPY') || tickerUpper.includes('FX')) {
     return 'Currencies';
+  }
+  if (['TBIL', 'BIL', 'SGOV', 'SHV', 'GBIL', 'CLIP', 'USFR', 'TFLO', 'XBIL'].includes(tickerUpper)) {
+    return 'CASH';
   }
   if (tickerUpper.includes('GOLD') || tickerUpper.includes('GLD') || tickerUpper.includes('SLV')) {
     return 'Currencies'; // Gold/Silver mapped to Currencies per existing logic
@@ -120,33 +130,12 @@ const getAssetClassForTicker = (ticker, holding = null) => {
   return 'Equities';
 };
 
-const SLEEVE_TARGETS = {
-  Credit: 7.5,
-  Growth: 0,
-  Defensive: 0,
-  Inflation: 0,
-  Volatility: 0,
-  Cash: 15
-};
-
 const SLEEVE_ORDER = ['Growth', 'Credit', 'Inflation', 'Defensive', 'Volatility', 'Cash'];
-const EXCEPTION_ORDER = ['Growth', 'Credit', 'Inflation', 'Cash', 'Small Cap', 'Defensive', 'Volatility', 'USD'];
 
 const SECURITY_NAME_BY_TICKER = SECURITIES_LIST.reduce((acc, security) => {
   acc[security.ticker.toUpperCase()] = security.name;
   return acc;
 }, {});
-
-const OVEREXPOSURE_META = {
-  Credit: { descriptor: 'Concentration', target: SLEEVE_TARGETS.Credit },
-  Growth: { descriptor: 'Factor', target: SLEEVE_TARGETS.Growth },
-  Defensive: { descriptor: 'Sleeve', target: SLEEVE_TARGETS.Defensive },
-  Inflation: { descriptor: 'Sleeve', target: SLEEVE_TARGETS.Inflation },
-  Volatility: { descriptor: 'Risk', target: SLEEVE_TARGETS.Volatility },
-  Cash: { descriptor: 'Sleeve', target: SLEEVE_TARGETS.Cash },
-  'Small Cap': { descriptor: 'Size', target: 0 },
-  USD: { descriptor: 'Currency', target: 0 }
-};
 
 const CREDIT_CATEGORIES = new Set([
   'HY Credit',
@@ -182,6 +171,7 @@ const VOLATILITY_CATEGORIES = new Set(['Low Beta']);
 const POSITION_SIZE_PARAMETERS = {
   long: {
     Currencies: '4-12%',
+    'CASH': '0-100%',
     'Fixed Income': '3-10%',
     Equities: '2-6%',
     Commodities: '2-4%',
@@ -189,6 +179,7 @@ const POSITION_SIZE_PARAMETERS = {
   },
   short: {
     Currencies: '2-6%',
+    'CASH': '0-100%',
     'Fixed Income': '2-5%',
     Equities: '1-3%',
     Commodities: '1-2%',
@@ -196,11 +187,21 @@ const POSITION_SIZE_PARAMETERS = {
   },
 };
 
+const POSITION_SIZE_BPS_STEPS = [50, 100, 150, 200, 250];
+const POSITION_SIZE_GUIDE_ROWS = [
+  { label: 'FX', long: POSITION_SIZE_PARAMETERS.long.Currencies, short: POSITION_SIZE_PARAMETERS.short.Currencies },
+  { label: 'FI', long: POSITION_SIZE_PARAMETERS.long['Fixed Income'], short: POSITION_SIZE_PARAMETERS.short['Fixed Income'] },
+  { label: 'Eq', long: POSITION_SIZE_PARAMETERS.long.Equities, short: POSITION_SIZE_PARAMETERS.short.Equities },
+  { label: 'Com', long: POSITION_SIZE_PARAMETERS.long.Commodities, short: POSITION_SIZE_PARAMETERS.short.Commodities },
+  { label: 'Crypto', long: POSITION_SIZE_PARAMETERS.long.Cryptocurrency, short: POSITION_SIZE_PARAMETERS.short.Cryptocurrency },
+];
+
 const ASSET_CLASS_ABBREVIATIONS = {
   Equities: 'EQ',
   'Fixed Income': 'FI',
   Commodities: 'COM',
   Currencies: 'FX',
+  'CASH': 'CASH',
   Cryptocurrency: 'CRYPTO',
 };
 
@@ -211,7 +212,10 @@ const isCashHolding = (holding) => {
   return (
     symbol === 'CASH & CASH INVESTMENTS' ||
     symbol === 'CASH' ||
+    ['TBIL', 'BIL', 'SGOV', 'SHV', 'GBIL', 'CLIP', 'USFR', 'TFLO', 'XBIL'].includes(symbol) ||
     assetClass.includes('cash') ||
+    assetClass.includes('money market') ||
+    description.includes('treasury bill') ||
     description.includes('money market')
   );
 };
@@ -232,11 +236,6 @@ const getSleeveForHolding = (holding) => {
   return 'Growth';
 };
 
-const getHoldingCategory = (holding) => {
-  const symbol = (holding?.symbol || '').toUpperCase();
-  return SECURITY_CATEGORY_MAPPING[symbol]?.category || '';
-};
-
 const getSecurityName = (holding) => {
   const symbol = (holding?.symbol || '').toUpperCase();
   return holding?.description || holding?.name || SECURITY_NAME_BY_TICKER[symbol] || holding?.symbol || '--';
@@ -251,40 +250,6 @@ const getPositionSizeParameter = (holding, isLongs) => {
 const getAssetClassAbbreviation = (holding) => {
   const assetClass = getAssetClassForTicker(holding?.symbol, holding);
   return ASSET_CLASS_ABBREVIATIONS[assetClass] || assetClass || '--';
-};
-
-const isSmallCapHolding = (holding) => {
-  const symbol = (holding?.symbol || '').toUpperCase();
-  const haystack = [
-    holding?.description,
-    holding?.name,
-    SECURITY_NAME_BY_TICKER[symbol],
-    getHoldingCategory(holding)
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  return ['IWM', 'RUT'].includes(symbol) || haystack.includes('small cap') || haystack.includes('russell 2000');
-};
-
-const isUsdHolding = (holding) => {
-  const symbol = (holding?.symbol || '').toUpperCase();
-  const category = getHoldingCategory(holding).toLowerCase();
-  const haystack = [
-    holding?.description,
-    holding?.name,
-    SECURITY_NAME_BY_TICKER[symbol],
-    category
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  return (
-    symbol === 'USD' ||
-    symbol === 'UUP' ||
-    symbol.includes('/USD') ||
-    symbol.includes('USD/') ||
-    category === 'fx' ||
-    haystack.includes('u.s. dollar') ||
-    haystack.includes('us dollar') ||
-    haystack.includes('usd')
-  );
 };
 
 const formatPct = (value, decimals = 1, { signed = false } = {}) => {
@@ -314,19 +279,27 @@ const formatSignedCurrency = (value, { compact = false } = {}) => {
   return `${sign}$${absValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
-const formatAsOf = (value) => {
+const AS_OF_TIMEZONES = {
+  pacific: {
+    label: 'PST',
+    timeZone: 'America/Los_Angeles',
+  },
+};
+
+const formatAsOf = (value, zoneKey = 'pacific') => {
   if (!value) return 'As of --';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'As of --';
-  return `As of ${date.toLocaleString('en-US', {
+  const zone = AS_OF_TIMEZONES[zoneKey] || AS_OF_TIMEZONES.pacific;
+  const formatted = date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-    timeZone: 'America/New_York',
-    timeZoneName: 'short'
-  })}`;
+    timeZone: zone.timeZone,
+  });
+  return `As of ${formatted} ${zone.label}`;
 };
 
 const csvEscape = (value) => {
@@ -388,7 +361,6 @@ const PortfolioBreakdown = ({
   const [shortsSearchFilter, setShortsSearchFilter] = useState('');
   const [ledgerSearchFilter, setLedgerSearchFilter] = useState('');
   const [ledgerSortField, setLedgerSortField] = useState('weight');
-  const [ledgerSideFilter, setLedgerSideFilter] = useState('all');
   const [ledgerSleeveFilter, setLedgerSleeveFilter] = useState('all');
 
   // Column order state (Intraday G/L after Mkt Value by default, % Portfolio after Basis Pts)
@@ -1372,142 +1344,17 @@ const PortfolioBreakdown = ({
   }, [ledgerSearchFilter, ledgerSleeveFilter]);
 
   const ledgerLongs = useMemo(() => {
-    if (ledgerSideFilter === 'short') return [];
     return sortLedgerHoldings(filterLedgerHoldings(longs), true);
-  }, [filterLedgerHoldings, ledgerSideFilter, longs, sortLedgerHoldings]);
+  }, [filterLedgerHoldings, longs, sortLedgerHoldings]);
 
   const ledgerShorts = useMemo(() => {
-    if (ledgerSideFilter === 'long') return [];
     return sortLedgerHoldings(filterLedgerHoldings(shorts), false);
-  }, [filterLedgerHoldings, ledgerSideFilter, shorts, sortLedgerHoldings]);
+  }, [filterLedgerHoldings, shorts, sortLedgerHoldings]);
 
   const ledgerRows = useMemo(() => ([
     ...ledgerLongs.map((holding, index) => ({ holding, index, isLongs: true })),
     ...ledgerShorts.map((holding, index) => ({ holding, index, isLongs: false }))
   ]), [ledgerLongs, ledgerShorts]);
-
-  const sleeveExposureRows = useMemo(() => {
-    const rowsBySleeve = SLEEVE_ORDER.reduce((acc, sleeve) => {
-      acc[sleeve] = {
-        sleeve,
-        target: SLEEVE_TARGETS[sleeve],
-        longValue: 0,
-        shortValue: 0,
-        netValue: 0
-      };
-      return acc;
-    }, {});
-
-    holdings.forEach((holding) => {
-      const sleeve = getSleeveForHolding(holding);
-      const row = rowsBySleeve[sleeve] || rowsBySleeve.Growth;
-      const marketValue = Number(holding.marketValue) || 0;
-      const absoluteValue = Math.abs(marketValue);
-      if (absoluteValue === 0) return;
-
-      if (isCashHolding(holding)) {
-        row.longValue += absoluteValue;
-        row.netValue += absoluteValue;
-      } else if (marketValue < 0 || Number(holding.quantity) < 0) {
-        row.shortValue += absoluteValue;
-        row.netValue -= absoluteValue;
-      } else {
-        row.longValue += absoluteValue;
-        row.netValue += absoluteValue;
-      }
-    });
-
-    const accountCash = Number(portfolioData?.accountSummary?.totalCashValue);
-    const cashRow = rowsBySleeve.Cash;
-    if (Number.isFinite(accountCash) && accountCash > cashRow.longValue) {
-      cashRow.longValue = accountCash;
-      cashRow.netValue = accountCash;
-    }
-
-    return SLEEVE_ORDER.map((sleeve) => {
-      const row = rowsBySleeve[sleeve];
-      const longPct = totalValue > 0 ? (row.longValue / totalValue) * 100 : 0;
-      const shortPct = totalValue > 0 ? (row.shortValue / totalValue) * 100 : 0;
-      const netPct = longPct - shortPct;
-      const gap = netPct - row.target;
-      return {
-        ...row,
-        longPct,
-        shortPct,
-        netPct,
-        gap
-      };
-    });
-  }, [holdings, portfolioData, totalValue]);
-
-  const sleeveExposureTotals = useMemo(() => (
-    sleeveExposureRows.reduce((acc, row) => ({
-      longPct: acc.longPct + row.longPct,
-      shortPct: acc.shortPct + row.shortPct,
-      netPct: acc.netPct + row.netPct,
-      target: acc.target + row.target,
-      gap: acc.gap + row.gap
-    }), { longPct: 0, shortPct: 0, netPct: 0, target: 0, gap: 0 })
-  ), [sleeveExposureRows]);
-
-  const exceptionRows = useMemo(() => {
-    const getDriver = (matcher, fallback = '--') => {
-      const driver = holdings.reduce((largest, holding) => {
-        if (!matcher(holding)) return largest;
-        const marketValue = Number(holding.marketValue) || 0;
-        const absoluteValue = Math.abs(marketValue);
-        if (absoluteValue <= largest.absoluteValue) return largest;
-        return { symbol: holding.symbol || fallback, absoluteValue };
-      }, { symbol: fallback, absoluteValue: 0 });
-      return driver.symbol || fallback;
-    };
-
-    const buildDerivedBucket = (label, matcher) => {
-      const bucket = holdings.reduce((acc, holding) => {
-        if (!matcher(holding)) return acc;
-        const marketValue = Number(holding.marketValue) || 0;
-        const absoluteValue = Math.abs(marketValue);
-        if (marketValue < 0 || Number(holding.quantity) < 0) {
-          acc.shortValue += absoluteValue;
-        } else {
-          acc.longValue += absoluteValue;
-        }
-        return acc;
-      }, { longValue: 0, shortValue: 0 });
-
-      const longPct = totalValue > 0 ? (bucket.longValue / totalValue) * 100 : 0;
-      const shortPct = totalValue > 0 ? (bucket.shortValue / totalValue) * 100 : 0;
-      const netPct = longPct - shortPct;
-      const target = OVEREXPOSURE_META[label].target;
-      return {
-        label,
-        gap: netPct - target,
-        driver: getDriver(matcher)
-      };
-    };
-
-    const candidates = [
-      ...sleeveExposureRows.map((row) => ({
-        label: row.sleeve,
-        gap: row.gap,
-        driver: getDriver(
-          (holding) => getSleeveForHolding(holding) === row.sleeve,
-          row.sleeve === 'Cash' ? 'Cash' : '--'
-        )
-      })),
-      buildDerivedBucket('Small Cap', isSmallCapHolding),
-      buildDerivedBucket('USD', isUsdHolding)
-    ].sort((a, b) => EXCEPTION_ORDER.indexOf(a.label) - EXCEPTION_ORDER.indexOf(b.label));
-
-    const exceptions = candidates.filter((row) => Math.abs(row.gap) >= 0.25);
-    const fillers = candidates.filter((row) => Math.abs(row.gap) < 0.25 && !exceptions.some((item) => item.label === row.label));
-
-    return [...exceptions, ...fillers].slice(0, 5).map((row) => ({
-      ...row,
-      type: Math.abs(row.gap) < 0.25 ? 'In Range' : row.gap > 0 ? 'Over Target' : 'Under Target',
-      action: Math.abs(row.gap) < 0.25 ? 'Monitor' : row.gap > 0 ? 'Consider Trim' : 'Consider Add'
-    }));
-  }, [holdings, sleeveExposureRows, totalValue]);
 
   const latestHoldingTimestamp = useMemo(() => {
     const timestamps = (portfolioData?.holdings || [])
@@ -1632,112 +1479,6 @@ const PortfolioBreakdown = ({
     [holding.positionSource && `pos: ${holding.positionSource}`, holding.priceSource && `price: ${holding.priceSource}`, holding.warning]
       .filter(Boolean)
       .join(' · ');
-
-  const constructionStats = (() => {
-    const totalLongValue = longs.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
-    const totalShortValue = shorts.reduce((sum, holding) => sum + Math.abs(parseFloat(holding.marketValue) || 0), 0);
-    const cashPct = sleeveExposureRows.find((row) => row.sleeve === 'Cash')?.netPct || 0;
-    const grossExposure = totalValue > 0 ? ((totalLongValue + totalShortValue) / totalValue) * 100 : 0;
-    const netExposure = totalValue > 0 ? ((totalLongValue - totalShortValue) / totalValue) * 100 : 0;
-    const longWeight = totalValue > 0 ? (totalLongValue / totalValue) * 100 : 0;
-    const shortWeight = totalValue > 0 ? (totalShortValue / totalValue) * 100 : 0;
-
-    return {
-      totalLongValue,
-      totalShortValue,
-      grossExposure,
-      netExposure,
-      longWeight,
-      shortWeight,
-      cashPct,
-      longCount: longs.length,
-      shortCount: shorts.length
-    };
-  })();
-
-  const renderGapPill = (value, className = '') => (
-    <span className={`pcv2-gap-pill ${Math.abs(value) < 0.25 ? 'is-neutral' : value >= 0 ? 'is-over' : 'is-under'} ${className}`}>
-      {formatPct(value, 1, { signed: true })}
-    </span>
-  );
-
-  const renderExposureExceptions = () => (
-    <section className="pcv2-card pcv2-exceptions-card">
-      <div className="pcv2-card-title">Exposure Exceptions</div>
-      <table className="pcv2-exceptions-table">
-        <thead>
-          <tr>
-            <th>Rank</th>
-            <th>Type</th>
-            <th>Sleeve</th>
-            <th className="pcv2-num">Gap</th>
-            <th>Driver</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {exceptionRows.map((row, index) => (
-            <tr key={row.label}>
-              <td>{index + 1}</td>
-              <td>{row.type}</td>
-              <td>{row.label}</td>
-              <td className={`pcv2-num ${Math.abs(row.gap) < 0.25 ? '' : row.gap > 0 ? 'pcv2-negative' : 'pcv2-under'}`}>
-                {formatPct(row.gap, 1, { signed: true })}
-              </td>
-              <td>{row.driver}</td>
-              <td>{row.action}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="pcv2-exceptions-footer">
-        <span>Gap = Net % minus Target %.</span>
-        <span><i className="is-over" /> Overweight (&gt; +1%)</span>
-        <span><i className="is-neutral" /> In range (+/-1%)</span>
-        <span><i className="is-under" /> Underweight (&lt; -1%)</span>
-      </div>
-    </section>
-  );
-
-  const renderExposureTables = () => (
-    <section className="pcv2-card pcv2-sleeve-card">
-      <div className="pcv2-card-title">Exposure By Sleeve</div>
-      <table className="pcv2-sleeve-table">
-        <thead>
-          <tr>
-            <th>Sleeve</th>
-            <th className="pcv2-num">Long %</th>
-            <th className="pcv2-num">Short %</th>
-            <th className="pcv2-num">Net %</th>
-            <th className="pcv2-num">Target %</th>
-            <th className="pcv2-num">Gap %</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sleeveExposureRows.map((row) => (
-            <tr key={row.sleeve}>
-              <td>{row.sleeve}</td>
-              <td className="pcv2-num pcv2-positive">{formatPct(row.longPct)}</td>
-              <td className="pcv2-num pcv2-negative">{formatPct(-row.shortPct)}</td>
-              <td className={`pcv2-num ${row.netPct < 0 ? 'pcv2-under' : ''}`}>{formatPct(row.netPct)}</td>
-              <td className="pcv2-num">{formatPct(row.target, 1)}</td>
-              <td className="pcv2-num">{renderGapPill(row.gap)}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td>Total</td>
-            <td className="pcv2-num pcv2-positive">{formatPct(sleeveExposureTotals.longPct)}</td>
-            <td className="pcv2-num pcv2-negative">{formatPct(-sleeveExposureTotals.shortPct)}</td>
-            <td className={`pcv2-num ${sleeveExposureTotals.netPct < 0 ? 'pcv2-under' : 'pcv2-positive'}`}>{formatPct(sleeveExposureTotals.netPct)}</td>
-            <td className="pcv2-num">{formatPct(sleeveExposureTotals.target, 1)}</td>
-            <td className="pcv2-num">{renderGapPill(sleeveExposureTotals.gap)}</td>
-          </tr>
-        </tfoot>
-      </table>
-    </section>
-  );
 
   const renderTargetControl = (holding, isLongs, pctOfAccount) => {
     const percentPortfolioState = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
@@ -1871,113 +1612,137 @@ const PortfolioBreakdown = ({
     });
   };
 
-  const renderLedgerSectionLabel = (label) => (
-    <tr className={`pcv2-ledger-divider ${label === 'LONGS' ? 'pcv2-ledger-divider--long' : label === 'SHORTS' ? 'pcv2-ledger-divider--short' : ''}`}>
-      <td colSpan={11}>{label}</td>
-    </tr>
+  const renderLedgerTableHead = () => (
+    <thead>
+      <tr>
+        <th>Ticker</th>
+        <th className="pcv2-num">AC</th>
+        <th className="pcv2-num">Weight %<br />(NAV)</th>
+        <th className="pcv2-num">Target %<br />(NAV)</th>
+        <th className="pcv2-num">Gap<br />(BPS)</th>
+        <th>Sleeve</th>
+        <th className="pcv2-num">Pos Size<br />Params</th>
+        <th className="pcv2-num">Factor Ctrb</th>
+        <th className="pcv2-num">Resize<br />(Shares)</th>
+        <th className="pcv2-num">Day G/L<br />(USD)</th>
+        <th>Action</th>
+      </tr>
+    </thead>
   );
 
-  const renderUnifiedLedger = () => {
-    const portfolioDayGainLoss = [...ledgerLongs, ...ledgerShorts].reduce((sum, holding) => sum + (getDayGainLossValue(holding) || 0), 0);
+  const renderLedgerPane = ({ label, rows, isLongs }) => {
+    const visibleWeight = totalValue > 0
+      ? (rows.reduce((sum, holding) => sum + Math.abs(Number(holding.marketValue) || 0), 0) / totalValue) * 100
+      : 0;
+
     return (
-      <section className="pcv2-card pcv2-ledger-card">
-        <div className="pcv2-ledger-toolbar">
-          <label className="pcv2-search">
-            <input
-              type="text"
-              placeholder="Search ticker or name..."
-              value={ledgerSearchFilter}
-              onChange={(e) => setLedgerSearchFilter(e.target.value)}
-            />
-            <Search aria-hidden="true" />
-          </label>
-          <label className="pcv2-field">
-            <span>Sort:</span>
-            <select value={ledgerSortField} onChange={(e) => setLedgerSortField(e.target.value)}>
-              <option value="weight">Weight</option>
-              <option value="ticker">Ticker</option>
-              <option value="name">Name</option>
-              <option value="gap">Gap</option>
-              <option value="dayGainLoss">Day G/L</option>
-            </select>
-            <ChevronDown aria-hidden="true" />
-          </label>
-          <div className="pcv2-segmented" aria-label="Side filter">
-            <span>Side:</span>
-            {['all', 'long', 'short'].map((side) => (
-              <button
-                type="button"
-                key={side}
-                className={ledgerSideFilter === side ? 'is-active' : ''}
-                onClick={() => setLedgerSideFilter(side)}
-              >
-                {side.charAt(0).toUpperCase() + side.slice(1)}
-              </button>
-            ))}
+      <div className={`pcv2-ledger-pane ${isLongs ? 'pcv2-ledger-pane--long' : 'pcv2-ledger-pane--short'}`}>
+        <div className="pcv2-ledger-pane-head">
+          <span>{label}</span>
+          <div className="pcv2-ledger-pane-stats">
+            <span>{rows.length} positions</span>
+            <span>{formatPct(visibleWeight, 1)} {isLongs ? 'long' : 'short'}</span>
           </div>
-          <label className="pcv2-field">
-            <span>Sleeve:</span>
-            <select value={ledgerSleeveFilter} onChange={(e) => setLedgerSleeveFilter(e.target.value)}>
-              <option value="all">All</option>
-              {SLEEVE_ORDER.map((sleeve) => (
-                <option value={sleeve} key={sleeve}>{sleeve}</option>
-              ))}
-            </select>
-            <ChevronDown aria-hidden="true" />
-          </label>
-          <button type="button" className="pcv2-toolbar-icon" title="Filter options">
-            <Filter size={14} />
-          </button>
-          <button type="button" className="pcv2-columns-button">
-            Columns
-            <ChevronDown size={13} />
-          </button>
         </div>
-        <div className="pcv2-ledger-scroll">
+        <div className="pcv2-ledger-pane-scroll">
           <table className="pcv2-ledger-table">
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th className="pcv2-num">AC</th>
-                <th className="pcv2-num">Weight %<br />(NAV)</th>
-                <th className="pcv2-num">Target %<br />(NAV)</th>
-                <th className="pcv2-num">Gap<br />(BPS)</th>
-                <th>Sleeve</th>
-                <th className="pcv2-num">Pos Size<br />Params</th>
-                <th className="pcv2-num">Factor Ctrb</th>
-                <th className="pcv2-num">Resize<br />(Shares)</th>
-                <th className="pcv2-num">Day G/L<br />(USD)</th>
-                <th>Action</th>
-              </tr>
-            </thead>
+            {renderLedgerTableHead()}
             <tbody>
-              {ledgerSideFilter !== 'short' && renderLedgerSectionLabel('LONGS')}
-              {ledgerSideFilter !== 'short' && renderLedgerRows(ledgerLongs, true)}
-              {ledgerSideFilter !== 'long' && renderLedgerSectionLabel('SHORTS')}
-              {ledgerSideFilter !== 'long' && renderLedgerRows(ledgerShorts, false)}
+              {renderLedgerRows(rows, isLongs)}
             </tbody>
-            <tfoot>
-              <tr>
-                <td>Total Portfolio</td>
-                <td className="pcv2-num">{formatPct(constructionStats.netExposure)}</td>
-                <td className="pcv2-num">{formatPct(sleeveExposureTotals.target)}</td>
-                <td className="pcv2-num">{formatBps(constructionStats.netExposure - sleeveExposureTotals.target)}</td>
-                <td />
-                <td />
-                <td />
-                <td />
-                <td className={`pcv2-num ${portfolioDayGainLoss > 0 ? 'pcv2-positive' : portfolioDayGainLoss < 0 ? 'pcv2-negative' : ''}`}>{formatSignedCurrency(portfolioDayGainLoss)}</td>
-                <td />
-              </tr>
-            </tfoot>
           </table>
         </div>
-        <div className="pcv2-ledger-note">
-          Weights and targets are % of Net Liquidation Value (NAV). Gap in basis points (bps). Factor Contribution shows estimated impact on factor exposure.
-        </div>
-      </section>
+      </div>
     );
   };
+
+  const renderPositionSizingGuide = () => (
+    <div className="pcv2-sizing-guide" aria-label="Position sizing guide">
+      <div className="pcv2-sizing-card pcv2-sizing-card--bps">
+        <div className="pcv2-sizing-title">Position Sizes</div>
+        <div className="pcv2-sizing-bps">
+          {POSITION_SIZE_BPS_STEPS.map((bps) => (
+            <div key={bps} className="pcv2-sizing-bps-item">
+              <span>{bps}:</span>
+              <span className="pcv2-sizing-value">
+                {totalValue > 0
+                  ? `$${Math.round((totalValue * bps) / 10000).toLocaleString()}`
+                  : '--'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {[
+        { side: 'long', title: 'Longs', valueKey: 'long' },
+        { side: 'short', title: 'Shorts', valueKey: 'short' },
+      ].map((book) => (
+        <div key={book.side} className={`pcv2-sizing-card pcv2-sizing-card--${book.side}`}>
+          <div className="pcv2-sizing-title">{book.title}</div>
+          <div className="pcv2-sizing-ranges">
+            {POSITION_SIZE_GUIDE_ROWS.map((row) => (
+              <div key={`${book.side}-${row.label}`} className="pcv2-sizing-range-row">
+                <span>{row.label}</span>
+                <span className="pcv2-sizing-value">{row[book.valueKey]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderUnifiedLedger = () => (
+    <section className="pcv2-card pcv2-ledger-card">
+      <div className="pcv2-ledger-toolbar">
+        <label className="pcv2-search">
+          <input
+            type="text"
+            placeholder="Search ticker or name..."
+            value={ledgerSearchFilter}
+            onChange={(e) => setLedgerSearchFilter(e.target.value)}
+          />
+          <Search aria-hidden="true" />
+        </label>
+        <label className="pcv2-field">
+          <span>Sort:</span>
+          <select value={ledgerSortField} onChange={(e) => setLedgerSortField(e.target.value)}>
+            <option value="weight">Weight</option>
+            <option value="ticker">Ticker</option>
+            <option value="name">Name</option>
+            <option value="gap">Gap</option>
+            <option value="dayGainLoss">Day G/L</option>
+          </select>
+          <ChevronDown aria-hidden="true" />
+        </label>
+        <label className="pcv2-field">
+          <span>Sleeve:</span>
+          <select value={ledgerSleeveFilter} onChange={(e) => setLedgerSleeveFilter(e.target.value)}>
+            <option value="all">All</option>
+            {SLEEVE_ORDER.map((sleeve) => (
+              <option value={sleeve} key={sleeve}>{sleeve}</option>
+            ))}
+          </select>
+          <ChevronDown aria-hidden="true" />
+        </label>
+        <button type="button" className="pcv2-toolbar-icon" title="Filter options">
+          <Filter size={14} />
+        </button>
+        <button type="button" className="pcv2-columns-button">
+          Columns
+          <ChevronDown size={13} />
+        </button>
+      </div>
+      <div className="pcv2-ledger-split">
+        {renderLedgerPane({ label: 'Longs', rows: ledgerLongs, isLongs: true })}
+        {renderLedgerPane({ label: 'Shorts', rows: ledgerShorts, isLongs: false })}
+      </div>
+      <div className="pcv2-ledger-note">
+        Weights and targets are % of Net Liquidation Value (NAV). Gap in basis points (bps). Factor Contribution shows estimated impact on factor exposure.
+      </div>
+    </section>
+  );
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -1990,7 +1755,7 @@ const PortfolioBreakdown = ({
         </div>
       )}
       {/* Scrollable Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px 2px' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 8px 16px 2px', display: 'flex', flexDirection: 'column' }}>
 
         <section className="pcv2-shell">
           <header className="pcv2-header">
@@ -2000,6 +1765,7 @@ const PortfolioBreakdown = ({
                 <StatusDot
                   updatedAt={statusDot.updatedAt || portfolioUpdatedAt}
                   status={statusDot.status}
+                  emoji={statusDot.emoji}
                   size={9}
                   className="pcv2-header-status"
                   label="Portfolio data"
@@ -2009,18 +1775,16 @@ const PortfolioBreakdown = ({
                 <span>{asOfLabel}</span>
               </div>
             </div>
-            <div className="pcv2-header-actions">
-              <button type="button" className="pcv2-export" onClick={handleExportCsv}>
-                <Download size={16} />
-                Export CSV
-              </button>
+            <div className="pcv2-header-right">
+              {renderPositionSizingGuide()}
+              <div className="pcv2-header-actions">
+                <button type="button" className="pcv2-export" onClick={handleExportCsv}>
+                  <Download size={16} />
+                  Export CSV
+                </button>
+              </div>
             </div>
           </header>
-
-          <div className="pcv2-top-grid">
-            {renderExposureExceptions()}
-            {renderExposureTables()}
-          </div>
 
           {renderUnifiedLedger()}
         </section>

@@ -40,6 +40,13 @@ const {
 const {
   summarizeRealTimeAlertPositions,
 } = require('./src/utils/rtaPositionReconstruction.cjs');
+const {
+  buildCorrelationCacheKey,
+  computePortfolioCorrelationConcentration,
+  DEFAULT_WINDOWS: PORTFOLIO_CORRELATION_WINDOWS,
+  DEFAULT_PRIMARY_WINDOW: PORTFOLIO_CORRELATION_PRIMARY_WINDOW,
+  getCorrelationScorableSymbols,
+} = require('./src/utils/portfolioCorrelationConcentration');
 
 function scaleRateProxyValue(raw, isRateProxy) {
   if (raw == null || raw === undefined || !isRateProxy) return raw;
@@ -2047,6 +2054,43 @@ async function getPeriodReturnsCached(symbol) {
 // deltas without re-fetching both legs on every request.
 const dailyClosesCache = new Map();
 const DAILY_CLOSES_CACHE_TTL = parseInt(process.env.DAILY_CLOSES_CACHE_TTL_MS || '3600000', 10);
+
+const portfolioCorrelationResultCache = new Map();
+const portfolioCorrelationInFlight = new Map();
+const parsedPortfolioCorrelationCacheTtl = parseInt(process.env.PORTFOLIO_CORRELATION_CACHE_TTL_MS || '300000', 10);
+const PORTFOLIO_CORRELATION_CACHE_TTL = Number.isFinite(parsedPortfolioCorrelationCacheTtl)
+  ? Math.max(0, parsedPortfolioCorrelationCacheTtl)
+  : 300000;
+const parsedPortfolioCorrelationConcurrency = parseInt(process.env.PORTFOLIO_CORRELATION_HISTORY_CONCURRENCY || '8', 10);
+const PORTFOLIO_CORRELATION_HISTORY_CONCURRENCY = Number.isFinite(parsedPortfolioCorrelationConcurrency)
+  ? Math.max(1, parsedPortfolioCorrelationConcurrency)
+  : 8;
+
+function addPortfolioCorrelationMeta(concentration, meta = {}) {
+  return {
+    ...concentration,
+    meta: {
+      ...(concentration?.meta || {}),
+      ...meta,
+    },
+  };
+}
+
+async function mapWithConcurrency(items, concurrency, processor) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await processor(items[index], index);
+    }
+  }));
+
+  return results;
+}
 
 async function getDailyClosesCached(symbol) {
   const key = symbol.toUpperCase();
@@ -4584,6 +4628,134 @@ app.get('/api/portfolio', async (req, res) => {
     console.error(`[API] Error in /api/portfolio after ${totalTime}ms:`, error);
     res.status(500).json({
       error: 'Failed to fetch portfolio data',
+      details: error.message,
+    });
+  }
+});
+
+app.post('/api/portfolio/correlation-concentration', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const holdings = Array.isArray(req.body?.holdings) ? req.body.holdings : [];
+    const totalValue = Number(req.body?.totalValue);
+    const normalizedTotalValue = Number.isFinite(totalValue) ? totalValue : null;
+    const windows = Array.isArray(req.body?.windows) && req.body.windows.length > 0
+      ? req.body.windows
+      : PORTFOLIO_CORRELATION_WINDOWS;
+    const primaryWindow = Number(req.body?.primaryWindow) || PORTFOLIO_CORRELATION_PRIMARY_WINDOW;
+    const forceRefresh = req.body?.forceRefresh === true;
+    const cacheKey = buildCorrelationCacheKey({
+      holdings,
+      totalValue: normalizedTotalValue,
+      windows,
+      primaryWindow,
+    });
+
+    const cached = portfolioCorrelationResultCache.get(cacheKey);
+    const now = Date.now();
+    if (!forceRefresh && cached && now - cached.ts < PORTFOLIO_CORRELATION_CACHE_TTL) {
+      const totalTime = Date.now() - startTime;
+      console.log(
+        `[API] /api/portfolio/correlation-concentration cache hit in ${totalTime}ms`,
+      );
+      return res.json(addPortfolioCorrelationMeta(cached.data, {
+        cached: true,
+        deduped: false,
+        durationMs: totalTime,
+        cacheAgeMs: now - cached.ts,
+      }));
+    }
+
+    if (!forceRefresh && portfolioCorrelationInFlight.has(cacheKey)) {
+      const concentration = await portfolioCorrelationInFlight.get(cacheKey);
+      const totalTime = Date.now() - startTime;
+      console.log(
+        `[API] /api/portfolio/correlation-concentration deduped in ${totalTime}ms`,
+      );
+      return res.json(addPortfolioCorrelationMeta(concentration, {
+        cached: false,
+        deduped: true,
+        durationMs: totalTime,
+      }));
+    }
+
+    const calculationPromise = (async () => {
+      const symbols = getCorrelationScorableSymbols(holdings);
+      const histories = {};
+
+      if (symbols.length > 0) {
+        console.log(
+          `[API] Correlation concentration fetching ${symbols.length} scorable histories from ${holdings.length} holdings`,
+        );
+      }
+
+      const historyResults = await mapWithConcurrency(
+        symbols,
+        PORTFOLIO_CORRELATION_HISTORY_CONCURRENCY,
+        async (symbol) => {
+          try {
+            const series = await getDailyClosesCached(symbol);
+            return { symbol, series: series || [] };
+          } catch (error) {
+            console.warn(`[API] Correlation history fetch failed for ${symbol}:`, error.message);
+            return { symbol, series: [] };
+          }
+        },
+      );
+
+      historyResults.forEach((result) => {
+        if (result?.symbol) {
+          histories[result.symbol] = (result.series || []).map((row) => ({
+            date: row.date || (row.t ? new Date(row.t).toISOString().slice(0, 10) : null),
+            close: row.close,
+          })).filter((row) => row.date && Number.isFinite(Number(row.close)));
+        }
+      });
+
+      const concentration = computePortfolioCorrelationConcentration({
+        holdings,
+        totalValue: normalizedTotalValue,
+        histories,
+        windows,
+        primaryWindow,
+        asOf: new Date().toISOString(),
+      });
+
+      return addPortfolioCorrelationMeta(concentration, {
+        fetchedSymbols: symbols.length,
+        scorableSymbols: symbols.length,
+      });
+    })();
+
+    portfolioCorrelationInFlight.set(cacheKey, calculationPromise);
+
+    let concentration;
+    try {
+      concentration = await calculationPromise;
+      portfolioCorrelationResultCache.set(cacheKey, {
+        data: concentration,
+        ts: Date.now(),
+      });
+    } finally {
+      if (portfolioCorrelationInFlight.get(cacheKey) === calculationPromise) {
+        portfolioCorrelationInFlight.delete(cacheKey);
+      }
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(
+      `[API] /api/portfolio/correlation-concentration completed in ${totalTime}ms fetched=${concentration.meta?.fetchedSymbols || 0} scored=${concentration.coverage.scoredCount}`,
+    );
+    res.json(addPortfolioCorrelationMeta(concentration, {
+      cached: false,
+      deduped: false,
+      durationMs: totalTime,
+    }));
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/portfolio/correlation-concentration after ${totalTime}ms:`, error);
+    res.status(500).json({
+      error: 'Failed to calculate portfolio correlation concentration',
       details: error.message,
     });
   }

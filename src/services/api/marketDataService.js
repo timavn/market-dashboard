@@ -175,6 +175,29 @@ export class MarketDataService {
     }
   }
 
+  static async getPortfolioCorrelationConcentration({
+    holdings = [],
+    totalValue = null,
+    windows = [30, 90, 180],
+    primaryWindow = 90,
+    signal = null,
+    forceRefresh = false,
+  } = {}) {
+    try {
+      const response = await apiClient.post('/api/portfolio/correlation-concentration', {
+        holdings,
+        totalValue,
+        windows,
+        primaryWindow,
+        forceRefresh,
+      }, { signal });
+      return response.data;
+    } catch (error) {
+      console.error('Error calculating portfolio correlation concentration:', error);
+      throw error;
+    }
+  }
+
   // Get options chain
   static async getOptionsChain(symbol, expiration = null) {
     try {
