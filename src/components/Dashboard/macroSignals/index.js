@@ -1,4 +1,5 @@
 export { default as MacroSignalsCard } from './MacroSignalsCard';
+export { default as InflationNowcastPanel } from './InflationNowcastPanel';
 export { default as AssetTabs } from './AssetTabs';
 export { default as SignalSection } from './SignalSection';
 export { default as SignalRow, isInActionZone, isOutOfRange } from './SignalRow';
@@ -12,7 +13,7 @@ export {
   DEFAULT_ASSET_CLASS,
   GROUP_TO_ASSET_CLASS,
 } from './constants';
-export { inferEventMacroAssetClass } from './inferEventAssetClass';
+export { inferEventMacroAssetClass, isCpiMacroEvent } from './inferEventAssetClass';
 export { mapNormalizedRowToMacroSignal, mapNormalizedRows, isLongTrend, isShortTrend, normalizeTail } from './mapNormalizedRow';
 export {
   formatRangeNumber,

@@ -38,6 +38,13 @@ describe('normalizeQuote', () => {
     expect(q.warning).toMatch(/stale_quote/);
   });
 
+  it('does not fabricate freshness when a timestamp is missing', () => {
+    const q = normalizeQuote({ symbol: 'X', last: 10, close: 9 }, 'ibkr');
+    expect(q.timestamp).toBeNull();
+    expect(q.valid).toBe(false);
+    expect(q.warning).toMatch(/missing_timestamp/);
+  });
+
   it('normalizes Yahoo legacy shape', () => {
     const q = normalizeYahooLegacy(mockYahoo, 'SPY');
     expect(q.source).toBe('yahoo');

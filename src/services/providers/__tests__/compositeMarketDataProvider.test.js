@@ -79,4 +79,45 @@ describe('compositeMarketDataProvider fallback', () => {
     expect(legacy.source).toBe('yahoo');
     expect(legacy.price).toBe('50.00');
   });
+
+  it('routes an explicit SPX cash-index descriptor directly to Yahoo', async () => {
+    const descriptor = {
+      symbol: 'SPX',
+      secType: 'IND',
+      provider: 'yahoo',
+      providerSymbol: '^GSPC',
+    };
+    yahoo.getQuote.mockResolvedValue({
+      canonical: {
+        symbol: 'SPX',
+        source: 'yahoo',
+        mark: 7500,
+        last: 7500,
+        close: 7490,
+        timestamp: new Date().toISOString(),
+        dataType: 'delayed',
+        valid: true,
+        warning: 'yahoo_fallback',
+      },
+      error: null,
+    });
+
+    const legacy = await composite.getQuote(descriptor);
+
+    expect(legacy.symbol).toBe('SPX');
+    expect(legacy.source).toBe('yahoo');
+    expect(ibkr.getQuote).not.toHaveBeenCalled();
+    expect(yahoo.getQuote).toHaveBeenCalledWith(descriptor);
+  });
+
+  it.each([
+    { symbol: 'BZ', secType: 'FUT', provider: 'yahoo', providerSymbol: 'BZ=F' },
+    { symbol: 'BTC', secType: 'CRYPTO', provider: 'yahoo', providerSymbol: 'BTC-USD' },
+    { symbol: 'USDCAD', secType: 'CASH', provider: 'yahoo', providerSymbol: 'USDCAD=X' },
+  ])('does not ask IBKR for non-equity descriptor $symbol', async (descriptor) => {
+    yahoo.getQuote.mockResolvedValue({ canonical: null, error: 'invalid_yahoo' });
+    await composite.getQuote(descriptor);
+    expect(ibkr.getQuote).not.toHaveBeenCalled();
+    expect(yahoo.getQuote).toHaveBeenCalledWith(descriptor);
+  });
 });

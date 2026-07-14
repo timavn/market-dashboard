@@ -4,6 +4,21 @@ const { isFinancialMacroEvent } = require('../filter/isFinancialMacroEvent');
 const { setProviderStatus } = require('../cache');
 const { paginateKalshi, kalshiFetch } = require('./kalshiClient');
 
+const CPI_MONTHS = {
+  JANUARY: 'JAN',
+  FEBRUARY: 'FEB',
+  MARCH: 'MAR',
+  APRIL: 'APR',
+  MAY: 'MAY',
+  JUNE: 'JUN',
+  JULY: 'JUL',
+  AUGUST: 'AUG',
+  SEPTEMBER: 'SEP',
+  OCTOBER: 'OCT',
+  NOVEMBER: 'NOV',
+  DECEMBER: 'DEC',
+};
+
 async function fetchFinancialSeries() {
   const data = await kalshiFetch('/series', {});
   const series = data.series || [];
@@ -15,6 +30,82 @@ async function fetchFinancialSeries() {
       `${cat} ${tags} ${s.title || ''}`
     );
   });
+}
+
+function getCpiYoyEventTicker(cpi = {}) {
+  const metric = String(cpi.metric || '').toUpperCase();
+  if (metric && !/\bYOY\b|\bY\/Y\b|YEAR/i.test(metric)) return null;
+
+  const values = [cpi.releaseCode, cpi.reportMonth, cpi.forecastMonth];
+  for (const value of values) {
+    const text = String(value || '').toUpperCase();
+    const match = text.match(
+      /\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b\D*(\d{2,4})/,
+    );
+    if (!match) continue;
+    const month = CPI_MONTHS[match[1]] || match[1].slice(0, 3);
+    const year = match[2].slice(-2);
+    return `KXCPIYOY-${year}${month}`;
+  }
+  return null;
+}
+
+function normalizeKalshiCpiMarket(market, eventTicker) {
+  const event = normalizeEvent({
+    market,
+    series: {
+      ticker: 'KXCPIYOY',
+      title: 'Headline CPI YoY',
+      category: 'Economics',
+      settlement_sources: [{ name: 'Bureau of Labor Statistics' }],
+    },
+    event: {
+      event_ticker: eventTicker,
+      title: market.title || 'Headline CPI YoY',
+      category: 'Economics',
+    },
+  }, 'kalshi');
+  const threshold = market.subtitle ?? market.floor_strike ?? '';
+  return {
+    ...event,
+    category: 'Inflation',
+    underlying: 'KXCPIYOY',
+    event_title: market.title || event.event_title || 'Headline CPI YoY',
+    contract_title: threshold !== '' ? `Above ${threshold}%` : event.contract_title,
+    question: market.title || event.question,
+  };
+}
+
+async function fetchKalshiCpiEvents(cpi = {}, options = {}) {
+  const eventTicker = getCpiYoyEventTicker(cpi);
+  if (!eventTicker || process.env.PM_USE_MOCK === 'true' || options.useMock) return [];
+
+  try {
+    const markets = await paginateKalshi(
+      '/markets',
+      { event_ticker: eventTicker, status: 'open' },
+      'markets',
+      options.maxPages || 2,
+    );
+    const normalized = markets
+      .filter((market) => String(market.status || '').toLowerCase() === 'active')
+      .map((market) => normalizeKalshiCpiMarket(market, eventTicker));
+
+    setProviderStatus('kalshi', {
+      status: 'connected',
+      last_success_at: new Date().toISOString(),
+      message: null,
+    });
+    return normalized;
+  } catch (err) {
+    console.warn('[Kalshi] targeted CPI fetch error:', err.message);
+    setProviderStatus('kalshi', {
+      status: err.status === 401 ? 'auth_required' : 'error',
+      message: err.message,
+      last_success_at: null,
+    });
+    return [];
+  }
 }
 
 async function fetchKalshiEvents(options = {}) {
@@ -79,4 +170,9 @@ async function fetchKalshiEvents(options = {}) {
   }
 }
 
-module.exports = { fetchKalshiEvents, fetchFinancialSeries };
+module.exports = {
+  fetchKalshiEvents,
+  fetchFinancialSeries,
+  fetchKalshiCpiEvents,
+  getCpiYoyEventTicker,
+};

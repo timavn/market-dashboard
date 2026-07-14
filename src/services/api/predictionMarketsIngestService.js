@@ -6,6 +6,8 @@ const API_BASE_URL =
   'http://localhost:3001';
 
 const BASE = `${API_BASE_URL}/api/prediction-markets`;
+const IBKR_REFRESH_TIMEOUT_MS = Number(process.env.REACT_APP_IBKR_REFRESH_TIMEOUT_MS || 60000);
+const IBKR_DISCOVER_TIMEOUT_MS = Number(process.env.REACT_APP_IBKR_DISCOVER_TIMEOUT_MS || 30000);
 
 class PredictionMarketsIngestService {
   async getAggregatedEvents(params = {}) {
@@ -18,7 +20,14 @@ class PredictionMarketsIngestService {
 
   async refreshIbkr(body = {}) {
     const response = await axios.post(`${BASE}/refresh/ibkr`, body, {
-      timeout: 120000,
+      timeout: body?.cpi ? IBKR_REFRESH_TIMEOUT_MS : 120000,
+    });
+    return response.data;
+  }
+
+  async discoverIbkr(body = {}) {
+    const response = await axios.post(`${BASE}/discover/ibkr`, body, {
+      timeout: body?.cpi ? IBKR_DISCOVER_TIMEOUT_MS : 120000,
     });
     return response.data;
   }

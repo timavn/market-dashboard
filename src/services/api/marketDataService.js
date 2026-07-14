@@ -7,17 +7,61 @@ import { PortfolioAnalytics } from '../portfolioAnalytics';
 const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 const apiClient = axios.create({
   baseURL: backendUrl,
-  timeout: 60000, // 60 seconds - increased for large quote requests (111 symbols)
+  timeout: 60000, // 60 seconds - increased to handle slow DynamoDB/Yahoo Finance responses on cold cache
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+// Add response interceptor for better error handling
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+      console.warn(`[MarketDataService] Request timed out: ${error.config?.url}`);
+      throw new Error('Request timed out - server may be busy');
+    }
+    throw error;
+  }
+);
+
+const inFlightGetRequests = new Map();
+
+const normalizeParamsForKey = (params = {}) => Object.keys(params)
+  .sort()
+  .reduce((acc, key) => {
+    acc[key] = params[key];
+    return acc;
+  }, {});
+
+const dedupedGet = (url, config = {}) => {
+  if (config.signal) {
+    return apiClient.get(url, config);
+  }
+
+  const key = JSON.stringify({
+    url,
+    params: normalizeParamsForKey(config.params || {}),
+  });
+
+  const existing = inFlightGetRequests.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const request = apiClient.get(url, config)
+    .finally(() => {
+      inFlightGetRequests.delete(key);
+    });
+  inFlightGetRequests.set(key, request);
+  return request;
+};
+
 // Market Data Service
 export class MarketDataService {
   static async getProviderStatus() {
     try {
-      const response = await apiClient.get(ENDPOINTS.PROVIDERS_STATUS);
+      const response = await dedupedGet(ENDPOINTS.PROVIDERS_STATUS);
       return response.data;
     } catch (error) {
       console.error('Error fetching provider status:', error);
@@ -28,7 +72,7 @@ export class MarketDataService {
   // Get real-time quotes
   static async getQuotes(symbols) {
     try {
-      const response = await apiClient.get(ENDPOINTS.QUOTES, {
+      const response = await dedupedGet(ENDPOINTS.QUOTES, {
         params: { symbols: symbols.join(',') }
       });
       return response.data;
@@ -44,7 +88,7 @@ export class MarketDataService {
       const params = {};
       if (account) params.account = account;
       if (snapshotId) params.snapshotId = snapshotId;
-      const response = await apiClient.get(ENDPOINTS.PORTFOLIO, { params });
+      const response = await dedupedGet(ENDPOINTS.PORTFOLIO, { params });
       const data = response.data;
 
       // Handle both AWS API Gateway format (with snapshot/holdings) and local server format (direct)
@@ -132,8 +176,10 @@ export class MarketDataService {
           dataSource: data.dataSource || null,
           accountSummary: data.accountSummary || null,
           accountId: data.accountId || null,
+          pnl: data.pnl || null,
           empty: Boolean(data.empty),
           reconciliationWarnings: data.reconciliationWarnings || [],
+          dataQuality: data.dataQuality || null,
 
           // Mock analytics for local development
           riskMetrics: {
@@ -175,6 +221,62 @@ export class MarketDataService {
     }
   }
 
+  static async getPortfolioAccounts() {
+    try {
+      const response = await dedupedGet(ENDPOINTS.PORTFOLIO_ACCOUNTS);
+      return response.data?.accounts || [];
+    } catch (error) {
+      console.error('Error fetching portfolio account snapshots:', error);
+      throw error;
+    }
+  }
+
+  static async getIbkrFlexStatus() {
+    try {
+      const response = await dedupedGet(ENDPOINTS.IBKR_FLEX_STATUS);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching IBKR Flex status:', error);
+      throw error;
+    }
+  }
+
+  static async syncIbkrFlex({ date = null } = {}) {
+    try {
+      const response = await apiClient.post(ENDPOINTS.IBKR_FLEX_SYNC, null, {
+        params: date ? { date } : {},
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error syncing IBKR Flex report:', error);
+      throw error;
+    }
+  }
+
+  static async getPortfolioExposureReconciliation({ date = null } = {}) {
+    try {
+      const response = await dedupedGet(ENDPOINTS.PORTFOLIO_EXPOSURE_RECONCILIATION, {
+        params: date ? { date } : {},
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching portfolio exposure reconciliation:', error);
+      throw error;
+    }
+  }
+
+  static async getPortfolioPredictionMarketPositions({ primaryAccount = null } = {}) {
+    try {
+      const params = {};
+      if (primaryAccount) params.primaryAccount = primaryAccount;
+      const response = await dedupedGet(ENDPOINTS.PORTFOLIO_PREDICTION_MARKET_POSITIONS, { params });
+      return response.data || { accounts: [], positions: [] };
+    } catch (error) {
+      console.error('Error fetching prediction market positions:', error);
+      throw error;
+    }
+  }
+
   static async getPortfolioCorrelationConcentration({
     holdings = [],
     totalValue = null,
@@ -204,7 +306,7 @@ export class MarketDataService {
       const params = { symbol };
       if (expiration) params.expiration = expiration;
 
-      const response = await apiClient.get(ENDPOINTS.OPTIONS_CHAIN, { params });
+      const response = await dedupedGet(ENDPOINTS.OPTIONS_CHAIN, { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching options chain:', error);
@@ -215,7 +317,7 @@ export class MarketDataService {
   // Get VIX data
   static async getVIXData() {
     try {
-      const response = await apiClient.get(ENDPOINTS.VIX);
+      const response = await dedupedGet(ENDPOINTS.VIX);
       return response.data;
     } catch (error) {
       console.error('Error fetching VIX data:', error);
@@ -226,7 +328,7 @@ export class MarketDataService {
   // Get macro indicators (DXY, GLD, UST10Y, CRB, WTI, SPY, QQQ, IWM)
   static async getMacroIndicators() {
     try {
-      const response = await apiClient.get('/api/macro-indicators');
+      const response = await dedupedGet('/api/macro-indicators');
       return response.data;
     } catch (error) {
       console.error('Error fetching macro indicators:', error);
@@ -248,7 +350,7 @@ export class MarketDataService {
         params.includePeriodReturns = 'true';
       }
 
-      const response = await apiClient.get('/api/multi-region-quotes', { params });
+      const response = await dedupedGet('/api/multi-region-quotes', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching multi-region quotes:', error);
@@ -259,7 +361,7 @@ export class MarketDataService {
   // Get volume data
   static async getVolumeData(symbols) {
     try {
-      const response = await apiClient.get(ENDPOINTS.VOLUME, {
+      const response = await dedupedGet(ENDPOINTS.VOLUME, {
         params: { symbols: symbols.join(',') }
       });
       return response.data;
@@ -275,7 +377,7 @@ export class MarketDataService {
   // - totalExchange: listed exchange share volume
   static async getMarketShareVolume(days = 365) {
     try {
-      const response = await apiClient.get(ENDPOINTS.MARKET_SHARE_VOLUME, {
+      const response = await dedupedGet(ENDPOINTS.MARKET_SHARE_VOLUME, {
         params: { days }
       });
       return response.data;
@@ -349,7 +451,7 @@ export class MarketDataService {
   // Get signal strength rankings
   static async getSignalStrengthRankings() {
     try {
-      const response = await apiClient.get('/api/securities/signal-strength');
+      const response = await dedupedGet('/api/securities/signal-strength');
       return response.data;
     } catch (error) {
       console.error('Error fetching signal strength rankings:', error);
@@ -361,7 +463,7 @@ export class MarketDataService {
   static async getRiskRanges(tickers = null) {
     try {
       const params = tickers ? { tickers: tickers.join(',') } : {};
-      const response = await apiClient.get(ENDPOINTS.RISK_RANGES, { params });
+      const response = await dedupedGet(ENDPOINTS.RISK_RANGES, { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching risk ranges:', error);
@@ -372,7 +474,7 @@ export class MarketDataService {
   // Get risk range history for a specific ticker
   static async getRiskRangeHistory(ticker, limit = 30) {
     try {
-      const response = await apiClient.get('/api/risk-ranges/history', {
+      const response = await dedupedGet('/api/risk-ranges/history', {
         params: { ticker, limit }
       });
       return response.data;
@@ -390,7 +492,7 @@ export class MarketDataService {
   // Get all risk range history (bulk)
   static async getAllRiskRangeHistory() {
     try {
-      const response = await apiClient.get('/api/risk-ranges/history-all');
+      const response = await dedupedGet('/api/risk-ranges/history-all');
       return response.data;
     } catch (error) {
       console.error('Error fetching all risk range history:', error);
@@ -404,7 +506,7 @@ export class MarketDataService {
   static async getHedgeyeSnapshot(snapshotType, date = null) {
     try {
       const params = date ? { date } : undefined;
-      const response = await apiClient.get(
+      const response = await dedupedGet(
         `/api/hedgeye/snapshot/${encodeURIComponent(snapshotType)}`,
         { params }
       );
@@ -419,7 +521,7 @@ export class MarketDataService {
   // Get Hedgeye freshness status for all 6 data types
   static async getHedgeyeFreshness() {
     try {
-      const response = await apiClient.get('/api/hedgeye/freshness');
+      const response = await dedupedGet('/api/hedgeye/freshness');
       return response.data;
     } catch (error) {
       console.error('Error fetching Hedgeye freshness:', error);
@@ -427,9 +529,65 @@ export class MarketDataService {
     }
   }
 
+  static async getHedgeyeChangelog() {
+    try {
+      const response = await dedupedGet('/api/hedgeye/changelog');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Hedgeye changelog:', error);
+      throw error;
+    }
+  }
+
+  static async getRealTimeAlertPositions() {
+    try {
+      const response = await dedupedGet('/api/hedgeye/real-time-alert/positions');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching real-time alert positions:', error);
+      throw error;
+    }
+  }
+
+  static async getHermesDirectorStatus() {
+    try {
+      const response = await dedupedGet(ENDPOINTS.HERMES_DIRECTOR_STATUS);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Hermes director status:', error);
+      throw error;
+    }
+  }
+
+  static async runHermesDirectorCommand(command, payload = {}) {
+    try {
+      const response = await apiClient.post(ENDPOINTS.HERMES_DIRECTOR_COMMAND, {
+        command,
+        payload,
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error running Hermes command "${command}":`, error);
+      throw error;
+    }
+  }
+
+  static async updateHermesAlert(alertId, action, payload = {}) {
+    try {
+      const response = await apiClient.post(`/api/hermes/alerts/${encodeURIComponent(alertId)}/action`, {
+        action,
+        ...payload,
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating Hermes alert ${alertId}:`, error);
+      throw error;
+    }
+  }
+
   static async getHedgeyeEtfPro() {
     try {
-      const response = await apiClient.get('/api/hedgeye/etfpro');
+      const response = await dedupedGet('/api/hedgeye/etfpro');
       return response.data;
     } catch (error) {
       console.error('Error fetching ETF Pro snapshot:', error);
@@ -449,7 +607,7 @@ export class MarketDataService {
   static async getHistoricalData(symbol, days = 30) {
     try {
       // Use query parameter to handle symbols with slashes (e.g., GBP/USD)
-      const response = await apiClient.get('/api/usd/historical', {
+      const response = await dedupedGet('/api/usd/historical', {
         params: { symbol: symbol, days }
       });
       return response.data;
@@ -462,7 +620,7 @@ export class MarketDataService {
   // Get USD correlations for all securities
   static async getUsdCorrelations() {
     try {
-      const response = await apiClient.get('/api/usd/correlations');
+      const response = await dedupedGet('/api/usd/correlations');
       return response.data;
     } catch (error) {
       console.error('Error fetching USD correlations:', error);
@@ -473,10 +631,21 @@ export class MarketDataService {
   // Get liquidity indicators (M3 proxy, Money Supply vs GDP)
   static async getLiquidityIndicators() {
     try {
-      const response = await apiClient.get('/api/liquidity-indicators');
+      const response = await dedupedGet('/api/liquidity-indicators');
       return response.data;
     } catch (error) {
       console.error('Error fetching liquidity indicators:', error);
+      throw error;
+    }
+  }
+
+  // Get global and U.S. dollar liquidity models
+  static async getDollarLiquidityModels() {
+    try {
+      const response = await dedupedGet('/api/liquidity-indicators');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching dollar liquidity models:', error);
       throw error;
     }
   }
@@ -485,7 +654,7 @@ export class MarketDataService {
   // Returns: { symbol, name, current, ohlc, chartData, meta }
   static async getChartData(symbol, range = '1d') {
     try {
-      const response = await apiClient.get(`/api/chart-data/${encodeURIComponent(symbol)}`, {
+      const response = await dedupedGet(`/api/chart-data/${encodeURIComponent(symbol)}`, {
         params: { range }
       });
       return response.data;

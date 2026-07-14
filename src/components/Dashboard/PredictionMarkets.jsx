@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Activity, FileText } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Activity, FileText, Info } from 'lucide-react';
 import './PredictionMarkets.css';
 import { MarketDataService } from '../../services/api/marketDataService';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
@@ -14,6 +14,7 @@ import {
   AssetTabs,
   DEFAULT_ASSET_CLASS,
   inferEventMacroAssetClass,
+  isCpiMacroEvent,
 } from './macroSignals';
 import { SecuritiesUniverseMetricsTable } from './securitiesUniverse/index';
 import useEnrichedSecurity from '../../hooks/useEnrichedSecurity';
@@ -21,10 +22,18 @@ import RefreshButton from '../common/RefreshButton';
 import LoadingIndicator from '../common/LoadingIndicator';
 import StatusDot from '../common/StatusDot';
 import Pmv2CardChrome from './Pmv2CardChrome';
+import contractsArmWrestleIcon from '../../assets/contracts-arm-wrestle.png';
+import payoutMapTreasureIcon from '../../assets/payout-map-treasure.png';
 import {
   filterContractMapEvents,
   groupContractMapByEvent,
 } from '../../utils/contractMapFilters';
+import {
+  buildCpiContractLadder,
+  deriveCpiTargetStrikes,
+  normalizeCpiNowcast,
+  summarizeCpiPositions,
+} from '../../utils/cpiPredictionMarket';
 import {
   adjustProbability,
   grossEdgeYes,
@@ -133,7 +142,6 @@ const TABS = [
   { id: 'calibration',  label: 'Calibration' },
   { id: 'performance',  label: 'Performance' },
   { id: 'journal',      label: 'Journal' },
-  { id: 'settings',     label: 'Settings' },
 ];
 
 const ASSET_CLASSES = ['equities', 'rates', 'fx', 'commodities', 'crypto'];
@@ -1545,6 +1553,8 @@ const CMAP_VENUE_FILTERS = [
 ];
 
 const CMAP_QUALITY_LABELS = {
+  open_position: 'Held',
+  missing_market_value: 'No MV',
   wide_spread: 'Wide spread',
   thin_liquidity: 'Thin',
   stale_quote: 'Stale',
@@ -1554,6 +1564,9 @@ const CMAP_QUALITY_LABELS = {
 
 const PROVIDER_STATUS_LABEL = {
   connected: 'Connected',
+  connected_no_contracts: 'No contracts',
+  connected_positions_only: 'Positions loaded',
+  gateway_half_connected: 'Gateway half-connected',
   gateway_offline: 'Gateway offline',
   sidecar_offline: 'Sidecar offline',
   tws_offline: 'IB Gateway offline',
@@ -1565,6 +1578,21 @@ const PROVIDER_STATUS_LABEL = {
 
 const EVENT_STATUSES = new Set(['watchlist', 'planned', 'open']);
 const BET_STATUSES = new Set(['open', 'closed', 'settled']);
+const IBKR_WORKBENCH_VENUES = new Set(['ForecastEx', 'CME', 'IBKR']);
+
+function isIbkrWorkbenchEvent(event) {
+  return Boolean(
+    event?.tradable_in_ibkr === true ||
+    event?.ibkr_tradable === true ||
+    event?.source_api === 'IBKR_CPAPI' ||
+    event?.source_api === 'kalshi_trade_api_v2' ||
+    IBKR_WORKBENCH_VENUES.has(event?.venue)
+  );
+}
+
+function filterIbkrWorkbenchEvents(events = []) {
+  return (events || []).filter(isIbkrWorkbenchEvent);
+}
 
 const CAT_COLORS = {
   Index:       { bg: '#e0f2fe', text: '#0369a1' },
@@ -2212,76 +2240,280 @@ export function PalantirOrbIcon({ size = 24, className = '' }) {
   return <PredictionMarketsLogo variant="icon" height={size} className={className} />;
 }
 
-function PredictionMarketsHeaderV2({ onClose }) {
-  return (
-    <header className="pmv2-redesign-header">
-      <div className="pmv2-header-left">
-        <button
-          type="button"
-          className="pmv2-header-brand"
-          onClick={onClose}
-          title={onClose ? 'Close panel' : undefined}
-          disabled={!onClose}
-        >
-          <PredictionMarketsLogo variant="icon" height={28} />
-          <span className="pmv2-header-title">Prediction Markets</span>
-        </button>
-      </div>
-    </header>
-  );
-}
-
 function providerSourceStatus(status) {
   if (status === 'connected') return 'current';
-  if (['gateway_offline', 'sidecar_offline', 'tws_offline', 'auth_required', 'unknown', 'stale'].includes(status)) {
+  if (status === 'gateway_half_connected') return 'stale';
+  if ([
+    'connected_no_contracts',
+    'connected_positions_only',
+    'gateway_offline',
+    'sidecar_offline',
+    'tws_offline',
+    'auth_required',
+    'unknown',
+    'stale',
+  ].includes(status)) {
     return 'stale';
   }
   return 'defective';
 }
 
-function deriveProviderAggregateStatus(kalshi, ibkr) {
-  const kalshiOk = kalshi?.status === 'connected';
-  const ibkrOk = ibkr?.status === 'connected';
-  if (kalshiOk && ibkrOk) return 'active';
-  if (!kalshiOk && !ibkrOk) return 'inactive';
+function getCpiProviderDiscovery(providers = {}) {
+  const ibkr = providers?.ibkr || providers || {};
+  return ibkr.cpi_discovery || ibkr.cpiDiscovery || {};
+}
+
+function getCpiContractsTotal(providers = {}) {
+  const ibkr = providers?.ibkr || providers || {};
+  const cpiDiscovery = getCpiProviderDiscovery(providers);
+  return ibkr.contracts_total ?? ibkr.contractsTotal ?? cpiDiscovery.contracts_total ?? cpiDiscovery.contractsTotal ?? null;
+}
+
+function hasCompleteIbkrCpiCatalog(providers = {}) {
+  const ibkr = providers?.ibkr || {};
+  const cpiDiscovery = getCpiProviderDiscovery(providers);
+  const targetStrikes = cpiDiscovery.targetStrikes || [];
+  const missingStrikes = cpiDiscovery.missingStrikes || [];
+  const contractsTotal = getCpiContractsTotal(providers);
+  const portfolioSeedCount = ibkr.portfolio_seed_count ?? ibkr.portfolioSeedCount ?? 0;
+  if (targetStrikes.length > 0 && missingStrikes.length > 0) return false;
+  if (targetStrikes.length > 0 && Number(contractsTotal || 0) < targetStrikes.length) return false;
+  if (Number(contractsTotal || 0) > 0 && Number(portfolioSeedCount || 0) >= Number(contractsTotal || 0)) return false;
+  return true;
+}
+
+function deriveProviderAggregateStatus(providers) {
+  const ibkr = providers?.ibkr || providers || {};
+  if (isLiveIbkrProvider(providers?.ibkr ? providers : { ibkr })) return 'active';
+  if (!ibkr?.status || ibkr.status === 'unknown') return 'inactive';
   return 'stale';
 }
 
-function ContractProviderStatusDot({ providers, ibkrLoading, onRefreshIbkr }) {
-  const kalshi = providers?.kalshi || {};
-  const ibkr = providers?.ibkr || {};
+function deriveCpiProviderAggregateStatus(providers) {
+  if (isLiveIbkrProvider(providers) || providers?.kalshi?.status === 'connected') return 'active';
+  return deriveProviderAggregateStatus(providers);
+}
 
-  const sources = useMemo(() => [
-    {
-      id: 'kalshi',
-      label: 'Kalshi',
-      detail: PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status || 'Unknown',
-      status: providerSourceStatus(kalshi.status),
-    },
-    {
-      id: 'ibkr',
-      label: 'IBKR',
-      detail: PROVIDER_STATUS_LABEL[ibkr.status] || ibkr.status || 'Unknown',
-      status: providerSourceStatus(ibkr.status),
-      action: (
-        <RefreshButton
-          iconOnly
-          onClick={onRefreshIbkr}
-          loading={ibkrLoading}
-          disabled={ibkrLoading}
-          title="Refresh IBKR contracts"
-          label="Refresh IBKR"
-        />
-      ),
-    },
-  ], [kalshi.status, ibkr.status, ibkrLoading, onRefreshIbkr]);
+function isConnectedIbkrProvider(providers) {
+  const ibkr = providers?.ibkr;
+  return ibkr?.status === 'connected' && ibkr?.gateway?.ok === true;
+}
+
+function isReachableIbkrGatewayProvider(providers) {
+  const ibkr = providers?.ibkr;
+  return Boolean(ibkr?.gateway?.ok === true && [
+    'connected',
+    'connected_no_contracts',
+    'connected_positions_only',
+  ].includes(ibkr?.status));
+}
+
+function isLiveIbkrProvider(providers) {
+  return isConnectedIbkrProvider(providers) && hasCompleteIbkrCpiCatalog(providers);
+}
+
+function isLiveCpiContractProvider(providers) {
+  return isReachableIbkrGatewayProvider(providers) || providers?.kalshi?.status === 'connected';
+}
+
+const NON_LIVE_TRADING_FLAGS = new Set([
+  'stale_quote',
+  'portfolio_seed',
+  'portfolio_discovered',
+  'catalog_missing',
+  'mock',
+  'fallback',
+  'no_live_quote',
+]);
+
+function hasNonLiveTradingFlag(event) {
+  return (event?.data_quality_flags || []).some((flag) => NON_LIVE_TRADING_FLAGS.has(flag));
+}
+
+function isLiveTradingEvent(event) {
+  return Boolean(event) &&
+    event.source_api !== 'IBKR_PORTFOLIO' &&
+    !event.heldPosition &&
+    !hasNonLiveTradingFlag(event);
+}
+
+function formatCpiDiagnosticStrikes(values = []) {
+  if (!Array.isArray(values) || values.length === 0) return 'None';
+  return values.map((value) => fmtCpiLevel(value, 1)).join(', ');
+}
+
+function formatDurationMs(value) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
+function formatCpiTiming(timing = {}) {
+  if (!timing || typeof timing !== 'object') return null;
+  const total = formatDurationMs(timing.express_total_ms ?? timing.total_ms);
+  const phase = timing.phase ? String(timing.phase) : null;
+  if (!total && !phase) return null;
+  return `Last ${phase || 'IBKR'} phase${total ? `: ${total}` : ''}`;
+}
+
+function ContractProviderStatusDot({
+  providers,
+  strikeCount = 0,
+  targetStrikeCount = 0,
+  contractWarnings = [],
+  ibkrLoading,
+  ibkrDiscovering,
+  onRefreshIbkr,
+  onDiscoverIbkr,
+}) {
+  const ibkr = providers?.ibkr || {};
+  const kalshi = providers?.kalshi || {};
+  const cpiDiscovery = ibkr.cpi_discovery || ibkr.cpiDiscovery || kalshi.cpi_discovery || kalshi.cpiDiscovery || null;
+  const contractsTotal = ibkr.contracts_total ?? ibkr.contractsTotal ?? cpiDiscovery?.contracts_total ?? cpiDiscovery?.contractsTotal;
+  const contractsAdded = ibkr.contracts_added ?? ibkr.contractsAdded ?? cpiDiscovery?.contracts_added ?? cpiDiscovery?.contractsAdded;
+  const lastSuccessAt = ibkr.last_success_at || ibkr.lastSuccessAt || cpiDiscovery?.last_success_at || null;
+  const portfolioSeedCount = ibkr.portfolio_seed_count ?? ibkr.portfolioSeedCount ?? 0;
+  const portfolioCpiPositions = ibkr.portfolio_cpi_positions ?? ibkr.portfolioCpiPositions ?? 0;
+  const timingText = formatCpiTiming(ibkr.cpi_timing || ibkr.cpiTiming);
+  const ibkrCatalogComplete = hasCompleteIbkrCpiCatalog(providers);
+
+  const sources = useMemo(() => {
+    const targetStrikes = cpiDiscovery?.targetStrikes || [];
+    const foundStrikes = cpiDiscovery?.foundStrikes || [];
+    const missingStrikes = cpiDiscovery?.missingStrikes || [];
+    const displayTargetCount = targetStrikes.length || targetStrikeCount || strikeCount;
+    const detailRows = [
+      {
+        text: `${strikeCount} of ${displayTargetCount} target strike${displayTargetCount === 1 ? '' : 's'} loaded`,
+        acknowledgeable: false,
+      },
+      {
+        text: `${targetStrikeCount || displayTargetCount} target strike${(targetStrikeCount || displayTargetCount) === 1 ? '' : 's'} shown`,
+        acknowledgeable: false,
+      },
+      ...(lastSuccessAt ? [
+        {
+          text: `Last refreshed: ${fmtTimeAgo(lastSuccessAt)} ago`,
+          acknowledgeable: false,
+        },
+      ] : []),
+      ...(targetStrikes.length > 0 ? [
+        {
+          text: `Target strikes: ${formatCpiDiagnosticStrikes(targetStrikes)}`,
+          acknowledgeable: false,
+        },
+        {
+          text: `Found strikes: ${formatCpiDiagnosticStrikes(foundStrikes)}`,
+          acknowledgeable: false,
+        },
+        {
+          text: `Missing strikes: ${formatCpiDiagnosticStrikes(missingStrikes)}`,
+          acknowledgeable: false,
+        },
+      ] : []),
+      ...(contractsTotal != null ? [
+        {
+          text: `Discovered contracts: ${contractsTotal}${contractsAdded != null ? ` total, ${contractsAdded} added last run` : ''}`,
+          acknowledgeable: false,
+        },
+      ] : []),
+      ...(portfolioCpiPositions ? [
+        {
+          text: `${portfolioCpiPositions} held CPI position${portfolioCpiPositions === 1 ? '' : 's'} tracked separately`,
+          acknowledgeable: false,
+        },
+      ] : []),
+      ...(portfolioSeedCount ? [
+        {
+          text: `${portfolioSeedCount} portfolio-seeded contract${portfolioSeedCount === 1 ? '' : 's'} excluded from executable ladder`,
+          acknowledgeable: false,
+        },
+      ] : []),
+      ...(timingText ? [
+        {
+          text: timingText,
+          acknowledgeable: false,
+        },
+      ] : []),
+      ...[...new Set(contractWarnings.filter(Boolean))].map((warning) => ({
+        text: warning,
+        acknowledgeable: false,
+      })),
+    ];
+
+    return [
+      {
+        id: 'ibkr',
+        label: 'IBKR',
+        detail: ibkr.message || PROVIDER_STATUS_LABEL[ibkr.status] || ibkr.status || 'Unknown',
+        detailRows,
+        status: ibkr.status === 'connected' && !ibkrCatalogComplete ? 'stale' : providerSourceStatus(ibkr.status),
+        action: (
+          <>
+            {['connected_no_contracts', 'connected_positions_only'].includes(ibkr.status) && onDiscoverIbkr && (
+              <RefreshButton
+                iconOnly
+                onClick={onDiscoverIbkr}
+                loading={ibkrDiscovering}
+                disabled={ibkrLoading || ibkrDiscovering}
+                title="Discover IBKR event contracts"
+                label="Discover IBKR"
+              />
+            )}
+            <RefreshButton
+              iconOnly
+              onClick={onRefreshIbkr}
+              loading={ibkrLoading}
+              disabled={ibkrLoading || ibkrDiscovering}
+              title="Refresh IBKR contracts"
+              label="Refresh IBKR"
+            />
+          </>
+        ),
+      },
+      ...(kalshi.status ? [{
+        id: 'kalshi',
+        label: 'Kalshi',
+        detail: kalshi.message || PROVIDER_STATUS_LABEL[kalshi.status] || kalshi.status,
+        detailRows: [
+          ...(cpiDiscovery?.kalshiFoundStrikes?.length ? [{
+            text: `Kalshi CPI strikes: ${formatCpiDiagnosticStrikes(cpiDiscovery.kalshiFoundStrikes)}`,
+            acknowledgeable: false,
+          }] : []),
+        ],
+        status: providerSourceStatus(kalshi.status),
+      }] : []),
+    ];
+  }, [
+    contractWarnings,
+    strikeCount,
+    targetStrikeCount,
+    cpiDiscovery,
+    contractsTotal,
+    contractsAdded,
+    lastSuccessAt,
+    portfolioCpiPositions,
+    portfolioSeedCount,
+    timingText,
+    ibkr.status,
+    ibkr.message,
+    ibkrCatalogComplete,
+    kalshi.status,
+    kalshi.message,
+    ibkrLoading,
+    ibkrDiscovering,
+    onRefreshIbkr,
+    onDiscoverIbkr,
+  ]);
 
   return (
     <StatusDot
-      status={deriveProviderAggregateStatus(kalshi, ibkr)}
+      status={deriveCpiProviderAggregateStatus(providers)}
+      emoji="🟢"
       size={8}
-      label="Contract providers"
-      overallLabel="Providers"
+      label="IBKR contract provider"
+      overallLabel="IBKR contracts"
       sources={sources}
       align="right"
     />
@@ -2402,7 +2634,12 @@ function TradePlanCard({ selectedSignal, selectedEvent, settings }) {
           {/* ── 3. Recommendation block ─────────────────── */}
           <div className="tp-section">
             <div className="tp-section-label">Recommendation</div>
-            {tradePlan && (
+            {tradePlan?.unavailableLiveData ? (
+              <div className="cpi-state cpi-state-compact tp-no-live-state">
+                <strong>No live executable quote</strong>
+                <span>{tradePlan.explanation}</span>
+              </div>
+            ) : tradePlan && (
               <div className={`tp-rec-box ${tradePlan.suggestedSize > 0 ? (tradePlan.recommendedSide === 'YES' ? 'yes' : 'no') : 'neutral'}`}>
                 <div className="tp-rec-header">
                   <span className={`tp-rec-side ${tradePlan.recommendedSide === 'YES' ? 'yes' : 'no'}`}>
@@ -2443,22 +2680,29 @@ function TradePlanCard({ selectedSignal, selectedEvent, settings }) {
           {/* ── 4. IBKR Order Fields block ─────────────── */}
           <div className="tp-section">
             <div className="tp-section-label">IBKR Order Fields</div>
-            <div className="tp-ibkr-grid">
-              <TpFieldRow label="Contract / Event" value={selectedEvent.question || selectedEvent.event_title || '—'} fullWidth />
-              <TpFieldRow label="Venue" value={selectedEvent.venue || 'Kalshi / IBKR ForecastEx'} />
-              <TpFieldRow label="Side" value={tradePlan ? `Buy ${tradePlan.recommendedSide}` : '—'} highlight />
-              <TpFieldRow label="Quantity" value={tradePlan ? `${tradePlan.suggestedSize} contracts` : '—'} />
-              <TpFieldRow label="Limit Price" value={
-                tradePlan && tradePlan.recommendedSide === 'YES' && selectedEvent.yes != null
-                  ? fmtPct(selectedEvent.yes)
-                  : tradePlan && selectedEvent.no != null
-                    ? fmtPct(selectedEvent.no)
-                    : '—'
-              } />
-              <TpFieldRow label="Est. Cost" value={tradePlan ? fmt$(tradePlan.estimatedCost) : '—'} />
-              <TpFieldRow label="Worst-Case Loss" value={tradePlan ? fmt$(tradePlan.worstCaseLoss) : '—'} />
-              <TpFieldRow label="Notes" value={`Signal: ${selectedSignal.symbol} ${selectedSignal.trend || ''}. Enter via ForecastEx or Kalshi bridge. Confirm settlement source before entry.`} fullWidth />
-            </div>
+            {tradePlan?.unavailableLiveData ? (
+              <div className="cpi-state cpi-state-compact tp-no-live-state">
+                <strong>Order fields disabled</strong>
+                <span>Connect IB Gateway/TWS and refresh live contract quotes before entering an order.</span>
+              </div>
+            ) : (
+              <div className="tp-ibkr-grid">
+                <TpFieldRow label="Contract / Event" value={selectedEvent.question || selectedEvent.event_title || '—'} fullWidth />
+                <TpFieldRow label="Venue" value={selectedEvent.venue || 'Kalshi / IBKR ForecastEx'} />
+                <TpFieldRow label="Side" value={tradePlan ? `Buy ${tradePlan.recommendedSide}` : '—'} highlight />
+                <TpFieldRow label="Quantity" value={tradePlan ? `${tradePlan.suggestedSize} contracts` : '—'} />
+                <TpFieldRow label="Limit Price" value={
+                  tradePlan && tradePlan.recommendedSide === 'YES' && selectedEvent.yes != null
+                    ? fmtPct(selectedEvent.yes)
+                    : tradePlan && selectedEvent.no != null
+                      ? fmtPct(selectedEvent.no)
+                      : '—'
+                } />
+                <TpFieldRow label="Est. Cost" value={tradePlan ? fmt$(tradePlan.estimatedCost) : '—'} />
+                <TpFieldRow label="Worst-Case Loss" value={tradePlan ? fmt$(tradePlan.worstCaseLoss) : '—'} />
+                <TpFieldRow label="Notes" value={`Signal: ${selectedSignal.symbol} ${selectedSignal.trend || ''}. Enter via ForecastEx or Kalshi bridge. Confirm settlement source before entry.`} fullWidth />
+              </div>
+            )}
           </div>
         </>
       )}
@@ -2480,15 +2724,6 @@ function TpFieldRow({ label, value, highlight, fullWidth }) {
     <div className={`tp-field-row${fullWidth ? ' full' : ''}`}>
       <span className="tp-field-label">{label}</span>
       <span className={`tp-field-value${highlight ? ' highlight' : ''}`}>{value}</span>
-    </div>
-  );
-}
-
-function HeroStat({ label, value, tone }) {
-  return (
-    <div className={`pmv2-hero-stat ${tone || ''}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }
@@ -2530,6 +2765,159 @@ function fmtTotalVolume(event) {
   const total = event.total_volume ?? event.open_interest;
   if (total != null && Number(total) > 0) return fmtVolume(total);
   return fmtVolume(event.volume);
+}
+
+function normalizeContractToken(value) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function isPredictionMarketHolding(holding = {}) {
+  if (holding.isPredictionMarket) return true;
+  const secType = String(holding.secType || holding.assetType || '').toUpperCase();
+  const text = [
+    holding.symbol,
+    holding.description,
+    holding.localSymbol,
+    holding.tradingClass,
+  ].filter(Boolean).join(' ').toUpperCase();
+  return (
+    secType === 'EVENT' ||
+    /\bKX[A-Z0-9]+\b/.test(text) ||
+    /\bCPIY\b/.test(text) ||
+    /(?:^|[-_ ])(?:YES|NO)(?:$|[-_ ])/.test(text)
+  );
+}
+
+function getHeldPredictionMarketPositions(portfolioData) {
+  return (portfolioData?.holdings || []).filter(
+    (holding) => Number(holding.quantity || 0) !== 0 && isPredictionMarketHolding(holding),
+  );
+}
+
+function dedupeHeldPredictionMarketPositions(positions = []) {
+  const seen = new Set();
+  const out = [];
+  for (const holding of positions) {
+    const key = [
+      holding.accountId,
+      holding.conid,
+      holding.symbol,
+      holding.description,
+    ].map(normalizeContractToken).join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(holding);
+  }
+  return out;
+}
+
+function getHoldingMatchTokens(holding = {}) {
+  return [
+    holding.conid,
+    holding.conId,
+    holding.symbol,
+    holding.description,
+    holding.localSymbol,
+    holding.positionId,
+  ]
+    .map(normalizeContractToken)
+    .filter(Boolean);
+}
+
+function getEventMatchTokens(event = {}) {
+  return [
+    event.conid,
+    event.conId,
+    event.ibkr_conid,
+    event.ibkrConId,
+    event.ibkr_contract?.conId,
+    event.contract?.conId,
+    event.contract?.conid,
+    event.symbol,
+    event.underlying,
+    event.underlyingTicker,
+    event.localSymbol,
+    event.contract_title,
+    event.event_title,
+    event.question,
+    event.id,
+  ]
+    .map(normalizeContractToken)
+    .filter(Boolean);
+}
+
+function eventMatchesHeldPosition(event, holding) {
+  const holdingTokens = getHoldingMatchTokens(holding);
+  const eventTokens = getEventMatchTokens(event);
+  return holdingTokens.some((holdingToken) =>
+    eventTokens.some((eventToken) =>
+      eventToken === holdingToken ||
+      eventToken.includes(holdingToken) ||
+      holdingToken.includes(eventToken),
+    ),
+  );
+}
+
+function inferPredictionHoldingCategory(holding = {}) {
+  const text = [holding.symbol, holding.description, holding.localSymbol].filter(Boolean).join(' ');
+  if (/\b(CPI|PCE|PPI|INFLATION)\b/i.test(text)) return 'Inflation';
+  return 'Other Macro';
+}
+
+function buildHeldPredictionEvent(holding) {
+  const title = holding.description || holding.symbol || 'IBKR prediction contract';
+  const price = Number(holding.price);
+  const validBinaryPrice = Number.isFinite(price) && price >= 0 && price <= 1 ? price : null;
+  const flags = ['open_position'];
+  if (holding.marketValue == null) flags.push('missing_market_value');
+
+  return {
+    id: `held-${holding.positionId || holding.conid || holding.symbol || title}`,
+    question: title,
+    contract_title: title,
+    event_title: holding.symbol || title,
+    category: inferPredictionHoldingCategory(holding),
+    venue: 'IBKR',
+    venues: ['IBKR'],
+    ibkr_tradable: true,
+    isOpenPosition: true,
+    heldQuantity: Number(holding.quantity || 0),
+    heldMarketValue: holding.marketValue,
+    heldPosition: holding,
+    yes: validBinaryPrice,
+    yes_bid: null,
+    yes_ask: null,
+    no: validBinaryPrice != null ? Math.max(0, 1 - validBinaryPrice) : null,
+    spread: null,
+    volume: null,
+    total_volume: null,
+    open_interest: null,
+    data_quality_flags: flags,
+    quote_source: holding.priceSource || null,
+    updated_at: holding.lastUpdated || null,
+  };
+}
+
+function mergeHeldPredictionEvents(events, heldPositions) {
+  if (!heldPositions.length) return events;
+  const matchedHoldings = new Set();
+  const enhanced = events.map((event) => {
+    const holding = heldPositions.find((candidate) => eventMatchesHeldPosition(event, candidate));
+    if (!holding) return event;
+    matchedHoldings.add(holding.positionId || holding.conid || holding.symbol || holding.description);
+    return {
+      ...event,
+      isOpenPosition: true,
+      heldQuantity: Number(holding.quantity || 0),
+      heldMarketValue: holding.marketValue,
+      heldPosition: holding,
+      data_quality_flags: [...new Set([...(event.data_quality_flags || []), 'open_position'])],
+    };
+  });
+  const synthetic = heldPositions
+    .filter((holding) => !matchedHoldings.has(holding.positionId || holding.conid || holding.symbol || holding.description))
+    .map(buildHeldPredictionEvent);
+  return [...enhanced, ...synthetic];
 }
 
 function fmtVolume(n) {
@@ -2593,12 +2981,13 @@ function getEventSortVal(ev, colId) {
 
 const CMAP_PAGE_SIZE = 20;
 
-function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading, providers, ibkrLoading, onRefreshIbkr }) {
+function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading, providers, ibkrLoading, onRefreshIbkr, heldContractCount = 0 }) {
   const [selectedAssetClass, setSelectedAssetClass] = useState(DEFAULT_ASSET_CLASS);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [venueFilter, setVenueFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [groupByEvent, setGroupByEvent] = useState(false);
+  const [openPositionsOnly, setOpenPositionsOnly] = useState(false);
   const [sortCol, setSortCol] = useState('oi');
   const [sortDir, setSortDir] = useState('desc');
   const [page, setPage] = useState(0);
@@ -2609,11 +2998,16 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading
   );
 
   const tabbedEvents = useMemo(() => {
-    const assetFiltered = filteredEvents.filter(
-      (e) => inferEventMacroAssetClass(e) === selectedAssetClass,
-    );
-    return groupByEvent ? groupContractMapByEvent(assetFiltered) : assetFiltered;
-  }, [filteredEvents, selectedAssetClass, groupByEvent]);
+    const assetFiltered = filteredEvents.filter((e) => (
+      selectedAssetClass === 'MACRO'
+        ? isCpiMacroEvent(e)
+        : inferEventMacroAssetClass(e) === selectedAssetClass
+    ));
+    const openFiltered = openPositionsOnly
+      ? assetFiltered.filter((e) => e.isOpenPosition)
+      : assetFiltered;
+    return groupByEvent ? groupContractMapByEvent(openFiltered) : openFiltered;
+  }, [filteredEvents, selectedAssetClass, groupByEvent, openPositionsOnly]);
 
   const sorted = useMemo(() => {
     const arr = [...tabbedEvents];
@@ -2626,7 +3020,7 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading
     return arr;
   }, [tabbedEvents, sortCol, sortDir]);
 
-  useEffect(() => { setPage(0); }, [sortCol, sortDir, selectedAssetClass, categoryFilter, venueFilter, searchQuery, groupByEvent]);
+  useEffect(() => { setPage(0); }, [sortCol, sortDir, selectedAssetClass, categoryFilter, venueFilter, searchQuery, groupByEvent, openPositionsOnly]);
 
   useEffect(() => {
     if (selectedId && !tabbedEvents.some(e => getEventKey(e) === selectedId)) {
@@ -2680,6 +3074,14 @@ function ContractMapCard({ events, selectedId, onSelect, selectedSignal, loading
             onChange={(e) => setGroupByEvent(e.target.checked)}
           />
           Group by event
+        </label>
+        <label className="cmap-group-toggle">
+          <input
+            type="checkbox"
+            checked={openPositionsOnly}
+            onChange={(e) => setOpenPositionsOnly(e.target.checked)}
+          />
+          Open positions{heldContractCount ? ` (${heldContractCount})` : ''}
         </label>
       </div>
       <FilterChipsV2 active={categoryFilter} onChange={setCategoryFilter} />
@@ -2798,11 +3200,14 @@ function TradeTicketV2({ event, settings, risk, analytics }) {
   const calc = useMemo(() => buildTicketCalc(event, settings), [event, settings]);
 
   if (!event || !calc) {
+    const emptyMessage = event
+      ? 'No live executable bid/ask quote is available for this market.'
+      : 'Select a mapped market to build a ticket.';
     return (
       <div className="pmv2-ticket-stack">
         <div className="pmv2-card">
           <div className="pmv2-card-title">Trade Ticket</div>
-          <div className="pmv2-empty">Select a mapped market to build a ticket.</div>
+          <div className="pmv2-empty">{emptyMessage}</div>
         </div>
       </div>
     );
@@ -2894,12 +3299,12 @@ function getBestEdge(events) {
 
 function withPricingFields(event) {
   if (!event) return event;
-  const yes = event.yes ?? event.yes_mid ?? event.last_price ?? event.yes_bid ?? 0;
-  const no = event.no ?? event.no_mid ?? event.no_bid ?? Math.max(0.01, 1 - yes);
+  const yes = Number(event.yes ?? event.yes_mid ?? event.last_price ?? event.yes_bid);
+  const no = Number(event.no ?? event.no_mid ?? event.no_bid);
   return {
     ...event,
-    yes: Number(yes) || 0,
-    no: Number(no) || 0,
+    yes: Number.isFinite(yes) ? yes : null,
+    no: Number.isFinite(no) ? no : null,
   };
 }
 
@@ -2907,11 +3312,24 @@ function getEventKey(event) {
   return event?.id || event?.contractId || event?.question || null;
 }
 
+function hasExecutablePrices(event) {
+  const yes = Number(event?.yes);
+  const no = Number(event?.no);
+  return (
+    Number.isFinite(yes) &&
+    Number.isFinite(no) &&
+    yes > 0 &&
+    yes < 1 &&
+    no > 0 &&
+    no < 1
+  );
+}
+
 function getEventEdge(event, settings = DEFAULT_SETTINGS) {
-  if (!event) return null;
+  if (!event || !hasExecutablePrices(event)) return null;
   const p = event.myProb ?? 0.58;
-  const yes = Number(event.yes || 0) || 0.5;
-  const no = Number(event.no || 0) || Math.max(0.01, 1 - yes);
+  const yes = Number(event.yes);
+  const no = Number(event.no);
   const fees = settings?.defaultFeePerContract ?? 0.02;
   const slippage = settings?.defaultSlippageBuffer ?? 0;
   const modelErr = settings?.modelErrorBuffer ?? 0;
@@ -2922,20 +3340,23 @@ function getEventEdge(event, settings = DEFAULT_SETTINGS) {
 
 function getRecommendedSide(event, settings = DEFAULT_SETTINGS) {
   if (!event) return 'Yes';
+  if (!hasExecutablePrices(event)) return null;
   const p = event.myProb ?? 0.58;
-  const yes = Number(event.yes || 0) || 0.5;
-  const no = Number(event.no || 0) || Math.max(0.01, 1 - yes);
+  const yes = Number(event.yes);
+  const no = Number(event.no);
   const yesEdge = calcNetEdge(grossEdgeYes(p, yes), settings.defaultFeePerContract, settings.defaultSlippageBuffer, settings.modelErrorBuffer);
   const noEdge = calcNetEdge(grossEdgeNo(p, no), settings.defaultFeePerContract, settings.defaultSlippageBuffer, settings.modelErrorBuffer);
   return yesEdge >= noEdge ? 'Yes' : 'No';
 }
 
 function buildTicketCalc(event, settings = DEFAULT_SETTINGS) {
-  if (!event) return null;
+  if (!event || !hasExecutablePrices(event)) return null;
   const p = event.myProb ?? 0.58;
-  const yes = Number(event.yes || 0) || 0.5;
-  const no = Number(event.no || 0) || Math.max(0.01, 1 - yes);
-  const side = getRecommendedSide(event, settings).toUpperCase();
+  const yes = Number(event.yes);
+  const no = Number(event.no);
+  const recommendedSide = getRecommendedSide(event, settings);
+  if (!recommendedSide) return null;
+  const side = recommendedSide.toUpperCase();
   const cp = Math.max(0.01, side === 'YES' ? yes : no);
   const pm = event.payoutMultiplier || 1;
   const contracts = fractionalKellySizing(
@@ -3051,11 +3472,26 @@ const DEFAULT_RISK_SETTINGS = {
 };
 
 function calculatePositionSize(signal, event, riskSettings = DEFAULT_SETTINGS) {
+  if (!event || !hasExecutablePrices(event)) {
+    return {
+      recommendedSide: inferSideFromSignal(signal, event),
+      suggestedSize: 0,
+      maxSize: 0,
+      estimatedCost: 0,
+      worstCaseLoss: 0,
+      expectedValue: 0,
+      confidence: 'Low',
+      explanation: 'No verified live bid/ask quote is available for this contract. Sizing and order fields are disabled until live data returns.',
+      isSignalOnly: true,
+      unavailableLiveData: true,
+      edge: null,
+    };
+  }
   const edge = getEventEdge(event, riskSettings) ?? 0;
   const maxRisk = riskSettings.maxRiskPerBet ?? riskSettings.maxRiskPerTrade ?? 500;
   const portfolioEquity = riskSettings.portfolioEquity ?? 100000;
   const side = getRecommendedSide(event, riskSettings);
-  const price = side === 'Yes' ? (Number(event.yes) || 0.5) : (Number(event.no) || 0.5);
+  const price = side === 'Yes' ? Number(event.yes) : Number(event.no);
   const pm = event.payoutMultiplier || 1;
   const hasModel = event.myProb != null;
 
@@ -3158,10 +3594,1491 @@ function formatMarketBand(event, index) {
   return index === 0 ? `${threshold} or above` : `Boundary near ${threshold}`;
 }
 
+function fmtCpiPercent(value, digits = 1) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  return `${n.toFixed(digits)}%`;
+}
+
+function fmtCpiLevel(value, digits = 2) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  return n.toFixed(digits);
+}
+
+function formatCpiLevelPercent(value, digits = 2) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  return `${n.toFixed(digits)}%`;
+}
+
+function fmtProb(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  return `${Math.round(n * 100)}%`;
+}
+
+const CPI_MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function getCpiMonthOptions(latest = { year: 2026, month: 5 }) {
+  return Array.from({ length: 13 }, (_, index) => {
+    const offset = index - 12;
+    const date = new Date(latest.year, latest.month + offset, 1);
+    const month = date.getMonth();
+    const year = date.getFullYear();
+    const shortYear = String(year).slice(-2);
+    return {
+      id: `${year}-${String(month + 1).padStart(2, '0')}`,
+      label: `${CPI_MONTH_LABELS[month]} ${shortYear}`,
+      fullLabel: `${date.toLocaleString('en-US', { month: 'long' })} ${year}`,
+      month,
+      year,
+    };
+  });
+}
+
+const DEFAULT_CPI_MONTH_OPTIONS = getCpiMonthOptions();
+const DEFAULT_CPI_DISCOVERY_METRIC = 'Headline CPI YoY';
+const DEFAULT_CPI_TARGET_STRIKES = [3.6, 3.7, 3.8, 3.9, 4, 4.1, 4.2];
+const CPI_MODEL_NOWCAST_DATE = process.env.REACT_APP_CPI_MODEL_NOWCAST_DATE || '2026-06-03';
+const PM_WORKBENCH_STATE_KEY = 'marketDashboard.predictionMarkets.workbench.v1';
+
+function readPredictionMarketsWorkbenchState() {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PM_WORKBENCH_STATE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePredictionMarketsWorkbenchState(state) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PM_WORKBENCH_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Non-critical UI preference persistence.
+  }
+}
+
+function getPersistedCpiMonth(state) {
+  const savedMonthId = state?.activeCpiMonthId;
+  return (
+    DEFAULT_CPI_MONTH_OPTIONS.find((month) => month.id === savedMonthId)
+    || DEFAULT_CPI_MONTH_OPTIONS[DEFAULT_CPI_MONTH_OPTIONS.length - 1]
+  );
+}
+
+const CPI_CALENDAR_FINALS = [
+  { id: '2025-06', label: 'Jun 25', final: 2.80, context: true, settlementLabel: 'Settlement Tuesday, July 15, 2025 · 8:30 AM ET' },
+  { id: '2025-07', label: 'Jul 25', final: 2.70, settlementLabel: 'Settlement Tuesday, August 12, 2025 · 8:30 AM ET' },
+  { id: '2025-08', label: 'Aug 25', final: 2.92, settlementLabel: 'Settlement Thursday, September 11, 2025 · 8:30 AM ET' },
+  { id: '2025-09', label: 'Sep 25', final: 3.01, settlementLabel: 'Settlement Friday, October 24, 2025 · 8:30 AM ET' },
+  { id: '2025-10', label: 'Oct 25', final: 2.87, settlementLabel: 'Settlement Thursday, November 13, 2025 · 8:30 AM ET' },
+  { id: '2025-11', label: 'Nov 25', final: 2.74, settlementLabel: 'Settlement Thursday, December 18, 2025 · 8:30 AM ET' },
+  { id: '2025-12', label: 'Dec 25', final: 2.68, settlementLabel: 'Settlement Tuesday, January 13, 2026 · 8:30 AM ET' },
+  { id: '2026-01', label: 'Jan 26', final: 2.39, settlementLabel: 'Settlement Friday, February 13, 2026 · 8:30 AM ET' },
+  { id: '2026-02', label: 'Feb 26', final: 2.41, settlementLabel: 'Settlement Wednesday, March 11, 2026 · 8:30 AM ET' },
+  { id: '2026-03', label: 'Mar 26', final: 3.26, settlementLabel: 'Settlement Friday, April 10, 2026 · 8:30 AM ET' },
+  { id: '2026-04', label: 'Apr 26', final: 3.81, settlementLabel: 'Settlement Tuesday, May 12, 2026 · 8:30 AM ET' },
+  { id: '2026-05', label: 'May 26', final: 4.25, settlementLabel: 'Settlement Wednesday, June 10, 2026 · 8:30 AM ET' },
+  { id: '2026-06', label: 'Jun 26', final: null, displayFinal: 0, settlementLabel: 'Settlement Tuesday, July 14, 2026 · 8:30 AM ET' },
+];
+
+const CPI_CALENDAR_SETTLEMENT_LABEL = 'Settlement Tuesday, July 14, 2026 · 8:30 AM ET';
+const CPI_CALENDAR_SCALE = {
+  min: -5,
+  zero: 0,
+  max: 10,
+};
+const CPI_MISSING_DATA_TITLE = 'Missing Data';
+const CPI_MISSING_DATA_MESSAGE = 'Live data is unavailable for this section.';
+
+function CpiMissingDataBox() {
+  return (
+    <div className="cpi-missing-data-box" role="status" aria-live="polite">
+      <strong>{CPI_MISSING_DATA_TITLE}</strong>
+      <span>{CPI_MISSING_DATA_MESSAGE}</span>
+    </div>
+  );
+}
+
+function getScenarioValue(model, key) {
+  const aliases = {
+    upside: ['upside', 'upper', 'bull', 'high'],
+    base: ['base', 'base-case', 'base case', 'central'],
+    downside: ['downside', 'lower', 'bear', 'low'],
+  };
+  const wanted = aliases[key] || [key];
+  const scenario = model?.scenarios?.find((item) => {
+    const tokens = [
+      item?.key,
+      item?.label,
+      item?.name,
+    ].map((value) => String(value || '').trim().toLowerCase());
+    return tokens.some((token) => wanted.includes(token));
+  });
+  return scenario?.value ?? scenario?.percent ?? scenario?.raw ?? null;
+}
+
+function hasOrderedCpiScenarioValues(lower, base, upper) {
+  const low = Number(lower);
+  const mid = Number(base);
+  const high = Number(upper);
+  return (
+    [low, mid, high].every(Number.isFinite) &&
+    low < mid &&
+    mid < high
+  );
+}
+
+function getCpiAccountValue(portfolioData = null, settings = {}) {
+  const candidates = [
+    portfolioData?.accountSummary?.netLiquidation,
+    portfolioData?.accountSummary?.equityWithLoanValue,
+    portfolioData?.summary?.totalValue,
+    settings?.portfolioEquity,
+    100000,
+  ];
+  for (const candidate of candidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 100000;
+}
+
+function getCpiSizeBps(settings = {}) {
+  const direct = Number(settings.cpiSizeBps ?? settings.maxRiskBps);
+  if (Number.isFinite(direct) && direct > 0) return Math.round(direct);
+  const dayRisk = Number(settings.maxRiskPerDay);
+  const equity = Number(settings.portfolioEquity);
+  if (Number.isFinite(dayRisk) && Number.isFinite(equity) && equity > 0) {
+    return Math.round((dayRisk / equity) * 10000);
+  }
+  return 200;
+}
+
+function getCpiBudget(settings = {}, portfolioData = null) {
+  return (getCpiSizeBps(settings) / 10000) * getCpiAccountValue(portfolioData, settings);
+}
+
+function getCpiRiskBps(value, settings = {}, portfolioData = null) {
+  const n = Number(value);
+  const accountValue = getCpiAccountValue(portfolioData, settings);
+  if (!Number.isFinite(n) || accountValue <= 0) return 0;
+  return Math.round((n / accountValue) * 10000);
+}
+
+function getAllocatedCpiRows(rows = []) {
+  return rows.filter((row) => !row.missingContract && Number(row.suggestedContracts || 0) > 0);
+}
+
+function isOpenCpiPositionRow(row = {}) {
+  const event = row.event || {};
+  return Boolean(
+    row.isOpenPosition ||
+    Number(row.openContracts || 0) > 0 ||
+    event.heldPosition ||
+    event.source_api === 'IBKR_PORTFOLIO' ||
+    (event.data_quality_flags || []).includes('open_position'),
+  );
+}
+
+function getCpiPayoffLeg(row = {}) {
+  if (isOpenCpiPositionRow(row)) {
+    const contracts = Number(row.openContracts || 0);
+    const riskPerContract = Number(row.openRiskPerContract || 0);
+    return {
+      contracts,
+      side: row.openSide || row.recommendedSide,
+      riskPerContract,
+      payoutMultiplier: Number(row.payoutMultiplier || 1),
+      estimatedCost: Number(row.openEstimatedCost || (contracts * riskPerContract) || 0),
+      maxProfit: Number(row.openMaxProfit || 0),
+      source: 'open_position',
+    };
+  }
+
+  const contracts = Number(row.suggestedContracts || 0);
+  const riskPerContract = Number(row.riskPerContract || 0);
+  return {
+    contracts,
+    side: row.recommendedSide,
+    riskPerContract,
+    payoutMultiplier: Number(row.payoutMultiplier || 1),
+    estimatedCost: Number(row.estimatedCost || (contracts * riskPerContract) || 0),
+    maxProfit: Number(row.maxProfit || 0),
+    source: 'recommendation',
+  };
+}
+
+function getPayoffCpiRows(rows = []) {
+  return rows.filter((row) => {
+    if (row.missingContract) return false;
+    const leg = getCpiPayoffLeg(row);
+    return leg.contracts > 0 && leg.riskPerContract > 0;
+  });
+}
+
+function calculateCpiScenarioPayoff(rows = [], scenarioValue) {
+  if (scenarioValue == null) return null;
+  const settlementValue = roundCpiSettlementLevel(scenarioValue);
+  if (!Number.isFinite(settlementValue)) return null;
+  return getPayoffCpiRows(rows).reduce((sum, row) => {
+    const leg = getCpiPayoffLeg(row);
+    const threshold = Number(row.threshold);
+    if (!leg.contracts || !Number.isFinite(threshold)) return sum;
+    const yesWins = settlementValue > threshold;
+    const legWins = leg.side === 'YES' ? yesWins : !yesWins;
+    const perContract = legWins ? leg.payoutMultiplier - leg.riskPerContract : -leg.riskPerContract;
+    return sum + (leg.contracts * perContract);
+  }, 0);
+}
+
+function formatCpiMoney(value, { decimals = 0, signed = false } = {}) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  const abs = Math.abs(n);
+  const sign = signed && n > 0 ? '+' : n < 0 ? '-' : '';
+  return `${sign}$${abs.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })}`;
+}
+
+function formatCpiCompactMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(abs >= 10000 ? 1 : 1)}K`;
+  return `${sign}$${abs.toFixed(0)}`;
+}
+
+function formatCpiContracts(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return n.toLocaleString('en-US', { maximumFractionDigits: n >= 100 ? 0 : 2 });
+}
+
+function roundCpiSettlementLevel(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.round((n + Number.EPSILON) * 10) / 10;
+}
+
+function getCpiScenarioSpecs(model) {
+  return [
+    { key: 'downside', label: 'Downside', tone: 'negative' },
+    { key: 'base', label: 'Base', tone: 'neutral' },
+    { key: 'upside', label: 'Upside', tone: 'positive' },
+  ].map((scenario) => {
+    const value = getScenarioValue(model, scenario.key);
+    return {
+      ...scenario,
+      value,
+      roundedValue: roundCpiSettlementLevel(value),
+    };
+  }).filter((scenario) => Number.isFinite(Number(scenario.value)) && scenario.roundedValue != null);
+}
+
+function getCpiScenarioWinCount(threshold, side, scenarios = []) {
+  const strike = Number(threshold);
+  if (!Number.isFinite(strike) || !scenarios.length) return 0;
+  return scenarios.filter((scenario) => {
+    const roundedValue = Number(scenario.roundedValue);
+    if (!Number.isFinite(roundedValue)) return false;
+    const yesWins = roundedValue > strike;
+    return side === 'NO' ? !yesWins : yesWins;
+  }).length;
+}
+
+function getCpiSettlementBoundary(threshold) {
+  const strike = roundCpiSettlementLevel(threshold);
+  if (!Number.isFinite(strike)) return null;
+  return Number((strike + 0.05).toFixed(2));
+}
+
+function getCpiPayoffStepSegments(rows = [], min = 3.5, max = 4.5) {
+  const payoffRows = getPayoffCpiRows(rows);
+  const epsilon = 0.0001;
+  const payAt = (value) => calculateCpiScenarioPayoff(payoffRows, value) ?? 0;
+  const boundaries = [...new Set(payoffRows
+    .map((row) => getCpiSettlementBoundary(row.threshold))
+    .filter((boundary) => Number.isFinite(boundary) && boundary > min && boundary < max)
+    .map((boundary) => Number(boundary.toFixed(2))))].sort((a, b) => a - b);
+
+  const horizontals = [];
+  const verticals = [];
+  let cursor = min;
+
+  boundaries.forEach((boundary) => {
+    const leftPayoff = payAt(Math.max(min, boundary - epsilon));
+    const rightPayoff = payAt(Math.min(max, boundary + epsilon));
+    if (boundary > cursor) {
+      horizontals.push({
+        from: cursor,
+        to: boundary,
+        payoff: leftPayoff,
+        tone: leftPayoff >= 0 ? 'positive' : 'negative',
+      });
+    }
+    if (leftPayoff !== rightPayoff) {
+      verticals.push({
+        cpi: boundary,
+        fromPayoff: leftPayoff,
+        toPayoff: rightPayoff,
+        tone: rightPayoff >= 0 ? 'positive' : 'negative',
+      });
+    }
+    cursor = boundary;
+  });
+
+  if (cursor < max) {
+    const payoff = payAt(Math.min(max, cursor + epsilon));
+    horizontals.push({
+      from: cursor,
+      to: max,
+      payoff,
+      tone: payoff >= 0 ? 'positive' : 'negative',
+    });
+  }
+
+  return { horizontals, verticals };
+}
+
+function getCpiLineScenarioOutcomes(threshold, side, scenarios = []) {
+  return scenarios.map((scenario) => {
+    const strike = Number(threshold);
+    const roundedValue = Number(scenario.roundedValue);
+    const yesWins = Number.isFinite(strike) && Number.isFinite(roundedValue) && roundedValue > strike;
+    const wins = side === 'NO' ? !yesWins : yesWins;
+    return {
+      ...scenario,
+      wins,
+    };
+  });
+}
+
+function formatCpiCents(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  return `${Math.round(n * 100)}c`;
+}
+
+function formatCpiEdgeCents(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '–';
+  const cents = Math.round(n * 100);
+  return cents > 0 ? `+${cents}c` : `${cents}c`;
+}
+
+function getCpiLineTitle(threshold, side) {
+  return `Above ${fmtCpiLevel(threshold, 1)} ${side}`;
+}
+
+function getCpiLineAsk(row, side) {
+  if (!row || row.missingContract) return null;
+  const ask = side === 'NO' ? row.noPrice : row.yesPrice;
+  const n = Number(ask);
+  return Number.isFinite(n) && n > 0 && n < 1 ? n : null;
+}
+
+function getCpiPositionLine(position, scenarios = []) {
+  const threshold = getCpiPositionThreshold(position);
+  const side = String(position.contractSide || 'YES').toUpperCase() === 'NO' ? 'NO' : 'YES';
+  const avgPrice = Number(position.avgPrice ?? position.lastPrice);
+  const fairValue = scenarios.length
+    ? getCpiScenarioWinCount(threshold, side, scenarios) / scenarios.length
+    : null;
+  const edge = Number.isFinite(avgPrice) && fairValue != null ? fairValue - avgPrice : null;
+  return {
+    id: `open-${position.id || position.title || threshold}-${side}`,
+    source: 'open_position',
+    title: getCpiLineTitle(threshold, side),
+    threshold,
+    side,
+    ask: Number.isFinite(avgPrice) ? avgPrice : null,
+    askLabel: 'Avg',
+    fairValue,
+    edge,
+    outcomes: getCpiLineScenarioOutcomes(threshold, side, scenarios),
+    wins: getCpiScenarioWinCount(threshold, side, scenarios),
+    scenarioCount: scenarios.length,
+    position,
+    executable: false,
+  };
+}
+
+function getCpiExecutableLineCandidates(rows = [], model = null, settings = {}) {
+  const scenarios = getCpiScenarioSpecs(model);
+  const riskBudget = Number(settings?.maxRiskPerBet || 500);
+  return rows
+    .filter((row) => !row.missingContract)
+    .flatMap((row) => ['YES', 'NO'].map((side) => {
+      const ask = getCpiLineAsk(row, side);
+      if (ask == null) return null;
+      const threshold = Number(row.threshold);
+      const wins = getCpiScenarioWinCount(threshold, side, scenarios);
+      const fairValue = scenarios.length ? wins / scenarios.length : null;
+      const edge = fairValue != null ? fairValue - ask : null;
+      const payoutMultiplier = Number(row.payoutMultiplier || 1);
+      const contracts = ask > 0 && riskBudget > 0
+        ? Math.floor(riskBudget / (ask * payoutMultiplier))
+        : 0;
+      return {
+        id: `${row.id}-${side}`,
+        source: 'live_quote',
+        row,
+        title: getCpiLineTitle(threshold, side),
+        threshold,
+        side,
+        ask,
+        askLabel: 'Ask',
+        fairValue,
+        edge,
+        outcomes: getCpiLineScenarioOutcomes(threshold, side, scenarios),
+        wins,
+        scenarioCount: scenarios.length,
+        executable: true,
+        payoutMultiplier,
+        riskBudget,
+        contracts,
+        evForBudget: edge == null ? null : contracts * edge * payoutMultiplier,
+      };
+    }))
+    .filter(Boolean);
+}
+
+function getCpiScenarioMatrixRows(rows = [], model = null, openPositions = []) {
+  const scenarios = getCpiScenarioSpecs(model);
+  const executableLines = getCpiExecutableLineCandidates(rows, model);
+  const byKey = new Map();
+  const addLine = (line) => {
+    if (!line || !Number.isFinite(Number(line.threshold))) return;
+    const key = `${Number(line.threshold).toFixed(1)}-${line.side}-${line.source}`;
+    if (!byKey.has(key)) byKey.set(key, line);
+  };
+
+  if (scenarios.length === 0) {
+    executableLines.slice(0, 8).forEach(addLine);
+    openPositions.map((position) => getCpiPositionLine(position, scenarios)).forEach(addLine);
+    return [...byKey.values()].sort((a, b) => {
+      if (Number(a.threshold) !== Number(b.threshold)) return Number(a.threshold) - Number(b.threshold);
+      if (a.side !== b.side) return a.side === 'YES' ? -1 : 1;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }
+
+  const roundedTargets = [...new Set(scenarios.map((scenario) => Number(scenario.roundedValue).toFixed(1)))];
+  roundedTargets.forEach((target) => {
+    const yesLine = executableLines.find((line) => line.side === 'YES' && Number(line.threshold).toFixed(1) === target);
+    if (yesLine) addLine(yesLine);
+  });
+
+  [...executableLines]
+    .filter((line) => Number.isFinite(Number(line.edge)))
+    .sort((a, b) => b.edge - a.edge)
+    .slice(0, 2)
+    .forEach(addLine);
+
+  openPositions.map((position) => getCpiPositionLine(position, scenarios)).forEach(addLine);
+
+  return [...byKey.values()].sort((a, b) => {
+    if (a.source !== b.source) {
+      if (a.source === 'live_quote' && b.source !== 'live_quote') return -1;
+      if (a.source !== 'live_quote' && b.source === 'live_quote') return 1;
+    }
+    if (Number(a.threshold) !== Number(b.threshold)) return Number(a.threshold) - Number(b.threshold);
+    if (a.side !== b.side) return a.side === 'YES' ? -1 : 1;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+function getCpiLineBadgeTone(line, index = 0) {
+  if (line?.side === 'YES') return 'green';
+  if (line?.side === 'NO') return 'blue';
+  return Number(line?.edge) > 0 || index === 0 ? 'slate' : 'gray';
+}
+
+function getCpiLineEdgeLabel(line, index = 0) {
+  const edge = Number(line?.edge);
+  if (!Number.isFinite(edge)) return '–';
+  if (line?.source === 'open_position') return 'Hedge / Open';
+  if (edge < 0) return 'Avoid';
+  if (index === 0) return 'Best';
+  return 'Small';
+}
+
+function getCpiPositionScenarioPayoff(position = {}, line = {}, scenario = {}) {
+  const contracts = Math.abs(Number(position.quantity || 0));
+  const risk = Number(position.maxLoss);
+  const profit = Number(position.maxProfit);
+  if (!contracts || !Number.isFinite(risk) || !Number.isFinite(profit)) return null;
+  const outcome = line.outcomes?.find((entry) => entry.key === scenario.key);
+  const wins = Boolean(outcome?.wins);
+  return wins ? profit : -risk;
+}
+
+function getCpiScenarioExposureColumns(openPositions = [], lines = [], scenarios = []) {
+  return scenarios.map((scenario) => {
+    const entries = openPositions.map((position, index) => {
+      const line = lines[index] || getCpiPositionLine(position, scenarios);
+      const payoff = getCpiPositionScenarioPayoff(position, line, scenario);
+      const outcome = line.outcomes?.find((entry) => entry.key === scenario.key);
+      const wins = Boolean(outcome?.wins);
+      return {
+        id: `${scenario.key}-${position.id || position.title || index}`,
+        position,
+        line,
+        wins,
+        payoff,
+      };
+    });
+    const netPayoff = entries.reduce((sum, entry) => (
+      Number.isFinite(Number(entry.payoff)) ? sum + Number(entry.payoff) : sum
+    ), 0);
+    return {
+      ...scenario,
+      entries,
+      winners: entries.filter((entry) => entry.wins),
+      losers: entries.filter((entry) => !entry.wins),
+      netPayoff,
+    };
+  });
+}
+
+function getCpiScenarioBiasLabel(columns = []) {
+  const positive = columns.filter((column) => Number(column.netPayoff) > 0);
+  if (positive.length >= 2) {
+    return `${positive[0].label} -> ${positive[positive.length - 1].label}`;
+  }
+  if (positive.length === 1) return positive[0].label;
+  const best = [...columns].sort((a, b) => Number(b.netPayoff) - Number(a.netPayoff))[0];
+  return best?.label || '–';
+}
+
+function getLargestCpiOpenLine(openPositions = [], lines = []) {
+  return openPositions.reduce((best, position, index) => {
+    const score = Math.max(Math.abs(Number(position.maxLoss || 0)), Math.abs(Number(position.currentValue || 0)));
+    if (!best || score > best.score) {
+      return {
+        position,
+        line: lines[index] || null,
+        score,
+      };
+    }
+    return best;
+  }, null);
+}
+
+function getCpiDefaultDiscoveryModel(activeMonth) {
+  return {
+    metric: DEFAULT_CPI_DISCOVERY_METRIC,
+    forecastMonth: activeMonth?.fullLabel || null,
+  };
+}
+
+function normalizeCpiTargetStrikes(targetStrikes = []) {
+  const strikes = Array.isArray(targetStrikes) ? targetStrikes : [];
+  const normalized = strikes
+    .map((strike) => Number(strike))
+    .filter((strike) => Number.isFinite(strike));
+  return normalized.length > 0 ? normalized : DEFAULT_CPI_TARGET_STRIKES;
+}
+
+function getCpiDiscoveryRequest(model, activeMonth, targetStrikes = []) {
+  const discoveryModel = model || getCpiDefaultDiscoveryModel(activeMonth);
+  const normalizedTargetStrikes = normalizeCpiTargetStrikes(targetStrikes);
+  if (normalizedTargetStrikes.length === 0) return {};
+  return {
+    cpi: {
+      metric: discoveryModel.metric || DEFAULT_CPI_DISCOVERY_METRIC,
+      forecastMonth: discoveryModel.forecastMonth || activeMonth?.fullLabel || null,
+      reportMonth: activeMonth?.fullLabel || null,
+      releaseCode: activeMonth?.label || null,
+      targetStrikes: normalizedTargetStrikes,
+    },
+  };
+}
+
+function getCpiPositionThreshold(position = {}) {
+  const text = [position.title, position.symbol].filter(Boolean).join(' ');
+  const match = text.match(/(?:^|[-_\s])T(-?\d+(?:\.\d+)?)(?:[-_\s]?(?:YES|NO)\b|$)/i) ||
+    text.match(/\b(?:above|below)\s+(-?\d+(?:\.\d+)?)\s*%?/i);
+  return match ? Number(match[1]) : null;
+}
+
+function getCpiPayoffChartData(rows = [], model) {
+  const payoffRows = getPayoffCpiRows(rows);
+  const min = 3.5;
+  const max = 4.5;
+  const { horizontals, verticals } = getCpiPayoffStepSegments(payoffRows, min, max);
+  const points = [];
+  horizontals.forEach((segment) => {
+    points.push(
+      { cpi: segment.from, payoff: segment.payoff },
+      { cpi: segment.to, payoff: segment.payoff },
+    );
+  });
+  verticals.forEach((segment) => {
+    points.push(
+      { cpi: segment.cpi, payoff: segment.fromPayoff },
+      { cpi: segment.cpi, payoff: segment.toPayoff },
+    );
+  });
+  return points
+    .sort((a, b) => (a.cpi - b.cpi) || (a.payoff - b.payoff))
+    .map((point) => ({
+      ...point,
+      positivePayoff: point.payoff >= 0 ? point.payoff : null,
+      negativePayoff: point.payoff <= 0 ? point.payoff : null,
+    }));
+}
+
+function getCpiPayoffMetrics(rows = [], model, settings = {}, portfolioData = null) {
+  const payoffRows = getPayoffCpiRows(rows);
+  const totalRisk = payoffRows.reduce((sum, row) => sum + getCpiPayoffLeg(row).estimatedCost, 0);
+  const maxProfit = payoffRows.reduce((sum, row) => sum + getCpiPayoffLeg(row).maxProfit, 0);
+  const stepSegments = getCpiPayoffStepSegments(payoffRows, 3.5, 4.5);
+  const chartData = getCpiPayoffChartData(payoffRows, model);
+  const positivePoints = chartData.filter((point) => point.payoff >= 0);
+  const breakevenLower = positivePoints[0]?.cpi ?? null;
+  const breakevenUpper = positivePoints[positivePoints.length - 1]?.cpi ?? null;
+  const scenarios = ['downside', 'base', 'upside']
+    .map((key) => getScenarioValue(model, key))
+    .filter((value) => Number.isFinite(Number(value)));
+  const wins = scenarios.filter((value) => (calculateCpiScenarioPayoff(payoffRows, value) ?? 0) > 0).length;
+  const winProbability = scenarios.length ? wins / scenarios.length : null;
+  const rewardRisk = totalRisk > 0 ? maxProfit / totalRisk : null;
+  const riskBps = getCpiRiskBps(totalRisk, settings, portfolioData);
+  return {
+    chartData,
+    stepSegments,
+    totalRisk,
+    riskBps,
+    maxProfit,
+    maxLoss: -totalRisk,
+    breakevenLower,
+    breakevenUpper,
+    chartMin: chartData[0]?.cpi ?? 3.5,
+    chartMax: chartData[chartData.length - 1]?.cpi ?? 4.5,
+    rewardRisk,
+    winProbability,
+  };
+}
+
+function getCpiStrikeExposureRows(rows = []) {
+  const payoffRows = getPayoffCpiRows(rows);
+  const levels = [...new Set(rows
+    .map((row) => Number(row.threshold))
+    .filter(Number.isFinite)
+    .map((threshold) => Number(threshold.toFixed(1))))].sort((a, b) => a - b);
+
+  return levels.map((strike) => {
+    const exposure = payoffRows.reduce((sum, row) => {
+      const threshold = Number(row.threshold);
+      if (!Number.isFinite(threshold) || Number(threshold.toFixed(1)) !== strike) return sum;
+      const leg = getCpiPayoffLeg(row);
+      const sign = leg.side === 'NO' ? -1 : 1;
+      return sum + (sign * leg.contracts * leg.payoutMultiplier);
+    }, 0);
+    return {
+      strike,
+      exposure,
+      tone: exposure > 0 ? 'positive' : exposure < 0 ? 'negative' : 'neutral',
+    };
+  });
+}
+
+const clampCpiPct = (value) => Math.max(0, Math.min(100, value));
+
+function getCpiPayoffStackMarkers(legMarkers = [], strikeExposureRows = []) {
+  const sideByStrike = new Map();
+  legMarkers.forEach((marker) => {
+    const strike = Number(marker.threshold);
+    if (!Number.isFinite(strike)) return;
+    sideByStrike.set(Number(strike.toFixed(1)), marker.side || (Number(marker.exposure) >= 0 ? 'YES' : 'NO'));
+  });
+
+  return strikeExposureRows
+    .filter((row) => Number.isFinite(Number(row.strike)) && Math.abs(Number(row.exposure || 0)) > 0)
+    .map((row) => {
+      const strike = Number(row.strike);
+      const exposure = Number(row.exposure || 0);
+      return {
+        strike,
+        exposure,
+        side: sideByStrike.get(Number(strike.toFixed(1))) || (exposure >= 0 ? 'YES' : 'NO'),
+        tone: exposure >= 0 ? 'positive' : 'negative',
+      };
+    })
+    .sort((a, b) => a.strike - b.strike);
+}
+
+function CpiPayoffMap({ metrics, scenarios, legMarkers, strikeExposureRows }) {
+  const chartData = Array.isArray(metrics?.chartData) ? metrics.chartData : [];
+  const stepSegments = metrics?.stepSegments || { horizontals: [], verticals: [] };
+  const chartMin = Number(metrics?.chartMin ?? 3.5);
+  const chartMax = Number(metrics?.chartMax ?? 4.5);
+  const chartRange = Math.max(0.01, chartMax - chartMin);
+  const maxAbsPayoff = Math.max(
+    1,
+    ...chartData.map((point) => Math.abs(Number(point.payoff || 0))),
+    ...(stepSegments.horizontals || []).map((segment) => Math.abs(Number(segment.payoff || 0))),
+    ...(stepSegments.verticals || []).flatMap((segment) => [
+      Math.abs(Number(segment.fromPayoff || 0)),
+      Math.abs(Number(segment.toPayoff || 0)),
+    ]),
+    Math.abs(Number(metrics?.maxProfit || 0)),
+    Math.abs(Number(metrics?.maxLoss || 0)),
+  );
+
+  const svgWidth = 720;
+  const svgHeight = 320;
+  const plot = { left: 52, top: 40, right: 20, bottom: 68 };
+  const plotWidth = svgWidth - plot.left - plot.right;
+  const plotHeight = svgHeight - plot.top - plot.bottom;
+  const xFor = (value) => plot.left + (clampCpiPct(((Number(value) - chartMin) / chartRange) * 100) / 100) * plotWidth;
+  const yFor = (value) => plot.top + ((maxAbsPayoff - Number(value || 0)) / (maxAbsPayoff * 2)) * plotHeight;
+  const zeroY = yFor(0);
+  const stackMarkers = getCpiPayoffStackMarkers(legMarkers, strikeExposureRows);
+  const ticks = Array.from({ length: Math.round((chartMax - chartMin) * 10) + 1 }, (_, index) => Number((chartMin + index * 0.1).toFixed(1)));
+  const areaSegments = (stepSegments.horizontals || []).map((segment) => {
+    const x0 = xFor(segment.from);
+    const x1 = xFor(segment.to);
+    const y = yFor(segment.payoff);
+    return {
+      ...segment,
+      path: `M ${x0} ${zeroY} L ${x0} ${y} L ${x1} ${y} L ${x1} ${zeroY} Z`,
+      linePath: `M ${x0} ${y} L ${x1} ${y}`,
+    };
+  });
+  const verticalSegments = (stepSegments.verticals || []).map((segment) => {
+    const x = xFor(segment.cpi);
+    return {
+      ...segment,
+      path: `M ${x} ${yFor(segment.fromPayoff)} L ${x} ${yFor(segment.toPayoff)}`,
+    };
+  });
+
+  let previousMarkerX = -Infinity;
+  const markers = stackMarkers.map((marker, index) => {
+    const x = xFor(marker.strike);
+    const compact = x - previousMarkerX < 72;
+    previousMarkerX = x;
+    return {
+      ...marker,
+      x,
+      lane: compact ? index % 2 : 0,
+      compact,
+    };
+  });
+
+  return (
+    <div className="cpi-payoff-map" aria-label="CPI payoff and strike exposure map">
+      <svg className="cpi-payoff-map-svg" viewBox={`0 0 ${svgWidth} ${svgHeight}`} role="img" aria-label="Payoff line with strike exposure markers">
+        <rect x="0" y="0" width={svgWidth} height={svgHeight} rx="8" className="cpi-payoff-map-bg" />
+        {[maxAbsPayoff, 0, -maxAbsPayoff].map((value) => (
+          <line
+            key={`grid-${value}`}
+            x1={plot.left}
+            x2={svgWidth - plot.right}
+            y1={yFor(value)}
+            y2={yFor(value)}
+            className={value === 0 ? 'cpi-payoff-zero-line' : 'cpi-payoff-grid-line'}
+          />
+        ))}
+        <text x={10} y={plot.top - 12} className="cpi-payoff-map-label">P&amp;L</text>
+        <text x={plot.left - 8} y={yFor(maxAbsPayoff) + 4} textAnchor="end" className="cpi-payoff-map-y">{formatCpiCompactMoney(maxAbsPayoff)}</text>
+        <text x={plot.left - 8} y={zeroY + 4} textAnchor="end" className="cpi-payoff-map-y">$0</text>
+        <text x={plot.left - 8} y={yFor(-maxAbsPayoff) + 4} textAnchor="end" className="cpi-payoff-map-y">-{formatCpiCompactMoney(maxAbsPayoff)}</text>
+
+        {areaSegments.map((area, index) => (
+          <path key={`area-${index}`} d={area.path} className={`cpi-payoff-area ${area.tone}`} />
+        ))}
+        {areaSegments.map((line, index) => (
+          <path
+            key={`line-${index}`}
+            d={line.linePath}
+            className={`cpi-payoff-line ${line.tone}`}
+            data-step-segment="horizontal"
+            data-from-cpi={line.from}
+            data-to-cpi={line.to}
+            data-payoff={line.payoff}
+          />
+        ))}
+        {verticalSegments.map((line, index) => (
+          <path
+            key={`jump-${index}`}
+            d={line.path}
+            className={`cpi-payoff-line cpi-payoff-line-jump ${line.tone}`}
+            data-step-segment="vertical"
+            data-cpi={line.cpi}
+            data-from-payoff={line.fromPayoff}
+            data-to-payoff={line.toPayoff}
+          />
+        ))}
+
+        {scenarios.map((scenario, index) => {
+          if (!Number.isFinite(Number(scenario.value))) return null;
+          const x = xFor(scenario.value);
+          const roundedValue = scenario.roundedValue ?? roundCpiSettlementLevel(scenario.value);
+          const labelY = Math.max(plot.top + 12 + (index % 2) * 14, zeroY - 17 - (index % 2) * 14);
+          return (
+            <g key={`scenario-${scenario.key}`}>
+              <line x1={x} x2={x} y1={plot.top} y2={zeroY + 10} className={`cpi-scenario-tick ${scenario.tone}`} />
+              <circle cx={x} cy={zeroY} r="3" className={`cpi-scenario-dot ${scenario.tone}`} />
+              <text x={x} y={labelY} textAnchor="middle" className={`cpi-scenario-marker-label ${scenario.tone}`}>
+                {`${fmtCpiLevel(scenario.value, 2)} -> ${fmtCpiLevel(roundedValue, 1)}`}
+              </text>
+            </g>
+          );
+        })}
+
+        {ticks.map((tick) => {
+          const x = xFor(tick);
+          return (
+            <g key={`tick-${tick}`}>
+              <line x1={x} x2={x} y1={zeroY + 4} y2={zeroY + 8} className="cpi-payoff-axis-tick" />
+              <text x={x} y={zeroY + 23} textAnchor="middle" className="cpi-payoff-map-x">{tick.toFixed(1)}</text>
+            </g>
+          );
+        })}
+
+        {markers.map((marker) => {
+          const labelY = zeroY + 44 + marker.lane * 24;
+          const amountLabel = formatCpiMoney(marker.exposure, { decimals: 0 });
+          const fullLabel = `${fmtCpiLevel(marker.strike, 1)} ${marker.side} ${amountLabel}`;
+          return (
+            <g key={`stack-${marker.strike}-${marker.side}`} className={`cpi-stack-marker ${marker.tone}`}>
+              <title>{fullLabel}</title>
+              <line x1={marker.x} x2={marker.x} y1={zeroY + 8} y2={labelY - 18} />
+              <circle cx={marker.x} cy={zeroY + 8} r="4" />
+              <rect x={marker.x - (marker.compact ? 29 : 42)} y={labelY - 17} width={marker.compact ? 58 : 84} height="18" rx="5" />
+              <text x={marker.x} y={labelY - 4} textAnchor="middle">
+                {marker.compact ? amountLabel : `${fmtCpiLevel(marker.strike, 1)} ${marker.side}`}
+              </text>
+              {!marker.compact && (
+                <text x={marker.x} y={labelY + 14} textAnchor="middle" className="cpi-stack-amount">
+                  {amountLabel}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <text x={(plot.left + svgWidth - plot.right) / 2} y={svgHeight - 7} textAnchor="middle" className="cpi-payoff-axis-label-svg">Headline CPI YoY (%)</text>
+      </svg>
+    </div>
+  );
+}
+
+function CpiCalculatorHeader({
+  model,
+  activeMonth,
+  months,
+  onMonthSelect,
+}) {
+  const lower = getScenarioValue(model, 'downside');
+  const base = getScenarioValue(model, 'base');
+  const upper = getScenarioValue(model, 'upside');
+  const baseScenario = model?.scenarios?.find((item) => /base/i.test(String(item?.key || item?.label || item?.name || '')));
+  const baseFallback = baseScenario?.value ?? baseScenario?.percent ?? baseScenario?.raw ?? null;
+  const resolvedBase = Number.isFinite(Number(base)) ? Number(base) : Number(baseFallback);
+  const hasScenarioValues = hasOrderedCpiScenarioValues(lower, resolvedBase, upper);
+  const activeLabel = activeMonth?.fullLabel || 'June 2026';
+  const levelRange = CPI_CALENDAR_SCALE.max - CPI_CALENDAR_SCALE.min;
+  const getCalendarLevelPct = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(100, ((n - CPI_CALENDAR_SCALE.min) / levelRange) * 100));
+  };
+  const zeroPct = getCalendarLevelPct(CPI_CALENDAR_SCALE.zero);
+  const getBarGeometry = (value) => {
+    const valuePct = getCalendarLevelPct(value);
+    if (valuePct == null || zeroPct == null) return null;
+    return {
+      valuePct,
+      bottomPct: Math.min(valuePct, zeroPct),
+      heightPct: Math.max(1, Math.abs(valuePct - zeroPct)),
+      polarity: Number(value) < CPI_CALENDAR_SCALE.zero ? 'negative' : 'positive',
+    };
+  };
+  const monthLookup = useMemo(
+    () => new Map((months || []).map((month) => [month.id, month])),
+    [months],
+  );
+  const activeCalendarEntry = CPI_CALENDAR_FINALS.find((entry) => entry.id === activeMonth?.id);
+  const settlementLabel = activeCalendarEntry?.settlementLabel || CPI_CALENDAR_SETTLEMENT_LABEL;
+
+  return (
+    <header className="cpi-calculator-header cpi-calendar-header">
+      <div className="cpi-calendar-title-row">
+        <div className="cpi-calendar-title-block">
+          <span className="cpi-calendar-title-accent" aria-hidden="true" />
+          <div>
+            <h1>CPI Model</h1>
+          </div>
+        </div>
+        <div className="cpi-calendar-meta">
+          <strong>Active: {activeLabel}</strong>
+          <span className="cpi-calendar-settlement">{settlementLabel}</span>
+        </div>
+      </div>
+
+      <div className="cpi-calendar-grid" aria-label="CPI YoY calendar with prior-year bookend">
+        {CPI_CALENDAR_FINALS.map((entry, index) => {
+          const isActive = entry.id === activeMonth?.id;
+          const previousFinal = index > 0 ? CPI_CALENDAR_FINALS[index - 1]?.final : null;
+          const hasFinal = entry.final != null && Number.isFinite(Number(entry.final));
+          const finalValue = hasFinal ? Number(entry.final) : null;
+          const displayFinal = hasFinal ? finalValue : Number.isFinite(Number(entry.displayFinal)) ? Number(entry.displayFinal) : null;
+          const direction = !hasFinal || previousFinal == null
+            ? 'neutral'
+            : finalValue >= previousFinal
+              ? 'up'
+              : 'down';
+          const finalBar = hasFinal ? getBarGeometry(finalValue) : null;
+          const lowerBar = getBarGeometry(lower);
+          const baseBar = getBarGeometry(resolvedBase);
+          const upperBar = getBarGeometry(upper);
+          const isNowcastEntry = entry.id === '2026-06';
+          const showScenarioValues = isNowcastEntry && hasScenarioValues;
+          const nowcastHeadline = isNowcastEntry && Number.isFinite(resolvedBase)
+            ? formatCpiLevelPercent(resolvedBase)
+            : null;
+          const hasScenarioChart = !hasFinal && showScenarioValues && [lowerBar, baseBar, upperBar].every(Boolean);
+          const cardClasses = [
+            'cpi-calendar-card',
+            isActive ? 'active' : '',
+            direction,
+            entry.context ? 'context' : '',
+            isNowcastEntry ? 'nowcast' : '',
+          ].filter(Boolean).join(' ');
+          const month = monthLookup.get(entry.id);
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              className={cardClasses}
+              aria-pressed={isActive}
+              onClick={() => month && onMonthSelect(month)}
+            >
+              <span className="cpi-calendar-month">{entry.label}</span>
+              <span className="cpi-calendar-divider" />
+              <strong className="cpi-calendar-final">
+                {nowcastHeadline != null
+                  ? nowcastHeadline
+                  : isNowcastEntry
+                    ? '–'
+                    : displayFinal != null
+                      ? formatCpiLevelPercent(displayFinal)
+                      : '–'}
+              </strong>
+              <span className="cpi-calendar-mini-chart" aria-hidden="true">
+                <span className="cpi-calendar-axis-label top">+10%</span>
+                <span className="cpi-calendar-axis-label zero">0%</span>
+                <span className="cpi-calendar-axis-label bottom">-5%</span>
+                <i className="cpi-calendar-zero-line" />
+                {hasFinal ? (
+                  finalBar && (
+                    <>
+                      <i
+                        className={`cpi-calendar-bar ${finalBar.polarity}`}
+                        style={{
+                          bottom: `${finalBar.bottomPct}%`,
+                          height: `${finalBar.heightPct}%`,
+                        }}
+                      />
+                      <i className="cpi-calendar-bar-line" style={{ bottom: `${finalBar.valuePct}%` }} />
+                    </>
+                  )
+                ) : hasScenarioChart ? (
+                  <>
+                    <i
+                      className="cpi-calendar-scenario-lower-line"
+                      style={{ bottom: `${lowerBar.valuePct}%` }}
+                    />
+                    <i
+                      className="cpi-calendar-scenario-base-line"
+                      style={{ bottom: `${baseBar.valuePct}%` }}
+                    />
+                    <i
+                      className="cpi-calendar-scenario-upper-line"
+                      style={{ bottom: `${upperBar.valuePct}%` }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <i className="cpi-calendar-estimate-track" />
+                    <i className="cpi-calendar-estimate-dot lower" />
+                    <i className="cpi-calendar-estimate-dot base" />
+                    <i className="cpi-calendar-estimate-dot upper" />
+                  </>
+                )}
+              </span>
+              <span className="cpi-estimate-labels">
+                <span className="upper">
+                  <span className="cpi-estimate-value">{showScenarioValues ? fmtCpiLevel(upper) : 'X.XX'}</span>{' '}
+                  <span className="cpi-estimate-name">upper</span>
+                </span>
+                {!isNowcastEntry && (
+                  <span className="base">
+                    <span className="cpi-estimate-value">{showScenarioValues ? fmtCpiLevel(resolvedBase) : 'X.XX'}</span>{' '}
+                    <span className="cpi-estimate-name">base</span>
+                  </span>
+                )}
+                <span className="lower">
+                  <span className="cpi-estimate-value">{showScenarioValues ? fmtCpiLevel(lower) : 'X.XX'}</span>{' '}
+                  <span className="cpi-estimate-name">lower</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </header>
+  );
+}
+
+function CpiNoLiveContractState({
+  rows,
+  loading,
+  providers,
+  ibkrLoading,
+  ibkrDiscovering,
+  onRefreshIbkr,
+  onDiscoverIbkr,
+}) {
+  const showLoading = loading && providers == null && rows.length === 0;
+
+  if (showLoading) {
+    return (
+      <LoadingIndicator
+        label="Loading IBKR CPI contracts..."
+        centered
+        className="pmv2-empty"
+      />
+    );
+  }
+
+  return (
+    <div className="cpi-state cpi-state-compact cpi-missing-data-panel">
+      <CpiMissingDataBox />
+      <div className="cpi-state-actions">
+        <RefreshButton
+          label="Discover IBKR Contracts"
+          onClick={onDiscoverIbkr}
+          loading={ibkrDiscovering}
+          disabled={ibkrLoading || ibkrDiscovering}
+        />
+        <RefreshButton
+          label="Refresh Quotes"
+          onClick={onRefreshIbkr}
+          loading={ibkrLoading}
+          disabled={ibkrLoading || ibkrDiscovering}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CpiLineBadge({ children, tone = 'gray' }) {
+  return <span className={`cpi-line-badge ${tone}`}>{children}</span>;
+}
+
+function CpiLineBadgeLegend() {
+  return (
+    <div className="cpi-line-badge-legend" aria-label="Line badge legend">
+      <span><i className="cpi-line-badge green" />YES</span>
+      <span><i className="cpi-line-badge blue" />NO</span>
+      <span><i className="cpi-line-badge gray" />Other</span>
+    </div>
+  );
+}
+
+function CpiScenarioMatrixCard({
+  rows,
+  matrixRows,
+  loading,
+  model,
+  providers,
+  ibkrLoading,
+  ibkrDiscovering,
+  onRefreshIbkr,
+  onDiscoverIbkr,
+}) {
+  const scenarios = getCpiScenarioSpecs(model);
+  const contractWarnings = useMemo(() => (
+    rows.flatMap((row) => (
+      (row.warnings || []).map((warning) => `${row.title}: ${warning}`)
+    ))
+  ), [rows]);
+  const loadedContractRows = useMemo(
+    () => rows.filter((row) => !row.missingContract).length,
+    [rows],
+  );
+
+  return (
+    <Pmv2CardChrome
+      className="cpi-matrix-card"
+      icon={(
+        <img
+          className="cpi-contracts-card-icon"
+          src={contractsArmWrestleIcon}
+          alt=""
+        />
+      )}
+      title={(
+        <span className="cpi-card-title-with-help">
+          <span>Contracts</span>
+        </span>
+      )}
+      titleId="cpi-scenario-matrix-title"
+      actions={(
+        <div className="cpi-header-actions">
+          <ContractProviderStatusDot
+            providers={providers}
+            strikeCount={loadedContractRows}
+            targetStrikeCount={rows.length}
+            contractWarnings={contractWarnings}
+            ibkrLoading={ibkrLoading}
+            ibkrDiscovering={ibkrDiscovering}
+            onRefreshIbkr={onRefreshIbkr}
+            onDiscoverIbkr={onDiscoverIbkr}
+          />
+        </div>
+      )}
+    >
+      {rows.length === 0 ? (
+        <CpiNoLiveContractState
+          rows={rows}
+          loading={loading}
+          providers={providers}
+          ibkrLoading={ibkrLoading}
+          ibkrDiscovering={ibkrDiscovering}
+          onRefreshIbkr={onRefreshIbkr}
+          onDiscoverIbkr={onDiscoverIbkr}
+        />
+      ) : (
+        <div className="cpi-matrix-table-wrap">
+          <table className="cpi-matrix-table">
+            <thead>
+              <tr>
+                <th>Contract</th>
+                {scenarios.map((scenario) => (
+                  <th key={scenario.key} className={scenario.tone}>
+                    <strong>{scenario.label}</strong>
+                    <span>{fmtCpiLevel(scenario.value, 2)} -&gt; {fmtCpiLevel(scenario.roundedValue, 1)}</span>
+                  </th>
+                ))}
+                <th>Fair<br />(c)</th>
+                <th>Ask<br />(c)</th>
+                <th>Edge<br />(c)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrixRows.map((line, index) => {
+                const edgeTone = Number(line.edge) > 0 ? 'edge-positive' : Number(line.edge) < 0 ? 'edge-negative' : 'edge-neutral';
+                const badgeTone = getCpiLineBadgeTone(line, index);
+                return (
+                  <tr key={line.id} className={index === 0 && Number(line.edge) > 0 ? 'selected' : ''}>
+                    <td className="cpi-matrix-contract-cell">
+                      <span className="cpi-matrix-contract-inner">
+                        <CpiLineBadge tone={badgeTone}>{index + 1}</CpiLineBadge>
+                        <strong>{line.title}</strong>
+                      </span>
+                    </td>
+                    {line.outcomes.map((outcome) => (
+                      <td key={`${line.id}-${outcome.key}`}>
+                        <span className={`cpi-outcome-pill ${outcome.wins ? 'win' : 'loss'}`}>
+                          {outcome.wins ? 'Win' : 'Loss'}
+                        </span>
+                      </td>
+                    ))}
+                    <td>{formatCpiCents(line.fairValue)}</td>
+                    <td>
+                      {formatCpiCents(line.ask)}
+                      {line.askLabel === 'Avg' && <small className="cpi-matrix-sub">avg</small>}
+                    </td>
+                    <td className={edgeTone}>
+                      <strong>{formatCpiEdgeCents(line.edge)}</strong>
+                      <small>{getCpiLineEdgeLabel(line, index)}</small>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Pmv2CardChrome>
+  );
+}
+function CpiPayoffConfirmationCard({
+  model,
+  openPositions,
+}) {
+  const scenarios = getCpiScenarioSpecs(model);
+  const openPositionLines = openPositions.map((position) => getCpiPositionLine(position, scenarios));
+  const totalContracts = openPositions.reduce((sum, position) => sum + Math.abs(Number(position.quantity || 0)), 0);
+  const totalRisk = openPositions.reduce((sum, position) => sum + Number(position.maxLoss || 0), 0);
+  const totalMaxProfit = openPositions.reduce((sum, position) => sum + Number(position.maxProfit || 0), 0);
+  const totalUnrealizedPnl = openPositions.reduce((sum, position) => {
+    const pnl = Number(position.unrealizedPnl);
+    return Number.isFinite(pnl) ? sum + pnl : sum;
+  }, 0);
+  const scenarioColumns = getCpiScenarioExposureColumns(openPositions, openPositionLines, scenarios);
+  const largestLine = getLargestCpiOpenLine(openPositions, openPositionLines);
+  const netBias = getCpiScenarioBiasLabel(scenarioColumns);
+  const marketCount = new Set(openPositions.map((position) => position.symbol).filter(Boolean)).size;
+
+  return (
+    <Pmv2CardChrome
+      className="cpi-payoff-card cpi-payday-exposure-card"
+      icon={(
+        <img
+          className="cpi-payoff-card-icon"
+          src={payoutMapTreasureIcon}
+          alt=""
+        />
+      )}
+      title={(
+        <span className="cpi-card-title-with-help">
+          <span>Payday</span>
+        </span>
+      )}
+      titleId="cpi-payoff-title"
+      actions={<CpiLineBadgeLegend />}
+    >
+      <CpiScenarioExposureBody
+        openPositions={openPositions}
+        model={model}
+        scenarios={scenarios}
+        totalContracts={totalContracts}
+        totalRisk={totalRisk}
+        totalMaxProfit={totalMaxProfit}
+        totalUnrealizedPnl={totalUnrealizedPnl}
+        scenarioColumns={scenarioColumns}
+        largestLine={largestLine}
+        netBias={netBias}
+        marketCount={marketCount}
+        showHeader={false}
+        showRail={false}
+        compact
+      />
+    </Pmv2CardChrome>
+  );
+}
+
+function CpiScenarioExposureBody({
+  openPositions,
+  model,
+  scenarios,
+  totalContracts,
+  totalRisk,
+  totalMaxProfit,
+  totalUnrealizedPnl,
+  scenarioColumns,
+  largestLine,
+  netBias,
+  marketCount,
+  showHeader = true,
+  showRail = true,
+  compact = false,
+}) {
+  const bodyClasses = [
+    'cpi-scenario-exposure-card',
+    compact ? 'compact' : '',
+    showRail ? '' : 'no-rail',
+  ].filter(Boolean).join(' ');
+  return (
+    <div className={bodyClasses}>
+      {showHeader && (
+        <header className="cpi-scenario-exposure-header">
+          <div>
+            <h3>Scenario Exposure</h3>
+            <span>CPI prediction market positions</span>
+          </div>
+          <small>{model?.forecastMonth ? `As of ${model.forecastMonth}` : 'Current book'}</small>
+        </header>
+      )}
+      {openPositions.length === 0 || scenarios.length === 0 ? (
+        <div className="cpi-position-empty-panel">
+          <CpiMissingDataBox />
+        </div>
+      ) : compact ? (
+        <CpiScenarioExposureTable
+          openPositions={openPositions}
+          scenarioColumns={scenarioColumns}
+          totalContracts={totalContracts}
+          totalRisk={totalRisk}
+        />
+      ) : (
+        <div className="cpi-scenario-exposure-layout">
+          {showRail && (
+            <aside className="cpi-scenario-exposure-rail">
+              <div>
+                <span>Total Risk</span>
+                <strong>{formatCpiMoney(totalRisk, { decimals: 0 })}</strong>
+                <small>Max loss at expiration</small>
+              </div>
+              <div>
+                <span>Net Bias</span>
+                <strong className="positive">{netBias}</strong>
+                <small>{totalUnrealizedPnl < 0 ? 'Working through drawdown' : 'Current P&L positive'}</small>
+              </div>
+              <div>
+                <span>Largest Open Line</span>
+                <strong>{largestLine?.line?.title || '–'}</strong>
+                {largestLine?.position && (
+                  <small>
+                    {formatCpiContracts(Math.abs(largestLine.position.quantity || 0))} contracts
+                    {' · '}
+                    P&L {formatCpiMoney(largestLine.position.unrealizedPnl, { decimals: 0, signed: true })}
+                  </small>
+                )}
+              </div>
+              <div>
+                <span>Total Positions</span>
+                <strong>{openPositions.length}</strong>
+                <small>
+                  {formatCpiContracts(totalContracts)} contracts
+                  {marketCount ? ` across ${marketCount} market${marketCount === 1 ? '' : 's'}` : ''}
+                </small>
+              </div>
+              <div>
+                <span>Max Profit</span>
+                <strong>{formatCpiMoney(totalMaxProfit, { decimals: 0 })}</strong>
+                <small>Entry-price based</small>
+              </div>
+            </aside>
+          )}
+            <section className="cpi-scenario-exposure-board">
+              {scenarioColumns.map((scenario) => (
+                <article className={`cpi-scenario-column ${scenario.tone}`} key={scenario.key}>
+                  <header>
+                    <span>{scenario.label}</span>
+                    <strong>{fmtCpiLevel(scenario.value, 2)} -&gt; {fmtCpiLevel(scenario.roundedValue, 1)}</strong>
+                  </header>
+                  <div className="cpi-scenario-column-body">
+                    <div className="cpi-scenario-position-counts">
+                      <span className="win">Win {scenario.winners.length}</span>
+                      <span className="loss">Loss {scenario.losers.length}</span>
+                    </div>
+                    <div className="cpi-scenario-position-list">
+                      {[...scenario.winners, ...scenario.losers].map((entry, index) => (
+                        <div className={`cpi-scenario-position-chip ${entry.wins ? 'win' : 'loss'}`} key={entry.id}>
+                          <span>
+                            <span className={`cpi-line-badge ${getCpiLineBadgeTone(entry.line, index)}`}>{index + 1}</span>
+                            <strong>{entry.line.title}</strong>
+                            <small>{formatCpiContracts(Math.abs(entry.position.quantity || 0))}</small>
+                          </span>
+                          <b>{formatCpiMoney(entry.payoff, { decimals: 0, signed: true })}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <footer>
+                    <span>Net Payoff</span>
+                    <strong className={scenario.netPayoff >= 0 ? 'positive' : 'negative'}>
+                      {formatCpiMoney(scenario.netPayoff, { decimals: 0, signed: true })}
+                    </strong>
+                    <small>if CPI settles {fmtCpiLevel(scenario.value, 2)} -&gt; {fmtCpiLevel(scenario.roundedValue, 1)}</small>
+                  </footer>
+                </article>
+              ))}
+            </section>
+          </div>
+        )}
+      </div>
+  );
+}
+
+function CpiScenarioExposureTable({
+  openPositions,
+  scenarioColumns,
+  totalContracts,
+  totalRisk,
+}) {
+  return (
+    <div className="cpi-payday-table-wrap">
+      <table className="cpi-payday-table cpi-matrix-table">
+        <thead>
+          <tr>
+            <th>Position</th>
+            {scenarioColumns.map((scenario) => (
+              <th key={scenario.key}>
+                <strong>{scenario.label}</strong>
+                <span>{fmtCpiLevel(scenario.value, 2)} -&gt; {fmtCpiLevel(scenario.roundedValue, 1)}</span>
+              </th>
+            ))}
+            <th>Qty</th>
+            <th>Avg<br />(c)</th>
+            <th>Risk</th>
+          </tr>
+        </thead>
+        <tbody>
+          {openPositions.map((position, index) => {
+            const firstEntry = scenarioColumns[0]?.entries?.[index];
+            const line = firstEntry?.line || getCpiPositionLine(position, []);
+            return (
+              <tr key={position.id || `${line.title}-${index}`}>
+                <td className="cpi-matrix-contract-cell">
+                  <span className="cpi-matrix-contract-inner">
+                    <CpiLineBadge tone={getCpiLineBadgeTone(line, index)}>{index + 1}</CpiLineBadge>
+                    <strong>{line.title}</strong>
+                  </span>
+                </td>
+                {scenarioColumns.map((scenario) => {
+                  const entry = scenario.entries[index];
+                  const tone = entry?.wins ? 'win' : 'loss';
+                  return (
+                    <td key={`${scenario.key}-${position.id || index}`} className={`cpi-payday-scenario-cell ${tone}`}>
+                      <span className={`cpi-payday-payoff-pill ${tone}`}>
+                        <span>{entry?.wins ? 'Win' : 'Loss'}</span>
+                        <strong>{formatCpiMoney(entry?.payoff, { decimals: 0, signed: true })}</strong>
+                      </span>
+                    </td>
+                  );
+                })}
+                <td>{formatCpiContracts(Math.abs(position.quantity || 0))}</td>
+                <td>
+                  {formatCpiCents(line.ask)}
+                  {line.askLabel === 'Avg' && <small className="cpi-matrix-sub">avg</small>}
+                </td>
+                <td>{formatCpiMoney(position.maxLoss, { decimals: 0 })}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Net Payoff</td>
+            {scenarioColumns.map((scenario) => (
+              <td
+                key={`${scenario.key}-net`}
+                className={scenario.netPayoff >= 0 ? 'edge-positive' : 'edge-negative'}
+              >
+                <strong>{formatCpiMoney(scenario.netPayoff, { decimals: 0, signed: true })}</strong>
+              </td>
+            ))}
+            <td>{formatCpiContracts(totalContracts)}</td>
+            <td>–</td>
+            <td>{formatCpiMoney(totalRisk, { decimals: 0 })}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 // ─── Main Component (v2) ──────────────────────────────────────────────────────
 
-export default function PredictionMarkets({ onApiStatusChange, onClose }) {
-  const [selectedId, setSelectedId] = useState(null);
+export default function PredictionMarkets({ onApiStatusChange, onClose, portfolioData }) {
+  const persistedWorkbenchState = useMemo(readPredictionMarketsWorkbenchState, []);
+  const [selectedId, setSelectedId] = useState(() => persistedWorkbenchState.selectedId || null);
   const [contracts, setContracts] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [analytics, setAnalytics] = useState(null);
@@ -3175,18 +5092,60 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
   const [ingestError, setIngestError] = useState(null);
   const [signalsLoading, setSignalsLoading] = useState(true);
   const [signalsError, setSignalsError] = useState(null);
-  const [selectedSignalSymbol, setSelectedSignalSymbol] = useState(null);
+  const [selectedSignalSymbol, setSelectedSignalSymbol] = useState(() => persistedWorkbenchState.selectedSignalSymbol || null);
   const [signalData, setSignalData] = useState({
     riskRanges: {},
     bitcoinSnapshot: null,
     momoSnapshot: null,
     macroSnapshot: null,
     callSnapshot: null,
+    inflationNowcastSnapshot: null,
     spotPrices: {},
   });
 
   const [ibkrLoading, setIbkrLoading] = useState(false);
+  const [ibkrDiscovering, setIbkrDiscovering] = useState(false);
   const [uploadFreshness, setUploadFreshness] = useState(null);
+  const [portfolioPredictionPositions, setPortfolioPredictionPositions] = useState([]);
+  const [portfolioPredictionPositionsLive, setPortfolioPredictionPositionsLive] = useState(false);
+  const [positionsLoading, setPositionsLoading] = useState(false);
+  const [activeCpiMonth, setActiveCpiMonth] = useState(() => getPersistedCpiMonth(persistedWorkbenchState));
+  const ibkrBusyRef = useRef(false);
+
+  const cpiMonths = useMemo(() => DEFAULT_CPI_MONTH_OPTIONS, []);
+
+  useEffect(() => {
+    ibkrBusyRef.current = ibkrLoading || ibkrDiscovering;
+  }, [ibkrLoading, ibkrDiscovering]);
+
+  useEffect(() => {
+    writePredictionMarketsWorkbenchState({
+      selectedId,
+      selectedSignalSymbol,
+      activeCpiMonthId: activeCpiMonth?.id || null,
+    });
+  }, [activeCpiMonth, selectedId, selectedSignalSymbol]);
+
+  const loadPortfolioPredictionPositions = useCallback(async () => {
+    setPositionsLoading(true);
+    try {
+      const data = await MarketDataService.getPortfolioPredictionMarketPositions({
+        primaryAccount: portfolioData?.accountId || null,
+      });
+      const positions = Array.isArray(data?.positions) ? data.positions : [];
+      const liveSource = data?.meta?.source === 'ibkr_live';
+      setPortfolioPredictionPositions(liveSource ? positions : []);
+      setPortfolioPredictionPositionsLive(liveSource);
+      return data;
+    } catch (err) {
+      console.warn('[PM] portfolio prediction positions load error:', err.message);
+      setPortfolioPredictionPositions([]);
+      setPortfolioPredictionPositionsLive(false);
+      return null;
+    } finally {
+      setPositionsLoading(false);
+    }
+  }, [portfolioData?.accountId]);
 
   const loadIngest = useCallback(async (opts = {}) => {
     setIngestLoading(true);
@@ -3194,9 +5153,12 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     try {
       const data = await predictionMarketsIngestService.getAggregatedEvents({
         mock: opts.mock,
-        refresh: opts.refreshKalshi !== false ? 'kalshi' : undefined,
+        source: 'ibkr',
+        refreshKalshi: false,
       });
-      const rows = data.events || data.dashboardEvents || [];
+      const rows = isLiveCpiContractProvider(data.providers)
+        ? filterIbkrWorkbenchEvents(data.events || data.dashboardEvents || []).filter(isLiveTradingEvent)
+        : [];
       setMarketEvents(rows);
       setProviders(data.providers || null);
     } catch (err) {
@@ -3207,19 +5169,48 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     }
   }, []);
 
-  const loadIbkr = useCallback(async () => {
+  const loadIbkr = useCallback(async (requestBody = {}) => {
     setIbkrLoading(true);
+    setIngestError(null);
     try {
-      const data = await predictionMarketsIngestService.refreshIbkr();
-      const newEvents = data.events || data.dashboardEvents || [];
+      const data = await predictionMarketsIngestService.refreshIbkr(requestBody);
+      const liveProvider = isLiveCpiContractProvider(data.providers);
+      const newEvents = liveProvider
+        ? filterIbkrWorkbenchEvents(data.events || data.dashboardEvents || []).filter(isLiveTradingEvent)
+        : [];
       setMarketEvents(newEvents);
       if (data.providers) setProviders(data.providers);
+      await loadPortfolioPredictionPositions();
     } catch (err) {
       console.warn('[PM] IBKR refresh error:', err.message);
+      setIngestError(err.message);
+      setMarketEvents([]);
+      setPortfolioPredictionPositions([]);
+      setPortfolioPredictionPositionsLive(false);
     } finally {
       setIbkrLoading(false);
     }
-  }, []);
+  }, [loadPortfolioPredictionPositions]);
+
+  const discoverIbkr = useCallback(async (requestBody = {}) => {
+    setIbkrDiscovering(true);
+    setIngestError(null);
+    try {
+      const data = await predictionMarketsIngestService.discoverIbkr(requestBody);
+      const liveProvider = isLiveCpiContractProvider(data.providers);
+      const newEvents = liveProvider
+        ? filterIbkrWorkbenchEvents(data.events || data.dashboardEvents || []).filter(isLiveTradingEvent)
+        : [];
+      setMarketEvents(newEvents);
+      if (data.providers) setProviders(data.providers);
+      await loadPortfolioPredictionPositions();
+    } catch (err) {
+      console.warn('[PM] IBKR discovery error:', err.message);
+      setIngestError(err.message);
+    } finally {
+      setIbkrDiscovering(false);
+    }
+  }, [loadPortfolioPredictionPositions]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -3259,7 +5250,7 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
       const quotePlan = getMacroSignalQuotePlan(riskRanges || {});
       const quoteTickers = [...new Set(quotePlan.map(entry => entry.quote))];
 
-      const [bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot, rawSpotPrices, freshness] = await Promise.all([
+      const [bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot, freshness] = await Promise.all([
         MarketDataService.getHedgeyeSnapshot('bitcoin-trend-tracker').catch(err => {
           console.warn('[PM] bitcoin tracker signal load error:', err);
           return null;
@@ -3276,31 +5267,38 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
           console.warn('[PM] the call signal load error:', err);
           return null;
         }),
-        MarketDataService.getQuotes(quoteTickers).catch(err => {
-          console.warn('[PM] spot price quote load error:', err);
-          return {};
-        }),
         MarketDataService.getHedgeyeFreshness().catch(err => {
           console.warn('[PM] hedgeye freshness load error:', err);
           return null;
         }),
       ]);
 
-      const spotPrices = {};
-      for (const { display, quote } of quotePlan) {
-        const q = rawSpotPrices?.[quote] ?? rawSpotPrices?.[quote.toUpperCase()];
-        if (q) spotPrices[display] = q;
-      }
-
-      setSignalData({
+      setSignalData((current) => ({
+        ...current,
         riskRanges: riskRanges || {},
         bitcoinSnapshot,
         momoSnapshot,
         macroSnapshot,
         callSnapshot,
-        spotPrices: spotPrices || {},
-      });
+        spotPrices: {},
+      }));
       setUploadFreshness(freshness?.dataTypes ?? null);
+
+      if (!quoteTickers.length) return;
+
+      MarketDataService.getQuotes(quoteTickers).then((rawSpotPrices) => {
+        const spotPrices = {};
+        for (const { display, quote } of quotePlan) {
+          const q = rawSpotPrices?.[quote] ?? rawSpotPrices?.[quote.toUpperCase()];
+          if (q) spotPrices[display] = q;
+        }
+        setSignalData((current) => ({
+          ...current,
+          spotPrices,
+        }));
+      }).catch(err => {
+        console.warn('[PM] spot price quote load error:', err);
+      });
     } catch (err) {
       console.error('[PM] signal context load error:', err);
       setSignalsError(err.message || 'Failed to load signal context');
@@ -3309,10 +5307,27 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     }
   }, []);
 
+  const loadCpiNowcastData = useCallback(async () => {
+    try {
+      const inflationNowcastSnapshot = await MarketDataService.getHedgeyeSnapshot('inflation-nowcast', CPI_MODEL_NOWCAST_DATE);
+      setSignalData((current) => ({
+        ...current,
+        inflationNowcastSnapshot,
+      }));
+    } catch (err) {
+      console.warn('[PM] inflation nowcast signal load error:', err);
+      setSignalData((current) => ({
+        ...current,
+        inflationNowcastSnapshot: null,
+      }));
+    }
+  }, []);
+
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadIngest(); }, [loadIngest]);
+  useEffect(() => { loadCpiNowcastData(); }, [loadCpiNowcastData]);
   useEffect(() => { loadSignalData(); }, [loadSignalData]);
-  useEffect(() => { loadIbkr(); }, [loadIbkr]);
+  useEffect(() => { loadPortfolioPredictionPositions(); }, [loadPortfolioPredictionPositions]);
   useEffect(() => {
     onApiStatusChange?.(apiStatus);
   }, [apiStatus, onApiStatusChange]);
@@ -3366,14 +5381,126 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
 
   // If the active signal symbol is no longer present in the loaded data, clear it
   useEffect(() => {
-    if (selectedSignalSymbol && !signalContext.rows.some(row => row.symbol === selectedSignalSymbol)) {
+    if (
+      !signalsLoading &&
+      selectedSignalSymbol &&
+      signalContext.rows.length > 0 &&
+      !signalContext.rows.some(row => row.symbol === selectedSignalSymbol)
+    ) {
       setSelectedSignalSymbol(null);
     }
-  }, [selectedSignalSymbol, signalContext]);
+  }, [selectedSignalSymbol, signalContext, signalsLoading]);
+
+  const heldPredictionPositions = useMemo(
+    () => {
+      const liveEndpointPositions = portfolioPredictionPositionsLive && Array.isArray(portfolioPredictionPositions)
+        ? portfolioPredictionPositions
+        : [];
+      const livePortfolioHoldings = portfolioData?.dataSource === 'ibkr_api'
+        ? getHeldPredictionMarketPositions(portfolioData)
+        : [];
+      return dedupeHeldPredictionMarketPositions([
+        ...liveEndpointPositions,
+        ...livePortfolioHoldings,
+      ]);
+    },
+    [portfolioData, portfolioPredictionPositions, portfolioPredictionPositionsLive],
+  );
+
+  const cpiNowcastResult = useMemo(() => {
+    const result = normalizeCpiNowcast(signalData.inflationNowcastSnapshot);
+    if (!result.ok) return result;
+    return {
+      ...result,
+      model: {
+        ...result.model,
+        forecastMonth: activeCpiMonth?.fullLabel || result.model.forecastMonth,
+      },
+    };
+  }, [activeCpiMonth?.fullLabel, signalData.inflationNowcastSnapshot]);
+
+  const cpiTargetStrikes = useMemo(
+    () => {
+      const modelStrikes = cpiNowcastResult.ok ? deriveCpiTargetStrikes(cpiNowcastResult.model) : [];
+      return normalizeCpiTargetStrikes(modelStrikes);
+    },
+    [cpiNowcastResult],
+  );
+
+  const cpiDiscoveryRequest = useMemo(
+    () => getCpiDiscoveryRequest(cpiNowcastResult.model, activeCpiMonth, cpiTargetStrikes),
+    [activeCpiMonth, cpiNowcastResult.model, cpiTargetStrikes],
+  );
+
+  const cpiAutoRefreshRequest = useMemo(
+    () => (
+      cpiDiscoveryRequest?.cpi?.targetStrikes?.length
+        ? cpiDiscoveryRequest
+        : null
+    ),
+    [cpiDiscoveryRequest],
+  );
+
+  useEffect(() => {
+    if (!cpiAutoRefreshRequest) return undefined;
+    let cancelled = false;
+    const refresh = () => {
+      if (cancelled || ibkrBusyRef.current) return;
+      loadIbkr(cpiAutoRefreshRequest);
+    };
+    refresh();
+    const intervalId = window.setInterval(refresh, 45000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [cpiAutoRefreshRequest, loadIbkr]);
+
+  const refreshCpiContracts = useCallback(
+    () => loadIbkr(cpiDiscoveryRequest),
+    [cpiDiscoveryRequest, loadIbkr],
+  );
+
+  const discoverCpiContracts = useCallback(
+    () => discoverIbkr(cpiDiscoveryRequest),
+    [cpiDiscoveryRequest, discoverIbkr],
+  );
+
+  const cpiPositions = useMemo(
+    () => summarizeCpiPositions(heldPredictionPositions),
+    [heldPredictionPositions],
+  );
+
+  const cpiContractEvents = useMemo(() => {
+    const merged = events.filter(isLiveTradingEvent);
+    const seen = new Set();
+    return merged.filter((event) => {
+      const key = event?.id || event?.conid || event?.question || event?.contract_title;
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [events]);
+
+  const cpiContractRows = useMemo(
+    () => isLiveCpiContractProvider(providers) && cpiContractEvents.length > 0
+      ? buildCpiContractLadder(cpiContractEvents, cpiNowcastResult.model, settings)
+      : [],
+    [cpiNowcastResult, providers, cpiContractEvents, settings],
+  );
+
+  const cpiScenarioMatrixRows = useMemo(
+    () => getCpiScenarioMatrixRows(cpiContractRows, cpiNowcastResult.model, cpiPositions),
+    [cpiContractRows, cpiNowcastResult.model, cpiPositions],
+  );
 
   const contractMapEvents = useMemo(
-    () => getContractsForSignal(selectedSignal, filteredEvents),
-    [filteredEvents, selectedSignal],
+    () => mergeHeldPredictionEvents(
+      getContractsForSignal(selectedSignal, filteredEvents),
+      heldPredictionPositions,
+    ),
+    [filteredEvents, heldPredictionPositions, selectedSignal],
   );
 
   const selectedEvent = useMemo(
@@ -3381,43 +5508,47 @@ export default function PredictionMarkets({ onApiStatusChange, onClose }) {
     [contractMapEvents, selectedId],
   );
 
+  void analytics;
+  void risk;
+  void macroSignalViews;
+  void selectedEvent;
+  void setSelectedId;
+  void onClose;
+
   return (
     <div className="pmv2-wrap pmv2-redesign">
-      <PredictionMarketsHeaderV2 onClose={onClose} />
       {(ingestError || loadError) && (
         <div className="pmv2-error-banner">
           {ingestError || loadError}
           <RefreshButton label="Retry" onClick={() => { loadData(); loadIngest(); }} />
         </div>
       )}
-      <div className="pmv2-redesign-body">
-        <MacroSignalsCard
-          signals={macroSignalViews}
-          selectedSignal={selectedSignal}
-          onSelectSignal={view => {
-            if (!view?.canonical?.symbol) return;
-            setSelectedSignalSymbol(view.canonical.symbol);
-          }}
-          loading={signalsLoading}
-          error={signalsError}
-          onRefresh={loadSignalData}
-          uploadFreshness={uploadFreshness}
+      <div className="cpi-workbench-shell">
+        <CpiCalculatorHeader
+          model={cpiNowcastResult.model}
+          activeMonth={activeCpiMonth}
+          months={cpiMonths}
+          onMonthSelect={setActiveCpiMonth}
+          modelReady={cpiNowcastResult.ok}
         />
-        <main className="pmv2-redesign-main">
-          <ContractMapCard
-            events={contractMapEvents}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            selectedSignal={selectedSignal}
-            loading={loading || ingestLoading}
+        {signalsError && (
+          <div className="pmv2-error-banner cpi-inline-error">{signalsError}</div>
+        )}
+        <main className="cpi-workbench-grid">
+          <CpiScenarioMatrixCard
+            rows={cpiContractRows}
+            matrixRows={cpiScenarioMatrixRows}
+            loading={loading || ingestLoading || ibkrLoading || ibkrDiscovering}
+            model={cpiNowcastResult.model}
             providers={providers}
             ibkrLoading={ibkrLoading}
-            onRefreshIbkr={loadIbkr}
+            ibkrDiscovering={ibkrDiscovering}
+            onRefreshIbkr={refreshCpiContracts}
+            onDiscoverIbkr={discoverCpiContracts}
           />
-          <TradePlanCard
-            selectedSignal={selectedSignal}
-            selectedEvent={selectedEvent}
-            settings={settings}
+          <CpiPayoffConfirmationCard
+            model={cpiNowcastResult.model}
+            openPositions={cpiPositions}
           />
         </main>
       </div>

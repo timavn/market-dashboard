@@ -39,7 +39,7 @@ function getCachedLegacy(symbol) {
   const entry = quotesStateCache.get(cacheKey(symbol));
   if (!entry) return null;
   const ageSec = (Date.now() - entry.updatedAt) / 1000;
-  if (ageSec > STALE_SEC) return null;
+  if (ageSec > STALE_SEC || entry.canonical?.valid !== true) return null;
   return entry.legacy;
 }
 

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Title, Text, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Badge } from '@tremor/react';
-import { Info, TrendingUp, RefreshCw, DollarSign, Package, LayoutGrid, ArrowUp, ArrowDown, Grid } from 'lucide-react';
-import StatusDot from '../common/StatusDot';
+import { Card, Title, Text, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell } from '@tremor/react';
+import { Info, TrendingUp, RefreshCw, DollarSign, Package, LayoutGrid, ArrowUp, ArrowDown } from 'lucide-react';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';
 import LoadingIndicator from '../common/LoadingIndicator';
@@ -33,6 +32,18 @@ const METRIC_EMOJI = {
   'Ethereum':    '⬡',
 };
 
+const CFTC_STALE_AFTER_MS = 10 * 24 * 60 * 60 * 1000;
+
+const getCftcFreshness = (date, refreshFailed = false) => {
+  if (!date) return { label: 'UNAVAILABLE', stale: true };
+  const asOf = new Date(`${date}T23:59:59Z`);
+  const stale = refreshFailed || Number.isNaN(asOf.getTime()) || Date.now() - asOf.getTime() > CFTC_STALE_AFTER_MS;
+  const formatted = Number.isNaN(asOf.getTime())
+    ? date
+    : asOf.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return { label: `${stale ? 'STALE · ' : ''}AS OF ${formatted}`.toUpperCase(), stale };
+};
+
 const CFTCNetLongCard = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -45,6 +56,7 @@ const CFTCNetLongCard = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
+        setError(null);
         const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
         // Fetch the latest CFTC positioning snapshot
         const response = await axios.get(`${backendUrl}/api/hedgeye/snapshot/cftc-positioning`);
@@ -133,6 +145,7 @@ const CFTCNetLongCard = () => {
     if (idxB === -1) return -1;
     return idxA - idxB;
   });
+  const freshness = getCftcFreshness(data?.date, Boolean(error));
 
   return (
     <Card 
@@ -155,13 +168,17 @@ const CFTCNetLongCard = () => {
         </Title>
         <Info size={13} color={isDark ? '#6b7280' : '#9ca3af'} style={{ flexShrink: 0 }} />
         <div style={{ marginLeft: 'auto' }}>
-          <StatusDot
-            updatedAt={data?.date ? new Date(data.date + 'T12:00:00') : null}
-            status={data ? 'active' : loading ? 'stale' : 'inactive'}
-            size={9}
-            label="CFTC Positioning Data"
-            showDateOnly
-          />
+          <span
+            title={error || `CFTC positioning ${freshness.label.toLowerCase()}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', border: `1px solid ${freshness.stale ? '#f59e0b' : '#cbd5e1'}`,
+              borderRadius: '4px', padding: '2px 6px', color: freshness.stale ? '#b45309' : (isDark ? '#cbd5e1' : '#64748b'),
+              background: freshness.stale ? '#fffbeb' : (isDark ? '#1f2937' : '#f8fafc'),
+              fontSize: '9px', fontWeight: 700, letterSpacing: '0.04em', whiteSpace: 'nowrap',
+            }}
+          >
+            {freshness.label}
+          </span>
         </div>
       </div>
 

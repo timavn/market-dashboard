@@ -1,0 +1,44 @@
+CURRENT OPEN POSITIONS
+LONG: 20
+SHORT: 19
+View:
+Ticker	Name	Position	Entry Date	Entry Price	Recent Price	Total Return	Trend Low End	Trend High End	% From Low End	% From High End	Holding Period
+UGA	Gasoline Futures	Short	06/25/26	102.02	100.52	+1.47%					3 days
+VYMI	International Dividend	Long	06/24/26	97.73	97.81	+0.08%					4 days
+DBJP	Japan	Long	06/24/26	113.00	113.76	+0.68%					4 days
+EIS	Israel	Short	06/23/26	120.17	117.85	+1.93%					5 days
+IVES	AI Revolution	Short	06/23/26	37.16	36.18	+2.64%					5 days
+XLY	Consumer Discretionary	Short	06/23/26	114.94	114.37	+0.50%					5 days
+MAGS	Magnificent Seven	Short	06/23/26	63.87	61.60	+3.55%					5 days
+XHB	Homebuilders	Long	06/23/26	109.11	115.64	+5.98%					5 days
+TLT	Long Treasury Bond	Long	06/23/26	86.33	87.36	+1.20%					5 days
+IAK	US Insurance	Long	06/18/26	135.04	141.46	+4.75%	$130.00	$138.00	+8.82%	+2.51%	10 days
+EWM	Malaysia	Short	06/17/26	27.90	26.91	+3.55%	$26.66	$27.98	+0.94%	-3.82%	11 days
+XLV	Healthcare	Long	06/17/26	151.27	160.34	+6.00%	$147.00	$155.00	+9.07%	+3.45%	11 days
+XLRE	Real Estate	Long	06/17/26	44.71	45.24	+1.18%	$43.44	$45.86	+4.14%	-1.35%	11 days
+URA	Uranium	Short	06/16/26	48.06	43.59	+9.30%	$42.34	$49.84	+2.95%	-12.54%	12 days
+SOLZ	Solana	Short	06/16/26	7.38	7.31	+0.95%	$6.05	$7.56	+20.83%	-3.31%	12 days
+MSTY	MSTR Income Strategy	Short	06/12/26	16.94	11.53	+31.93%	$15.06	$17.86	-23.44%	-35.44%	16 days
+LQD	US Corporate Bonds	Long	06/12/26	109.08	109.50	+0.39%	$108.00	$110.00	+1.39%	-0.45%	16 days
+FXH	Healthcare Equity	Long	06/12/26	116.94	122.92	+5.11%	$113.00	$119.00	+8.78%	+3.29%	16 days
+HARD	Commodities Strategy	Short	06/11/26	32.32	29.61	+8.39%	$30.04	$33.14	-1.43%	-10.65%	17 days
+IBIT	Bitcoin	Short	06/11/26	35.61	33.85	+4.94%	$34.14	$37.89	-0.85%	-10.66%	17 days
+BNDD	US Deflation	Long	06/11/26	98.83	101.74	+2.95%	$98.83	$102.29	+2.94%	-0.54%	17 days
+EWG	Germany	Short	06/10/26	40.86	40.63	+0.57%	$40.55	$42.61	+0.20%	-4.65%	18 days
+USO	Crude Oil	Short	06/10/26	133.81	105.48	+21.17%	$105.00	$130.00	+0.46%	-18.86%	18 days
+TINY	Nanotechnology	Long	06/09/26	84.40	89.55	+6.10%	$83.11	$96.97	+7.75%	-7.65%	19 days
+XAR	Aerospace & Defense	Long	06/01/26	278.81	274.09	-1.69%	$268.00	$293.00	+2.27%	-6.45%	27 days
+FXE	Euro	Short	05/27/26	107.44	105.09	+2.19%	$104.00	$107.00	+1.05%	-1.79%	32 days
+UUP	US Dollar Bullish	Long	05/26/26	27.75	28.46	+2.58%	$27.83	$28.42	+2.26%	+0.15%	33 days
+EWZ	Brazil	Short	05/21/26	36.28	34.67	+4.45%	$32.66	$35.17	+6.15%	-1.42%	38 days
+BTAL	US Market Neutral	Short	05/18/26	12.40	11.37	+8.31%	$10.26	$11.96	+10.82%	-4.93%	41 days
+IHI	Medical Devices	Short	05/18/26	49.65	51.03	-2.78%	$47.47	$50.86	+7.50%	+0.33%	41 days
+DRAM	Roundhill Memory	Long	05/18/26	50.81	71.88	+41.47%	$60.14	$78.90	+19.52%	-8.90%	41 days
+VXF	US Extended Market	Long	05/13/26	226.47	241.71	+6.73%	$230.00	$245.00	+5.09%	-1.34%	46 days
+VYM	Dividend Yield	Long	05/12/26	154.13	158.22	+2.65%	$156.00	$162.00	+1.42%	-2.33%	47 days
+IDX	Indonesia	Short	05/07/26	13.29	10.32	+22.35%	$9.56	$11.97	+7.95%	-13.78%	52 days
+PALL	Palladium	Short	05/01/26	27.81	22.04	+20.75%	$21.26	$24.98	+3.67%	-11.77%	58 days
+CLOZ	CLOs	Long	04/22/26	25.77	26.41	+2.48%	$26.20	$26.42	+0.80%	-0.04%	67 days
+CLOX	AAA CLO	Long	03/06/25	24.02	25.61	+6.64%	$25.49	$25.65	+0.49%	-0.14%	479 days
+AAAU	Physical Gold	Long	02/28/25	28.23	40.13	+42.15%	$40.26	$44.40	-0.32%	-9.62%	485 days
+BUXX	Income Short Maturity	Long	10/25/23	17.60	20.28	+15.23%	$20.21	$20.29	+0.35%	-0.05%	977 days

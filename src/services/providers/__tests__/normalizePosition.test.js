@@ -21,11 +21,30 @@ describe('normalizePosition', () => {
     expect(h.positionId).toBe('snap1#AAPL');
   });
 
-  it('estimates marketValue from avgCost when quote and marketValue missing', () => {
+  it('marks marketValue missing instead of fabricating it from avgCost', () => {
     const p = normalizeIbkrPosition(
       { symbol: 'AAPL', position: 10, avgCost: 150, account: 'U1', secType: 'STK' },
       null,
     );
-    expect(p.marketValue).toBe(1500);
+    expect(p.marketValue).toBe(null);
+    expect(p.warning).toBe('missing_market_value');
+  });
+
+  it('classifies IBKR prediction market contracts without quote warnings', () => {
+    const p = normalizeIbkrPosition(
+      {
+        symbol: 'KXCPIYOY',
+        localSymbol: 'KXCPIYOY-26JUN-T4.2_NO',
+        position: -1,
+        avgCost: 0.51,
+        account: 'U1',
+        secType: 'OPT',
+      },
+      null,
+    );
+    expect(p.isPredictionMarket).toBe(true);
+    expect(p.assetClass).toBe('Prediction Markets');
+    expect(p.marketValue).toBe(null);
+    expect(p.warning).toBe(null);
   });
 });

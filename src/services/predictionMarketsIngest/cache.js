@@ -1,4 +1,3 @@
-const AWS = require('aws-sdk');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,7 +10,8 @@ let dynamodb;
 
 function getDynamo() {
   if (!dynamodb) {
-    dynamodb = new AWS.DynamoDB.DocumentClient({
+    const DynamoDB = require('aws-sdk/clients/dynamodb');
+    dynamodb = new DynamoDB.DocumentClient({
       region: process.env.AWS_REGION || 'us-west-1',
     });
   }

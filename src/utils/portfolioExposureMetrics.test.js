@@ -4,6 +4,8 @@ import {
   computeDailyPnLPercent,
   formatExposurePct,
   formatSignedCurrency,
+  isUsEquitySessionActive,
+  resolvePortfolioHeaderSnapshot,
 } from './portfolioExposureMetrics';
 
 describe('computePortfolioExposure', () => {
@@ -79,6 +81,68 @@ describe('computeMarginMetrics', () => {
 describe('computeDailyPnLPercent', () => {
   it('computes daily P&L percent vs prior close', () => {
     expect(computeDailyPnLPercent(2480, 196187)).toBeCloseTo(1.28, 1);
+  });
+});
+
+describe('isUsEquitySessionActive', () => {
+  it('returns false after the close', () => {
+    expect(isUsEquitySessionActive(new Date('2026-06-09T01:30:00.000Z'))).toBe(false);
+  });
+
+  it('returns true during regular market hours', () => {
+    expect(isUsEquitySessionActive(new Date('2026-06-09T15:00:00.000Z'))).toBe(true);
+  });
+});
+
+describe('resolvePortfolioHeaderSnapshot', () => {
+  it('uses live daily P&L when available', () => {
+    const result = resolvePortfolioHeaderSnapshot({
+      nlv: 196187,
+      dailyPnL: 2480,
+      sessionActive: true,
+      cachedCloseSnapshot: { netLiquidation: 190000, dailyPct: 0.5 },
+    });
+
+    expect(result.displayNlv).toBe(196187);
+    expect(result.displayDailyPct).toBeCloseTo(1.28, 1);
+    expect(result.snapshotToCache).toBeNull();
+  });
+
+  it('falls back to cached close when the market is closed and live P&L is missing', () => {
+    const result = resolvePortfolioHeaderSnapshot({
+      nlv: 196500,
+      dailyPnL: null,
+      sessionActive: false,
+      cachedCloseSnapshot: { netLiquidation: 196187, dailyPct: 1.28 },
+    });
+
+    expect(result.displayNlv).toBe(196187);
+    expect(result.displayDailyPct).toBe(1.28);
+  });
+
+  it('ignores buggy cached zero close values when live P&L is missing after hours', () => {
+    const result = resolvePortfolioHeaderSnapshot({
+      nlv: 196500,
+      dailyPnL: null,
+      sessionActive: false,
+      cachedCloseSnapshot: { netLiquidation: 196187, dailyPct: 0 },
+    });
+
+    expect(result.displayNlv).toBe(196500);
+    expect(result.displayDailyPct).toBeNull();
+    expect(result.snapshotToCache).toBeNull();
+  });
+
+  it('captures the close snapshot when a valid P&L is available after hours', () => {
+    const result = resolvePortfolioHeaderSnapshot({
+      nlv: 196187,
+      dailyPnL: 2480,
+      sessionActive: false,
+      cachedCloseSnapshot: null,
+    });
+
+    expect(result.snapshotToCache?.netLiquidation).toBe(196187);
+    expect(result.snapshotToCache?.dailyPct).toBeCloseTo(1.28, 1);
   });
 });
 

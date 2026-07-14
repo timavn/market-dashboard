@@ -41,6 +41,8 @@ Thumbs.db
 # Hedgeye credentials
 aws/lambda/hedgeye_config.json
 aws/lambda/test_output/
+**/hedgeye_cookies.json
+**/hedgeye_session.json
 
 # Large Lambda deployment packages
 aws/lambda/*.zip
@@ -53,3 +55,7 @@ aws/lambda/*.png
 
 # Local Hedgeye ETF Pro snapshots
 /data/hedgeye/etfpro/*.json
+
+# Local live-data/runtime snapshots
+/data/hedgeye/rta/*.json
+/src/services/predictionMarketsIngest/mock/.local-ingest-cache.json

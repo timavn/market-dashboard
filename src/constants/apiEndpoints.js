@@ -10,7 +10,12 @@ export const ENDPOINTS = {
 
   // Portfolio data
   PORTFOLIO: '/api/portfolio',
+  PORTFOLIO_ACCOUNTS: '/api/portfolio/accounts',
+  PORTFOLIO_PREDICTION_MARKET_POSITIONS: '/api/portfolio/prediction-market-positions',
+  PORTFOLIO_EXPOSURE_RECONCILIATION: '/api/portfolio/exposure/reconciliation',
   PROVIDERS_STATUS: '/api/providers/status',
+  IBKR_FLEX_STATUS: '/api/ibkr/flex/status',
+  IBKR_FLEX_SYNC: '/api/ibkr/flex/sync',
   POSITIONS: '/api/positions',
   PERFORMANCE: '/api/performance',
   PERFORMANCE_HISTORY: '/api/performance/history',
@@ -33,6 +38,8 @@ export const ENDPOINTS = {
 
   // Workflow status
   WORKFLOW_STATUS: '/api/workflow-status',
+  HERMES_DIRECTOR_STATUS: '/api/hermes/director/status',
+  HERMES_DIRECTOR_COMMAND: '/api/hermes/director/command',
 
   // Prediction markets venue catalog
   PREDICTION_MARKETS_AGGREGATED: '/api/prediction-markets/aggregated-events',

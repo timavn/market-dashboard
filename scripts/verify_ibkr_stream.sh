@@ -6,8 +6,17 @@ SIDECAR="${IBKR_SIDECAR_URL:-http://localhost:8765}"
 BACKEND="${REACT_APP_BACKEND_URL:-http://localhost:3001}"
 
 echo "=== 1. Sidecar GET /status (stream fields) ==="
-STATUS_JSON=$(curl -sf "${SIDECAR%/}/status") || {
-  echo "FAIL: sidecar not reachable at ${SIDECAR}"
+curl -sf --max-time 2 "${SIDECAR%/}/livez" | python3 -m json.tool || {
+  echo "FAIL: sidecar not responsive at ${SIDECAR}"
+  echo "If :8765 is occupied, restart with: pkill -f 'uvicorn app:app' && npm run ibkr-sidecar"
+  exit 1
+}
+
+echo ""
+echo "=== 1b. Sidecar GET /status (stream fields) ==="
+STATUS_JSON=$(curl -sf --max-time 5 "${SIDECAR%/}/status") || {
+  echo "FAIL: sidecar is alive but /status did not respond."
+  echo "Recommended action: pkill -f 'uvicorn app:app' && npm run ibkr-sidecar"
   exit 1
 }
 echo "$STATUS_JSON" | python3 -m json.tool
@@ -20,7 +29,7 @@ fi
 
 echo ""
 echo "=== 2. POST /subscribe SPY ==="
-curl -sf -X POST "${SIDECAR%/}/subscribe" \
+curl -sf --max-time 10 -X POST "${SIDECAR%/}/subscribe" \
   -H 'Content-Type: application/json' \
   -d '{"instruments":[{"symbol":"SPY","secType":"STK"}]}' | python3 -m json.tool
 
@@ -32,11 +41,11 @@ timeout 12 curl -sfN "${SIDECAR%/}/stream/quotes" | head -n 5 || {
 
 echo ""
 echo "=== 4. GET /cache/quotes?symbols=SPY ==="
-curl -sf "${SIDECAR%/}/cache/quotes?symbols=SPY" | python3 -m json.tool
+curl -sf --max-time 5 "${SIDECAR%/}/cache/quotes?symbols=SPY" | python3 -m json.tool
 
 echo ""
 echo "=== 5. Express GET /api/providers/status ==="
-if curl -sf "${BACKEND%/}/api/providers/status" | python3 -m json.tool; then
+if curl -sf --max-time 12 "${BACKEND%/}/api/providers/status" | python3 -m json.tool; then
   echo "OK"
 else
   echo "WARN: backend not reachable at ${BACKEND}"

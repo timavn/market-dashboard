@@ -4,13 +4,14 @@
  */
 
 /**
- * Separate holdings into longs and shorts based on quantity
+ * Split active holdings into long/short sides.
+ * Market value wins because quantity signs can be unreliable for some products.
  * @param {Array} holdings - Array of holding objects
- * @returns {Object} { longs: Array, shorts: Array }
+ * @returns {Object} { longs: Array, shorts: Array, longCount: number, shortCount: number }
  */
-export const separateLongsAndShorts = (holdings) => {
+export const getLongShortPositionSnapshot = (holdings) => {
   if (!holdings || !Array.isArray(holdings)) {
-    return { longs: [], shorts: [] };
+    return { longs: [], shorts: [], longCount: 0, shortCount: 0 };
   }
 
   const longs = [];
@@ -20,8 +21,6 @@ export const separateLongsAndShorts = (holdings) => {
     const quantity = parseFloat(holding.quantity) || 0;
     const marketValue = parseFloat(holding.marketValue) || 0;
 
-    // Use market value as primary determinant (more reliable than quantity parsing)
-    // Or if market value is 0, try quantity
     if (marketValue > 0) {
       longs.push(holding);
     } else if (marketValue < 0) {
@@ -31,9 +30,23 @@ export const separateLongsAndShorts = (holdings) => {
     } else if (quantity < 0) {
       shorts.push(holding);
     }
-    // If both are 0, we skip it
   });
 
+  return {
+    longs,
+    shorts,
+    longCount: longs.length,
+    shortCount: shorts.length,
+  };
+};
+
+/**
+ * Separate holdings into longs and shorts.
+ * @param {Array} holdings - Array of holding objects
+ * @returns {Object} { longs: Array, shorts: Array }
+ */
+export const separateLongsAndShorts = (holdings) => {
+  const { longs, shorts } = getLongShortPositionSnapshot(holdings);
   return { longs, shorts };
 };
 
@@ -299,8 +312,4 @@ export const formatDate = (date) => {
     return '--';
   }
 };
-
-
-
-
 

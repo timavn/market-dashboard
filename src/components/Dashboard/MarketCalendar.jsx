@@ -631,7 +631,7 @@ const MarketCalendar = () => {
 
             {/* Error message */}
             {saveError && (
-              <div className="mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm text-red-600 dark:text-red-400">
+              <div className="mt-3 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-sm text-blue-600 dark:text-blue-400">
                 {saveError}
               </div>
             )}

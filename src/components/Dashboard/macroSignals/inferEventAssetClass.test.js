@@ -1,4 +1,4 @@
-import { inferEventMacroAssetClass } from './inferEventAssetClass';
+import { inferEventMacroAssetClass, isCpiMacroEvent } from './inferEventAssetClass';
 
 describe('inferEventMacroAssetClass', () => {
   test('maps ingest categories directly', () => {
@@ -45,5 +45,12 @@ describe('inferEventMacroAssetClass', () => {
       }),
     ).toBeNull();
     expect(inferEventMacroAssetClass(null)).toBeNull();
+  });
+
+  test('identifies CPI contracts for the macro contracts tab', () => {
+    expect(isCpiMacroEvent({ question: 'Will CPI YoY exceed 3% in June?' })).toBe(true);
+    expect(isCpiMacroEvent({ symbol: 'CPIY-26JUN-3.0', contract_title: 'June CPI above 3.0%' })).toBe(true);
+    expect(isCpiMacroEvent({ question: 'Will PCE inflation exceed 3% in June?' })).toBe(false);
+    expect(isCpiMacroEvent({ category: 'Inflation', question: 'Will PPI exceed 3%?' })).toBe(false);
   });
 });

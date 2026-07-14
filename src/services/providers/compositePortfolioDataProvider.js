@@ -1,12 +1,58 @@
 const ibkrPortfolio = require('./ibkr/ibkrPortfolioDataProvider');
+const compositeMarketData = require('./compositeMarketDataProvider');
 const { setPortfolioMeta } = require('./providerStatus');
 const ibkrStreamBridge = require('../ibkr/ibkrStreamBridge');
 const { sidecarRequest } = require('./ibkrSidecarClient');
 const { normalizeIbkrRaw } = require('./normalize/normalizeQuote');
 
+const PORTFOLIO_QUOTE_FALLBACK_ENABLED = process.env.PORTFOLIO_QUOTE_FALLBACK_ENABLED !== 'false';
+const PORTFOLIO_QUOTE_FALLBACK_BATCH_SIZE = Number(process.env.PORTFOLIO_QUOTE_FALLBACK_BATCH_SIZE || 4);
+const PORTFOLIO_QUOTE_FALLBACK_DELAY_MS = Number(process.env.PORTFOLIO_QUOTE_FALLBACK_DELAY_MS || 75);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getFallbackQuotesForSymbols(symbols) {
+  const map = {};
+  if (!PORTFOLIO_QUOTE_FALLBACK_ENABLED || !Array.isArray(symbols) || symbols.length === 0) {
+    return map;
+  }
+
+  const batchSize = Math.max(1, PORTFOLIO_QUOTE_FALLBACK_BATCH_SIZE);
+  for (let i = 0; i < symbols.length; i += batchSize) {
+    const batch = symbols.slice(i, i + batchSize);
+    const results = await Promise.all(
+      batch.map(async (sym) => {
+        try {
+          const canonical = await compositeMarketData.getCanonicalQuote(sym);
+          if (canonical?.mark != null) {
+            return [sym.toUpperCase(), canonical];
+          }
+        } catch (err) {
+          console.warn(`[Portfolio] fallback quote failed for ${sym}:`, err.message);
+        }
+        return null;
+      }),
+    );
+
+    for (const result of results) {
+      if (result) map[result[0]] = result[1];
+    }
+
+    if (i + batchSize < symbols.length && PORTFOLIO_QUOTE_FALLBACK_DELAY_MS > 0) {
+      await sleep(PORTFOLIO_QUOTE_FALLBACK_DELAY_MS);
+    }
+  }
+
+  return map;
+}
+
 /**
- * Cache-only quotes for portfolio enrichment — avoids sequential IBKR/Yahoo fetches.
- * Positions from IBKR stream cache usually include marketValue already.
+ * Portfolio quote enrichment:
+ * 1. Fast cache/stream lookup for most holdings.
+ * 2. Bounded full-provider fallback for unmarked holdings so thin/stale-cache
+ *    names can still receive display marks.
  */
 async function getCachedQuotesForSymbols(symbols) {
   const map = {};
@@ -38,6 +84,12 @@ async function getCachedQuotesForSymbols(symbols) {
     }
   } catch {
     // Positions may already carry marketValue from IBKR portfolio cache.
+  }
+
+  const stillMissing = missing.filter((sym) => !map[sym.toUpperCase()]);
+  if (stillMissing.length > 0) {
+    const fallback = await getFallbackQuotesForSymbols(stillMissing);
+    Object.assign(map, fallback);
   }
 
   return map;
@@ -91,24 +143,30 @@ function createCompositePortfolioDataProvider(uploadProvider) {
     const holdings = (ibkrSnap.holdings || []).map((h) => ({
       symbol: h.symbol,
       description: h.description,
+      accountId: h.accountId,
       quantity: h.quantity,
-      price: h.price ?? 0,
-      marketValue: h.marketValue ?? 0,
-      costBasis: h.costBasis ?? 0,
-      gainLoss: h.gainLoss ?? 0,
-      gainLossPercent: h.gainLossPercent ?? 0,
+      price: h.price ?? null,
+      marketValue: h.marketValue ?? null,
+      costBasis: h.costBasis ?? null,
+      gainLoss: h.gainLoss ?? null,
+      gainLossPercent: h.gainLossPercent ?? null,
       dayChangePercent: null,
       assetType: h.assetType,
       assetClass: h.assetClass,
       secType: h.secType,
       conid: h.conid,
+      isPredictionMarket: h.isPredictionMarket,
       positionSource: h.positionSource,
       priceSource: h.priceSource,
       lastUpdated: h.lastUpdated,
       warning: h.warning,
     }));
 
-    setPortfolioMeta('ibkr_api', ibkrSnap.error || null);
+    const dataQualityWarnings = Array.isArray(ibkrSnap.dataQuality?.warnings)
+      ? ibkrSnap.dataQuality.warnings
+      : [];
+
+    setPortfolioMeta('ibkr_api', ibkrSnap.error || dataQualityWarnings[0] || null);
 
     const totalValue =
       ibkrSnap.accountSummary?.netLiquidation ?? ibkrSnap.summary?.totalValue ?? 0;
@@ -123,15 +181,16 @@ function createCompositePortfolioDataProvider(uploadProvider) {
         .map((h) => ({
           symbol: h.symbol,
           marketValue: h.marketValue,
-          accountPercent: totalValue
+          accountPercent: totalValue && h.marketValue != null
             ? ((Math.abs(h.marketValue) / totalValue) * 100).toFixed(2)
             : '0.00',
         })),
       dataSource: 'ibkr_api',
       positionSource: 'ibkr_api',
       priceSource: 'ibkr',
-      reconciliationWarnings: [],
+      reconciliationWarnings: dataQualityWarnings,
       providerStatus: null,
+      dataQuality: ibkrSnap.dataQuality || null,
       lastUpdated: formatLastUpdated(ibkrSnap.fetchedAt || new Date().toISOString()),
       accountSummary: ibkrSnap.accountSummary,
       empty: holdings.length === 0 && !ibkrSnap.accountSummary,

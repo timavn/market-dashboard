@@ -24,6 +24,13 @@ const {
 } = require('./src/utils/hedgeyeVolumeSnapshot.cjs');
 const { determineEtfProSnapshotDate } = require('./src/utils/etfProSnapshotDate.cjs');
 const {
+  parseEtfProActionEmail,
+  parseEtfProFullBookEmail,
+} = require('./src/utils/etfProEmailSnapshot.cjs');
+const {
+  resolveEtfProPayloadFromSources,
+} = require('./src/utils/etfProResolver.cjs');
+const {
   HEDGEYE_BUCKET,
   resolveHedgeyeMedia,
   buildHedgeyeContentUrlFromRequest,
@@ -47,6 +54,41 @@ const {
   DEFAULT_PRIMARY_WINDOW: PORTFOLIO_CORRELATION_PRIMARY_WINDOW,
   getCorrelationScorableSymbols,
 } = require('./src/utils/portfolioCorrelationConcentration');
+const { sidecarRequest } = require('./src/services/providers/ibkrSidecarClient');
+const {
+  isPredictionMarketContract,
+  normalizeIbkrPosition,
+} = require('./src/services/providers/normalize/normalizePosition');
+const {
+  buildLiquidityModels,
+} = require('./src/utils/liquidityModel.cjs');
+const {
+  createUsdCorrelationService,
+} = require('./src/services/usdCorrelationService.cjs');
+const {
+  fetchFlexStatement,
+  getReconciliation: getFlexReconciliation,
+  publicConfigStatus: getFlexPublicConfigStatus,
+} = require('./src/services/ibkrFlexService.cjs');
+const { getFreshCachedQuote } = require('./src/services/providers/quoteCachePolicy.cjs');
+const {
+  instrumentCacheKey,
+  canUseSymbolStream,
+} = require('./src/services/providers/instruments/instrumentResolver');
+const {
+  getProviderStatusSnapshot,
+} = require('./src/services/providers/providerStatus');
+const {
+  toQuoteInstrument,
+  buildQuoteMetadata,
+  buildPeriodReturnsMetadata,
+} = require('./src/services/providers/multiRegionQuoteIntegrity.cjs');
+const {
+  createVolatilitySnapshotService,
+} = require('./src/services/volatilitySnapshotService.cjs');
+const { scanAllPages } = require('./src/utils/dynamoScanAllPages.cjs');
+
+const volatilitySnapshotService = createVolatilitySnapshotService({ httpClient: axios });
 
 function scaleRateProxyValue(raw, isRateProxy) {
   if (raw == null || raw === undefined || !isRateProxy) return raw;
@@ -165,6 +207,287 @@ function etfProEmailSnapshotToPayload(snapshot) {
   };
 }
 
+function classifyEtfProRows(rows = []) {
+  const longs = new Set();
+  const shorts = new Set();
+  for (const row of rows || []) {
+    const ticker = String(row.ticker || '').trim().toUpperCase();
+    if (!ticker) continue;
+    if (String(row.call || '').toLowerCase() === 'short') {
+      shorts.add(ticker);
+    } else {
+      longs.add(ticker);
+    }
+  }
+  return { longs, shorts };
+}
+
+function isEtfProActionPayload(payload) {
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const changes = payload?.changes || {};
+  const changeCount =
+    (changes.addedLongs?.length || 0) +
+    (changes.removedLongs?.length || 0) +
+    (changes.addedShorts?.length || 0) +
+    (changes.removedShorts?.length || 0);
+  const headline = payload?.meta?.headline || '';
+  return rows.length > 0 && (changeCount > 0 || /\bNew ETF Pro Changes?\b/i.test(headline));
+}
+
+function applyEtfProActionUpdate(basePayload, actionPayload, options = {}) {
+  if (!basePayload || !actionPayload) return actionPayload || basePayload || null;
+  const baseRows = Array.isArray(basePayload.rows) ? basePayload.rows : [];
+  const changes = actionPayload.changes || {};
+  const removedLongs = new Set((changes.removedLongs || []).map((t) => String(t).toUpperCase()));
+  const removedShorts = new Set((changes.removedShorts || []).map((t) => String(t).toUpperCase()));
+  const addedByTicker = new Map(
+    (Array.isArray(actionPayload.rows) ? actionPayload.rows : [])
+      .filter((row) => String(row.action || '').toUpperCase() === 'ADD')
+      .map((row) => [String(row.ticker || '').toUpperCase(), row]),
+  );
+  const removedButMissing = [];
+  const seenRemoved = new Set();
+  const nextRows = baseRows.filter((row) => {
+    const ticker = String(row.ticker || '').trim().toUpperCase();
+    if (!ticker) return true;
+    const side = String(row.call || '').toLowerCase() === 'short' ? 'short' : 'long';
+    const shouldRemove = side === 'short' ? removedShorts.has(ticker) : removedLongs.has(ticker);
+    if (shouldRemove) {
+      seenRemoved.add(`${side}:${ticker}`);
+      return false;
+    }
+    return true;
+  });
+
+  for (const ticker of removedLongs) {
+    if (!seenRemoved.has(`long:${ticker}`)) removedButMissing.push(ticker);
+  }
+  for (const ticker of removedShorts) {
+    if (!seenRemoved.has(`short:${ticker}`)) removedButMissing.push(ticker);
+  }
+
+  const existingTickers = new Set(nextRows.map((row) => String(row.ticker || '').toUpperCase()));
+  for (const [ticker, row] of addedByTicker.entries()) {
+    if (!ticker || existingTickers.has(ticker)) continue;
+    nextRows.push({
+      id: `${ticker}_${nextRows.length}`,
+      etf: row.etf || ticker,
+      assetClass: row.assetClass || 'ETF Pro',
+      call: row.call || row.side || 'Long',
+      ticker,
+      dateAdded: actionPayload.meta?.snapshotDate || null,
+      riskRangeHigh: row.riskRangeHigh ?? null,
+      riskRangeLow: row.riskRangeLow ?? null,
+      relativePerformance: null,
+      absolutePerformance: null,
+      daysHeld: 0,
+      sourceAction: 'ADD',
+    });
+    existingTickers.add(ticker);
+  }
+
+  return {
+    ...basePayload,
+    meta: {
+      ...(basePayload.meta || {}),
+      snapshotDate: actionPayload.meta?.snapshotDate || basePayload.meta?.snapshotDate || null,
+      parsedAt: actionPayload.meta?.parsedAt || basePayload.meta?.parsedAt || null,
+      sourceFile: actionPayload.meta?.sourceFile || basePayload.meta?.sourceFile || null,
+      source: options.source || 'gmail-html-applied-to-local-book',
+      headline: actionPayload.meta?.headline || null,
+      baseSnapshotDate: basePayload.meta?.snapshotDate || null,
+      actionCount: Array.isArray(actionPayload.rows) ? actionPayload.rows.length : 0,
+      appliedActionDates: [
+        ...new Set([
+          ...(Array.isArray(basePayload.meta?.appliedActionDates) ? basePayload.meta.appliedActionDates : []),
+          actionPayload.meta?.snapshotDate,
+        ].filter(Boolean)),
+      ],
+      rowCount: nextRows.length,
+    },
+    rows: nextRows.map((row, index) => ({ ...row, id: row.id || `${row.ticker}_${index}` })),
+    changes,
+    actionRows: actionPayload.rows || [],
+    dataQuality: {
+      status: removedButMissing.length > 0 ? 'partial' : 'ok',
+      removedButMissing,
+      warnings: removedButMissing.length > 0
+        ? [`ETF Pro remove actions not found in base book: ${removedButMissing.join(', ')}`]
+        : [],
+    },
+  };
+}
+
+function loadLocalEtfProPayload() {
+  const etfproDir = path.join(__dirname, 'data', 'hedgeye', 'etfpro');
+  const latestPath = path.join(etfproDir, 'latest.json');
+  if (!fs.existsSync(latestPath)) {
+    return { etfproDir, latestPath, payload: null };
+  }
+  const parsed = JSON.parse(fs.readFileSync(latestPath, 'utf-8'));
+  const { snapDate: resolvedDate } = resolveEtfProSnapshotForAnalytics(parsed);
+  if (resolvedDate && (!parsed.meta || !parsed.meta.snapshotDate)) {
+    parsed.meta = { ...(parsed.meta || {}), snapshotDate: resolvedDate };
+  }
+  return { etfproDir, latestPath, payload: parsed };
+}
+
+function getPayloadDate(payload) {
+  return payload?.meta?.snapshotDate || null;
+}
+
+function getPayloadTime(payload) {
+  const raw = payload?.meta?.parsedAt || payload?.meta?.sourceFileMtime || null;
+  const date = raw ? new Date(raw) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+}
+
+function sortPayloadsChronologically(payloads) {
+  return [...payloads].sort((a, b) => {
+    const dateCompare = String(getPayloadDate(a) || '').localeCompare(String(getPayloadDate(b) || ''));
+    if (dateCompare !== 0) return dateCompare;
+    return getPayloadTime(a) - getPayloadTime(b);
+  });
+}
+
+function pickNewestPayload(payloads) {
+  return sortPayloadsChronologically(payloads).at(-1) || null;
+}
+
+function dedupeEtfProActions(payloads) {
+  const seen = new Set();
+  const result = [];
+  for (const payload of payloads) {
+    if (!payload) continue;
+    const changes = payload.changes || {};
+    const signature = JSON.stringify({
+      date: payload.meta?.snapshotDate || null,
+      headline: payload.meta?.headline || null,
+      addedLongs: [...(changes.addedLongs || [])].sort(),
+      removedLongs: [...(changes.removedLongs || [])].sort(),
+      addedShorts: [...(changes.addedShorts || [])].sort(),
+      removedShorts: [...(changes.removedShorts || [])].sort(),
+    });
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    result.push(payload);
+  }
+  return result;
+}
+
+function isEtfProActionAfterBase(actionPayload, basePayload) {
+  const actionDate = getPayloadDate(actionPayload);
+  const baseDate = getPayloadDate(basePayload);
+  if (!actionDate || !baseDate) return false;
+  return actionDate.localeCompare(baseDate) > 0;
+}
+
+async function getHermesEtfProEmailPayloads() {
+  const fullBooks = [];
+  const actions = [];
+  let ExclusiveStartKey;
+
+  do {
+    const result = await dynamodb.scan({
+      TableName: HERMES_EMAIL_LEDGER_TABLE,
+      ProjectionExpression: 'messageId, subject, reportType, snapshotType, snapshotDate, s3Bucket, s3Key, createdAt, updatedAt, receivedAt, #status',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExclusiveStartKey,
+    }).promise();
+
+    for (const item of result.Items || []) {
+      if (item.status !== 'STORED') continue;
+      const subject = item.subject || '';
+      const isEtfPro =
+        item.reportType === 'etf-pro' ||
+        item.snapshotType === 'etf-pro' ||
+        /ETF Pro|New ETF Pro Changes?/i.test(subject);
+      if (!isEtfPro || !item.s3Key) continue;
+
+      let htmlBody = '';
+      try {
+        const obj = await s3.getObject({
+          Bucket: item.s3Bucket || HEDGEYE_BUCKET,
+          Key: item.s3Key,
+        }).promise();
+        htmlBody = obj.Body?.toString('utf8') || '';
+      } catch (err) {
+        console.warn('[ETF Pro] Failed to read Hermes email artifact:', item.s3Key, err.message);
+        continue;
+      }
+
+      const fullBook = parseEtfProFullBookEmail(item, htmlBody);
+      if (fullBook) {
+        fullBooks.push(fullBook);
+        continue;
+      }
+
+      const action = parseEtfProActionEmail(item, htmlBody);
+      if (action) {
+        actions.push(action);
+      }
+    }
+
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+
+  return { fullBooks, actions };
+}
+
+function resolveEtfProFromEmailFullBook({ fullBookPayload, actionPayloads }) {
+  if (!fullBookPayload) return null;
+  const actions = sortPayloadsChronologically(dedupeEtfProActions(actionPayloads))
+    .filter((actionPayload) => isEtfProActionAfterBase(actionPayload, fullBookPayload));
+
+  let payload = {
+    ...fullBookPayload,
+    meta: {
+      ...(fullBookPayload.meta || {}),
+      source: actions.length > 0 ? 'gmail-html-full-book-applied-actions' : 'gmail-html-full-book',
+      baseSnapshotDate: fullBookPayload.meta?.snapshotDate || null,
+      appliedActionDates: [],
+      rowCount: Array.isArray(fullBookPayload.rows) ? fullBookPayload.rows.length : 0,
+    },
+    rows: Array.isArray(fullBookPayload.rows) ? fullBookPayload.rows : [],
+    dataQuality: { status: 'ok', removedButMissing: [], warnings: [] },
+  };
+
+  for (const actionPayload of actions) {
+    payload = applyEtfProActionUpdate(payload, actionPayload, {
+      source: 'gmail-html-full-book-applied-actions',
+    });
+  }
+
+  payload.meta = {
+    ...(payload.meta || {}),
+    source: actions.length > 0 ? 'gmail-html-full-book-applied-actions' : 'gmail-html-full-book',
+    baseSnapshotDate: fullBookPayload.meta?.snapshotDate || null,
+    rowCount: Array.isArray(payload.rows) ? payload.rows.length : 0,
+  };
+  return payload;
+}
+
+async function getResolvedEtfProPayload() {
+  const emailSnapshot = await getLatestEtfProEmailSnapshot();
+  const emailPayload = etfProEmailSnapshotToPayload(emailSnapshot);
+  const hermesPayloads = await getHermesEtfProEmailPayloads();
+  const { etfproDir, latestPath, payload: localPayload } = loadLocalEtfProPayload();
+  const resolvedPayload = resolveEtfProPayloadFromSources({
+    localPayload,
+    emailPayload,
+    hermesPayloads,
+  });
+
+  return {
+    payload: resolvedPayload,
+    etfproDir,
+    latestPath,
+    localPayload,
+    emailPayload,
+    hermesPayloads,
+  };
+}
+
 function stripHtmlToText(value = '') {
   return String(value)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -203,21 +526,41 @@ function parseRealTimeAlertFromLedgerItem(item, htmlBody = '') {
   const text = stripHtmlToText(htmlBody);
   const candidates = [subject, headline, text].filter(Boolean);
 
+  const inferAlertIntent = (action, ticker) => {
+    const escapedTicker = String(ticker || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const haystack = [subject, headline, text].filter(Boolean).join(' ');
+    const shortingPattern = new RegExp(`\\bSELL\\s+SIGNAL\\s*-\\s*SHORTING(?:\\s+SHORT)?\\s+${escapedTicker}\\b`, 'i');
+    const coveringPattern = new RegExp(`\\b(?:BUY|COVER(?:-SOME)?)\\s+SIGNAL\\s*-\\s*COVERING(?:\\s+SHORT)?\\s+${escapedTicker}\\b`, 'i');
+    const buyingPattern = new RegExp(`\\bBUY\\s+SIGNAL\\s*-\\s*BUYING\\s+${escapedTicker}\\b`, 'i');
+
+    if (shortingPattern.test(haystack)) {
+      return { action: 'SELL', intent: 'open-short', side: 'short' };
+    }
+    if (coveringPattern.test(haystack)) {
+      return { action: 'COVER', intent: 'close-short', side: 'short' };
+    }
+    if (action === 'BUY' && buyingPattern.test(haystack)) {
+      return { action: 'BUY', intent: 'open-long', side: 'long' };
+    }
+    return { action, intent: null, side: null };
+  };
+
   for (const candidate of candidates) {
     const rtaSubjectMatch = candidate.match(/Real-Time Alert:\s*(.+?)\s+Signal(?:\s*\(([^)]*)\))?\s*:\s*(.+?)(?:\s*-\s*([A-Z]{1,4}))?\s*$/i);
     if (rtaSubjectMatch) {
       const signalPhrase = rtaSubjectMatch[1].trim();
       const target = rtaSubjectMatch[3].trim();
-      const actionMatch = signalPhrase.match(/\b(SELL-SOME|BUY|SELL|COVER)\b/i);
+      const actionMatch = signalPhrase.match(/\b(SELL-SOME|COVER-SOME|BUY|SELL|COVER)\b/i);
       const parenMatch = target.match(/(.+?)\s+\(([A-Z][A-Z0-9./-]{1,9})\)$/);
       const tickerMatch = target.match(/^([A-Z][A-Z0-9./-]{1,9})$/);
       const ticker = (parenMatch?.[2] || tickerMatch?.[1] || '').toUpperCase();
       if (actionMatch && ticker) {
+        const inferred = inferAlertIntent(actionMatch[1].toUpperCase(), ticker);
         return {
           ticker,
-          action: actionMatch[1].toUpperCase(),
-          intent: null,
-          side: null,
+          action: inferred.action,
+          intent: inferred.intent,
+          side: inferred.side,
           name: parenMatch?.[1]?.trim() || extractLogoName(htmlBody) || ticker,
           headline: subject,
           signalPhrase,
@@ -227,11 +570,12 @@ function parseRealTimeAlertFromLedgerItem(item, htmlBody = '') {
       }
     }
 
-    const signalMatch = candidate.match(/\b(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL(?:\s*-\s*(SHORTING|COVERING|BUYING|SELLING))?\s+([A-Z][A-Z0-9./-]{1,9})\b/i);
+    const signalMatch = candidate.match(/\b(BUY|SELL-SOME|COVER-SOME|SELL|COVER)\s+SIGNAL(?:\s*-\s*(SHORTING|COVERING|BUYING|SELLING))?(?:\s+SHORT)?\s+([A-Z][A-Z0-9./-]{1,9})\b/i);
     if (signalMatch) {
-      const action = signalMatch[1].toUpperCase();
+      const rawAction = signalMatch[1].toUpperCase();
       const modifier = (signalMatch[2] || '').toUpperCase();
       const ticker = signalMatch[3].toUpperCase();
+      const action = modifier === 'COVERING' || rawAction === 'COVER-SOME' ? 'COVER' : rawAction;
       return {
         ticker,
         action,
@@ -239,8 +583,10 @@ function parseRealTimeAlertFromLedgerItem(item, htmlBody = '') {
           ? 'open-short'
           : modifier === 'BUYING'
             ? 'open-long'
+            : modifier === 'COVERING'
+              ? 'close-short'
             : null,
-        side: modifier === 'SHORTING' ? 'short' : modifier === 'BUYING' ? 'long' : null,
+        side: modifier === 'SHORTING' || modifier === 'COVERING' ? 'short' : modifier === 'BUYING' ? 'long' : null,
         name: extractLogoName(htmlBody) || ticker,
         headline: headline || subject,
         signalPhrase: signalMatch[0],
@@ -249,7 +595,7 @@ function parseRealTimeAlertFromLedgerItem(item, htmlBody = '') {
       };
     }
 
-    const subjectMatch = candidate.match(/Real-Time Alert:\s*.*?\b(BUY|SELL-SOME|SELL|COVER)\s+Signal\b.*?:\s*(.+?)\s+\(([A-Z][A-Z0-9./-]{1,9})\)/i);
+    const subjectMatch = candidate.match(/Real-Time Alert:\s*.*?\b(BUY|SELL-SOME|COVER-SOME|SELL|COVER)\s+Signal\b.*?:\s*(.+?)\s+\(([A-Z][A-Z0-9./-]{1,9})\)/i);
     if (subjectMatch) {
       return {
         ticker: subjectMatch[3].toUpperCase(),
@@ -274,14 +620,19 @@ function parsePositionChangeAlertsFromLedgerItem(item, htmlBody = '') {
   const changeMatch = subject.match(/\b\d+\s+Changes?:\s*(.+)$/i);
   if (changeMatch) {
     const clauses = changeMatch[1].split(/\s*,\s*/);
+    let currentAction = null;
     for (const clause of clauses) {
-      const match = clause.match(/\b(Add|Remove)\s+([A-Z][A-Z0-9./-]{1,9})\b/i);
+      const match = clause.match(/\b(?:(Add|Remove)\s+)?(?:(Long|Short)\s+)?([A-Z][A-Z0-9./-]{1,9})\b/i);
       if (!match) continue;
+      currentAction = match[1]?.toUpperCase() || currentAction;
+      if (!currentAction) continue;
+      const side = match[2] ? match[2].toLowerCase() : currentAction === 'ADD' ? 'long' : null;
+      const ticker = match[3].toUpperCase();
       alerts.push({
-        ticker: match[2].toUpperCase(),
-        action: match[1].toUpperCase() === 'ADD' ? 'ADD' : 'REMOVE',
-        side: 'long',
-        name: match[2].toUpperCase(),
+        ticker,
+        action: currentAction === 'ADD' ? 'ADD' : 'REMOVE',
+        side,
+        name: ticker,
         headline: subject,
         signalPhrase: clause,
         eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
@@ -293,14 +644,14 @@ function parsePositionChangeAlertsFromLedgerItem(item, htmlBody = '') {
   if (alerts.length > 0) return alerts;
 
   const text = stripHtmlToText(htmlBody);
-  const addMatch = text.match(/ADDING[\s\S]{0,400}?\bLong:\s*([A-Z][A-Z0-9./-]{1,9})/i);
-  const removeMatch = text.match(/REMOVED[\s\S]{0,400}?\bLong:\s*([A-Z][A-Z0-9./-]{1,9})/i);
+  const addMatch = text.match(/ADDING[\s\S]{0,400}?\b(Long|Short):\s*([A-Z][A-Z0-9./-]{1,9})/i);
+  const removeMatch = text.match(/REMOVED[\s\S]{0,400}?\b(?:(Long|Short):\s*)?([A-Z][A-Z0-9./-]{1,9})/i);
   if (addMatch) {
     alerts.push({
-      ticker: addMatch[1].toUpperCase(),
+      ticker: addMatch[2].toUpperCase(),
       action: 'ADD',
-      side: 'long',
-      name: addMatch[1].toUpperCase(),
+      side: addMatch[1].toLowerCase(),
+      name: addMatch[2].toUpperCase(),
       headline: subject,
       eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
       source: 'hermes-email-position-change',
@@ -308,10 +659,10 @@ function parsePositionChangeAlertsFromLedgerItem(item, htmlBody = '') {
   }
   if (removeMatch) {
     alerts.push({
-      ticker: removeMatch[1].toUpperCase(),
+      ticker: removeMatch[2].toUpperCase(),
       action: 'REMOVE',
-      side: 'long',
-      name: removeMatch[1].toUpperCase(),
+      side: removeMatch[1] ? removeMatch[1].toLowerCase() : null,
+      name: removeMatch[2].toUpperCase(),
       headline: subject,
       eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
       source: 'hermes-email-position-change',
@@ -388,6 +739,24 @@ async function fetchHermesRtaSnapshots(windowDays) {
   return snapshots;
 }
 
+function loadLocalRtaBenchmark() {
+  const benchmarkPath = path.join(__dirname, 'data', 'hedgeye', 'rta', 'latest-benchmark.json');
+  if (!fs.existsSync(benchmarkPath)) return null;
+  try {
+    const benchmark = JSON.parse(fs.readFileSync(benchmarkPath, 'utf8'));
+    if (!benchmark || (!Array.isArray(benchmark.longs) && !Array.isArray(benchmark.shorts) && !Array.isArray(benchmark.holdings))) {
+      return null;
+    }
+    return {
+      ...benchmark,
+      sourceFile: benchmarkPath,
+    };
+  } catch (error) {
+    console.warn('[RTA] Failed to read local benchmark:', error.message);
+    return null;
+  }
+}
+
 async function getLatestEtfProEmailSnapshot() {
   let latest = null;
   let ExclusiveStartKey;
@@ -426,6 +795,8 @@ async function getHermesInboxStatus() {
     latestStatus: null,
     nextRun: 'Every 15 minutes',
     source: HERMES_EMAIL_LEDGER_TABLE,
+    gmailAccount: HERMES_GMAIL_ACCOUNT,
+    gmailQuery: HERMES_GMAIL_QUERY,
   };
 
   const items = [];
@@ -435,9 +806,10 @@ async function getHermesInboxStatus() {
     const result = await dynamodb.scan({
       TableName: HERMES_EMAIL_LEDGER_TABLE,
       ExclusiveStartKey,
-      ProjectionExpression: '#status, filename, s3Key, updatedAt, createdAt, receivedAt',
+      ProjectionExpression: '#status, filename, s3Key, updatedAt, createdAt, receivedAt, #query, accountEmail, gmailAccount',
       ExpressionAttributeNames: {
         '#status': 'status',
+        '#query': 'query',
       },
     }).promise();
 
@@ -487,6 +859,8 @@ async function getHermesInboxStatus() {
     latestFilename: latest.filename || null,
     latestS3Key: latest.s3Key || null,
     latestStatus: latest.status || null,
+    gmailAccount: latest.accountEmail || latest.gmailAccount || defaultStatus.gmailAccount,
+    gmailQuery: latest.query || defaultStatus.gmailQuery,
   };
 }
 
@@ -519,6 +893,22 @@ app.use('/api/providers', providersRoutes);
 // In-memory cache for quotes (5-10 second TTL)
 const quotesCache = new Map();
 const CACHE_TTL = parseInt(process.env.QUOTES_CACHE_TTL || '30000'); // 30 seconds default
+const inFlightApiRequests = new Map();
+
+function runInFlight(key, producer) {
+  const existing = inFlightApiRequests.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const request = Promise.resolve()
+    .then(producer)
+    .finally(() => {
+      inFlightApiRequests.delete(key);
+    });
+  inFlightApiRequests.set(key, request);
+  return request;
+}
 
 // Cache for historical data (1 hour TTL - changes daily)
 const historicalCache = new Map();
@@ -528,6 +918,8 @@ const HISTORICAL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const riskRangesCache = new Map();
 const RISK_RANGES_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const HERMES_EMAIL_LEDGER_TABLE = process.env.HERMES_LEDGER_TABLE || 'HermesEmailIngestLedger';
+const HERMES_GMAIL_QUERY = process.env.HERMES_GMAIL_QUERY || 'label:Hedgeye newer_than:30d';
+const HERMES_GMAIL_ACCOUNT = process.env.HERMES_GMAIL_ACCOUNT || process.env.HERMES_ACCOUNT_EMAIL || 'timsmithaviation@gmail.com';
 
 async function buildWorkflowStatusSnapshot() {
   const today = new Date().toISOString().split('T')[0];
@@ -728,7 +1120,8 @@ const STOOQ_BOND_SYMBOLS = {};
 const YAHOO_TICKER_MAP = {
   // Indices - US
   'SPX': '^GSPC',
-  'SPY': '^GSPC',
+  // SPY remains the ETF identity; the cash index is represented by SPX.
+  'SPY': 'SPY',
   'DJI': '^DJI',
   'COMPQ': '^IXIC',
   'IXIC': '^IXIC',
@@ -739,7 +1132,7 @@ const YAHOO_TICKER_MAP = {
   'VXN': '^VXN',
   'GVZ': '^GVZ',
   'OVX': '^OVX',
-  'CRB': '^CRB',
+  'CRB': '^TRCCRB',
 
   // Indices - European
   'DAX': '^GDAXI',
@@ -773,7 +1166,7 @@ const YAHOO_TICKER_MAP = {
   'GBP/USD': 'GBPUSD=X',
   'GBPUSD': 'GBPUSD=X',
   'CAD/USD': 'CADUSD=X',
-  'USDCAD': 'CADUSD=X',
+  'USDCAD': 'USDCAD=X',
   'AUDUSD': 'AUDUSD=X',
   'USDMXN': 'MXN=X',
   'USDCHF': 'CHF=X',
@@ -831,10 +1224,10 @@ const MARKET_REGIONS = {
   us: {
     label: 'US',
     indices: [
-      { symbol: 'SPY', name: 'S&P 500', yahooSymbol: '^GSPC' },
-      { symbol: 'DJI', name: 'Dow 30', yahooSymbol: '^DJI' },
-      { symbol: 'IXIC', name: 'Nasdaq', yahooSymbol: '^IXIC' },
-      { symbol: 'RUT', name: 'Russell 2000', yahooSymbol: '^RUT' },
+      { symbol: 'SPX', name: 'S&P 500', yahooSymbol: '^GSPC', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'DJI', name: 'Dow 30', yahooSymbol: '^DJI', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'IXIC', name: 'Nasdaq', yahooSymbol: '^IXIC', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'RUT', name: 'Russell 2000', yahooSymbol: '^RUT', provider: 'yahoo', secType: 'IND' },
       { symbol: 'QQQ', name: 'QQQ (Tech)', yahooSymbol: 'QQQ' },
       { symbol: 'RSP', name: 'EW S&P (Breadth)', yahooSymbol: 'RSP' }
     ]
@@ -853,40 +1246,40 @@ const MARKET_REGIONS = {
       { symbol: 'XLU', name: 'Utilities Select Sector', yahooSymbol: 'XLU' },
       { symbol: 'XLRE', name: 'Real Estate Select Sector', yahooSymbol: 'XLRE' },
       { symbol: 'XLC', name: 'Communications Services Sector', yahooSymbol: 'XLC' },
-      { symbol: 'SPX', name: 'S&P 500', yahooSymbol: '^GSPC' }
+      { symbol: 'SPX', name: 'S&P 500', yahooSymbol: '^GSPC', provider: 'yahoo', secType: 'IND' }
     ]
   },
   europe: {
     label: 'Europe',
     indices: [
-      { symbol: 'FTSE', name: 'FTSE 100', yahooSymbol: '^FTSE' },
-      { symbol: 'CAC', name: 'CAC 40', yahooSymbol: '^FCHI' },
-      { symbol: 'DAX', name: 'DAX', yahooSymbol: '^GDAXI' },
-      { symbol: 'N100', name: 'Euronext 100', yahooSymbol: '^N100' },
-      { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X' },
-      { symbol: 'GBPUSD', name: 'USD/GBP', yahooSymbol: 'GBPUSD=X' }
+      { symbol: 'FTSE', name: 'FTSE 100', yahooSymbol: '^FTSE', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'CAC', name: 'CAC 40', yahooSymbol: '^FCHI', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'DAX', name: 'DAX', yahooSymbol: '^GDAXI', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'N100', name: 'Euronext 100', yahooSymbol: '^N100', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'GBPUSD', name: 'USD/GBP', yahooSymbol: 'GBPUSD=X', provider: 'yahoo', secType: 'CASH' }
     ]
   },
   asia: {
     label: 'Asia',
     indices: [
-      { symbol: 'N225', name: 'Nikkei 225', yahooSymbol: '^N225' },
-      { symbol: 'HSI', name: 'Hang Seng', yahooSymbol: '^HSI' },
-      { symbol: 'SSEC', name: 'Shanghai', yahooSymbol: '000001.SS' },
-      { symbol: 'AXJO', name: 'ASX 200', yahooSymbol: '^AXJO' },
-      { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X' },
-      { symbol: 'USDCNY', name: 'USD/CNY', yahooSymbol: 'CNY=X' }
+      { symbol: 'N225', name: 'Nikkei 225', yahooSymbol: '^N225', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'HSI', name: 'Hang Seng', yahooSymbol: '^HSI', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'SSEC', name: 'Shanghai', yahooSymbol: '000001.SS', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'AXJO', name: 'ASX 200', yahooSymbol: '^AXJO', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'USDCNY', name: 'USD/CNY', yahooSymbol: 'CNY=X', provider: 'yahoo', secType: 'CASH' }
     ]
   },
   crypto: {
     label: 'Cryptocurrencies',
     indices: [
-      { symbol: 'BTC', name: 'Bitcoin', yahooSymbol: 'BTC-USD' },
-      { symbol: 'ETH', name: 'Ethereum', yahooSymbol: 'ETH-USD' },
-      { symbol: 'BNB', name: 'Binance Coin', yahooSymbol: 'BNB-USD' },
-      { symbol: 'ADA', name: 'Cardano', yahooSymbol: 'ADA-USD' },
-      { symbol: 'SOL', name: 'Solana', yahooSymbol: 'SOL-USD' },
-      { symbol: 'XRP', name: 'XRP', yahooSymbol: 'XRP-USD' }
+      { symbol: 'BTC', name: 'Bitcoin', yahooSymbol: 'BTC-USD', provider: 'yahoo', secType: 'CRYPTO' },
+      { symbol: 'ETH', name: 'Ethereum', yahooSymbol: 'ETH-USD', provider: 'yahoo', secType: 'CRYPTO' },
+      { symbol: 'BNB', name: 'Binance Coin', yahooSymbol: 'BNB-USD', provider: 'yahoo', secType: 'CRYPTO' },
+      { symbol: 'ADA', name: 'Cardano', yahooSymbol: 'ADA-USD', provider: 'yahoo', secType: 'CRYPTO' },
+      { symbol: 'SOL', name: 'Solana', yahooSymbol: 'SOL-USD', provider: 'yahoo', secType: 'CRYPTO' },
+      { symbol: 'XRP', name: 'XRP', yahooSymbol: 'XRP-USD', provider: 'yahoo', secType: 'CRYPTO' }
     ]
   },
   rates: {
@@ -896,21 +1289,21 @@ const MARKET_REGIONS = {
     // tabbed structure is authoritative for the /api/multi-region-quotes
     // response shape under the `rates` key.
     indices: [
-      { symbol: 'UST2Y', name: '2-Yr' },
-      { symbol: 'UST5Y', name: '5-Yr' },
-      { symbol: 'UST10Y', name: '10-Yr' },
-      { symbol: 'UST30Y', name: '30-Yr' },
-      { symbol: 'UST13W', name: '13-Wk' },
-      { symbol: 'FEDFUNDS', name: 'Fed Funds' }
+      { symbol: 'UST2Y', name: '2-Yr', yahooSymbol: '^FVX', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'UST5Y', name: '5-Yr', provider: 'fred', secType: 'ECONOMIC' },
+      { symbol: 'UST10Y', name: '10-Yr', yahooSymbol: '^TNX', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'UST30Y', name: '30-Yr', yahooSymbol: '^TYX', provider: 'yahoo', secType: 'IND' },
+      { symbol: 'UST13W', name: '13-Wk', provider: 'fred', secType: 'ECONOMIC' },
+      { symbol: 'FEDFUNDS', name: 'Fed Funds', provider: 'fred', secType: 'ECONOMIC' }
     ],
     tabs: {
       us_treasuries: {
         label: 'Treasuries',
         indices: [
-          { symbol: 'UST2Y', name: '2-Yr', unit: 'yield' },
-          { symbol: 'UST5Y', name: '5-Yr', unit: 'yield' },
-          { symbol: 'UST10Y', name: '10-Yr', unit: 'yield' },
-          { symbol: 'UST30Y', name: '30-Yr', unit: 'yield' }
+          { symbol: 'UST2Y', name: '2-Yr', unit: 'yield', yahooSymbol: '^FVX', provider: 'yahoo', secType: 'IND' },
+          { symbol: 'UST5Y', name: '5-Yr', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'UST10Y', name: '10-Yr', unit: 'yield', yahooSymbol: '^TNX', provider: 'yahoo', secType: 'IND' },
+          { symbol: 'UST30Y', name: '30-Yr', unit: 'yield', yahooSymbol: '^TYX', provider: 'yahoo', secType: 'IND' }
         ],
         // Derived rows (computed server-side from the indices above)
         derived: [
@@ -922,17 +1315,17 @@ const MARKET_REGIONS = {
       policy: {
         label: 'Policy',
         indices: [
-          { symbol: 'FEDFUNDS', name: 'Fed Funds', unit: 'yield' },
-          { symbol: 'SOFR', name: 'SOFR', unit: 'yield' },
-          { symbol: 'UST13W', name: '13-Wk', unit: 'yield' },
-          { symbol: 'IORB', name: 'IORB', unit: 'yield' }
+          { symbol: 'FEDFUNDS', name: 'Fed Funds', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'SOFR', name: 'SOFR', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'UST13W', name: '13-Wk', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'IORB', name: 'IORB', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' }
         ]
       },
       credit: {
         label: 'Credit',
         indices: [
-          { symbol: 'IG_OAS', name: 'IG OAS', unit: 'oas' },
-          { symbol: 'HY_OAS', name: 'HY OAS', unit: 'oas' },
+          { symbol: 'IG_OAS', name: 'IG OAS', unit: 'oas', provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'HY_OAS', name: 'HY OAS', unit: 'oas', provider: 'fred', secType: 'ECONOMIC' },
           { symbol: 'LQD', name: 'LQD', unit: 'price' },
           { symbol: 'HYG', name: 'HYG', unit: 'price' },
           { symbol: 'EMB', name: 'EMB', unit: 'price' }
@@ -941,19 +1334,19 @@ const MARKET_REGIONS = {
       eu_sovereigns: {
         label: 'EU',
         indices: [
-          { symbol: 'BUND10Y', name: 'Bund 10Y', unit: 'yield', intl: true },
-          { symbol: 'GILT10Y', name: 'Gilt 10Y', unit: 'yield', intl: true },
-          { symbol: 'OAT10Y', name: 'OAT 10Y', unit: 'yield', intl: true },
-          { symbol: 'BTP10Y', name: 'BTP 10Y', unit: 'yield', intl: true }
+          { symbol: 'BUND10Y', name: 'Bund 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'GILT10Y', name: 'Gilt 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'OAT10Y', name: 'OAT 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'BTP10Y', name: 'BTP 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' }
         ]
       },
       asia_sovereigns: {
         label: 'Asia',
         indices: [
-          { symbol: 'JGB10Y', name: 'JGB 10Y', unit: 'yield', intl: true },
-          { symbol: 'CGB10Y', name: 'CGB 10Y', unit: 'yield', intl: true },
-          { symbol: 'ACGB10Y', name: 'ACGB 10Y', unit: 'yield', intl: true },
-          { symbol: 'KTB10Y', name: 'KTB 10Y', unit: 'yield', intl: true }
+          { symbol: 'JGB10Y', name: 'JGB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'CGB10Y', name: 'CGB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'ACGB10Y', name: 'ACGB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
+          { symbol: 'KTB10Y', name: 'KTB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' }
         ]
       }
     }
@@ -961,28 +1354,28 @@ const MARKET_REGIONS = {
   commodities: {
     label: 'Commodities',
     indices: [
-      { symbol: 'BZ', name: 'Brent Crude', yahooSymbol: 'BZ=F' },
-      { symbol: 'CL', name: 'WTI Crude', yahooSymbol: 'CL=F' },
-      { symbol: 'GC', name: 'Gold', yahooSymbol: 'GC=F' },
-      { symbol: 'SI', name: 'Silver', yahooSymbol: 'SI=F' },
-      { symbol: 'HG', name: 'Copper', yahooSymbol: 'HG=F' },
-      { symbol: 'PL', name: 'Platinum', yahooSymbol: 'PL=F' }
+      { symbol: 'BZ', name: 'Brent Crude', yahooSymbol: 'BZ=F', provider: 'yahoo', secType: 'FUT' },
+      { symbol: 'CL', name: 'WTI Crude', yahooSymbol: 'CL=F', provider: 'yahoo', secType: 'FUT' },
+      { symbol: 'GC', name: 'Gold', yahooSymbol: 'GC=F', provider: 'yahoo', secType: 'FUT' },
+      { symbol: 'SI', name: 'Silver', yahooSymbol: 'SI=F', provider: 'yahoo', secType: 'FUT' },
+      { symbol: 'HG', name: 'Copper', yahooSymbol: 'HG=F', provider: 'yahoo', secType: 'FUT' },
+      { symbol: 'PL', name: 'Platinum', yahooSymbol: 'PL=F', provider: 'yahoo', secType: 'FUT' }
     ]
   },
   currencies: {
     label: 'Currencies',
     indices: [
-      { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X' },
-      { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X' },
-      { symbol: 'GBPUSD', name: 'GBP/USD', yahooSymbol: 'GBPUSD=X' },
-      { symbol: 'AUDUSD', name: 'AUD/USD', yahooSymbol: 'AUDUSD=X' },
-      { symbol: 'USDCAD', name: 'USD/CAD', yahooSymbol: 'CADUSD=X' },
-      { symbol: 'USDMXN', name: 'USD/MXN', yahooSymbol: 'MXN=X' },
-      { symbol: 'USDCHF', name: 'USD/CHF', yahooSymbol: 'CHF=X' },
-      { symbol: 'NZDUSD', name: 'NZD/USD', yahooSymbol: 'NZDUSD=X' },
-      { symbol: 'USDCNY', name: 'USD/CNY', yahooSymbol: 'CNY=X' },
-      { symbol: 'EURGBP', name: 'EUR/GBP', yahooSymbol: 'EURGBP=X' },
-      { symbol: 'USD', name: 'DXY', yahooSymbol: 'DX-Y.NYB' },
+      { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'GBPUSD', name: 'GBP/USD', yahooSymbol: 'GBPUSD=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'AUDUSD', name: 'AUD/USD', yahooSymbol: 'AUDUSD=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'USDCAD', name: 'USD/CAD', yahooSymbol: 'USDCAD=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'USDMXN', name: 'USD/MXN', yahooSymbol: 'MXN=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'USDCHF', name: 'USD/CHF', yahooSymbol: 'CHF=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'NZDUSD', name: 'NZD/USD', yahooSymbol: 'NZDUSD=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'USDCNY', name: 'USD/CNY', yahooSymbol: 'CNY=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'EURGBP', name: 'EUR/GBP', yahooSymbol: 'EURGBP=X', provider: 'yahoo', secType: 'CASH' },
+      { symbol: 'USD', name: 'DXY', yahooSymbol: 'DX-Y.NYB', provider: 'yahoo', secType: 'IND' },
       { symbol: 'UUP', name: 'UUP', yahooSymbol: 'UUP' }
     ]
   }
@@ -1115,7 +1508,9 @@ async function fetchYahooQuote(yahooTicker) {
         change: change.toFixed(2),
         changePercent: changePercent.toFixed(2),
         previousClose: previousClose.toFixed(2),
-        timestamp: new Date().toISOString()
+        timestamp: Number.isFinite(meta.regularMarketTime)
+          ? new Date(meta.regularMarketTime * 1000).toISOString()
+          : null
       };
     } else {
       console.warn(`[Yahoo Finance] No price found in response for ${yahooTicker}`);
@@ -1172,7 +1567,7 @@ async function fetchFredQuoteFromCsv(seriesId) {
       price: latest.value.toFixed(2),
       change: change.toFixed(2),
       changePercent: changePercent.toFixed(2),
-      timestamp: latest.date ? new Date(`${latest.date}T00:00:00Z`).toISOString() : new Date().toISOString()
+      timestamp: latest.date ? new Date(`${latest.date}T00:00:00Z`).toISOString() : null
     };
   } catch (error) {
     console.error(`[FRED] CSV fallback failed for ${seriesId}:`, error.message);
@@ -1223,7 +1618,7 @@ async function fetchFredQuote(seriesId) {
           price: price.toFixed(2),
           change: change.toFixed(2),
           changePercent: changePercent.toFixed(2),
-          timestamp: new Date().toISOString()
+          timestamp: obs.date ? new Date(`${obs.date}T00:00:00Z`).toISOString() : null
         };
       } else {
         console.warn(`[FRED] Invalid value for ${seriesId}:`, obs.value);
@@ -1298,7 +1693,7 @@ async function fetchStooqBondQuote(stooqSymbol) {
       changePercent: changePercent.toFixed(2),
       timestamp: latest.date
         ? new Date(`${latest.date}T00:00:00Z`).toISOString()
-        : new Date().toISOString()
+        : null
     };
   } catch (error) {
     console.error(`[Stooq] Error fetching ${stooqSymbol}:`, error.message);
@@ -1337,23 +1732,40 @@ compositeMarketDataProvider.setSpecialQuoteFetcher(async (symbol) => {
     quoteData = await fetchFredQuote(mapping.ticker);
   }
   if (quoteData && quoteData.price) {
-    return { legacy: { symbol: upperSym, ...quoteData, source: quoteData.source || mapping.source } };
+    return {
+      legacy: {
+        symbol: upperSym,
+        ...quoteData,
+        source: quoteData.source || mapping.source,
+        dataType: 'historical',
+        entitlementStatus: null,
+        warning: 'historical_observation'
+      }
+    };
   }
   return null;
 });
 
 // Fetch quote with caching (IBKR-first via composite provider)
-async function getQuote(symbol) {
+async function getQuote(symbolOrInstrument) {
   const now = Date.now();
-  const cacheKey = symbol.toUpperCase();
+  const symbol = typeof symbolOrInstrument === 'object'
+    ? String(symbolOrInstrument.symbol || '').toUpperCase()
+    : String(symbolOrInstrument || '').toUpperCase();
+  const cacheKey = instrumentCacheKey(symbolOrInstrument);
 
-  const cached = quotesCache.get(cacheKey);
-  if (cached && now - cached.timestamp < CACHE_TTL) {
-    return cached.data;
+  const cachedQuote = getFreshCachedQuote(quotesCache, cacheKey, now, CACHE_TTL);
+  if (cachedQuote) {
+    const cachedMeta = buildQuoteMetadata(cachedQuote);
+    const ibkrConnected = getProviderStatusSnapshot().ibkr.connected === true;
+    if (cachedMeta.usable && (cachedQuote.source !== 'ibkr' || ibkrConnected)) {
+      return cachedQuote;
+    }
+    quotesCache.delete(cacheKey);
   }
 
-  if (ibkrStreamBridge.STREAM_ENABLED) {
-    const streamLegacy = ibkrStreamBridge.getCachedLegacy(cacheKey);
+  if (ibkrStreamBridge.STREAM_ENABLED && canUseSymbolStream(symbolOrInstrument)) {
+    const streamLegacy = ibkrStreamBridge.getCachedLegacy(symbol);
     if (streamLegacy && streamLegacy.price) {
       quotesCache.set(cacheKey, { data: streamLegacy, timestamp: now });
       return streamLegacy;
@@ -1361,8 +1773,9 @@ async function getQuote(symbol) {
   }
 
   try {
-    const quoteResult = await compositeMarketDataProvider.getQuote(symbol);
-    if (quoteResult && quoteResult.price) {
+    const quoteResult = await compositeMarketDataProvider.getQuote(symbolOrInstrument);
+    const quoteMeta = buildQuoteMetadata(quoteResult);
+    if (quoteMeta.usable) {
       quotesCache.set(cacheKey, { data: quoteResult, timestamp: now });
       return quoteResult;
     }
@@ -1370,9 +1783,6 @@ async function getQuote(symbol) {
     console.error(`[Quote] Error fetching quote for ${symbol}:`, error.message);
   }
 
-  if (cached && cached.data && cached.data.price) {
-    return cached.data;
-  }
   return null;
 }
 
@@ -1588,50 +1998,55 @@ app.get('/api/quotes', async (req, res) => {
   const startTime = Date.now();
   try {
     const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ', 'AAPL'];
-    console.log(`[API] /api/quotes called with ${symbols.length} symbols:`, symbols.slice(0, 5), '...');
+    const requestKey = `GET /api/quotes?symbols=${symbols.map(s => s.trim()).join(',')}`;
+    const quotes = await runInFlight(requestKey, async () => {
+      console.log(`[API] /api/quotes called with ${symbols.length} symbols:`, symbols.slice(0, 5), '...');
 
-    const quotes = {};
+      const quoteMap = {};
 
-    // Process in batches to avoid rate limiting
-    // Yahoo Finance can be sensitive to rate limiting, so we'll do smaller batches with longer delays
-    const BATCH_SIZE = 5; // Reduced from 10 to avoid rate limiting
-    const DELAY_MS = 200; // Increased from 100ms to 200ms between batches
+      // Process in batches to avoid rate limiting
+      // Yahoo Finance can be sensitive to rate limiting, so we'll do smaller batches with longer delays
+      const BATCH_SIZE = 5; // Reduced from 10 to avoid rate limiting
+      const DELAY_MS = 200; // Increased from 100ms to 200ms between batches
 
-    const fetchStartTime = Date.now();
-    const results = await batchProcess(
-      symbols.map(s => s.trim()),
-      BATCH_SIZE,
-      DELAY_MS,
-      async (symbol) => {
-        try {
-          return await getQuote(symbol);
-        } catch (error) {
-          console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
-          return null;
+      const fetchStartTime = Date.now();
+      const results = await batchProcess(
+        symbols.map(s => s.trim()),
+        BATCH_SIZE,
+        DELAY_MS,
+        async (symbol) => {
+          try {
+            return await getQuote(symbol);
+          } catch (error) {
+            console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
+            return null;
+          }
         }
-      }
-    );
-    const fetchTime = Date.now() - fetchStartTime;
-    console.log(`[API] Quote fetching completed in ${fetchTime}ms`);
+      );
+      const fetchTime = Date.now() - fetchStartTime;
+      console.log(`[API] Quote fetching completed in ${fetchTime}ms`);
 
-    // Map results back to symbols
-    let successCount = 0;
-    let failCount = 0;
-    symbols.forEach((symbol, index) => {
-      const quote = results[index];
-      if (quote && quote.price) {
-        quotes[symbol.trim().toUpperCase()] = quote;
-        successCount++;
-      } else {
-        failCount++;
-        if (failCount <= 10) { // Log first 10 failures
-          console.warn(`[API] No quote data for ${symbol}`);
+      // Map results back to symbols
+      let successCount = 0;
+      let failCount = 0;
+      symbols.forEach((symbol, index) => {
+        const quote = results[index];
+        if (quote && quote.price) {
+          quoteMap[symbol.trim().toUpperCase()] = quote;
+          successCount++;
+        } else {
+          failCount++;
+          if (failCount <= 10) { // Log first 10 failures
+            console.warn(`[API] No quote data for ${symbol}`);
+          }
         }
-      }
+      });
+
+      const totalTime = Date.now() - startTime;
+      console.log(`[API] /api/quotes completed: ${successCount} quotes out of ${symbols.length} requested (${failCount} failed) in ${totalTime}ms`);
+      return quoteMap;
     });
 
-    const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/quotes completed: ${successCount} quotes out of ${symbols.length} requested (${failCount} failed) in ${totalTime}ms`);
     res.json(quotes);
   } catch (error) {
     const totalTime = Date.now() - startTime;
@@ -1896,7 +2311,7 @@ async function fetchFREDHistorical(seriesId, range) {
 const periodReturnsCache = new Map();
 const PERIOD_RETURNS_CACHE_TTL = parseInt(process.env.PERIOD_RETURNS_CACHE_TTL_MS || '900000', 10);
 /** Bump when `computePeriodPercentsFromCloses` grows new fields — avoids serving stale cached objects lacking them. */
-const PERIOD_RETURNS_CACHE_KEY_VERSION = '4';
+const PERIOD_RETURNS_CACHE_KEY_VERSION = '5';
 
 function symbolIsYahooRateProxy(upperSym) {
   return upperSym === 'UST2Y' || upperSym === 'UST10Y' || upperSym === 'UST30Y';
@@ -1955,6 +2370,7 @@ function computePeriodPercentsFromCloses(closes) {
       ? Math.round((((last / ref) - 1) * 100) * 100) / 100
       : null;
 
+  const asOfTime = Number(closes[n - 1].t);
   return {
     weekChangePct: pct(weekRef),
     fifteenDayChangePct: pct(fifteenDayRef),
@@ -1965,20 +2381,26 @@ function computePeriodPercentsFromCloses(closes) {
     sixMonthChangePct: pct(sixMonthRef),
     mtdChangePct: pct(mtdRef),
     qtdChangePct: pct(qtdRef),
-    ytdChangePct: pct(ytdRef)
+    ytdChangePct: pct(ytdRef),
+    asOf: Number.isFinite(asOfTime) ? new Date(asOfTime).toISOString() : null
   };
 }
 
-async function fetchYahooDailyClosesSeries(symbol) {
+async function fetchYahooDailyClosesSeries(symbol, range = '1y') {
   const upperSym = symbol.toUpperCase();
   const isRateProxy = symbolIsYahooRateProxy(upperSym);
   const mapping = getTickerMapping(symbol);
   if (mapping.source === 'fred' && !isRateProxy) return null;
 
   const yahooSymbol = mapping.source === 'yahoo' ? mapping.ticker : symbol;
-  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=1y&interval=1d&includePrePost=false`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`;
 
   const response = await axios.get(url, {
+    params: {
+      range,
+      interval: '1d',
+      includePrePost: 'false',
+    },
     timeout: 12000,
     headers: { 'User-Agent': 'Mozilla/5.0' }
   });
@@ -2054,7 +2476,6 @@ async function getPeriodReturnsCached(symbol) {
 // deltas without re-fetching both legs on every request.
 const dailyClosesCache = new Map();
 const DAILY_CLOSES_CACHE_TTL = parseInt(process.env.DAILY_CLOSES_CACHE_TTL_MS || '3600000', 10);
-
 const portfolioCorrelationResultCache = new Map();
 const portfolioCorrelationInFlight = new Map();
 const parsedPortfolioCorrelationCacheTtl = parseInt(process.env.PORTFOLIO_CORRELATION_CACHE_TTL_MS || '300000', 10);
@@ -2199,7 +2620,10 @@ function computeSpreadBpsDeltas(spreadSeries) {
     mtdDeltaBps: delta(mtdRef),
     qtdDeltaBps: delta(qtdRef),
     ytdDeltaBps: delta(ytdRef),
-    latestBps: Math.round(last * 10) / 10
+    latestBps: Math.round(last * 10) / 10,
+    asOf: Number.isFinite(Number(spreadSeries[n - 1].t))
+      ? new Date(Number(spreadSeries[n - 1].t)).toISOString()
+      : null
   };
 }
 
@@ -2486,7 +2910,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'volume', 'cftc-positioning', 'etf-pro'];
+    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'volume', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
 
     // Single scan of HedgeyeDailySnapshot, then pick the latest item per snapshotType.
     // This reports the true most recent upload regardless of age, matching how
@@ -2591,13 +3015,12 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 3. ETF Pro — local json (same as GET /api/hedgeye/etfpro)
     try {
-      const etfproLatest = path.join(__dirname, 'data', 'hedgeye', 'etfpro', 'latest.json');
-      if (fs.existsSync(etfproLatest)) {
-        const etf = JSON.parse(fs.readFileSync(etfproLatest, 'utf-8'));
+      const { payload: etf, latestPath } = await getResolvedEtfProPayload();
+      if (etf) {
         let { snapDate, rowCount, scraped } = resolveEtfProSnapshotForAnalytics(etf);
         if (!snapDate) {
           try {
-            const st = fs.statSync(etfproLatest);
+            const st = fs.statSync(latestPath);
             if (st.mtime) {
               snapDate = st.mtime.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
             }
@@ -2607,24 +3030,22 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
         }
         if (!scraped) {
           try {
-            scraped = fs.statSync(etfproLatest).mtime.toISOString();
+            scraped = fs.statSync(latestPath).mtime.toISOString();
           } catch (statErr2) {
             // leave scraped null
           }
         }
-        const emailEtfPro = results['etf-pro'];
-        const localEtfPro = {
+        results['etf-pro'] = {
           status: getFreshnessStatus(snapDate),
           lastUpdated: snapDate,
           scrapedAt: scraped,
           itemCount: rowCount,
+          actionCount: etf.meta?.actionCount ?? undefined,
           date: snapDate,
-          source: 'EtfProLocal'
+          source: etf.meta?.source || 'EtfProLocal',
+          headline: etf.meta?.headline || undefined,
+          dataQuality: etf.dataQuality || undefined,
         };
-        results['etf-pro'] =
-          emailEtfPro?.date && (!localEtfPro.date || emailEtfPro.date.localeCompare(localEtfPro.date) >= 0)
-            ? emailEtfPro
-            : localEtfPro;
       } else {
         results['etf-pro'] = results['etf-pro']?.date ? results['etf-pro'] : {
           status: 'missing',
@@ -2652,11 +3073,19 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
         pendingCount: hermesInbox.pendingCount,
         latestFilename: hermesInbox.latestFilename,
         latestS3Key: hermesInbox.latestS3Key,
+        gmailAccount: hermesInbox.gmailAccount,
+        gmailQuery: hermesInbox.gmailQuery,
         source: hermesInbox.source,
       };
     } catch (err) {
       console.error('[API] Error querying Hermes inbox ledger:', err.message);
-      results['hermes-inbox'] = { status: 'error', error: err.message, source: HERMES_EMAIL_LEDGER_TABLE };
+      results['hermes-inbox'] = {
+        status: 'error',
+        error: err.message,
+        source: HERMES_EMAIL_LEDGER_TABLE,
+        gmailAccount: HERMES_GMAIL_ACCOUNT,
+        gmailQuery: HERMES_GMAIL_QUERY,
+      };
     }
 
     const totalTime = Date.now() - startTime;
@@ -3020,14 +3449,8 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
 // Also computes day-over-day changes (adds/removes) for Longs and Shorts when local rows are available.
 app.get('/api/hedgeye/etfpro', async (req, res) => {
   try {
-    const emailSnapshot = await getLatestEtfProEmailSnapshot();
-    const emailPayload = etfProEmailSnapshotToPayload(emailSnapshot);
-    const etfproDir = path.join(__dirname, 'data', 'hedgeye', 'etfpro');
-    const latestPath = path.join(etfproDir, 'latest.json');
-    if (!fs.existsSync(latestPath)) {
-      if (emailPayload) {
-        return res.json(emailPayload);
-      }
+    const { payload: parsed, etfproDir, latestPath, localPayload, emailPayload } = await getResolvedEtfProPayload();
+    if (!parsed) {
       return res.status(404).json({
         error: 'ETF Pro snapshot not found',
         hint: 'Run: npm run collect:etfpro',
@@ -3035,20 +3458,10 @@ app.get('/api/hedgeye/etfpro', async (req, res) => {
       });
     }
 
-    const raw = fs.readFileSync(latestPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    const { snapDate: resolvedDate } = resolveEtfProSnapshotForAnalytics(parsed);
-    if (resolvedDate && (!parsed.meta || !parsed.meta.snapshotDate)) {
-      parsed.meta = { ...(parsed.meta || {}), snapshotDate: resolvedDate };
-    }
-    const todayDate = parsed.meta?.snapshotDate || resolvedDate;
-    if (emailPayload?.meta?.snapshotDate && (!todayDate || emailPayload.meta.snapshotDate.localeCompare(todayDate) >= 0)) {
-      return res.json(emailPayload);
-    }
-
     // Find previous day's snapshot for diffing
     let changes = null;
     try {
+      const todayDate = parsed.meta?.snapshotDate || null;
       const dated = fs.readdirSync(etfproDir)
         .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
         .map(f => f.replace('.json', ''))
@@ -3090,7 +3503,13 @@ app.get('/api/hedgeye/etfpro', async (req, res) => {
       console.warn('[API] Could not compute ETF Pro day-over-day diff:', diffErr.message);
     }
 
-    parsed.changes = changes;
+    parsed.changes = parsed.changes || changes;
+    if (emailPayload?.changes && parsed.meta?.source === 'gmail-html-applied-to-local-book') {
+      parsed.changes = emailPayload.changes;
+    }
+    if (localPayload?.meta?.snapshotDate && parsed.meta?.source === 'gmail-html-applied-to-local-book') {
+      parsed.meta.previousFullBookDate = localPayload.meta.snapshotDate;
+    }
     return res.json(parsed);
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/etfpro:', error);
@@ -3184,6 +3603,24 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
           break;
         }
       }
+
+      if (!item) {
+        const baseParams = {
+          TableName: 'HedgeyeDailySnapshot',
+          FilterExpression: 'snapshotType = :type',
+          ExpressionAttributeValues: {
+            ':type': snapshotType
+          }
+        };
+        const matchingSnapshots = await scanAllPages(dynamodb, baseParams);
+
+        item = matchingSnapshots
+          .sort((a, b) => {
+            const aTime = new Date(a.publishedAt || a.scrapedAt || a.date || 0).getTime();
+            const bTime = new Date(b.publishedAt || b.scrapedAt || b.date || 0).getTime();
+            return bTime - aTime;
+          })[0];
+      }
     }
 
     if (!item) {
@@ -3197,6 +3634,7 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
       date: item.date,
       snapshotType: snapshotType,
       scrapedAt: item.scrapedAt,
+      publishedAt: item.publishedAt,
       data: item.data,
       trendChanges: item.trendChanges,
       outbucket: item.outbucket,
@@ -3204,8 +3642,15 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
         riskRangeCount: item.riskRangeCount,
         stockCount: item.stockCount,
         cryptoCount: item.cryptoCount,
-        rankingCount: item.rankingCount
+        rankingCount: item.rankingCount,
+        itemCount: item.itemCount,
       },
+      article: item.article,
+      htmlSource: item.htmlSource,
+      reportType: item.reportType,
+      warnings: item.warnings,
+      sourceProduct: item.sourceProduct,
+      sourcePriority: item.sourcePriority,
       pdfSource: item.pdfSource,
       screenshotS3Key: item.screenshotS3Key
     });
@@ -3245,14 +3690,23 @@ app.get('/api/hedgeye/real-time-alert/positions', async (req, res) => {
     }
 
     const hermesSnapshots = await fetchHermesRtaSnapshots(windowDays);
-    snapshots.push(...hermesSnapshots);
+    const reconstructionSnapshots = hermesSnapshots.length > 0
+      ? hermesSnapshots
+      : snapshots;
+    const rtaBenchmark = loadLocalRtaBenchmark();
 
-    const summary = summarizeRealTimeAlertPositions(snapshots, { windowDays });
-    const activeTickers = new Set((summary.holdings || []).map((holding) => holding.ticker));
+    const summary = summarizeRealTimeAlertPositions(reconstructionSnapshots, {
+      windowDays,
+      baseline: rtaBenchmark,
+    });
     summary.sourceDiagnostics = {
-      dailySnapshotCount: snapshots.length - hermesSnapshots.length,
+      dailySnapshotCount: snapshots.length,
       hermesEventSnapshotCount: hermesSnapshots.length,
-      missingKnownWebsiteTickers: ['SWBI', 'NCLH'].filter((ticker) => !activeTickers.has(ticker)),
+      reconstructionInput: hermesSnapshots.length > 0 ? 'hermes-email-ledger' : 'daily-snapshots',
+      positionSource: summary.positionSource,
+      positionSourceConfidence: summary.positionSourceConfidence,
+      benchmark: summary.baseline,
+      reconstructionWarnings: summary.reconstructionWarnings || [],
     };
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/hedgeye/real-time-alert/positions completed in ${totalTime}ms`);
@@ -3327,6 +3781,22 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
       return [];
     };
 
+    const getSnapshotEventTime = (snapshot) => (
+      snapshot?.publishedAt ||
+      snapshot?.scrapedAt ||
+      snapshot?.receivedAt ||
+      snapshot?.createdAt ||
+      snapshot?.updatedAt ||
+      snapshot?.date ||
+      null
+    );
+
+    const getSnapshotMeta = (snapshot) => ({
+      scrapedAt: snapshot?.scrapedAt || snapshot?.receivedAt || snapshot?.createdAt || snapshot?.updatedAt || null,
+      publishedAt: snapshot?.publishedAt || null,
+      eventTime: getSnapshotEventTime(snapshot),
+    });
+
     // Process each type in parallel
     await Promise.all(snapshotTypes.map(async (type) => {
       try {
@@ -3385,7 +3855,8 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
               removed: [],
               alerts,
               available: alerts.length > 0,
-              currentDate: current.date
+              currentDate: current.date,
+              ...getSnapshotMeta(current),
             };
             return;
           }
@@ -3395,14 +3866,15 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             const current = recentSnapshots[0];
             const explicitAdded = (current.data?.added && Array.isArray(current.data.added)) ? current.data.added : [];
             const explicitRemoved = (current.data?.removed && Array.isArray(current.data.removed)) ? current.data.removed : [];
-            results[type] = {
-              added: explicitAdded,
-              removed: explicitRemoved,
-              available: true,
-              currentDate: current.date
-            };
-            return;
-          }
+          results[type] = {
+            added: explicitAdded,
+            removed: explicitRemoved,
+            available: true,
+            currentDate: current.date,
+            ...getSnapshotMeta(current),
+          };
+          return;
+        }
 
           // For cftc-positioning, extract significant Z-scores even with just 1 snapshot
           if (type === 'cftc-positioning' && recentSnapshots.length === 1) {
@@ -3452,6 +3924,7 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             results[type] = {
               available: true,
               currentDate: current.date,
+              ...getSnapshotMeta(current),
               significantPositive,
               significantNegative
             };
@@ -3463,7 +3936,8 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             added: [],
             removed: [],
             available: recentSnapshots.length > 0,
-            currentDate: recentSnapshots.length > 0 ? recentSnapshots[0].date : null
+            currentDate: recentSnapshots.length > 0 ? recentSnapshots[0].date : null,
+            ...(recentSnapshots.length > 0 ? getSnapshotMeta(recentSnapshots[0]) : {}),
           };
           return;
         }
@@ -3605,7 +4079,8 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           updates: updates || [],
           currentDate: current.date,
           previousDate: previous.date,
-          available: true
+          available: true,
+          ...getSnapshotMeta(current),
         };
 
         // Add topMovers and bottomMovers for portfolio-solutions
@@ -3805,77 +4280,61 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
 
     // ETF Pro — local dated JSON + latest.json (same diff as GET /api/hedgeye/etfpro)
     try {
-      const etfproDir = path.join(__dirname, 'data', 'hedgeye', 'etfpro');
-      const latestPath = path.join(etfproDir, 'latest.json');
-      if (!fs.existsSync(latestPath)) {
+      const { payload: parsed, etfproDir } = await getResolvedEtfProPayload();
+      if (!parsed) {
         results['etf-pro'] = {
           added: [], removed: [], available: false, currentDate: null, previousDate: null,
           addedLongs: [], removedLongs: [], addedShorts: [], removedShorts: []
         };
       } else {
-        const parsed = JSON.parse(fs.readFileSync(latestPath, 'utf-8'));
-        const { snapDate: resolvedDate } = resolveEtfProSnapshotForAnalytics(parsed);
-        if (resolvedDate && (!parsed.meta || !parsed.meta.snapshotDate)) {
-          parsed.meta = { ...(parsed.meta || {}), snapshotDate: resolvedDate };
-        }
-        const todayDate = parsed.meta?.snapshotDate || resolvedDate;
+        const todayDate = parsed.meta?.snapshotDate || null;
+        let changes = parsed.changes || null;
+        let previousDate = parsed.meta?.previousFullBookDate || parsed.meta?.baseSnapshotDate || null;
 
-        const classifyEtfPro = (rows) => {
-          const longs = new Set();
-          const shorts = new Set();
-          for (const r of rows || []) {
-            const ticker = String(r.ticker || '').trim().toUpperCase();
-            if (!ticker) continue;
-            if (String(r.call).toLowerCase() === 'short') {
-              shorts.add(ticker);
-            } else {
-              longs.add(ticker);
-            }
+        if (!changes) {
+          const dated = fs.readdirSync(etfproDir)
+            .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+            .map(f => f.replace('.json', ''))
+            .filter(d => d !== todayDate)
+            .sort()
+            .reverse();
+
+          if (dated.length > 0) {
+            const prevParsed = JSON.parse(fs.readFileSync(path.join(etfproDir, `${dated[0]}.json`), 'utf-8'));
+            const today = classifyEtfProRows(parsed.rows || []);
+            const prev = classifyEtfProRows(prevParsed.rows || []);
+            changes = {
+              addedLongs: [...today.longs].filter(t => !prev.longs.has(t)),
+              removedLongs: [...prev.longs].filter(t => !today.longs.has(t)),
+              addedShorts: [...today.shorts].filter(t => !prev.shorts.has(t)),
+              removedShorts: [...prev.shorts].filter(t => !today.shorts.has(t)),
+            };
+            previousDate = dated[0];
           }
-          return { longs, shorts };
-        };
-
-        const dated = fs.readdirSync(etfproDir)
-          .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
-          .map(f => f.replace('.json', ''))
-          .filter(d => d !== todayDate)
-          .sort()
-          .reverse();
-
-        if (dated.length > 0) {
-          const prevParsed = JSON.parse(fs.readFileSync(path.join(etfproDir, `${dated[0]}.json`), 'utf-8'));
-          const today = classifyEtfPro(parsed.rows || []);
-          const prev = classifyEtfPro(prevParsed.rows || []);
-          const addedLongs = [...today.longs].filter(t => !prev.longs.has(t));
-          const removedLongs = [...prev.longs].filter(t => !today.longs.has(t));
-          const addedShorts = [...today.shorts].filter(t => !prev.shorts.has(t));
-          const removedShorts = [...prev.shorts].filter(t => !today.shorts.has(t));
-          const added = [...new Set([...addedLongs, ...addedShorts])];
-          const removed = [...new Set([...removedLongs, ...removedShorts])];
-          results['etf-pro'] = {
-            available: true,
-            currentDate: todayDate,
-            previousDate: dated[0],
-            added,
-            removed,
-            addedLongs,
-            removedLongs,
-            addedShorts,
-            removedShorts
-          };
-        } else {
-          results['etf-pro'] = {
-            available: !!todayDate,
-            currentDate: todayDate,
-            previousDate: null,
-            added: [],
-            removed: [],
-            addedLongs: [],
-            removedLongs: [],
-            addedShorts: [],
-            removedShorts: []
-          };
         }
+
+        const addedLongs = changes?.addedLongs || [];
+        const removedLongs = changes?.removedLongs || [];
+        const addedShorts = changes?.addedShorts || [];
+        const removedShorts = changes?.removedShorts || [];
+        results['etf-pro'] = {
+          available: !!todayDate,
+          currentDate: todayDate,
+          previousDate,
+          scrapedAt: parsed.meta?.parsedAt || parsed.meta?.scrapedAt || null,
+          publishedAt: parsed.meta?.publishedAt || null,
+          eventTime: parsed.meta?.actionParsedAt || parsed.meta?.parsedAt || parsed.meta?.scrapedAt || todayDate || null,
+          added: changes?.added || [...new Set([...addedLongs, ...addedShorts])],
+          removed: changes?.removed || [...new Set([...removedLongs, ...removedShorts])],
+          addedLongs,
+          removedLongs,
+          addedShorts,
+          removedShorts,
+          source: parsed.meta?.source || 'EtfProLocal',
+          actionCount: parsed.meta?.actionCount,
+          rowCount: Array.isArray(parsed.rows) ? parsed.rows.length : 0,
+          dataQuality: parsed.dataQuality,
+        };
       }
     } catch (err) {
       console.error('[API] ETF Pro changelog:', err.message);
@@ -3883,28 +4342,6 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
         available: false, error: err.message,
         added: [], removed: [], addedLongs: [], removedLongs: [], addedShorts: [], removedShorts: []
       };
-    }
-
-    try {
-      const emailPayload = etfProEmailSnapshotToPayload(await getLatestEtfProEmailSnapshot());
-      const emailDate = emailPayload?.meta?.snapshotDate;
-      const localDate = results['etf-pro']?.currentDate;
-      if (emailPayload && emailDate && (!localDate || emailDate.localeCompare(localDate) >= 0)) {
-        results['etf-pro'] = {
-          available: true,
-          currentDate: emailDate,
-          previousDate: emailPayload.changes?.previousDate || null,
-          added: emailPayload.changes?.added || [],
-          removed: emailPayload.changes?.removed || [],
-          addedLongs: emailPayload.changes?.addedLongs || [],
-          removedLongs: emailPayload.changes?.removedLongs || [],
-          addedShorts: emailPayload.changes?.addedShorts || [],
-          removedShorts: emailPayload.changes?.removedShorts || [],
-          source: 'HedgeyeDailySnapshot'
-        };
-      }
-    } catch (emailErr) {
-      console.warn('[API] ETF Pro email changelog fallback:', emailErr.message);
     }
 
     const totalTime = Date.now() - startTime;
@@ -3982,12 +4419,13 @@ app.get('/api/macro-indicators', async (req, res) => {
 // Build a uniform quote row for the multi-region response.
 async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
   try {
-    const quote = await getQuote(index.symbol);
+    const quote = await getQuote(toQuoteInstrument(index));
+    const quoteMetadata = buildQuoteMetadata(quote);
     const mapping = getTickerMapping(index.symbol);
     const isIntl = index.intl === true;
 
     let sparklineData = [];
-    if (includeSparklines && !isIntl && mapping.source === 'yahoo') {
+    if (quoteMetadata.usable && includeSparklines && !isIntl && mapping.source === 'yahoo') {
       sparklineData = await getIntradayData(index.symbol);
     }
 
@@ -4001,9 +4439,10 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
     let mtdChangePct = null;
     let qtdChangePct = null;
     let ytdChangePct = null;
+    let periods = null;
     if (wantPeriodReturns && !isIntl) {
       try {
-        const periods = await getPeriodReturnsCached(index.symbol);
+        periods = await getPeriodReturnsCached(index.symbol);
         if (periods) {
           weekChangePct = periods.weekChangePct;
           fifteenDayChangePct = periods.fifteenDayChangePct ?? null;
@@ -4020,15 +4459,22 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
         console.warn(`[API] Period returns failed for ${index.symbol}:`, periodErr.message);
       }
     }
+    const periodMetadata = buildPeriodReturnsMetadata(periods);
 
     return {
       symbol: index.symbol,
       name: index.name,
       unit: index.unit || undefined,
-      price: quote?.price || null,
-      change: quote?.change || null,
-      changePercent: quote?.changePercent || null,
-      timestamp: quote?.timestamp || new Date().toISOString(),
+      price: quoteMetadata.usable ? quote.price : null,
+      change: quoteMetadata.usable ? (quote.change ?? null) : null,
+      changePercent: quoteMetadata.usable ? (quote.changePercent ?? null) : null,
+      timestamp: quoteMetadata.quoteAsOf,
+      source: quoteMetadata.source,
+      dataType: quoteMetadata.dataType,
+      availability: quoteMetadata.availability,
+      quoteAsOf: quoteMetadata.quoteAsOf,
+      warning: quoteMetadata.warning,
+      entitlementStatus: quoteMetadata.entitlementStatus,
       sparklineData,
       weekChangePct,
       fifteenDayChangePct,
@@ -4039,7 +4485,9 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       sixMonthChangePct,
       mtdChangePct,
       qtdChangePct,
-      ytdChangePct
+      ytdChangePct,
+      periodReturnsAsOf: periodMetadata.periodReturnsAsOf,
+      periodReturnsStatus: periodMetadata.periodReturnsStatus
     };
   } catch (error) {
     console.error(`[API] Error fetching ${index.symbol}:`, error.message);
@@ -4048,6 +4496,16 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       name: index.name,
       unit: index.unit || undefined,
       price: null,
+      change: null,
+      changePercent: null,
+      timestamp: null,
+      source: null,
+      dataType: null,
+      availability: 'unavailable',
+      quoteAsOf: null,
+      warning: error.message || 'quote_fetch_failed',
+      entitlementStatus: null,
+      sparklineData: [],
       error: 'Failed to fetch quote',
       weekChangePct: null,
       fifteenDayChangePct: null,
@@ -4058,7 +4516,9 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       sixMonthChangePct: null,
       mtdChangePct: null,
       qtdChangePct: null,
-      ytdChangePct: null
+      ytdChangePct: null,
+      periodReturnsAsOf: null,
+      periodReturnsStatus: 'unavailable'
     };
   }
 }
@@ -4068,6 +4528,10 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
 async function buildRatesPayload(region, opts) {
   const tabs = region.tabs || {};
   const out = {};
+  const rateIndicesBySymbol = new Map();
+  Object.values(tabs).forEach((tab) => {
+    (tab.indices || []).forEach((index) => rateIndicesBySymbol.set(index.symbol, index));
+  });
 
   await Promise.all(Object.entries(tabs).map(async ([tabKey, tab]) => {
     const rows = await Promise.all((tab.indices || []).map((idx) => buildQuoteRow(idx, opts)));
@@ -4084,7 +4548,8 @@ async function buildRatesPayload(region, opts) {
           return { value: parseFloat(existing.price), ts: existing.timestamp };
         }
         try {
-          const q = await getQuote(sym);
+          const configuredIndex = rateIndicesBySymbol.get(sym);
+          const q = await getQuote(configuredIndex ? toQuoteInstrument(configuredIndex) : sym);
           if (q?.price != null) {
             return { value: parseFloat(q.price), ts: q.timestamp };
           }
@@ -4113,6 +4578,7 @@ async function buildRatesPayload(region, opts) {
         let mtdDeltaBps = null;
         let qtdDeltaBps = null;
         let ytdDeltaBps = null;
+        let periodReturnsAsOf = null;
         try {
           const [longCloses, shortCloses] = await Promise.all([
             getDailyClosesCached(longSym),
@@ -4129,22 +4595,37 @@ async function buildRatesPayload(region, opts) {
             mtdDeltaBps = deltas.mtdDeltaBps;
             qtdDeltaBps = deltas.qtdDeltaBps;
             ytdDeltaBps = deltas.ytdDeltaBps;
+            periodReturnsAsOf = deltas.asOf || null;
           }
         } catch (err) {
           console.warn(`[Rates] derived deltas failed for ${derived.symbol}:`, err.message);
         }
 
+        const legTimes = [longLeg.ts, shortLeg.ts]
+          .map((value) => Date.parse(String(value || '')))
+          .filter(Number.isFinite);
+        const derivedAsOf = legTimes.length === 2
+          ? new Date(Math.min(...legTimes)).toISOString()
+          : null;
+        const derivedAvailable = priceStr != null && derivedAsOf != null;
+
         rows.push({
           symbol: derived.symbol,
           name: derived.name,
           unit: derived.unit || 'bps',
-          price: priceStr,
-          change: dayDeltaBps,
+          price: derivedAvailable ? priceStr : null,
+          change: derivedAvailable ? dayDeltaBps : null,
           // For bps-denominated derived rows the UI renders these fields with
           // a " bps" suffix (see getRowMetrics), so we populate them with the
           // bps delta rather than a percent change.
-          changePercent: dayDeltaBps,
-          timestamp: longLeg.ts || shortLeg.ts || new Date().toISOString(),
+          changePercent: derivedAvailable ? dayDeltaBps : null,
+          timestamp: derivedAvailable ? derivedAsOf : null,
+          source: 'derived',
+          dataType: 'derived',
+          availability: derivedAvailable ? 'historical' : 'unavailable',
+          quoteAsOf: derivedAvailable ? derivedAsOf : null,
+          warning: derivedAvailable ? 'derived_from_rate_legs' : 'derived_legs_unavailable',
+          entitlementStatus: null,
           sparklineData: [],
           weekChangePct: weekDeltaBps,
           monthChangePct: monthDeltaBps,
@@ -4153,6 +4634,8 @@ async function buildRatesPayload(region, opts) {
           mtdChangePct: mtdDeltaBps,
           qtdChangePct: qtdDeltaBps,
           ytdChangePct: ytdDeltaBps,
+          periodReturnsAsOf,
+          periodReturnsStatus: periodReturnsAsOf ? 'historical' : 'unavailable',
           derived: true
         });
       }
@@ -4173,40 +4656,45 @@ app.get('/api/multi-region-quotes', async (req, res) => {
     const wantPeriodReturns =
       includePeriodReturns === 'true' || includePeriodReturns === true || includePeriodReturns === '1';
     const wantSparklines = includeSparklines === 'true';
+    const requestKey = `GET /api/multi-region-quotes?regions=${requestedRegions.join(',')}&includeSparklines=${wantSparklines}&includePeriodReturns=${wantPeriodReturns}`;
 
-    console.log(`[API] /api/multi-region-quotes called for regions: ${requestedRegions.join(', ')}, sparklines: ${includeSparklines}, periodReturns: ${wantPeriodReturns}`);
+    const results = await runInFlight(requestKey, async () => {
+      console.log(`[API] /api/multi-region-quotes called for regions: ${requestedRegions.join(', ')}, sparklines: ${includeSparklines}, periodReturns: ${wantPeriodReturns}`);
 
-    const results = {};
-    const opts = { includeSparklines: wantSparklines, wantPeriodReturns };
+      const payload = {};
+      const opts = { includeSparklines: wantSparklines, wantPeriodReturns };
 
-    await Promise.all(requestedRegions.map(async (regionKey) => {
-      const region = MARKET_REGIONS[regionKey];
-      if (!region) {
-        console.warn(`[API] Unknown region: ${regionKey}`);
-        return;
-      }
+      await Promise.all(requestedRegions.map(async (regionKey) => {
+        const region = MARKET_REGIONS[regionKey];
+        if (!region) {
+          console.warn(`[API] Unknown region: ${regionKey}`);
+          return;
+        }
 
-      // Tabbed regions (currently just `rates`) return a nested object keyed
-      // by tab. All other regions return a flat array of quote rows.
-      if (region.tabs) {
-        console.log(`[API] Fetching tabbed region ${regionKey} (${Object.keys(region.tabs).join(', ')})...`);
-        const payload = await buildRatesPayload(region, opts);
-        results[regionKey] = payload;
-        const tabCounts = Object.entries(payload)
-          .map(([k, v]) => `${k}=${v.length}`)
-          .join(' ');
-        console.log(`[API] Completed ${regionKey}: ${tabCounts}`);
-        return;
-      }
+        // Tabbed regions (currently just `rates`) return a nested object keyed
+        // by tab. All other regions return a flat array of quote rows.
+        if (region.tabs) {
+          console.log(`[API] Fetching tabbed region ${regionKey} (${Object.keys(region.tabs).join(', ')})...`);
+          const tabPayload = await buildRatesPayload(region, opts);
+          payload[regionKey] = tabPayload;
+          const tabCounts = Object.entries(tabPayload)
+            .map(([k, v]) => `${k}=${v.length}`)
+            .join(' ');
+          console.log(`[API] Completed ${regionKey}: ${tabCounts}`);
+          return;
+        }
 
-      console.log(`[API] Fetching ${region.indices.length} indices for ${regionKey}...`);
-      const quotes = await Promise.all(region.indices.map((index) => buildQuoteRow(index, opts)));
-      results[regionKey] = quotes;
-      console.log(`[API] Completed ${regionKey}: ${quotes.length} quotes fetched`);
-    }));
+        console.log(`[API] Fetching ${region.indices.length} indices for ${regionKey}...`);
+        const quotes = await Promise.all(region.indices.map((index) => buildQuoteRow(index, opts)));
+        payload[regionKey] = quotes;
+        console.log(`[API] Completed ${regionKey}: ${quotes.length} quotes fetched`);
+      }));
 
-    const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/multi-region-quotes completed in ${totalTime}ms`);
+      const totalTime = Date.now() - startTime;
+      console.log(`[API] /api/multi-region-quotes completed in ${totalTime}ms`);
+      return payload;
+    });
+
     res.json(results);
   } catch (error) {
     const totalTime = Date.now() - startTime;
@@ -4321,111 +4809,43 @@ function getValueMonthsAgo(observations, months) {
   return closest;
 }
 
-// Liquidity Indicators endpoint
+const liquidityModelsCache = {
+  timestamp: 0,
+  data: null,
+};
+const LIQUIDITY_MODELS_CACHE_TTL = 6 * 60 * 60 * 1000;
+
+// Dollar Liquidity Models endpoint
 app.get('/api/liquidity-indicators', async (req, res) => {
   const startTime = Date.now();
   try {
     console.log('[API] /api/liquidity-indicators called');
 
-    // Fetch MZM (Money Zero Maturity) and GDP data
-    const fredStartTime = Date.now();
-    const [mzmData, gdpData] = await Promise.all([
-      fetchFredHistoricalData('MZM', 7), // Need 7 months for 6m calculation
-      fetchFredHistoricalData('GDP', 7)  // GDP is quarterly, but we'll use last available
-    ]);
-    const fredTime = Date.now() - fredStartTime;
-    console.log(`[API] FRED data fetching completed in ${fredTime}ms`);
-
-    if (!mzmData || mzmData.length === 0) {
-      return res.status(500).json({ error: 'Failed to fetch MZM data from FRED' });
+    const forceRefresh = req.query.refresh === 'true';
+    if (
+      !forceRefresh &&
+      liquidityModelsCache.data &&
+      Date.now() - liquidityModelsCache.timestamp < LIQUIDITY_MODELS_CACHE_TTL
+    ) {
+      console.log(`[API] /api/liquidity-indicators returning cached data (${Date.now() - startTime}ms)`);
+      return res.json(liquidityModelsCache.data);
     }
 
-    // Get current and historical values for MZM
-    const sortedMzm = [...mzmData].sort((a, b) => new Date(b.date) - new Date(a.date));
-    const currentMzm = sortedMzm[0].value;
-    const mzm1m = getValueMonthsAgo(mzmData, 1);
-    const mzm3m = getValueMonthsAgo(mzmData, 3);
-    const mzm6m = getValueMonthsAgo(mzmData, 6);
+    const data = await buildLiquidityModels({
+      baseDir: __dirname,
+      now: new Date(),
+    });
 
-    // Calculate M3 Proxy (MZM) 1m annualized growth
-    const m3Proxy1m = calculateAnnualizedROC(currentMzm, mzm1m, 1);
-
-    // Calculate Money Supply ROC for different periods
-    const moneySupplyROC1m = calculateAnnualizedROC(currentMzm, mzm1m, 1);
-    const moneySupplyROC3m = calculateAnnualizedROC(currentMzm, mzm3m, 3);
-    const moneySupplyROC6m = calculateAnnualizedROC(currentMzm, mzm6m, 6);
-
-    // Handle GDP (quarterly data)
-    let gdpROC1m = null;
-    let gdpROC3m = null;
-    let gdpROC6m = null;
-
-    if (gdpData && gdpData.length > 0) {
-      const sortedGdp = [...gdpData].sort((a, b) => new Date(b.date) - new Date(a.date));
-      const currentGdp = sortedGdp[0].value;
-
-      // For GDP, we'll use the last available quarterly value for all periods
-      // since it's quarterly data, we approximate monthly changes
-      // Get the most recent quarter and the quarter from ~3 months ago
-      const gdp3m = getValueMonthsAgo(gdpData, 3);
-      const gdp6m = getValueMonthsAgo(gdpData, 6);
-
-      // For 1m, we'll use the same value as 3m (since GDP is quarterly)
-      // Or calculate based on 3m if we have it
-      if (gdp3m) {
-        gdpROC1m = calculateAnnualizedROC(currentGdp, gdp3m, 3); // Use 3m for 1m approximation
-        gdpROC3m = calculateAnnualizedROC(currentGdp, gdp3m, 3);
-      }
-
-      if (gdp6m) {
-        gdpROC6m = calculateAnnualizedROC(currentGdp, gdp6m, 6);
-      }
-    }
-
-    // Calculate spreads (Money Supply ROC - GDP ROC)
-    const spread1m = moneySupplyROC1m !== null && gdpROC1m !== null
-      ? moneySupplyROC1m - gdpROC1m
-      : null;
-    const spread3m = moneySupplyROC3m !== null && gdpROC3m !== null
-      ? moneySupplyROC3m - gdpROC3m
-      : null;
-    const spread6m = moneySupplyROC6m !== null && gdpROC6m !== null
-      ? moneySupplyROC6m - gdpROC6m
-      : null;
-
-    const result = {
-      m3Proxy: {
-        value: m3Proxy1m !== null ? parseFloat(m3Proxy1m.toFixed(1)) : null,
-        period: '1m',
-        timestamp: new Date().toISOString()
-      },
-      moneySupplyVsGDP: {
-        '1m': {
-          moneySupplyROC: moneySupplyROC1m !== null ? parseFloat(moneySupplyROC1m.toFixed(1)) : null,
-          gdpROC: gdpROC1m !== null ? parseFloat(gdpROC1m.toFixed(1)) : null,
-          spread: spread1m !== null ? parseFloat(spread1m.toFixed(1)) : null
-        },
-        '3m': {
-          moneySupplyROC: moneySupplyROC3m !== null ? parseFloat(moneySupplyROC3m.toFixed(1)) : null,
-          gdpROC: gdpROC3m !== null ? parseFloat(gdpROC3m.toFixed(1)) : null,
-          spread: spread3m !== null ? parseFloat(spread3m.toFixed(1)) : null
-        },
-        '6m': {
-          moneySupplyROC: moneySupplyROC6m !== null ? parseFloat(moneySupplyROC6m.toFixed(1)) : null,
-          gdpROC: gdpROC6m !== null ? parseFloat(gdpROC6m.toFixed(1)) : null,
-          spread: spread6m !== null ? parseFloat(spread6m.toFixed(1)) : null
-        }
-      },
-      timestamp: new Date().toISOString()
-    };
+    liquidityModelsCache.timestamp = Date.now();
+    liquidityModelsCache.data = data;
 
     const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/liquidity-indicators completed in ${totalTime}ms (FRED: ${fredTime}ms)`);
-    res.json(result);
+    console.log(`[API] /api/liquidity-indicators completed in ${totalTime}ms`);
+    res.json(data);
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/liquidity-indicators after ${totalTime}ms:`, error);
-    res.status(500).json({ error: 'Failed to fetch liquidity indicators', details: error.message });
+    res.status(500).json({ error: 'Failed to build liquidity models', details: error.message });
   }
 });
 
@@ -4761,6 +5181,229 @@ app.post('/api/portfolio/correlation-concentration', async (req, res) => {
   }
 });
 
+app.get('/api/portfolio/prediction-market-positions', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    let gatewayStatus = null;
+    try {
+      gatewayStatus = await sidecarRequest('/status', { timeoutMs: 3000 });
+    } catch (error) {
+      gatewayStatus = {
+        connected: false,
+        status: error.reason || 'sidecar_unavailable',
+        message: error.message,
+      };
+    }
+
+    if (!gatewayStatus?.connected || gatewayStatus.status !== 'connected') {
+      const totalTime = Date.now() - startTime;
+      return res.json({
+        accounts: [],
+        positions: [],
+        meta: {
+          source: 'ibkr_live_unavailable',
+          durationMs: totalTime,
+          managedAccounts: [],
+          gateway: gatewayStatus,
+          message: 'IB Gateway/TWS is not connected; prediction market positions require live data.',
+        },
+      });
+    }
+
+    let managedAccounts = [];
+    try {
+      const accountsRes = await sidecarRequest('/accounts', { timeoutMs: 3000 });
+      managedAccounts = Array.isArray(accountsRes.accounts) ? accountsRes.accounts : [];
+    } catch (error) {
+      console.warn('[API] Prediction market account lookup fell back to cache-only mode:', error.message);
+    }
+
+    const preferredAccounts = [
+      req.query.primaryAccount,
+      process.env.IBKR_ACCOUNT_ID,
+      'U25779973',
+      ...managedAccounts,
+    ].filter(Boolean);
+    const accountsToCheck = [...new Set(preferredAccounts)];
+
+    const snapshots = await Promise.all(
+      accountsToCheck.map(async (accountId) => {
+        try {
+          const cache = await sidecarRequest(`/cache/portfolio?account=${encodeURIComponent(accountId)}`, {
+            timeoutMs: 2500,
+          });
+          let rawPositions = Array.isArray(cache.positions) ? cache.positions : [];
+          let source = 'ibkr_sidecar_cache';
+          let fetchedAt = cache.fetched_at || null;
+          if (rawPositions.length === 0) {
+            try {
+              const snapshot = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(accountId)}`, {
+                timeoutMs: 6000,
+              });
+              if (Array.isArray(snapshot.positions) && snapshot.positions.length > 0) {
+                rawPositions = snapshot.positions;
+                source = snapshot.source || 'ibkr_positions';
+                fetchedAt = snapshot.fetched_at || fetchedAt;
+              }
+            } catch (error) {
+              console.warn(`[API] Prediction market positions live fallback failed for ${accountId}:`, error.message);
+            }
+          }
+          const positions = rawPositions
+            .filter((position) => Number(position.position || 0) !== 0 && isPredictionMarketContract(position))
+            .map((position) => ({
+              ...normalizeIbkrPosition(position),
+              accountId: position.account || accountId,
+              positionSource: source,
+            }));
+          return {
+            accountId,
+            positions,
+            fetchedAt,
+            source,
+          };
+        } catch (error) {
+          return {
+            accountId,
+            positions: [],
+            error: error.message,
+            source: 'ibkr_sidecar_cache',
+          };
+        }
+      }),
+    );
+
+    const positions = snapshots.flatMap((snapshot) => snapshot.positions || []);
+    const totalTime = Date.now() - startTime;
+    console.log(
+      `[API] /api/portfolio/prediction-market-positions completed in ${totalTime}ms accounts=${snapshots.length} positions=${positions.length}`,
+    );
+    res.json({
+      accounts: snapshots,
+      positions,
+      meta: {
+        source: 'ibkr_live',
+        durationMs: totalTime,
+        managedAccounts,
+        gateway: gatewayStatus,
+      },
+    });
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/portfolio/prediction-market-positions after ${totalTime}ms:`, error);
+    res.status(500).json({
+      error: 'Failed to fetch prediction market positions',
+      details: error.message,
+    });
+  }
+});
+
+app.get('/api/portfolio/accounts', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const accounts = await portfolioDataProvider.getAccounts();
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+      return res.json({ accounts: [] });
+    }
+
+    const snapshots = await Promise.all(
+      accounts.map(async (accountId) => {
+        try {
+          const [accountSummary, pnl] = await Promise.all([
+            portfolioDataProvider.getAccountSummary(accountId),
+            portfolioDataProvider.getPnL(accountId),
+          ]);
+          return {
+            accountId,
+            accountSummary: accountSummary || null,
+            pnl: pnl || null,
+          };
+        } catch (error) {
+          return {
+            accountId,
+            accountSummary: null,
+            pnl: null,
+            error: error.message,
+          };
+        }
+      }),
+    );
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/portfolio/accounts completed in ${totalTime}ms accounts=${snapshots.length}`);
+    res.json({ accounts: snapshots });
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    console.error(`[API] Error in /api/portfolio/accounts after ${totalTime}ms:`, error);
+    res.status(500).json({
+      error: 'Failed to fetch portfolio account snapshots',
+      details: error.message,
+    });
+  }
+});
+
+app.get('/api/ibkr/flex/status', (req, res) => {
+  try {
+    res.json(getFlexPublicConfigStatus());
+  } catch (error) {
+    console.error('[API] Error in /api/ibkr/flex/status:', error);
+    res.status(500).json({
+      enabled: false,
+      configured: false,
+      status: 'error',
+      error: 'Failed to read IBKR Flex status',
+    });
+  }
+});
+
+app.post('/api/ibkr/flex/sync', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const date = req.query.date || req.body?.date;
+    const snapshot = await fetchFlexStatement({ date });
+    const totalTime = Date.now() - startTime;
+    console.log(`[API] /api/ibkr/flex/sync completed in ${totalTime}ms date=${snapshot.date} positions=${snapshot.positionCount}`);
+    res.json({
+      ok: true,
+      status: 'ready',
+      durationMs: totalTime,
+      flex: {
+        date: snapshot.date,
+        fetchedAt: snapshot.fetchedAt,
+        reportDate: snapshot.reportDate,
+        accountId: snapshot.accountId,
+        currency: snapshot.currency,
+        positionCount: snapshot.positionCount,
+        exposure: snapshot.exposure,
+      },
+    });
+  } catch (error) {
+    const totalTime = Date.now() - startTime;
+    const code = error.code || 'flex_error';
+    console.warn(`[API] /api/ibkr/flex/sync unavailable after ${totalTime}ms:`, error.message);
+    res.status(code === 'flex_disabled' || code === 'flex_missing_config' ? 409 : 502).json({
+      ok: false,
+      status: 'unavailable',
+      code,
+      durationMs: totalTime,
+      error: error.message || 'IBKR Flex sync unavailable',
+    });
+  }
+});
+
+app.get('/api/portfolio/exposure/reconciliation', (req, res) => {
+  try {
+    res.json(getFlexReconciliation({ date: req.query.date }));
+  } catch (error) {
+    console.error('[API] Error in /api/portfolio/exposure/reconciliation:', error);
+    res.status(500).json({
+      status: 'error',
+      source: 'ibkr_flex_web_service',
+      error: 'Failed to read IBKR Flex reconciliation snapshot',
+    });
+  }
+});
+
 app.get('/api/options', (req, res) => {
   res.json(generateOptionsData());
 });
@@ -4793,106 +5436,18 @@ app.get('/api/indicators/volatility/:ticker', async (req, res) => {
 });
 
 app.get('/api/volatility-snapshot', async (req, res) => {
-  const VOL_TICKERS = {
-    VIX:    '^VIX',
-    VVIX:   '^VVIX',
-    RVX:    '^RVX',
-    NazVol: '^VXN',
-    GVZ:    '^GVZ',
-    OVX:    '^OVX',
-    MOVE:   '^MOVE',
-  };
-
-  const fetches = Object.entries(VOL_TICKERS).map(async ([name, yahooTicker]) => {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}`;
-    const response = await axios.get(url, {
-      params: { range: '3mo', interval: '1d', includePrePost: 'false' },
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      timeout: 10000
+  try {
+    const snapshot = await volatilitySnapshotService.fetchSnapshot();
+    return res.status(snapshot.status === 'unavailable' ? 503 : 200).json(snapshot);
+  } catch (error) {
+    console.error('[volatility-snapshot] unexpected snapshot failure:', error);
+    return res.status(503).json({
+      status: 'unavailable',
+      generatedAt: new Date().toISOString(),
+      lastUpdated: null,
+      error: 'Volatility providers are unavailable',
     });
-    const result = response.data?.chart?.result?.[0];
-    const meta = result?.meta || {};
-    const quote = result?.indicators?.quote?.[0];
-    const closes = quote?.close || [];
-    // Filter nulls then reverse so index 0 = most recent trading day
-    const valid = closes.filter(v => v != null).reverse();
-    const lastPx = meta.regularMarketPrice ?? valid[0] ?? null;
-    const day1Ago = meta.previousClose ?? valid[1] ?? null;
-    if (lastPx == null) {
-      const baseMsg = `[volatility-snapshot] ${name} has no lastPx`;
-      const detail = `result=${!!result}, meta=${!!meta}, quote=${!!quote}, closesLen=${closes.length}, validLen=${valid.length}, hasRegMktPrice=${meta.regularMarketPrice != null}, hasPrevClose=${meta.previousClose != null}`;
-      if (name === 'RVX') {
-        console.warn(`${baseMsg} (RVX-specific; ${detail})`);
-      } else {
-        console.warn(`${baseMsg} (${detail})`);
-      }
-    }
-    return {
-      name,
-      lastPx,
-      day1Ago,
-      week1Ago: valid[5] ?? null,
-      week4Ago: valid[21] ?? null,
-    };
-  });
-
-  const settled = await Promise.allSettled(fetches);
-  const snapshot = {};
-  const tickerNames = Object.keys(VOL_TICKERS);
-  settled.forEach((r, i) => {
-    const name = tickerNames[i];
-    if (r.status === 'rejected') {
-      console.warn(`[volatility-snapshot] ${name} failed:`, r.reason?.message || r.reason);
-      return;
-    }
-    const { name: _n, ...vals } = r.value;
-    snapshot[name] = vals;
-  });
-
-  // Fallback for VVIX and RVX when 3mo chart returns no current price (keep any existing week1Ago/week4Ago)
-  for (const name of ['VVIX', 'RVX']) {
-    if (!snapshot[name] || snapshot[name].lastPx == null) {
-      try {
-        const data = await fetchVolatilityData(VOL_TICKERS[name]);
-        if (data.current == null || data.change == null || Number.isNaN(Number(data.current)) || Number.isNaN(Number(data.change))) {
-          // If we still don't have a reliable price, leave this series as missing
-          // rather than showing a hardcoded or misleading value.
-          console.warn(
-            `[volatility-snapshot] fallback for ${name} returned invalid data; leaving series missing to avoid misleading values (current=${data.current}, change=${data.change})`
-          );
-          continue;
-        }
-        const prev = (parseFloat(data.current) - parseFloat(data.change)).toFixed(2);
-        const existing = snapshot[name] || {};
-        snapshot[name] = {
-          lastPx: data.current,
-          day1Ago: prev,
-          week1Ago: existing.week1Ago ?? null,
-          week4Ago: existing.week4Ago ?? null,
-        };
-        // Second 3mo request to try to fill week1Ago/week4Ago when main fetch had no quote
-        try {
-          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(VOL_TICKERS[name])}`;
-          const res3mo = await axios.get(url, {
-            params: { range: '3mo', interval: '1d', includePrePost: 'false' },
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-            timeout: 10000
-          });
-          const result = res3mo.data?.chart?.result?.[0];
-          const closes = result?.indicators?.quote?.[0]?.close || [];
-          const valid = closes.filter(v => v != null).reverse();
-          if (valid.length > 21) {
-            snapshot[name].week1Ago = valid[5] ?? null;
-            snapshot[name].week4Ago = valid[21] ?? null;
-          }
-        } catch (_) { /* leave week columns as-is */ }
-      } catch (err) {
-        console.warn(`[volatility-snapshot] fallback for ${name} failed:`, err?.message || err);
-      }
-    }
   }
-
-  res.json(snapshot);
 });
 
 function loadLocalMarketStructureBundle() {
@@ -5145,87 +5700,32 @@ app.get('/api/usd/currency-pairs', async (req, res) => {
   }
 });
 
-// Get USD correlations
+const usdCorrelationService = createUsdCorrelationService({
+  fetchHistory: (symbol) => fetchYahooDailyClosesSeries(symbol, '2y'),
+});
+
+// Get USD correlations from current daily market history.
 app.get('/api/usd/correlations', async (req, res) => {
   const startTime = Date.now();
   try {
-    const dbStartTime = Date.now();
-
-    // Try query by calculationDate first (more efficient than scan)
-    // Get today's date and try recent dates in descending order
-    const today = new Date().toISOString().split('T')[0];
-    let latest = null;
-
-    // Try today, yesterday, and up to 7 days ago
-    for (let i = 0; i < 7; i++) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-
-      try {
-        const params = {
-          TableName: 'USDCorrelations',
-          Key: {
-            calculationDate: dateStr
-          }
-        };
-
-        const result = await dynamodb.get(params).promise();
-        if (result.Item) {
-          latest = result.Item;
-          break;
-        }
-      } catch (err) {
-        // Continue to next date
-        continue;
-      }
-    }
-
-    // Fallback to scan if query didn't find anything
-    if (!latest) {
-      const scanParams = {
-        TableName: 'USDCorrelations',
-        Limit: 1
-      };
-
-      const scanResult = await dynamodb.scan(scanParams).promise();
-      if (scanResult.Items && scanResult.Items.length > 0) {
-        // Sort by calculationDate descending
-        latest = scanResult.Items.sort((a, b) => {
-          const dateA = new Date(a.calculationDate || 0);
-          const dateB = new Date(b.calculationDate || 0);
-          return dateB - dateA;
-        })[0];
-      }
-    }
-
-    const dbTime = Date.now() - dbStartTime;
-    console.log(`[API] USD correlations query completed in ${dbTime}ms`);
-
-    if (!latest) {
-      const totalTime = Date.now() - startTime;
-      console.log(`[API] /api/usd/correlations completed (no data) in ${totalTime}ms`);
-      return res.json({
-        correlations: null,
-        rollingStats: null,
-        timestamp: null,
-        message: 'No correlation data available'
-      });
-    }
-
+    const snapshot = await usdCorrelationService.getSnapshot();
     const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/usd/correlations completed in ${totalTime}ms (DB: ${dbTime}ms)`);
-    res.json({
-      correlations: latest.correlations,
-      rollingStats: latest.rollingStats,
-      timestamp: latest.timestamp,
-      calculationDate: latest.calculationDate
-    });
+    console.log(`[API] /api/usd/correlations completed in ${totalTime}ms (${snapshot.calculationDate})`);
+    res.json(snapshot);
 
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/usd/correlations after ${totalTime}ms:`, error);
-    res.status(500).json({ error: 'Failed to fetch correlation data' });
+    res.status(503).json({
+      correlations: null,
+      rollingStats: null,
+      timestamp: null,
+      calculationDate: null,
+      source: 'Yahoo Finance daily bars',
+      sourceStatus: 'unavailable',
+      error: error.message || 'Current USD correlation data is unavailable',
+      code: error.code || 'USD_CORRELATION_DATA_UNAVAILABLE',
+    });
   }
 });
 

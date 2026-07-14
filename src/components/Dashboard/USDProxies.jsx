@@ -230,8 +230,8 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
 
   if (error) {
     return (
-      <Card className="bg-red-50 border-red-200 rounded-lg">
-        <Text className="text-red-600">Error loading USD data: {error}</Text>
+      <Card className="bg-blue-50 border-blue-200 rounded-lg">
+        <Text className="text-blue-600">Error loading USD data: {error}</Text>
       </Card>
     );
   }

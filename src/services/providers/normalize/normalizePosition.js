@@ -7,15 +7,34 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
   const accountId = raw.account || '';
   const quantity = Number(raw.position) || 0;
   const avgCost = Number(raw.avgCost) || 0;
+  const isPredictionMarket = isPredictionMarketContract(raw);
   const mark = marketQuote?.mark ?? null;
-  const marketValue =
-    raw.marketValue != null
+  const rawMarketValue =
+    raw.marketValue != null && Number.isFinite(Number(raw.marketValue))
       ? Number(raw.marketValue)
-      : mark != null
-        ? quantity * mark
-        : quantity !== 0 && avgCost
-          ? quantity * avgCost
-          : null;
+      : null;
+  const derivedMark =
+    mark != null
+      ? mark
+      : rawMarketValue != null && quantity !== 0
+        ? Math.abs(rawMarketValue / quantity)
+        : null;
+  const marketValue =
+    rawMarketValue != null
+      ? rawMarketValue
+      : derivedMark != null
+        ? quantity * derivedMark
+        : null;
+  const costBasis = quantity * avgCost;
+  const gainLoss =
+    raw.unrealizedPnL != null && Number.isFinite(Number(raw.unrealizedPnL))
+      ? Number(raw.unrealizedPnL)
+      : marketValue != null
+        ? marketValue - costBasis
+        : null;
+  const warning =
+    marketQuote?.warning ||
+    (quantity !== 0 && marketValue == null && !isPredictionMarket ? 'missing_market_value' : null);
 
   return {
     positionId: conid ? `${accountId}#${conid}` : `${accountId}#${raw.symbol}`,
@@ -25,13 +44,13 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
     description: raw.localSymbol || raw.symbol,
     quantity,
     avgCost,
-    price: mark,
+    price: derivedMark,
     marketValue,
-    costBasis: quantity * avgCost,
-    gainLoss: marketValue != null ? marketValue - quantity * avgCost : null,
+    costBasis,
+    gainLoss,
     gainLossPercent:
-      avgCost > 0 && marketValue != null
-        ? ((marketValue - quantity * avgCost) / (quantity * avgCost)) * 100
+      costBasis !== 0 && gainLoss != null
+        ? (gainLoss / Math.abs(costBasis)) * 100
         : null,
     unrealizedPnL: raw.unrealizedPnL != null ? Number(raw.unrealizedPnL) : null,
     realizedPnL: raw.realizedPnL != null ? Number(raw.realizedPnL) : null,
@@ -39,12 +58,34 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
     secType: raw.secType || 'STK',
     exchange: raw.exchange || null,
     assetType: raw.secType || 'STK',
-    assetClass: mapSecTypeToAssetClass(raw.secType),
+    assetClass: isPredictionMarket ? 'Prediction Markets' : mapSecTypeToAssetClass(raw.secType),
+    isPredictionMarket,
     positionSource: 'ibkr_api',
-    priceSource: marketQuote?.source || null,
-    lastUpdated: marketQuote?.timestamp || raw.fetched_at || null,
-    warning: marketQuote?.warning || null,
+    priceSource: marketQuote?.source || (rawMarketValue != null ? 'ibkr_portfolio' : null),
+    lastUpdated: marketQuote?.timestamp || raw.updated_at || raw.fetched_at || null,
+    warning,
   };
+}
+
+function isPredictionMarketContract(raw = {}) {
+  const text = [
+    raw.symbol,
+    raw.localSymbol,
+    raw.description,
+    raw.tradingClass,
+    raw.contractMonth,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toUpperCase();
+  const secType = String(raw.secType || '').toUpperCase();
+
+  return (
+    secType === 'EVENT' ||
+    /\bKX[A-Z0-9]+\b/.test(text) ||
+    /\bCPIY\b/.test(text) ||
+    /(?:^|[-_ ])(?:YES|NO)(?:$|[-_ ])/.test(text)
+  );
 }
 
 function mapSecTypeToAssetClass(secType) {
@@ -85,4 +126,9 @@ function normalizeUploadedHolding(holding, snapshotId) {
   };
 }
 
-module.exports = { normalizeIbkrPosition, normalizeUploadedHolding, mapSecTypeToAssetClass };
+module.exports = {
+  normalizeIbkrPosition,
+  normalizeUploadedHolding,
+  mapSecTypeToAssetClass,
+  isPredictionMarketContract,
+};

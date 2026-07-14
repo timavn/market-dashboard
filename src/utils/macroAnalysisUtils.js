@@ -87,7 +87,7 @@ const getFactorLoadings = (holding) => {
     if (['TLT', 'ZROZ'].includes(symbol)) { // Long Treasuries
         return { growth: -0.3, defensive: 0.8, inflation: -0.4, volatility: 0.2, real_rates: 1.0 };
     }
-    if (['SHV', 'BIL', 'SGOV'].includes(symbol)) { // Cash equivalents
+    if (['TBIL', 'BIL', 'SGOV', 'SHV', 'GBIL', 'CLIP', 'USFR', 'TFLO', 'XBIL'].includes(symbol)) { // Cash equivalents
         return { growth: 0, defensive: 0.2, inflation: -0.8, volatility: 0.8, real_rates: 0 }; // Cash is a vol buffer
     }
     if (['GLD', 'IAU', 'SLV'].includes(symbol)) {

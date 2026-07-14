@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Card, Title } from '@tremor/react';
 import { useTheme } from '../../context/ThemeContext';
 import { BarChart2, FileText, Percent, PieChart, TrendingUp, DollarSign } from 'lucide-react';
-import StatusDot from '../common/StatusDot';
 
 const GROUPS = [
   { id: 'debt',  label: 'DEBT',      Icon: FileText,   bgColor: '#1e3a5f', rows: ['High Debt/EV', 'Low Debt/EV'] },
@@ -18,6 +17,7 @@ const COLUMNS = ['1D', '1W', '1M', '3M', '6M', 'YTD'];
 const COLUMN_LABELS = ['1D\n% CHG', '1W\n% CHG', '1M\n% CHG', '3M\n% CHG', '6M\n% CHG', 'YTD\n% CHG'];
 
 const STORAGE_KEY = 'styleFactorPerformanceData';
+const UPDATED_AT_STORAGE_KEY = `${STORAGE_KEY}.lastEditedAt`;
 
 const getAllRowLabels = () => {
   const labels = [];
@@ -77,6 +77,9 @@ const StyleFactorPerformanceCard = () => {
     }
     return getDefaultData();
   });
+  const [lastEditedAt, setLastEditedAt] = useState(() => (
+    typeof window !== 'undefined' ? localStorage.getItem(UPDATED_AT_STORAGE_KEY) : null
+  ));
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -88,6 +91,7 @@ const StyleFactorPerformanceCard = () => {
 
   const handleCellChange = (row, col, value) => {
     if (value === '' || /^-?\d*\.?\d*$/.test(value)) {
+      const editedAt = new Date().toISOString();
       setData(prev => ({
         ...prev,
         [row]: {
@@ -95,6 +99,10 @@ const StyleFactorPerformanceCard = () => {
           [col]: value
         }
       }));
+      setLastEditedAt(editedAt);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(UPDATED_AT_STORAGE_KEY, editedAt);
+      }
     }
   };
 
@@ -184,12 +192,17 @@ const StyleFactorPerformanceCard = () => {
             Factor Performance
           </Title>
           <div style={{ marginLeft: 'auto' }}>
-            <StatusDot
-              updatedAt={null}
-              status="active"
-              size={9}
-              label="Style Factor Performance (manually maintained)"
-            />
+            <span
+              title={lastEditedAt ? `Last manually edited ${new Date(lastEditedAt).toLocaleString()}` : 'Manually maintained; no saved edit timestamp'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', border: '1px solid #cbd5e1',
+                borderRadius: '4px', padding: '2px 6px', color: isDark ? '#cbd5e1' : '#64748b',
+                background: isDark ? '#1f2937' : '#f8fafc', fontSize: '9px', fontWeight: 700,
+                letterSpacing: '0.04em', whiteSpace: 'nowrap',
+              }}
+            >
+              MANUAL · {lastEditedAt ? new Date(lastEditedAt).toLocaleDateString() : 'NO AS-OF'}
+            </span>
           </div>
         </div>
       </div>

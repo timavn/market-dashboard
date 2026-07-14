@@ -34,7 +34,7 @@ async function sidecarRequest(path, options = {}) {
       const timeoutErr = new Error(
         `IBKR sidecar timed out after ${options.timeoutMs || SIDECAR_TIMEOUT_MS}ms`,
       );
-      timeoutErr.reason = 'sidecar_offline';
+      timeoutErr.reason = 'sidecar_timeout';
       throw timeoutErr;
     }
     if (/ECONNREFUSED|fetch failed|ENOTFOUND|connect/i.test(err.message)) {
@@ -46,4 +46,64 @@ async function sidecarRequest(path, options = {}) {
   }
 }
 
-module.exports = { sidecarRequest, SIDECAR_BASE, SIDECAR_TIMEOUT_MS };
+function isSidecarOfflineError(err) {
+  return err?.reason === 'sidecar_offline';
+}
+
+function isSidecarTimeoutError(err) {
+  return err?.reason === 'sidecar_timeout' || /timed out/i.test(err?.message || '');
+}
+
+async function getSidecarProviderStatus(name = 'ibkr') {
+  let livez = null;
+  try {
+    livez = await sidecarRequest('/livez', { timeoutMs: 1500 });
+  } catch (err) {
+    const status = isSidecarTimeoutError(err) ? 'sidecar_unresponsive' : 'sidecar_offline';
+    return {
+      name,
+      connected: false,
+      status,
+      message: status === 'sidecar_unresponsive'
+        ? 'IBKR sidecar is listening but not responding; restart the existing sidecar process'
+        : err.message,
+      accounts: [],
+      sidecar: null,
+    };
+  }
+
+  try {
+    const status = await sidecarRequest('/status', { timeoutMs: 5000 });
+    return {
+      name,
+      connected: Boolean(status.connected),
+      status: status.status,
+      accounts: status.accounts || [],
+      message: status.message,
+      sidecar: livez,
+      gateway: {
+        host: status.host,
+        port: status.port,
+        clientId: status.client_id,
+      },
+    };
+  } catch (err) {
+    return {
+      name,
+      connected: false,
+      status: isSidecarOfflineError(err) ? 'sidecar_offline' : 'sidecar_unresponsive',
+      message: isSidecarOfflineError(err)
+        ? err.message
+        : 'IBKR sidecar is alive but Gateway status did not respond; restart the existing sidecar process',
+      accounts: [],
+      sidecar: livez,
+    };
+  }
+}
+
+module.exports = {
+  sidecarRequest,
+  getSidecarProviderStatus,
+  SIDECAR_BASE,
+  SIDECAR_TIMEOUT_MS,
+};

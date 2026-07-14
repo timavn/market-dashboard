@@ -12,7 +12,7 @@ import {
     ReferenceDot,
     Legend
 } from 'recharts';
-import { XMarkIcon } from '@heroicons/react/24/solid';
+import XMarkIcon from '@heroicons/react/24/solid/XMarkIcon';
 import LoadingIndicator from '../common/LoadingIndicator';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';

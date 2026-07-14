@@ -64,7 +64,7 @@ const YAHOO_TICKER_MAP = {
   'XRP': 'XRP-USD',
   
   // Additional indices/commodities
-  'CRB': '^CRB',       // CRB Commodity Index
+  'CRB': '^TRCCRB',    // Refinitiv/CoreCommodity CRB Index
   // Rates (CBOE Treasury yield indices)
   // Yahoo may quote percent directly (~4.58) or legacy yield×10 (~45.8); see treasuryYieldScale.cjs
   'UST10Y': '^TNX',    // 10-Year Treasury Yield Index
@@ -164,7 +164,6 @@ export const getApiTicker = (ticker) => {
   const config = getSecurityConfig(ticker);
   return config.apiTicker;
 };
-
 
 
 

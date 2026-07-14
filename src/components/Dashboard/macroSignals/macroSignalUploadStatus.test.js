@@ -12,22 +12,29 @@ describe('macroSignalUploadStatus', () => {
     expect(mapFreshnessToSourceStatus('error')).toBe('defective');
   });
 
-  test('buildMacroUploadSources includes three range-feeding products', () => {
+  test('buildMacroUploadSources includes Hedgeye signal products', () => {
     const sources = buildMacroUploadSources({
       'risk-ranges': { status: 'fresh', itemCount: 35, date: '2026-05-20' },
+      'inflation-nowcast': { status: 'fresh', itemCount: 3, date: '2026-06-15' },
       'bitcoin-trend-tracker': { status: 'stale', itemCount: 4, date: '2026-05-19' },
       'momo-tracker': { status: 'missing', itemCount: 0 },
     });
 
-    expect(sources).toHaveLength(3);
+    expect(sources).toHaveLength(4);
     expect(sources[0]).toMatchObject({
       id: 'risk-ranges',
       label: 'Risk Ranges',
       detail: '35 items · Fresh',
       status: 'current',
     });
-    expect(sources[1].status).toBe('stale');
-    expect(sources[2].status).toBe('defective');
+    expect(sources[1]).toMatchObject({
+      id: 'inflation-nowcast',
+      label: 'Inflation Nowcast',
+      detail: '3 items · Fresh',
+      status: 'current',
+    });
+    expect(sources[2].status).toBe('stale');
+    expect(sources[3].status).toBe('defective');
   });
 
   test('deriveMacroUploadAggregateStatus uses worst status', () => {

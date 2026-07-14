@@ -2,6 +2,7 @@ import { getMinTimestamp } from '../../../utils/timeUtils';
 
 export const RISK_RANGE_UPLOAD_KEYS = [
   { key: 'risk-ranges', label: 'Risk Ranges' },
+  { key: 'inflation-nowcast', label: 'Inflation Nowcast' },
   { key: 'bitcoin-trend-tracker', label: 'Bitcoin Tracker' },
   { key: 'momo-tracker', label: 'MOMO Tracker' },
 ];

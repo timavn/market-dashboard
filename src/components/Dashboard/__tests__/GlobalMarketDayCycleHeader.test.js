@@ -1,20 +1,12 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom';
 import GlobalMarketDayCycleHeader from '../GlobalMarketDayCycleHeader';
 
-// Mock ResizeObserver
-global.ResizeObserver = jest.fn().mockImplementation(() => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
-}));
+const mockDate = new Date('2024-01-15T14:26:00Z');
 
-// Mock the date to a specific time for consistent testing
-const mockDate = new Date('2024-01-15T14:26:00Z'); // Jan 15, 2024 at 14:26 UTC
-
-describe('GlobalMarketDayCycleHeader - Date Boundary Line', () => {
+describe('GlobalMarketDayCycleHeader regional strip', () => {
   beforeEach(() => {
-    // Mock Date to return our test date
     jest.useFakeTimers();
     jest.setSystemTime(mockDate);
   });
@@ -23,40 +15,24 @@ describe('GlobalMarketDayCycleHeader - Date Boundary Line', () => {
     jest.useRealTimers();
   });
 
-  test('renders date boundary line at left edge (0%)', () => {
-    const { container } = render(<GlobalMarketDayCycleHeader />);
-    
-    // Find the date boundary line element
-    const dateBoundaryLine = container.querySelector('[style*="left: \'0%\'"]');
-    
-    expect(dateBoundaryLine).toBeInTheDocument();
-    expect(dateBoundaryLine).toHaveStyle({ left: '0%' });
-    expect(dateBoundaryLine).toHaveStyle({ width: '2px' });
+  test('renders the three regional clock groups without a redundant title', () => {
+    render(<GlobalMarketDayCycleHeader compact />);
+
+    expect(screen.getByLabelText('Americas market clocks')).toBeInTheDocument();
+    expect(screen.getByLabelText('Europe market clocks')).toBeInTheDocument();
+    expect(screen.getByLabelText('Asia market clocks')).toBeInTheDocument();
+    expect(screen.queryByText(/follow the sun/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/global market day-cycle/i)).not.toBeInTheDocument();
   });
 
-  test('date boundary line has purple gradient styling', () => {
-    const { container } = render(<GlobalMarketDayCycleHeader />);
-    
-    const dateBoundaryLine = container.querySelector('[style*="left: \'0%\'"]');
-    const gradientDiv = dateBoundaryLine?.querySelector('div');
-    
-    expect(gradientDiv).toBeInTheDocument();
-    expect(gradientDiv?.style.background).toContain('rgba(196, 181, 253'); // purple-300 color
-  });
+  test('shows the correct local times from west to east', () => {
+    render(<GlobalMarketDayCycleHeader />);
 
-  test('date boundary line has correct z-index', () => {
-    const { container } = render(<GlobalMarketDayCycleHeader />);
-    
-    const dateBoundaryLine = container.querySelector('[style*="left: \'0%\'"]');
-    
-    expect(dateBoundaryLine).toHaveStyle({ zIndex: '15' });
-  });
-
-  test('date boundary line spans full height of timeline', () => {
-    const { container } = render(<GlobalMarketDayCycleHeader />);
-    
-    const dateBoundaryLine = container.querySelector('[style*="left: \'0%\'"]');
-    
-    expect(dateBoundaryLine).toHaveClass('absolute', 'top-0', 'bottom-0');
+    expect(screen.getByLabelText(/LA 06:26/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/CHI 08:26/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/NY 09:26/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/LDN 14:26/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/HK 22:26/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/TYO 23:26/)).toBeInTheDocument();
   });
 });

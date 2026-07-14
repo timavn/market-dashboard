@@ -88,7 +88,7 @@ function groupContractMapByEvent(events) {
   });
 }
 
-module.exports = {
+const contractMapFilters = {
   VENUE_FILTERS,
   eventSearchText,
   matchesVenueFilter,
@@ -97,3 +97,15 @@ module.exports = {
   filterContractMapEvents,
   groupContractMapByEvent,
 };
+
+export {
+  VENUE_FILTERS,
+  eventSearchText,
+  matchesVenueFilter,
+  matchesCategoryFilter,
+  matchesSearchQuery,
+  filterContractMapEvents,
+  groupContractMapByEvent,
+};
+
+export default contractMapFilters;

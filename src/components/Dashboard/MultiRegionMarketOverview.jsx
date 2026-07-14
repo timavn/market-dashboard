@@ -1,13 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { DollarSign, BarChart2 } from 'lucide-react';
-import { USDMarketService } from '../../services/api/usdMarketService';
+import React from 'react';
+import { BarChart2 } from 'lucide-react';
 import MarketVolumeTable from './MarketVolumeTable';
 import { VolatilityTableWithTabs } from './VolatilityTable';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
 import { US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, isMarketHoliday } from '../../constants/globalMarkets';
 import StatusDot from '../common/StatusDot';
 import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
-import { REFRESH_INTERVALS as USD_REFRESH_INTERVALS } from '../../constants/usdMarket';
+import useUsdCorrelations from '../../hooks/useUsdCorrelations';
 import './MultiRegionMarketOverview.css';
 
 // Helper to check if a date is a US market holiday
@@ -316,10 +315,14 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
     <div
       className={`region-chart-panel region-chart-panel--mw currencies-compact-rail${layout === 'sidebar' ? ' currencies-compact-rail--in-sidebar' : ''}`}
     >
-      <div className="region-chart-header region-chart-header--mw">
+        <div className="region-chart-header region-chart-header--mw">
         <div className="region-header-left">
           <span className="card-header-icon card-header-icon--green" aria-hidden="true">
-            <DollarSign size={16} strokeWidth={2.25} />
+            <img
+              src="/assets/ben-franklin-100.jpg"
+              alt=""
+              className="currency-header-portrait"
+            />
           </span>
           <span className="region-label region-label--lg">Currencies</span>
         </div>
@@ -505,7 +508,7 @@ export function SectorsCompactRail({ data, loading, layout = 'rail' }) {
           />
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="text-gray-500 hover:text-gray-800 p-1 rounded hover:bg-gray-200 transition-colors z-10"
+            className="text-blue-500 hover:text-blue-700 p-1 rounded border border-blue-500 dark:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors z-10"
             title={isExpanded ? "Collapse" : "Expand"}
           >
             {isExpanded ? (
@@ -636,6 +639,7 @@ function VolumeCard() {
             status={volStatus}
             size={8}
             label="Volume"
+            emoji="🟢"
             showDateOnly
           />
         </div>
@@ -650,7 +654,7 @@ function VolumeCard() {
 }
 
 // USD Correlation card - same dimensions as Volatility card
-function USDCorrelationCard({ correlations, rollingStats, correlationsTimestamp, calculationDate, loading, error }) {
+function USDCorrelationCard({ correlations, rollingStats, correlationsTimestamp, calculationDate, loading, error, onRetry }) {
   return (
     <div className="region-chart-panel region-chart-panel--mw usd-correlation-card">
       <USDCorrelationMatrix
@@ -660,6 +664,7 @@ function USDCorrelationCard({ correlations, rollingStats, correlationsTimestamp,
         calculationDate={calculationDate}
         loading={loading}
         error={error}
+        onRetry={onRetry}
       />
     </div>
   );
@@ -1179,45 +1184,15 @@ function RatesCard({ data, loading }) {
 
 // Main MultiRegionMarketOverview component (multi-region quotes supplied by parent)
 export default function MultiRegionMarketOverview({ marketData, loading, error }) {
-  // USD correlation data for the USD Correlation card (right stack)
-  const [correlationData, setCorrelationData] = useState({
-    correlations: null,
-    rollingStats: null,
-    correlationsTimestamp: null,
-    calculationDate: null
-  });
-  const [correlationLoading, setCorrelationLoading] = useState(true);
-  const [correlationError, setCorrelationError] = useState(null);
-
-  // Fetch USD correlation data for the USD Correlation card
-  useEffect(() => {
-    let cancelled = false;
-    const fetchCorrelations = async () => {
-      try {
-        setCorrelationError(null);
-        const data = await USDMarketService.getCorrelations();
-        if (cancelled) return;
-        setCorrelationData({
-          correlations: data.correlations ?? null,
-          rollingStats: data.rollingStats ?? null,
-          correlationsTimestamp: data.timestamp ?? null,
-          calculationDate: data.calculationDate ?? null
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setCorrelationError(err.message || 'Failed to load correlation data');
-        }
-      } finally {
-        if (!cancelled) setCorrelationLoading(false);
-      }
-    };
-    fetchCorrelations();
-    const interval = setInterval(fetchCorrelations, USD_REFRESH_INTERVALS.CORRELATIONS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+  const {
+    correlations,
+    rollingStats,
+    correlationsTimestamp,
+    calculationDate,
+    loading: correlationLoading,
+    error: correlationError,
+    retry: retryCorrelations,
+  } = useUsdCorrelations();
 
   // Map region keys to data keys in marketData
   const getRegionData = (regionKey) => {
@@ -1253,12 +1228,13 @@ export default function MultiRegionMarketOverview({ marketData, loading, error }
         </div>
         <div className="secondary-cards-stack">
           <USDCorrelationCard
-            correlations={correlationData.correlations}
-            rollingStats={correlationData.rollingStats}
-            correlationsTimestamp={correlationData.correlationsTimestamp}
-            calculationDate={correlationData.calculationDate}
+            correlations={correlations}
+            rollingStats={rollingStats}
+            correlationsTimestamp={correlationsTimestamp}
+            calculationDate={calculationDate}
             loading={correlationLoading}
             error={correlationError}
+            onRetry={retryCorrelations}
           />
           <VolatilityCard />
         </div>

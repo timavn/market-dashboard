@@ -123,6 +123,30 @@ export const SERVICE_CONFIG = {
       costPerCall: 0,
       dataSource: 'DynamoDB queries',
       status: 'active'
+    },
+    hermesDirectorStatus: {
+      name: 'Hermes Director Status API',
+      endpoint: '/api/hermes/director/status',
+      description: 'Managing Director orchestration snapshot, worker health, and alerts',
+      updateFrequency: 'On load / On-demand',
+      updateFrequencyMs: null,
+      estimatedCallsPerDay: 48,
+      estimatedCallsPerMonth: 1440,
+      costPerCall: 0,
+      dataSource: 'DynamoDB (HermesAgentRuns/HermesAlerts) + workflow synthesis',
+      status: 'active'
+    },
+    hermesDirectorCommand: {
+      name: 'Hermes Director Command API',
+      endpoint: '/api/hermes/director/command',
+      description: 'Manual Managing Director commands and worker dispatch',
+      updateFrequency: 'User-driven',
+      updateFrequencyMs: null,
+      estimatedCallsPerDay: 6,
+      estimatedCallsPerMonth: 180,
+      costPerCall: 0,
+      dataSource: 'Express orchestration → Lambda/EventBridge/DynamoDB',
+      status: 'active'
     }
   },
 
@@ -225,6 +249,76 @@ export const SERVICE_CONFIG = {
       status: 'active',
       method: 'AWS Lambda'
     },
+    hermesGmailIngestor: {
+      name: 'Hermes Gmail Ingestor',
+      type: 'lambda',
+      description: 'Polls hedgeyehermes@gmail.com and archives Hedgeye product attachments',
+      schedule: 'Every 15 minutes',
+      updateFrequency: '96 times per day',
+      estimatedRunsPerDay: 96,
+      estimatedRunsPerMonth: 2880,
+      costPerRun: 0.0002,
+      costPerMonth: 0.58,
+      dataSource: 'Gmail API → S3 → Lambda → DynamoDB',
+      status: 'configured',
+      method: 'AWS Lambda + Gmail OAuth'
+    },
+    hermesManagingDirector: {
+      name: 'The Managing Director',
+      type: 'orchestrator',
+      description: 'Human-facing control plane for worker status, summaries, and manual delegation',
+      schedule: 'On-demand via chat/dashboard',
+      updateFrequency: 'User-driven',
+      estimatedRunsPerDay: 6,
+      estimatedRunsPerMonth: 180,
+      costPerRun: 0,
+      costPerMonth: 0,
+      dataSource: 'Dashboard/API → DynamoDB',
+      status: 'active',
+      method: 'Express orchestration layer'
+    },
+    hermesQuantAnalyst: {
+      name: 'Hermes Quant Analyst',
+      type: 'lambda',
+      description: 'Threshold, outlier, Hedgeye freshness, and anomaly scans',
+      schedule: 'Every 5-15 minutes (market hours)',
+      updateFrequency: '48-96 times per day',
+      estimatedRunsPerDay: 64,
+      estimatedRunsPerMonth: 1920,
+      costPerRun: 0.0002,
+      costPerMonth: 0.38,
+      dataSource: 'Portfolio/Hedgeye data → DynamoDB alerts',
+      status: 'configured',
+      method: 'AWS Lambda + EventBridge'
+    },
+    hermesQuantDeveloper: {
+      name: 'Hermes Quant Developer',
+      type: 'lambda',
+      description: 'Dashboard/API/workflow regression monitor',
+      schedule: 'Every 10-15 minutes',
+      updateFrequency: '96 times per day',
+      estimatedRunsPerDay: 96,
+      estimatedRunsPerMonth: 2880,
+      costPerRun: 0.0002,
+      costPerMonth: 0.58,
+      dataSource: 'HTTP health checks → DynamoDB alerts',
+      status: 'configured',
+      method: 'AWS Lambda + EventBridge'
+    },
+    hermesSecurity: {
+      name: 'Hermes Security',
+      type: 'lambda',
+      description: 'Auth/config drift and suspicious failure monitor',
+      schedule: 'Every 15-60 minutes',
+      updateFrequency: '24-96 times per day',
+      estimatedRunsPerDay: 48,
+      estimatedRunsPerMonth: 1440,
+      costPerRun: 0.0002,
+      costPerMonth: 0.29,
+      dataSource: 'Infrastructure checks → DynamoDB alerts',
+      status: 'configured',
+      method: 'AWS Lambda + EventBridge'
+    },
     marketDataCollector: {
       name: 'Market Data Collector',
       type: 'lambda',
@@ -253,6 +347,9 @@ export const SERVICE_CONFIG = {
         'ProcessingLogs',
         'HedgeyeRiskRanges',
         'HedgeyeDailySnapshot',
+        'HermesEmailIngestLedger',
+        'HermesAgentRuns',
+        'HermesAlerts',
         'MarketPriceHistory',
         'USDCorrelations'
       ],
@@ -280,11 +377,11 @@ export const SERVICE_CONFIG = {
     lambda: {
       name: 'Lambda',
       provider: 'AWS',
-      description: 'Serverless functions (CSV processor, market data)',
-      estimatedInvocationsPerDay: 2,
-      estimatedInvocationsPerMonth: 60,
+      description: 'Serverless functions (CSV processor, Hermes Gmail ingestion, quant workers, market data)',
+      estimatedInvocationsPerDay: 306,
+      estimatedInvocationsPerMonth: 9180,
       costPerInvocation: 0.0000002,
-      estimatedCostPerMonth: 0.000012,
+      estimatedCostPerMonth: 0.001836,
       status: 'active'
     }
   }
@@ -348,4 +445,3 @@ export const calculateTotals = () => {
 
   return totals;
 };
-

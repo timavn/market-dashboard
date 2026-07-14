@@ -1,9 +1,71 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   formatDateOnly,
   formatLastUpdated,
   formatLastUpdatedForSources
 } from '../../utils/timeUtils';
+
+function sourceCardTestId(id) {
+  return `status-source-card-${String(id || 'source').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
+}
+
+const STATUS_DIALOG_WIDTH = 520;
+const STATUS_DIALOG_MARGIN = 16;
+
+function getDisplayStatus(source, visibleRows = []) {
+  const rawStatus = String(source?.status || '').toLowerCase();
+  const rawDetail = String(source?.localeString || '').toLowerCase();
+
+  if (/checking|loading|refreshing/.test(rawStatus) || /checking|loading|refreshing/.test(rawDetail)) {
+    return { label: 'Checking', className: 'text-slate-500' };
+  }
+
+  if (rawStatus === 'current' || rawStatus === 'active') {
+    return { label: 'Live', className: 'text-emerald-700' };
+  }
+
+  if (rawStatus === 'delayed') {
+    return { label: 'Delayed', className: 'text-[#175cd3]' };
+  }
+
+  if (rawStatus === 'historical') {
+    return { label: 'As of', className: 'text-[#42648f]' };
+  }
+
+  if (rawStatus === 'stale') {
+    return { label: 'Error', className: 'text-[#b54708]' };
+  }
+
+  if (rawStatus === 'inactive' || rawStatus === 'defective' || rawStatus === 'error') {
+    return { label: 'Error', className: 'text-[#b54708]' };
+  }
+
+  if (rawStatus === 'missing' || rawStatus === 'unknown') {
+    return visibleRows.length > 0
+      ? { label: 'Error', className: 'text-[#b54708]' }
+      : { label: 'Unknown', className: 'text-slate-500' };
+  }
+
+  if (rawDetail === 'live' || rawDetail === 'current') {
+    return { label: 'Live', className: 'text-emerald-700' };
+  }
+
+  if (rawDetail === 'error' || rawDetail === 'offline') {
+    return { label: 'Error', className: 'text-[#b54708]' };
+  }
+
+  return visibleRows.length > 0
+    ? { label: 'Error', className: 'text-[#b54708]' }
+    : { label: 'Live', className: 'text-emerald-700' };
+}
+
+function shouldShowDetailValue(source, displayLabel) {
+  const detail = String(source?.localeString || '').trim();
+  if (!detail) return false;
+  if (detail === displayLabel) return false;
+  return !['Live', 'Current', 'Error', 'Checking', 'Unknown'].includes(detail);
+}
 
 /**
  * StatusDot
@@ -21,8 +83,6 @@ import {
  * - sources: optional array of sub-sources to show in popup
  * - overallLabel: optional override label for overall line
  * - showDateOnly: optional boolean to show only the update date
- * - align: 'left' | 'right' | 'after' – popover horizontal alignment (default 'left')
- * - placement: 'bottom' | 'top' – popover opens below or above the dot (default 'bottom')
  */
 const StatusDot = ({
   updatedAt,
@@ -34,13 +94,107 @@ const StatusDot = ({
   sources,
   overallLabel,
   showDateOnly = false,
-  align = 'left',
-  placement = 'bottom',
 }) => {
   const [open, setOpen] = useState(false);
   const [popupPos, setPopupPos] = useState({ top: 0, left: 0, right: 'auto' });
+  const [acknowledgedWarnings, setAcknowledgedWarnings] = useState({});
+  const [expandedAcknowledged, setExpandedAcknowledged] = useState({});
+  const [dragging, setDragging] = useState(false);
   const containerRef = useRef(null);
   const buttonRef = useRef(null);
+  const popoverRef = useRef(null);
+  const dragRef = useRef(null);
+  const positionedByDragRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('dashboard.statusDot.acknowledgedWarnings');
+      setAcknowledgedWarnings(raw ? JSON.parse(raw) : {});
+    } catch {
+      setAcknowledgedWarnings({});
+    }
+  }, []);
+
+  const acknowledgeWarning = useCallback((key) => {
+    if (!key) return;
+    setAcknowledgedWarnings((current) => {
+      const next = { ...current, [key]: new Date().toISOString() };
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem('dashboard.statusDot.acknowledgedWarnings', JSON.stringify(next));
+        } catch {
+          // Ignore storage failures; the UI still updates for this session.
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const normalizeDetailRow = useCallback((src, detail, index) => {
+    if (detail && typeof detail === 'object') {
+      const text = detail.text || detail.message || detail.label || '';
+      const key = detail.id || detail.key || `${src.id || src.label || 'source'}:${text}`;
+      return {
+        key,
+        text,
+        acknowledgeable: Boolean(detail.acknowledgeable ?? src.acknowledgeableDetails),
+        acknowledged: Boolean(acknowledgedWarnings[key]),
+      };
+    }
+    const text = String(detail || '');
+    const key = `${src.id || src.label || 'source'}:${index}:${text}`;
+    return {
+      key,
+      text,
+      acknowledgeable: Boolean(src.acknowledgeableDetails),
+      acknowledged: Boolean(acknowledgedWarnings[key]),
+    };
+  }, [acknowledgedWarnings]);
+
+  const toggleAcknowledgedRows = useCallback((sourceId) => {
+    setExpandedAcknowledged((current) => ({
+      ...current,
+      [sourceId]: !current[sourceId],
+    }));
+  }, []);
+
+  const effectiveSources = Array.isArray(sources)
+    ? sources.map((src) => {
+        const acknowledgeableRows = (src.detailRows || [])
+          .map((detail, index) => normalizeDetailRow(src, detail, index))
+          .filter((detail) => detail.acknowledgeable);
+        const activeWarnings = acknowledgeableRows.filter((detail) => !detail.acknowledged).length;
+        const acknowledgedCount = acknowledgeableRows.length - activeWarnings;
+        const warningResolved = Boolean(src.acknowledgeableStatus && acknowledgeableRows.length > 0 && activeWarnings === 0);
+        return {
+          ...src,
+          status: warningResolved ? (src.acknowledgedStatus || 'current') : src.status,
+          detail: warningResolved && src.acknowledgedDetail ? src.acknowledgedDetail : src.detail,
+          acknowledgedCount,
+          activeWarnings,
+        };
+      })
+    : null;
+
+  const effectiveStatus = (() => {
+    if (!effectiveSources || effectiveSources.length === 0) return status;
+    if (effectiveSources.some((src) => src.status === 'defective' || src.status === 'inactive')) return 'inactive';
+    if (effectiveSources.some((src) => src.status === 'stale')) return 'stale';
+    if (status === 'inactive' || status === 'defective') return status;
+    if (effectiveSources.some((src) => src.status === 'historical')) return 'historical';
+    return 'active';
+  })();
+
+  const effectiveEmoji = emoji && effectiveStatus === 'active'
+    ? '🟢'
+    : emoji && effectiveStatus === 'stale'
+      ? '🟡'
+      : emoji && effectiveStatus === 'historical'
+        ? '🔵'
+      : emoji && (effectiveStatus === 'inactive' || effectiveStatus === 'defective')
+        ? '🔴'
+        : emoji;
 
   const updatedDate = updatedAt ? new Date(updatedAt) : null;
 
@@ -49,19 +203,77 @@ const StatusDot = ({
   const hoursAgo = updatedDate ? (now - updatedDate) / (1000 * 60 * 60) : null;
 
   let colorClass = 'bg-gray-400';
-  if (status === 'active' || status === 'current') {
+  let colorTone = {
+    top: '#e5e7eb',
+    base: '#9ca3af',
+    dark: '#4b5563',
+    ring: 'rgba(75, 85, 99, 0.35)',
+    glow: 'rgba(75, 85, 99, 0.18)',
+  };
+  if (effectiveStatus === 'active' || effectiveStatus === 'current') {
     colorClass = 'bg-green-500';
-  } else if (status === 'inactive' || status === 'defective') {
+    colorTone = {
+      top: '#bbf7d0',
+      base: '#22c55e',
+      dark: '#15803d',
+      ring: 'rgba(21, 128, 61, 0.42)',
+      glow: 'rgba(34, 197, 94, 0.24)',
+    };
+  } else if (effectiveStatus === 'inactive' || effectiveStatus === 'defective') {
     colorClass = 'bg-red-500';
-  } else if (status === 'stale') {
+    colorTone = {
+      top: '#fecaca',
+      base: '#ef4444',
+      dark: '#b91c1c',
+      ring: 'rgba(185, 28, 28, 0.42)',
+      glow: 'rgba(239, 68, 68, 0.22)',
+    };
+  } else if (effectiveStatus === 'stale') {
     colorClass = 'bg-yellow-500';
+    colorTone = {
+      top: '#fef3c7',
+      base: '#f59e0b',
+      dark: '#b45309',
+      ring: 'rgba(180, 83, 9, 0.42)',
+      glow: 'rgba(245, 158, 11, 0.22)',
+    };
+  } else if (effectiveStatus === 'historical') {
+    colorClass = 'bg-blue-500';
+    colorTone = {
+      top: '#dbeafe',
+      base: '#3b82f6',
+      dark: '#1d4ed8',
+      ring: 'rgba(29, 78, 216, 0.38)',
+      glow: 'rgba(59, 130, 246, 0.2)',
+    };
   } else if (hoursAgo != null) {
     if (hoursAgo < 24) {
       colorClass = 'bg-green-500';
+      colorTone = {
+        top: '#bbf7d0',
+        base: '#22c55e',
+        dark: '#15803d',
+        ring: 'rgba(21, 128, 61, 0.42)',
+        glow: 'rgba(34, 197, 94, 0.24)',
+      };
     } else if (hoursAgo < 72) {
       colorClass = 'bg-yellow-500';
+      colorTone = {
+        top: '#fef3c7',
+        base: '#f59e0b',
+        dark: '#b45309',
+        ring: 'rgba(180, 83, 9, 0.42)',
+        glow: 'rgba(245, 158, 11, 0.22)',
+      };
     } else {
       colorClass = 'bg-red-500';
+      colorTone = {
+        top: '#fecaca',
+        base: '#ef4444',
+        dark: '#b91c1c',
+        ring: 'rgba(185, 28, 28, 0.42)',
+        glow: 'rgba(239, 68, 68, 0.22)',
+      };
     }
   }
 
@@ -70,7 +282,10 @@ const StatusDot = ({
     if (!open) return;
 
     const handleClickOutside = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
+      const target = event.target;
+      const inContainer = containerRef.current && containerRef.current.contains(target);
+      const inPopover = popoverRef.current && popoverRef.current.contains(target);
+      if (!inContainer && !inPopover) {
         setOpen(false);
       }
     };
@@ -91,46 +306,17 @@ const StatusDot = ({
   }, [open]);
 
   const calculatePosition = useCallback(() => {
-    if (!buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    const popupWidth = 200; // approximate width
-    const popupHeight = 80; // approximate height
-    const margin = 8;
+    if (typeof window === 'undefined') return;
+    const width = Math.min(STATUS_DIALOG_WIDTH, window.innerWidth - (STATUS_DIALOG_MARGIN * 2));
+    const top = Math.max(STATUS_DIALOG_MARGIN, Math.round(window.innerHeight * 0.12));
+    const left = Math.max(STATUS_DIALOG_MARGIN, Math.round((window.innerWidth - width) / 2));
 
-    let top, left, right = 'auto';
-
-    if (placement === 'top') {
-      top = rect.top - popupHeight - margin;
-    } else {
-      top = rect.bottom + margin;
-    }
-
-    if (align === 'after') {
-      left = rect.right + margin;
-      if (left + popupWidth > window.innerWidth) {
-        left = Math.max(8, rect.left - popupWidth - margin);
-      }
-    } else if (align === 'right') {
-      right = window.innerWidth - rect.right;
-      left = 'auto';
-    } else {
-      left = rect.left;
-      // Ensure popup doesn't go off-screen on the right
-      if (left + popupWidth > window.innerWidth) {
-        left = Math.max(8, window.innerWidth - popupWidth - 8);
-      }
-    }
-
-    // Ensure popup doesn't go off-screen at the top
-    if (top < 8) {
-      top = rect.bottom + margin;
-    }
-
-    setPopupPos({ top, left, right });
-  }, [align, placement]);
+    setPopupPos({ top, left, right: 'auto' });
+  }, []);
 
   const handleToggle = () => {
     if (!open) {
+      positionedByDragRef.current = false;
       calculatePosition();
     }
     setOpen((prev) => !prev);
@@ -139,9 +325,259 @@ const StatusDot = ({
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
+      if (!open) {
+        positionedByDragRef.current = false;
+        calculatePosition();
+      }
       setOpen((prev) => !prev);
     }
   };
+
+  const clampPopoverPosition = useCallback((top, left) => {
+    if (typeof window === 'undefined') return { top, left };
+    const margin = STATUS_DIALOG_MARGIN;
+    const rect = popoverRef.current?.getBoundingClientRect();
+    const width = rect?.width || Math.min(STATUS_DIALOG_WIDTH, window.innerWidth - (margin * 2));
+    const height = rect?.height || Math.min(window.innerHeight - (margin * 2), 560);
+    return {
+      top: Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - height - margin)),
+      left: Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - width - margin)),
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open || positionedByDragRef.current || typeof window === 'undefined') return;
+    const rect = popoverRef.current?.getBoundingClientRect();
+    const margin = STATUS_DIALOG_MARGIN;
+    const width = rect?.width || Math.min(STATUS_DIALOG_WIDTH, window.innerWidth - (margin * 2));
+    const height = rect?.height || Math.min(window.innerHeight - (margin * 2), 560);
+    const next = {
+      top: Math.max(margin, Math.round((window.innerHeight - height) / 2)),
+      left: Math.max(margin, Math.round((window.innerWidth - width) / 2)),
+      right: 'auto',
+    };
+    setPopupPos((current) => {
+      const currentTop = Number(current.top);
+      const currentLeft = Number(current.left);
+      const topMatches = Number.isFinite(currentTop) && Math.abs(currentTop - next.top) < 1;
+      const leftMatches = Number.isFinite(currentLeft) && Math.abs(currentLeft - next.left) < 1;
+      if (topMatches && leftMatches && current.right === next.right) {
+        return current;
+      }
+      return next;
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!dragging) return undefined;
+
+    const handleMouseMove = (event) => {
+      if (!dragRef.current) return;
+      event.preventDefault();
+      const next = clampPopoverPosition(
+        event.clientY - dragRef.current.offsetY,
+        event.clientX - dragRef.current.offsetX,
+      );
+      positionedByDragRef.current = true;
+      setPopupPos({ ...next, right: 'auto' });
+    };
+
+    const handleMouseUp = () => {
+      dragRef.current = null;
+      setDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [clampPopoverPosition, dragging]);
+
+  const startDrag = useCallback((event) => {
+    if (!popoverRef.current) return;
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (target?.closest?.('button')) return;
+    const rect = popoverRef.current.getBoundingClientRect();
+    dragRef.current = {
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    setDragging(true);
+  }, []);
+
+  const popover = open ? (
+    <div
+      ref={popoverRef}
+      role="dialog"
+      aria-modal="false"
+      aria-label={overallLabel || label || 'Status details'}
+      className="fixed overflow-hidden rounded-xl border border-blue-300 bg-white text-slate-900 shadow-lg"
+      style={{
+        top: popupPos.top,
+        left: popupPos.left,
+        right: popupPos.right,
+        zIndex: 2147483647,
+        width: 'min(520px, calc(100vw - 32px))',
+        maxHeight: 'calc(100vh - 32px)',
+        boxShadow: '0 18px 45px rgba(37, 99, 235, 0.12), 0 10px 20px rgba(15, 23, 42, 0.08)',
+        cursor: dragging ? 'grabbing' : undefined,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+      onMouseDown={startDrag}
+      title="Drag to move"
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen(false);
+        }}
+        className="absolute right-3 top-3 z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-blue-200 bg-white text-[13px] font-bold leading-none text-blue-900 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        aria-label={`Close ${overallLabel || label || 'status details'}`}
+        title="Close"
+      >
+        X
+      </button>
+      <div
+        className="overflow-y-auto px-5 pb-5 pt-9 font-mono text-[13px] leading-6"
+        style={{ maxHeight: 'calc(100vh - 32px)' }}
+      >
+        {Array.isArray(effectiveSources) && effectiveSources.length > 0 ? (
+          (() => {
+            const { perSource } = formatLastUpdatedForSources(effectiveSources);
+            return (
+              <div className="divide-y divide-blue-100">
+                {perSource.map((src) => {
+                  const normalizedRows = Array.isArray(src.detailRows)
+                    ? src.detailRows.map((detail, index) => normalizeDetailRow(src, detail, index))
+                    : [];
+                  const visibleRows = normalizedRows.filter((detail) => detail.text && !detail.acknowledged);
+                  const acknowledgedRows = normalizedRows.filter((detail) => detail.text && detail.acknowledged);
+                  const acknowledgedExpanded = Boolean(expandedAcknowledged[src.id]);
+                  const displayStatus = getDisplayStatus(src, visibleRows);
+                  const detailRows = visibleRows.filter((normalized) => normalized.text !== src.localeString);
+                  const showDetailValue = shouldShowDetailValue(src, displayStatus.label);
+                  const statusRuleClass = displayStatus.label === 'Error' ? 'border-[#ead9b1]' : 'border-blue-100';
+
+                  return (
+                    <section
+                      key={src.id}
+                      className="py-3 first:pt-1"
+                      data-testid={sourceCardTestId(src.id)}
+                      data-status-tone={displayStatus.label.toLowerCase()}
+                    >
+                      <div className="flex items-baseline justify-between gap-4">
+                        <h3 className={`min-w-0 text-[15px] font-normal leading-6 ${displayStatus.className}`}>
+                          {src.label}
+                        </h3>
+                        <span className={`shrink-0 text-right text-[15px] leading-6 ${displayStatus.className}`}>
+                          <span>{displayStatus.label}</span>
+                          {src.action && (
+                            <span className="ml-2 inline-flex align-middle">
+                              {src.action}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      {(showDetailValue || detailRows.length > 0 || acknowledgedRows.length > 0) && (
+                        <div className={`mt-2 border-t pt-2 ${statusRuleClass}`}>
+                          <div className="space-y-1.5 whitespace-normal text-[12px] leading-5 text-slate-500">
+                            {showDetailValue && (
+                              <div className="pl-4">{src.localeString}</div>
+                            )}
+                            {detailRows.map((normalized) => (
+                              <div
+                                key={normalized.key}
+                                className="flex items-start justify-between gap-3 pl-4"
+                              >
+                                <span className="min-w-0">{normalized.text}</span>
+                                {normalized.acknowledgeable && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      acknowledgeWarning(normalized.key);
+                                    }}
+                                    className="shrink-0 rounded border border-blue-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 hover:bg-blue-50"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            {acknowledgedRows.length > 0 && (
+                              <div className="pl-4 text-emerald-700">
+                                <span>
+                                  {acknowledgedRows.length} warning{acknowledgedRows.length === 1 ? '' : 's'} acknowledged
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleAcknowledgedRows(src.id);
+                                  }}
+                                  className="ml-2 rounded border border-emerald-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50"
+                                >
+                                  {acknowledgedExpanded ? 'Hide' : 'Show'}
+                                </button>
+                                {acknowledgedExpanded && (
+                                  <div className="mt-1.5 space-y-1 text-slate-500">
+                                    {acknowledgedRows.map((detail) => (
+                                      <div
+                                        key={detail.key}
+                                        className="flex items-start justify-between gap-3"
+                                      >
+                                        <span className="min-w-0">{detail.text}</span>
+                                        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
+                                          Muted
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            );
+          })()
+        ) : (
+          (() => {
+            const { localeString } = formatLastUpdated(updatedDate || null);
+            const dateOnly = formatDateOnly(updatedDate || null);
+            return (
+              <div className="divide-y divide-blue-100">
+                <section className="py-3 first:pt-1" data-testid="status-source-card-updated">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <h3 className="min-w-0 text-[15px] font-normal leading-6 text-emerald-700">
+                      {label || 'Updated'}
+                    </h3>
+                    <span className="shrink-0 text-right text-[15px] leading-6 text-emerald-700">
+                      Live
+                    </span>
+                  </div>
+                  <div className="mt-2 border-t border-blue-100 pt-2">
+                    <div className="pl-4 whitespace-normal text-[12px] leading-5 text-slate-500">
+                      {showDateOnly ? `Updated: ${dateOnly}` : `Last updated: ${localeString}`}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            );
+          })()
+        )}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div
@@ -161,93 +597,35 @@ const StatusDot = ({
             : 'Show last updated time'
         }
         className={`appearance-none border-0 rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-indigo-500 ${
-          emoji ? '' : colorClass
+          effectiveEmoji ? '' : colorClass
         }`}
         style={{
-          width: `${size + (emoji ? 2 : 0)}px`,
-          height: `${size + (emoji ? 2 : 0)}px`,
+          width: `${size + (effectiveEmoji ? 2 : 0)}px`,
+          height: `${size + (effectiveEmoji ? 2 : 0)}px`,
           padding: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: emoji ? 'transparent' : undefined,
-          boxShadow: emoji ? 'none' : 'inset 0 1px 1px rgba(255,255,255,0.55), 0 0 0 1px rgba(15,23,42,0.12)',
+          background: effectiveEmoji
+            ? 'transparent'
+            : `radial-gradient(circle at 32% 24%, #ffffff 0 10%, ${colorTone.top} 11% 28%, ${colorTone.base} 52%, ${colorTone.dark} 100%)`,
+          border: effectiveEmoji ? '0' : `1px solid ${colorTone.ring}`,
+          boxShadow: effectiveEmoji
+            ? 'none'
+            : `inset 0 1px 1px rgba(255,255,255,0.78), inset 0 -1px 1px rgba(15,23,42,0.2), 0 1px 2px rgba(15,23,42,0.16), 0 0 0 2px ${colorTone.glow}`,
         }}
       >
-        {emoji && (
+        {effectiveEmoji && (
           <span
             className="ticker-dot-emoji"
             style={{ fontSize: '8px', lineHeight: 1 }}
           >
-            {emoji}
+            {effectiveEmoji}
           </span>
         )}
       </button>
 
-      {open && (
-        <div
-          role="dialog"
-          aria-modal="false"
-          className="fixed z-[9999] px-3 py-2 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap"
-          style={{
-            top: popupPos.top,
-            left: popupPos.left,
-            right: popupPos.right,
-          }}
-        >
-          {Array.isArray(sources) && sources.length > 0 ? (
-            (() => {
-              const { perSource } = formatLastUpdatedForSources(sources);
-              return (
-                <>
-                  {overallLabel || label ? (
-                    <div className="font-semibold mb-1">
-                      {overallLabel || label}
-                    </div>
-                  ) : null}
-                  <div className="space-y-0.5">
-                    {perSource.map((src) => {
-                      const status = src.status || 'current';
-                      const rowColor =
-                        status === 'defective'
-                          ? 'text-red-300'
-                          : status === 'stale'
-                            ? 'text-yellow-300'
-                            : 'text-gray-200';
-                      return (
-                        <div key={src.id} className={`flex justify-between gap-2 items-center ${rowColor}`}>
-                          <span>{src.label}</span>
-                          <span className="opacity-90 flex items-center gap-1">
-                            {src.localeString}
-                            {src.action}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              );
-            })()
-          ) : (
-            (() => {
-              const { localeString } = formatLastUpdated(updatedDate || null);
-              const dateOnly = formatDateOnly(updatedDate || null);
-              return (
-                <>
-                  <div className="font-semibold">
-                    {showDateOnly ? `Updated: ${dateOnly}` : `Last updated: ${localeString}`}
-                  </div>
-                  {label && (
-                    <div className="text-gray-400 mt-0.5">
-                      {label}
-                    </div>
-                  )}
-                </>
-              );
-            })()
-          )}
-        </div>
-      )}
+      {popover && createPortal(popover, document.body)}
     </div>
   );
 };

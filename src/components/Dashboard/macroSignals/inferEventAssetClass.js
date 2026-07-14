@@ -15,9 +15,15 @@ function eventText(event) {
     event.eventTitle,
     event.contract_title,
     event.category,
+    event.underlying,
+    event.symbol,
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+export function isCpiMacroEvent(event) {
+  return /\bCPIY?\b|\bCONSUMER PRICE INDEX\b/i.test(eventText(event));
 }
 
 function inferCategoryFromText(event) {
@@ -44,7 +50,6 @@ const INGEST_CATEGORY_TO_ASSET_CLASS = {
   Inflation: 'FI',
   Labor: 'EQ',
   Growth: 'EQ',
-  'Other Macro': 'EQ',
 };
 
 /**

@@ -160,6 +160,13 @@ export const formatLastUpdatedForSources = (sources) => {
       localeString: s.detail ?? localeString,
       status: s.status || 'current',
       action: s.action ?? null,
+      detailRows: Array.isArray(s.detailRows) ? s.detailRows : [],
+      acknowledgeableDetails: Boolean(s.acknowledgeableDetails),
+      acknowledgeableStatus: Boolean(s.acknowledgeableStatus),
+      acknowledgedStatus: s.acknowledgedStatus || null,
+      acknowledgedCount: Number(s.acknowledgedCount || 0),
+      activeWarnings: Number(s.activeWarnings || 0),
+      acknowledgedDetail: s.acknowledgedDetail || null,
     };
   });
 

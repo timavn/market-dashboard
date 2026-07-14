@@ -1,34 +1,203 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Card, Metric, Text, Grid, Title, Button, Badge } from '@tremor/react';
-import ReactMarkdown from 'react-markdown';
+import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Text, Grid, Title, Button, Badge } from '@tremor/react';
 import { MarketDataService } from '../../services/api/marketDataService';
+import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
 import { useTheme } from '../../context/ThemeContext';
 import USDMacroDashboard from './USDMacroDashboard';
-import { SectorsCompactRail } from './MultiRegionMarketOverview';
-import SecuritiesList from './SecuritiesList';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
-import { bookContent } from '../../constants/bookContent';
-import WorkflowStatus from './WorkflowStatus';
-import SecuritiesUniverse from './SecuritiesUniverse';
-import PerformanceTracking from './PerformanceTracking';
-import PortfolioBreakdown from './PortfolioBreakdown';
-import ExpectedValuesWindow from './ExpectedValuesWindow';
-import CFTCNetLongCard from './CFTCNetLongCard';
-import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
-import GlobalQuadsCard from './GlobalQuadsCard';
-import PredictionMarkets, { PredictionMarketsLogo } from './PredictionMarkets';
 import './PredictionMarkets.css';
 import RefreshButton from '../common/RefreshButton';
+import LoadingIndicator from '../common/LoadingIndicator';
 import PortfolioSidebarSnapshot from './portfolio/PortfolioSidebarSnapshot';
-import { useMarketData } from '../../hooks/useMarketData';
-import { STREAM_PILOT_SYMBOLS } from '../../constants/streamPilotSymbols';
 import { loadSelectedAccount, saveSelectedAccount, saveIbkrAccounts } from '../../constants/ibkrAccountStorage';
 import { getIbkrConnectionDisplay, getPreferredIbkrAccount } from '../../utils/ibkrConnectionStatus';
 
-const PORTFOLIO_POLL_MS = 2000;
+const ReactMarkdown = lazy(() => import('react-markdown'));
+const WorkflowStatus = lazy(() => import('./WorkflowStatus'));
+const SecuritiesUniverse = lazy(() => import('./SecuritiesUniverse'));
+const PerformanceTracking = lazy(() => import('./PerformanceTracking'));
+const PortfolioBreakdown = lazy(() => import('./PortfolioBreakdown'));
+const ExpectedValuesWindow = lazy(() => import('./ExpectedValuesWindow'));
+const CpiModelPanel = lazy(() => import('./PredictionMarkets'));
+const SignalStrengthPanel = lazy(() => import('./SignalStrengthPanel'));
+const EtfProPanel = lazy(() => import('./EtfProPanel'));
+const HedgeyeShowPanel = lazy(() => import('./HedgeyeShowPanel'));
+
+const PORTFOLIO_POLL_MS = 10000;
+const PORTFOLIO_ACCOUNTS_POLL_MS = 60000;
 const RTA_POLL_MS = 30000;
-const PROVIDER_STATUS_POLL_MS = 2000;
-const PROVIDER_STATUS_POLL_FAST_MS = 1500;
+const ETFPRO_POLL_MS = 60000;
+const PROVIDER_STATUS_POLL_MS = 5000;
+const PROVIDER_STATUS_POLL_OFFLINE_MS = 15000;
+const PROVIDER_STATUS_TIMEOUT_MS = 3500;
+const SIDEBAR_PANEL_Z_INDEX_BASE = 1300;
+const DASHBOARD_PANEL_STATE_KEY = 'marketDashboard.panelState.v1';
+const DASHBOARD_RAIL_COLLAPSED_WIDTH = '76px';
+const DASHBOARD_RAIL_EXPANDED_WIDTH = 'calc((100vw - 16px) * (2/12) + 16px + 128px)';
+const PERSISTED_SIDEBAR_PANELS = new Set([
+  'analytics',
+  'securities',
+  'performance',
+  'portfolio',
+  'cpi',
+  'ss',
+  'etfPro',
+  'macroShow',
+  'call',
+  'pods',
+  'ev',
+]);
+
+const scheduleBackgroundTask = (callback, timeout = 1) => {
+  if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+    const id = window.requestIdleCallback(callback, { timeout: Math.max(timeout, 1000) });
+    return () => window.cancelIdleCallback?.(id);
+  }
+  const setTimer = typeof window !== 'undefined' ? window.setTimeout : setTimeout;
+  const clearTimer = typeof window !== 'undefined' ? window.clearTimeout : clearTimeout;
+  const id = setTimer(callback, timeout);
+  return () => clearTimer(id);
+};
+
+const withTimeout = (promise, timeoutMs, label) => new Promise((resolve, reject) => {
+  const timeoutId = setTimeout(() => {
+    const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+    error.code = 'ETIMEDOUT';
+    reject(error);
+  }, timeoutMs);
+
+  promise.then(
+    (value) => {
+      clearTimeout(timeoutId);
+      resolve(value);
+    },
+    (error) => {
+      clearTimeout(timeoutId);
+      reject(error);
+    },
+  );
+});
+
+const isConnectedProviderStatus = (status) => Boolean(
+  status?.ibkr?.connected ||
+  status?.ibkr?.status === 'connected' ||
+  status?.portfolio?.ibkr?.connected ||
+  status?.portfolio?.ibkr?.status === 'connected',
+);
+
+const LazyPanelFallback = ({ label = 'Loading...' }) => (
+  <div
+    className="flex h-full items-center justify-center p-4"
+    style={{
+      minHeight: 'min(720px, calc(100vh - 24px))',
+      width: '100%',
+    }}
+  >
+    <LoadingIndicator label={label} size="sm" />
+  </div>
+);
+
+const readDashboardPanelState = () => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(DASHBOARD_PANEL_STATE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeDashboardPanelState = (state) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(DASHBOARD_PANEL_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // localStorage can be unavailable in private contexts; panel state can still run in memory.
+  }
+};
+
+const readPersistedBoolean = (state, key) => state?.[key] === true;
+
+const normalizePersistedSidebarPanelKey = (key) => {
+  if (key === 'predictionMarkets') return 'cpi';
+  return key;
+};
+
+const readPersistedSidebarStack = (state) => (
+  Array.isArray(state?.sidebarPanelStack)
+    ? [...new Set(
+      state.sidebarPanelStack
+        .map(normalizePersistedSidebarPanelKey)
+        .filter((key) => PERSISTED_SIDEBAR_PANELS.has(key))
+    )]
+    : []
+);
+
+const PERIOD_RETURN_FIELDS = [
+  'weekChangePct',
+  'fifteenDayChangePct',
+  'thirtyDayChangePct',
+  'ninetyDayChangePct',
+  'monthChangePct',
+  'threeMonthChangePct',
+  'sixMonthChangePct',
+  'mtdChangePct',
+  'qtdChangePct',
+  'ytdChangePct',
+];
+
+const PERIOD_RETURN_METADATA_FIELDS = [
+  'periodReturnsAsOf',
+  'periodReturnsStatus',
+  'periodReturnsSource',
+];
+
+const QUOTE_VISUAL_FIELDS = ['sparklineData'];
+
+const mergeRowsPreservingPeriods = (previousRows = [], nextRows = []) => {
+  if (!Array.isArray(previousRows) || !Array.isArray(nextRows)) return nextRows;
+  const previousBySymbol = new Map(previousRows.map((row) => [row?.symbol, row]));
+  return nextRows.map((row) => {
+    const previous = previousBySymbol.get(row?.symbol);
+    if (!previous) return row;
+    const merged = { ...previous, ...row };
+    PERIOD_RETURN_FIELDS.forEach((field) => {
+      if (row[field] == null && previous[field] != null) {
+        merged[field] = previous[field];
+      }
+    });
+    PERIOD_RETURN_METADATA_FIELDS.forEach((field) => {
+      if (row[field] == null && previous[field] != null) {
+        merged[field] = previous[field];
+      }
+    });
+    QUOTE_VISUAL_FIELDS.forEach((field) => {
+      if ((!Array.isArray(row[field]) || row[field].length === 0) && Array.isArray(previous[field]) && previous[field].length > 0) {
+        merged[field] = previous[field];
+      }
+    });
+    return merged;
+  });
+};
+
+const mergeMarketDataPreservingPeriods = (previous = {}, next = {}) => {
+  const merged = { ...previous, ...next };
+  Object.entries(next || {}).forEach(([regionKey, regionValue]) => {
+    if (Array.isArray(regionValue)) {
+      merged[regionKey] = mergeRowsPreservingPeriods(previous?.[regionKey], regionValue);
+      return;
+    }
+    if (regionValue && typeof regionValue === 'object') {
+      merged[regionKey] = Object.fromEntries(
+        Object.entries(regionValue).map(([tabKey, rows]) => [
+          tabKey,
+          mergeRowsPreservingPeriods(previous?.[regionKey]?.[tabKey], rows),
+        ])
+      );
+    }
+  });
+  return merged;
+};
 
 const DEFAULT_OFFLINE_PORTFOLIO_DATA = {
   summary: {
@@ -53,26 +222,71 @@ const sidebarTabCenteredLabelStyle = {
   right: 0,
   textAlign: 'center',
   pointerEvents: 'none',
+  fontSize: '15px',
+  fontWeight: 400,
+  lineHeight: 1,
+  letterSpacing: 0,
 };
 
-const PortfolioDashboard = () => {
-  const { theme, toggleTheme } = useTheme();
+const sidebarRailControlStyle = {
+  minWidth: '56px',
+  height: '44px',
+  flexShrink: 0,
+};
+
+const sidebarRailIconStyle = {
+  width: '26px',
+  height: '26px',
+  flexShrink: 0,
+};
+
+const sidebarRailTextStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '100%',
+  height: '100%',
+  color: 'inherit',
+  fontSize: '9px',
+  fontWeight: 400,
+  lineHeight: 1,
+  letterSpacing: 0,
+  textTransform: 'uppercase',
+  whiteSpace: 'nowrap',
+};
+
+const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = '/how-it-works'; } }) => {
+  const { theme } = useTheme();
   const [portfolioData, setPortfolioData] = useState(null);
+  const [portfolioAccountsData, setPortfolioAccountsData] = useState([]);
   const [portfolioLoading, setPortfolioLoading] = useState(true);
+  const [portfolioRefreshing, setPortfolioRefreshing] = useState(false);
   const [portfolioError, setPortfolioError] = useState(null);
+  const [portfolioExposureReconciliation, setPortfolioExposureReconciliation] = useState(null);
+  const [portfolioExposureReconciliationLoading, setPortfolioExposureReconciliationLoading] = useState(false);
   const [rtaPositions, setRtaPositions] = useState(null);
+  const [etfProSnapshot, setEtfProSnapshot] = useState(null);
+  const [etfProLoading, setEtfProLoading] = useState(true);
+  const [etfProRefreshing, setEtfProRefreshing] = useState(false);
+  const [etfProError, setEtfProError] = useState(null);
+  const [predictionMarketProviderStatus, setPredictionMarketProviderStatus] = useState(null);
+  const [hedgeyeChangelog, setHedgeyeChangelog] = useState(null);
+  const [hedgeyeChangelogLoading, setHedgeyeChangelogLoading] = useState(true);
+  const [hedgeyeChangelogError, setHedgeyeChangelogError] = useState(null);
+  const [hedgeyeChangelogLastSuccessAt, setHedgeyeChangelogLastSuccessAt] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(() => loadSelectedAccount());
   const [ibkrAccounts, setIbkrAccounts] = useState([]);
   const ibkrAccountsRef = useRef([]);
   const selectedAccountRef = useRef(loadSelectedAccount());
   const [ibkrConnection, setIbkrConnection] = useState(null);
+  const [providerStatus, setProviderStatus] = useState(null);
   const ibkrConnectionRef = useRef(null);
+  const lastGoodProviderStatusRef = useRef(null);
   const portfolioDataRef = useRef(null);
-  const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(false);
-  const [showPeaPodWindow, setShowPeaPodWindow] = useState(false);
-  const [showEVWindow, setShowEVWindow] = useState(false);
-  const [peaPodImageError, setPeaPodImageError] = useState(false);
-  const [bookImageError, setBookImageError] = useState(false);
+  const persistedPanelState = useMemo(readDashboardPanelState, []);
+  const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(() => readPersistedBoolean(persistedPanelState, 'showPortfolioMetrics'));
+  const [showPeaPodWindow, setShowPeaPodWindow] = useState(() => readPersistedBoolean(persistedPanelState, 'showPeaPodWindow'));
+  const [showEVWindow, setShowEVWindow] = useState(() => readPersistedBoolean(persistedPanelState, 'showEVWindow'));
   const [showBookMenu, setShowBookMenu] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
   const [selectedBookContent, setSelectedBookContent] = useState(null);
@@ -80,29 +294,106 @@ const PortfolioDashboard = () => {
   const [bookMenuPosition, setBookMenuPosition] = useState({ top: 0, right: 0 });
   const bookMenuRef = useRef(null);
   const bookPopoverRef = useRef(null);
-  const [showWorkflowStatus, setShowWorkflowStatus] = useState(false);
+  const [showWorkflowStatus, setShowWorkflowStatus] = useState(() => readPersistedBoolean(persistedPanelState, 'showWorkflowStatus'));
   const [analyticsRefreshKey, setAnalyticsRefreshKey] = useState(0);
-  const [workflowStatusImageError, setWorkflowStatusImageError] = useState(false);
-  const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(false);
-  const [showPerformanceTracking, setShowPerformanceTracking] = useState(false);
-  const [showPredictionMarkets, setShowPredictionMarkets] = useState(false);
-  const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(false);
-  const [portfolioExpandedUp, setPortfolioExpandedUp] = useState(false);
-  const [securitiesUniverseImageError, setSecuritiesUniverseImageError] = useState(false);
-  const [performanceImageError, setPerformanceImageError] = useState(false);
-  const [portfolioBreakdownImageError, setPortfolioBreakdownImageError] = useState(false);
+  const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(() => readPersistedBoolean(persistedPanelState, 'showSecuritiesUniverse'));
+  const [showPerformanceTracking, setShowPerformanceTracking] = useState(() => readPersistedBoolean(persistedPanelState, 'showPerformanceTracking'));
+  const [showCpiModel, setShowCpiModel] = useState(() => (
+    readPersistedBoolean(persistedPanelState, 'showCpiModel') ||
+    readPersistedBoolean(persistedPanelState, 'showPredictionMarkets')
+  ));
+  const [showSignalStrength, setShowSignalStrength] = useState(() => readPersistedBoolean(persistedPanelState, 'showSignalStrength'));
+  const [showEtfPro, setShowEtfPro] = useState(() => readPersistedBoolean(persistedPanelState, 'showEtfPro'));
+  const [showMacroShow, setShowMacroShow] = useState(() => readPersistedBoolean(persistedPanelState, 'showMacroShow'));
+  const [showCall, setShowCall] = useState(() => readPersistedBoolean(persistedPanelState, 'showCall'));
+  const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(() => readPersistedBoolean(persistedPanelState, 'showPortfolioBreakdown'));
+  const [sidebarPanelStack, setSidebarPanelStack] = useState(() => readPersistedSidebarStack(persistedPanelState));
+  const [portfolioExpandedUp, setPortfolioExpandedUp] = useState(() => readPersistedBoolean(persistedPanelState, 'portfolioExpandedUp'));
   const [multiRegionMarketData, setMultiRegionMarketData] = useState({});
   const [multiRegionLoading, setMultiRegionLoading] = useState(true);
   const [multiRegionError, setMultiRegionError] = useState(null);
+  const [bookContentMap, setBookContentMap] = useState(null);
+  const [bookContentLoading, setBookContentLoading] = useState(false);
 
-  const { connected: streamConnected } = useMarketData(STREAM_PILOT_SYMBOLS, {
-    enableRealtime: true,
-  });
+  const bringSidebarPanelToFront = useCallback((panelKey) => {
+    setSidebarPanelStack((current) => [
+      ...current.filter((key) => key !== panelKey),
+      panelKey,
+    ]);
+  }, []);
 
-  const fetchMultiRegionQuotes = useCallback(async () => {
+  const removeSidebarPanelFromStack = useCallback((panelKey) => {
+    setSidebarPanelStack((current) => current.filter((key) => key !== panelKey));
+  }, []);
+
+  const toggleSidebarPanel = useCallback((panelKey, setPanelVisible) => {
+    setPanelVisible((isVisible) => {
+      const nextVisible = !isVisible;
+
+      if (nextVisible) {
+        bringSidebarPanelToFront(panelKey);
+      } else {
+        removeSidebarPanelFromStack(panelKey);
+      }
+
+      return nextVisible;
+    });
+  }, [bringSidebarPanelToFront, removeSidebarPanelFromStack]);
+
+  const closeSidebarPanel = useCallback((panelKey, setPanelVisible) => {
+    setPanelVisible(false);
+    removeSidebarPanelFromStack(panelKey);
+  }, [removeSidebarPanelFromStack]);
+
+  const getSidebarPanelZIndex = useCallback((panelKey, isVisible) => {
+    if (!isVisible) return -1;
+
+    const stackIndex = sidebarPanelStack.indexOf(panelKey);
+    return SIDEBAR_PANEL_Z_INDEX_BASE + Math.max(stackIndex, 0);
+  }, [sidebarPanelStack]);
+
+  useEffect(() => {
+    writeDashboardPanelState({
+      showPortfolioMetrics,
+      showPeaPodWindow,
+      showEVWindow,
+      showWorkflowStatus,
+      showSecuritiesUniverse,
+      showPerformanceTracking,
+      showCpiModel,
+      showSignalStrength,
+      showEtfPro,
+      showMacroShow,
+      showCall,
+      showPortfolioBreakdown,
+      sidebarPanelStack,
+      portfolioExpandedUp,
+    });
+  }, [
+    showPortfolioMetrics,
+    showPeaPodWindow,
+    showEVWindow,
+    showWorkflowStatus,
+    showSecuritiesUniverse,
+    showPerformanceTracking,
+    showCpiModel,
+    showSignalStrength,
+    showEtfPro,
+    showMacroShow,
+    showCall,
+    showPortfolioBreakdown,
+    sidebarPanelStack,
+    portfolioExpandedUp,
+  ]);
+
+  const fetchMultiRegionQuotes = useCallback(async ({ includePeriodReturns = false } = {}) => {
     try {
-      const data = await MarketDataService.getMultiRegionQuotes(null, false, true);
-      setMultiRegionMarketData(data);
+      const data = await MarketDataService.getMultiRegionQuotes(
+        null,
+        !includePeriodReturns,
+        includePeriodReturns,
+      );
+      setMultiRegionMarketData((current) => mergeMarketDataPreservingPeriods(current, data));
       setMultiRegionLoading(false);
       setMultiRegionError(null);
 
@@ -126,15 +417,35 @@ const PortfolioDashboard = () => {
       }
     } catch (err) {
       console.error('Failed to fetch multi-region quotes:', err);
+      // Quote rows influence interpretation and must not survive a failed
+      // refresh as if they were still current. Historical return metadata is
+      // rehydrated on the next successful response.
+      setMultiRegionMarketData({});
       setMultiRegionError(err.message);
       setMultiRegionLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchMultiRegionQuotes();
-    const interval = setInterval(fetchMultiRegionQuotes, 30000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    fetchMultiRegionQuotes({ includePeriodReturns: false });
+    const cancelBackgroundHydration = scheduleBackgroundTask(() => {
+      if (!cancelled) {
+        fetchMultiRegionQuotes({ includePeriodReturns: true });
+      }
+    }, 1500);
+    const currentQuotesInterval = setInterval(() => {
+      fetchMultiRegionQuotes({ includePeriodReturns: false });
+    }, 30000);
+    const periodReturnsInterval = setInterval(() => {
+      fetchMultiRegionQuotes({ includePeriodReturns: true });
+    }, 15 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      cancelBackgroundHydration?.();
+      clearInterval(currentQuotesInterval);
+      clearInterval(periodReturnsInterval);
+    };
   }, [fetchMultiRegionQuotes]);
 
   // Tag navigation state
@@ -171,9 +482,13 @@ const PortfolioDashboard = () => {
   };
 
   const fetchPortfolio = useCallback(async (accountId, silent = false) => {
+    const hasExistingPortfolio = Boolean(portfolioDataRef.current);
+    const shouldShowInitialLoading = !silent && !hasExistingPortfolio;
     try {
-      if (!silent) {
+      if (shouldShowInitialLoading) {
         setPortfolioLoading(true);
+      } else {
+        setPortfolioRefreshing(true);
       }
       setPortfolioError(null);
       const data = await MarketDataService.getPortfolio({ account: accountId || undefined });
@@ -181,14 +496,47 @@ const PortfolioDashboard = () => {
       portfolioDataRef.current = data;
       return data;
     } catch (e) {
-      if (!silent) {
+      if (!silent || !hasExistingPortfolio) {
         setPortfolioError(e.message || 'Failed to load portfolio');
       }
       throw e;
     } finally {
-      if (!silent) {
+      if (shouldShowInitialLoading) {
         setPortfolioLoading(false);
       }
+      setPortfolioRefreshing(false);
+    }
+  }, []);
+
+  const fetchPortfolioAccounts = useCallback(async () => {
+    try {
+      const data = await MarketDataService.getPortfolioAccounts();
+      setPortfolioAccountsData(Array.isArray(data) ? data : []);
+      return data;
+    } catch (e) {
+      console.error('Failed to load portfolio account snapshots:', e);
+      setPortfolioAccountsData((current) => current || []);
+      return null;
+    }
+  }, []);
+
+  const fetchPortfolioExposureReconciliation = useCallback(async () => {
+    try {
+      setPortfolioExposureReconciliationLoading(true);
+      const data = await MarketDataService.getPortfolioExposureReconciliation();
+      setPortfolioExposureReconciliation(data);
+      return data;
+    } catch (e) {
+      console.error('Failed to load portfolio exposure reconciliation:', e);
+      const unavailable = {
+        status: 'error',
+        source: 'ibkr_flex_web_service',
+        error: e.message || 'Failed to load IBKR Flex reconciliation',
+      };
+      setPortfolioExposureReconciliation(unavailable);
+      return unavailable;
+    } finally {
+      setPortfolioExposureReconciliationLoading(false);
     }
   }, []);
 
@@ -204,6 +552,60 @@ const PortfolioDashboard = () => {
     }
   }, []);
 
+  const fetchEtfProSnapshot = useCallback(async (silent = false) => {
+    if (silent) setEtfProRefreshing(true);
+    else setEtfProLoading(true);
+    setEtfProError(null);
+    try {
+      const data = await MarketDataService.getHedgeyeEtfPro();
+      setEtfProSnapshot(data);
+      return data;
+    } catch (e) {
+      console.error('Failed to load ETF Pro snapshot:', e);
+      setEtfProError(e.message || 'Failed to load ETF Pro snapshot');
+      setEtfProSnapshot((current) => current || { available: false, rows: [] });
+      return null;
+    } finally {
+      setEtfProLoading(false);
+      setEtfProRefreshing(false);
+    }
+  }, []);
+
+  const fetchPredictionMarketProviderStatus = useCallback(async () => {
+    try {
+      const data = await predictionMarketsIngestService.getProviderStatus();
+      setPredictionMarketProviderStatus(data);
+      return data;
+    } catch (e) {
+      console.error('Failed to load prediction market provider status:', e);
+      const errorStatus = { error: e.message || 'Failed to load prediction market provider status' };
+      setPredictionMarketProviderStatus(errorStatus);
+      return errorStatus;
+    }
+  }, []);
+
+  const fetchHedgeyeChangelog = useCallback(async (silent = false) => {
+    try {
+      if (!silent) {
+        setHedgeyeChangelogLoading(true);
+      }
+      setHedgeyeChangelogError(null);
+      const data = await MarketDataService.getHedgeyeChangelog();
+      setHedgeyeChangelog(data);
+      setHedgeyeChangelogLastSuccessAt(new Date().toISOString());
+      return data;
+    } catch (e) {
+      console.error('Failed to load Hedgeye changelog:', e);
+      setHedgeyeChangelogError(e.message || 'Failed to load latest updates');
+      setHedgeyeChangelog((current) => current || {});
+      return null;
+    } finally {
+      if (!silent) {
+        setHedgeyeChangelogLoading(false);
+      }
+    }
+  }, []);
+
   const handleAccountChange = useCallback((accountId) => {
     saveSelectedAccount(accountId);
     selectedAccountRef.current = accountId || '';
@@ -212,7 +614,15 @@ const PortfolioDashboard = () => {
 
   const refreshProviderStatus = useCallback(async () => {
     try {
-      const status = await MarketDataService.getProviderStatus();
+      const status = await withTimeout(
+        MarketDataService.getProviderStatus(),
+        PROVIDER_STATUS_TIMEOUT_MS,
+        'Provider status',
+      );
+      if (isConnectedProviderStatus(status)) {
+        lastGoodProviderStatusRef.current = status;
+      }
+      setProviderStatus(status);
       const list = status?.ibkr?.accounts || status?.portfolio?.ibkr?.accounts || [];
       if (Array.isArray(list) && list.length > 0) {
         ibkrAccountsRef.current = list;
@@ -227,6 +637,31 @@ const PortfolioDashboard = () => {
       setIbkrConnection(getIbkrConnectionDisplay({ status, error: null }));
       return status;
     } catch (err) {
+      const lastGoodStatus = lastGoodProviderStatusRef.current;
+      if (lastGoodStatus && (err?.code === 'ETIMEDOUT' || /timed out/i.test(err?.message || ''))) {
+        const delayedStatus = {
+          ...lastGoodStatus,
+          statusRefreshDelayed: true,
+          statusRefreshError: err.message,
+          statusRefreshDelayedAt: new Date().toISOString(),
+        };
+        setProviderStatus(delayedStatus);
+        const delayedConnection = getIbkrConnectionDisplay({ status: delayedStatus, error: null });
+        setIbkrConnection({
+          ...delayedConnection,
+          statusRefreshDelayed: true,
+          statusRefreshError: err.message,
+          statusRefreshDelayedAt: delayedStatus.statusRefreshDelayedAt,
+        });
+        setIbkrAccounts(ibkrAccountsRef.current);
+        return delayedStatus;
+      }
+      setProviderStatus({
+        unavailable: true,
+        error: err.message || 'Provider status unavailable',
+        responseTimestamp: new Date().toISOString(),
+        ibkr: { connected: false, status: 'offline' },
+      });
       setIbkrConnection(getIbkrConnectionDisplay({ status: null, error: err.message }));
       if (portfolioDataRef.current?.dataSource === 'ibkr_offline') {
         ibkrAccountsRef.current = [];
@@ -257,22 +692,50 @@ const PortfolioDashboard = () => {
     selectedAccountRef.current = selectedAccount || '';
   }, [selectedAccount]);
 
+  const pollingFnsRef = useRef({});
+  pollingFnsRef.current = {
+    fetchPortfolio,
+    fetchPortfolioAccounts,
+    fetchPortfolioExposureReconciliation,
+    fetchRtaPositions,
+    fetchEtfProSnapshot,
+    fetchPredictionMarketProviderStatus,
+    fetchHedgeyeChangelog,
+    handleAccountChange,
+    refreshProviderStatus,
+    resolvePortfolioAccount,
+  };
+
   useEffect(() => {
     let cancelled = false;
+    let cancelDeferredSecondary = null;
 
     const load = async () => {
       try {
-        const status = await refreshProviderStatus();
+        const status = await pollingFnsRef.current.refreshProviderStatus();
         if (cancelled) return;
-        const acct = resolvePortfolioAccount(status);
+        const acct = pollingFnsRef.current.resolvePortfolioAccount(status);
         if (acct && acct !== selectedAccountRef.current) {
-          handleAccountChange(acct);
-          return;
+          pollingFnsRef.current.handleAccountChange(acct);
         }
-        await Promise.all([
-          fetchPortfolio(acct),
-          fetchRtaPositions(),
-        ]);
+        try {
+          await pollingFnsRef.current.fetchPortfolio(acct);
+        } catch (err) {
+          if (!cancelled) {
+            setPortfolioError(err.message || 'Failed to load portfolio');
+          }
+        }
+        cancelDeferredSecondary = scheduleBackgroundTask(() => {
+          if (cancelled) return;
+          Promise.allSettled([
+            pollingFnsRef.current.fetchPortfolioAccounts(),
+            pollingFnsRef.current.fetchPortfolioExposureReconciliation(),
+            pollingFnsRef.current.fetchRtaPositions(),
+            pollingFnsRef.current.fetchEtfProSnapshot(),
+            pollingFnsRef.current.fetchPredictionMarketProviderStatus(),
+            pollingFnsRef.current.fetchHedgeyeChangelog(),
+          ]).catch(() => {});
+        }, 1200);
       } catch (err) {
         if (!cancelled) {
           setPortfolioError(err.message || 'Failed to load portfolio');
@@ -284,20 +747,32 @@ const PortfolioDashboard = () => {
     load();
 
     const portfolioInterval = setInterval(() => {
-      fetchPortfolio(resolvePortfolioAccount(), true).catch(() => {});
+      pollingFnsRef.current
+        .fetchPortfolio(pollingFnsRef.current.resolvePortfolioAccount(), true)
+        .catch(() => {});
     }, PORTFOLIO_POLL_MS);
 
+    const portfolioAccountsInterval = setInterval(() => {
+      pollingFnsRef.current.fetchPortfolioAccounts().catch(() => {});
+    }, PORTFOLIO_ACCOUNTS_POLL_MS);
+
     const rtaInterval = setInterval(() => {
-      fetchRtaPositions().catch(() => {});
+      pollingFnsRef.current.fetchRtaPositions().catch(() => {});
+      pollingFnsRef.current.fetchPredictionMarketProviderStatus().catch(() => {});
+      pollingFnsRef.current.fetchHedgeyeChangelog(true).catch(() => {});
     }, RTA_POLL_MS);
+
+    const etfProInterval = setInterval(() => {
+      pollingFnsRef.current.fetchEtfProSnapshot(true).catch(() => {});
+    }, ETFPRO_POLL_MS);
 
     let statusTimeout;
     const scheduleStatusPoll = () => {
       const delay = ibkrConnectionRef.current?.connected
         ? PROVIDER_STATUS_POLL_MS
-        : PROVIDER_STATUS_POLL_FAST_MS;
+        : PROVIDER_STATUS_POLL_OFFLINE_MS;
       statusTimeout = setTimeout(async () => {
-        try { await refreshProviderStatus(); } catch {}
+        try { await pollingFnsRef.current.refreshProviderStatus(); } catch {}
         if (!cancelled) scheduleStatusPoll();
       }, delay);
     };
@@ -305,29 +780,54 @@ const PortfolioDashboard = () => {
 
     return () => {
       cancelled = true;
+      cancelDeferredSecondary?.();
       clearInterval(portfolioInterval);
+      clearInterval(portfolioAccountsInterval);
       clearInterval(rtaInterval);
+      clearInterval(etfProInterval);
       clearTimeout(statusTimeout);
     };
-  }, [fetchPortfolio, fetchRtaPositions, handleAccountChange, refreshProviderStatus, resolvePortfolioAccount]);
+    // Polling callbacks are read from pollingFnsRef so UI state changes do not
+    // tear down and recreate the dashboard's background refresh loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const handler = () => {
       fetchPortfolio(resolvePortfolioAccount(), true).catch(() => {});
+      fetchPortfolioAccounts().catch(() => {});
+      fetchPortfolioExposureReconciliation().catch(() => {});
       fetchRtaPositions().catch(() => {});
+      fetchEtfProSnapshot(true).catch(() => {});
+      fetchPredictionMarketProviderStatus().catch(() => {});
+      fetchHedgeyeChangelog(true).catch(() => {});
     };
     window.addEventListener('portfolioRefresh', handler);
     return () => window.removeEventListener('portfolioRefresh', handler);
-  }, [fetchPortfolio, fetchRtaPositions, resolvePortfolioAccount]);
+  }, [fetchPortfolio, fetchPortfolioAccounts, fetchPortfolioExposureReconciliation, fetchRtaPositions, fetchEtfProSnapshot, fetchPredictionMarketProviderStatus, fetchHedgeyeChangelog, resolvePortfolioAccount]);
 
   const handlePortfolioRefresh = useCallback(async () => {
     const account = resolvePortfolioAccount();
-    await Promise.all([
-      fetchPortfolio(account || undefined),
+    const results = await Promise.allSettled([
+      fetchPortfolio(account || undefined, true),
+      fetchPortfolioAccounts(),
+      fetchPortfolioExposureReconciliation(),
       fetchRtaPositions(),
+      fetchEtfProSnapshot(true),
+      fetchPredictionMarketProviderStatus(),
+      fetchHedgeyeChangelog(),
     ]);
-    await refreshProviderStatus();
-  }, [fetchPortfolio, fetchRtaPositions, refreshProviderStatus, resolvePortfolioAccount]);
+    const portfolioResult = results[0];
+    if (portfolioResult.status === 'rejected') {
+      setPortfolioError(portfolioResult.reason?.message || 'Failed to load portfolio');
+    }
+    try {
+      await refreshProviderStatus();
+    } catch {
+      // Provider status has its own display state; keep manual refresh from surfacing
+      // as an unhandled promise in the React development overlay.
+    }
+  }, [fetchPortfolio, fetchPortfolioAccounts, fetchPortfolioExposureReconciliation, fetchRtaPositions, fetchEtfProSnapshot, fetchPredictionMarketProviderStatus, fetchHedgeyeChangelog, refreshProviderStatus, resolvePortfolioAccount]);
 
   useEffect(() => {
     if (
@@ -381,8 +881,24 @@ const PortfolioDashboard = () => {
     { name: 'Stop Losses', path: 'main/Stop Losses.md' }
   ];
 
-  const openBookFile = (fileName) => {
-    const content = bookContent[fileName];
+  const openBookFile = async (fileName) => {
+    let contentMap = bookContentMap;
+    if (!contentMap) {
+      setBookContentLoading(true);
+      try {
+        const module = await import('../../constants/bookContent');
+        contentMap = module.bookContent || module.default || {};
+        setBookContentMap(contentMap);
+      } catch (err) {
+        console.error('Failed to load book content:', err);
+        setBookContentLoading(false);
+        return;
+      } finally {
+        setBookContentLoading(false);
+      }
+    }
+
+    const content = contentMap[fileName];
     if (content) {
       setSelectedBookContent(content);
       setSelectedBookTitle(fileName);
@@ -521,13 +1037,21 @@ const PortfolioDashboard = () => {
   };
 
   const displayData = portfolioData || DEFAULT_OFFLINE_PORTFOLIO_DATA;
-
   return (
     <div
-      className="min-h-screen p-2 bg-[#eef6fb] dark:bg-gray-900"
+      data-testid="dashboard-shell"
+      className="dashboard-shell min-h-screen p-2 bg-[#eef6fb] dark:bg-gray-900"
       style={{
-        paddingBottom: '1.5rem',
-        paddingRight: showPortfolioMetrics ? '0px' : '40px', // No padding when open to extend content closer, matches collapsed width
+        '--dashboard-rail-collapsed-width': DASHBOARD_RAIL_COLLAPSED_WIDTH,
+        '--dashboard-rail-expanded-width': DASHBOARD_RAIL_EXPANDED_WIDTH,
+        '--dashboard-rail-control-width': '56px',
+        '--dashboard-rail-control-height': '44px',
+        '--dashboard-rail-icon-size': '26px',
+        '--dashboard-active-rail-width': showPortfolioMetrics
+          ? DASHBOARD_RAIL_EXPANDED_WIDTH
+          : DASHBOARD_RAIL_COLLAPSED_WIDTH,
+        paddingBottom: '8px',
+        paddingRight: showPortfolioMetrics ? '0px' : 'var(--dashboard-rail-collapsed-width)',
         transition: 'padding-right 0.3s ease-in-out',
       }}
     >
@@ -544,31 +1068,8 @@ const PortfolioDashboard = () => {
             multiRegionMarketData={multiRegionMarketData}
             multiRegionLoading={multiRegionLoading}
             multiRegionError={multiRegionError}
-            sidebarCols={2}
-            centerCols={showPortfolioMetrics ? 7 : 10}
-            leadingSidebar={(
-              <div className="dashboard-left-stack">
-                <SecuritiesList
-                  isPortfolioOpen={showPortfolioMetrics}
-                />
-                <div className="sectors-sidebar-slot">
-                  <SectorsCompactRail
-                    data={multiRegionMarketData?.sectors}
-                    loading={multiRegionLoading}
-                    layout="sidebar"
-                  />
-                </div>
-              </div>
-            )}
-            leadingSidebarContainerProps={
-              showPortfolioMetrics
-                ? {
-                    style: {
-                      zIndex: 100,
-                    },
-                  }
-                : undefined
-            }
+            providerStatus={providerStatus}
+            ibkrConnection={ibkrConnection}
           />
         </div>
 
@@ -577,24 +1078,24 @@ const PortfolioDashboard = () => {
 
       {/* Vertical Portfolio Bar - Always Visible */}
       <div
+        data-testid="dashboard-right-rail"
         style={{
           position: 'fixed',
           top: 0,
           right: 0,
-          width: showPortfolioMetrics
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
-            : '40px',
+          width: 'var(--dashboard-active-rail-width)',
           height: '100vh',
           zIndex: showPortfolioMetrics ? 1100 : 1000,
-          backgroundColor: '#ffffff',
-          borderLeft: showPortfolioMetrics ? '1px solid #e5e7eb' : 'none',
-          borderRight: '1px solid #e5e7eb',
+          backgroundColor: theme === 'dark' ? '#111827' : '#ffffff',
+          color: theme === 'dark' ? '#e5e7eb' : '#333333',
+          borderLeft: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
+          borderRight: 'none',
           borderTop: 'none',
           borderBottom: 'none',
-          borderRadius: showPortfolioMetrics ? '1rem 0 0 1rem' : '0.75rem 0 0 0.75rem',
+          borderRadius: '1rem 0 0 1rem',
           boxShadow: showPortfolioMetrics
-            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
-            : '-2px 0 8px rgba(0, 0, 0, 0.08)',
+            ? `-2px 0 10px ${theme === 'dark' ? 'rgba(0, 0, 0, 0.28)' : 'rgba(0, 0, 0, 0.08)'}`
+            : `-2px 0 10px ${theme === 'dark' ? 'rgba(0, 0, 0, 0.28)' : 'rgba(0, 0, 0, 0.08)'}`,
           transition: 'width 0.3s ease-in-out, border-radius 0.3s ease-in-out',
           display: 'flex',
           flexDirection: 'column',
@@ -602,51 +1103,31 @@ const PortfolioDashboard = () => {
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {/* Top Section - Night Mode Toggle */}
+        {/* Top Section - Dashboard Navigation */}
         <div
+          data-testid="dashboard-rail-navigation"
           style={{
-            padding: '12px',
+            padding: '12px 10px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            borderBottom: '1px solid #e5e7eb',
+            borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
             minHeight: '120px',
+            flex: showPortfolioMetrics ? '0 1 54vh' : '1 1 auto',
+            maxHeight: showPortfolioMetrics ? '560px' : 'none',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            scrollbarWidth: 'thin',
           }}
           className="dark:border-gray-700"
         >
-          {/* Night Mode Toggle */}
-          <button
-            onClick={toggleTheme}
-            className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full"
-            style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-            }}
-            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          >
-            <div style={{ width: '20px', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-              <span style={{ fontSize: '16px', lineHeight: 1 }}>{theme === 'dark' ? '☀️' : '🌙'}</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-              </span>
-            )}
-          </button>
-
           {/* X/Twitter Logo Button */}
           <button
             onClick={() => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer')}
-            className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full"
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -654,13 +1135,13 @@ const PortfolioDashboard = () => {
             }}
             title="Open X (Twitter) List"
           >
-            <div style={{ width: '20px', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300 shrink-0">
+            <div style={{ ...sidebarRailIconStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300 shrink-0">
                 <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
               </svg>
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
+              <span className="text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
                 X.com
               </span>
             )}
@@ -668,12 +1149,14 @@ const PortfolioDashboard = () => {
 
           {/* The Pods Button */}
           <button
-            onClick={() => setShowPeaPodWindow(!showPeaPodWindow)}
-            className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            onClick={() => toggleSidebarPanel('pods', setShowPeaPodWindow)}
+            className={`rounded-lg border transition-colors w-full mt-2 ${showPeaPodWindow
+              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111]'
+              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600'
+              }`}
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -682,35 +1165,26 @@ const PortfolioDashboard = () => {
             }}
             title="The Pods"
           >
-            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
-              {peaPodImageError ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-                  <path d="M7 4C5.5 4 4 5.5 4 7.5c0 1.5.8 2.5 2 3v8c0 1.1.9 2 2 2s2-.9 2-2v-8c1.2-.5 2-1.5 2-3 0-2-1.5-3.5-3-3.5zm-1 4.5c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S4.5 10.8 4.5 10s.7-1.5 1.5-1.5zm3 0c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5S7.5 10.8 7.5 10s.7-1.5 1.5-1.5z" />
-                </svg>
-              ) : (
-                <img
-                  src="/images/icons/pea-pod.png"
-                  alt="The Pods"
-                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                  onError={() => setPeaPodImageError(true)}
-                />
-              )}
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle}>PODS</span>
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                The Pods
+              <span className={`whitespace-nowrap ${showPeaPodWindow ? 'text-[#111]' : 'text-gray-700 dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
+                PODS
               </span>
             )}
           </button>
 
           {/* +EV Button */}
           <button
-            onClick={() => setShowEVWindow(!showEVWindow)}
-            className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            onClick={() => toggleSidebarPanel('ev', setShowEVWindow)}
+            className={`rounded-lg border transition-colors w-full mt-2 ${showEVWindow
+              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111]'
+              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600'
+              }`}
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -719,11 +1193,11 @@ const PortfolioDashboard = () => {
             }}
             title="Expected Values"
           >
-            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
-              <span className="font-bold text-black dark:text-white" style={{ fontSize: '12px' }}>+EV</span>
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span className={showEVWindow ? 'text-[#111]' : 'text-black dark:text-white'} style={sidebarRailTextStyle}>+EV</span>
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
+              <span className={`whitespace-nowrap ${showEVWindow ? 'text-[#111]' : 'text-gray-700 dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 +EV Data
               </span>
             )}
@@ -733,11 +1207,10 @@ const PortfolioDashboard = () => {
           <button
             ref={bookMenuRef}
             onClick={() => setShowBookMenu(!showBookMenu)}
-            className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -746,23 +1219,57 @@ const PortfolioDashboard = () => {
             }}
             title="Open Notes"
           >
-            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
-              {bookImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-gray-700 dark:text-gray-300">
-                  <path d="M4 6 L12 4 L12 20 L4 18 Z M12 4 L20 6 L20 18 L12 20 Z" />
-                </svg>
-              ) : (
-                <img
-                  src="/images/icons/book.png"
-                  alt="Open Notes"
-                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                  onError={() => setBookImageError(true)}
-                />
-              )}
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle}>NOTES</span>
             </div>
             {showPortfolioMetrics && (
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                Notes
+              <span className="text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
+                NOTES
+              </span>
+            )}
+          </button>
+
+          {/* How It Works Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowBookMenu(false);
+              onOpenHowItWorks();
+            }}
+            className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
+            style={{
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
+              overflow: 'hidden',
+            }}
+            title="How It Works"
+            aria-label="How It Works"
+          >
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <svg
+                width="25"
+                height="25"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="6" cy="6" r="2.25" />
+                <circle cx="18" cy="6" r="2.25" />
+                <circle cx="12" cy="18" r="2.25" />
+                <path d="M8.2 6h7.6M7.5 8l3.2 7.8M16.5 8l-3.2 7.8" />
+              </svg>
+            </div>
+            {showPortfolioMetrics && (
+              <span className="text-[15px] font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
+                How It Works
               </span>
             )}
           </button>
@@ -789,6 +1296,7 @@ const PortfolioDashboard = () => {
                 <button
                   key={index}
                   onClick={() => openBookFile(file.name)}
+                  disabled={bookContentLoading}
                   style={{
                     width: '100%',
                     textAlign: 'left',
@@ -797,7 +1305,8 @@ const PortfolioDashboard = () => {
                     color: theme === 'dark' ? '#f3f4f6' : '#111',
                     backgroundColor: 'transparent',
                     border: 'none',
-                    cursor: 'pointer',
+                    cursor: bookContentLoading ? 'wait' : 'pointer',
+                    opacity: bookContentLoading ? 0.7 : 1,
                   }}
                   className="hover:bg-gray-100 dark:hover:bg-gray-700"
                   onMouseEnter={(e) => {
@@ -807,7 +1316,7 @@ const PortfolioDashboard = () => {
                     e.target.style.backgroundColor = 'transparent';
                   }}
                 >
-                  {file.name}
+                  {bookContentLoading ? 'Loading...' : file.name}
                 </button>
               ))}
             </div>
@@ -823,15 +1332,14 @@ const PortfolioDashboard = () => {
 
           {/* Portfolio Breakdown Button */}
           <button
-            onClick={() => setShowPortfolioBreakdown(!showPortfolioBreakdown)}
-            className={`rounded-md border transition-colors w-full ${showPortfolioBreakdown
+            onClick={() => toggleSidebarPanel('portfolio', setShowPortfolioBreakdown)}
+            className={`rounded-lg border transition-colors w-full ${showPortfolioBreakdown
               ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111]'
               : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600'
               }`}
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -841,25 +1349,11 @@ const PortfolioDashboard = () => {
             }}
             title="Portfolio Breakdown"
           >
-            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
-              {portfolioBreakdownImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPortfolioBreakdown ? "text-[#111]" : "text-[#555] dark:text-gray-300"}>
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 2 L12 12 L20 12 Z" fill="currentColor" opacity="0.8" />
-                  <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.4" />
-                  <path d="M12 2 A10 10 0 0 0 2 12 L12 12 Z" fill="currentColor" opacity="0.2" />
-                </svg>
-              ) : (
-                <img
-                  src="/images/icons/portfolio-construction.png"
-                  alt="Portfolio Breakdown"
-                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                  onError={() => setPortfolioBreakdownImageError(true)}
-                />
-              )}
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle}>PORTFOLIO</span>
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPortfolioBreakdown ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
+              <span className={`whitespace-nowrap ${showPortfolioBreakdown ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 Portfolio
               </span>
             )}
@@ -867,15 +1361,14 @@ const PortfolioDashboard = () => {
 
           {/* Securities Universe Button */}
           <button
-            onClick={() => setShowSecuritiesUniverse(!showSecuritiesUniverse)}
-            className={`rounded-md border transition-colors w-full ${showSecuritiesUniverse
+            onClick={() => toggleSidebarPanel('securities', setShowSecuritiesUniverse)}
+            className={`rounded-lg border transition-colors w-full ${showSecuritiesUniverse
               ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111]'
               : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600'
               }`}
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -885,57 +1378,26 @@ const PortfolioDashboard = () => {
             }}
             title="Securities Universe"
           >
-            <div className="shrink-0 flex items-center justify-center w-6 h-6" style={{ width: '20px', flexShrink: 0 }}>
-              {securitiesUniverseImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={showSecuritiesUniverse ? "text-[#111]" : "text-[#555] dark:text-gray-300"}>
-                  <defs>
-                    <radialGradient id="planetGradient" cx="0.4" cy="0.3">
-                      <stop offset="0%" stopColor="#E6E6FA" stopOpacity="0.9" />
-                      <stop offset="50%" stopColor="#9370DB" stopOpacity="0.95" />
-                      <stop offset="100%" stopColor="#663399" stopOpacity="1" />
-                    </radialGradient>
-                    <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#DDA0DD" stopOpacity="0.8" />
-                      <stop offset="50%" stopColor="#9370DB" stopOpacity="0.9" />
-                      <stop offset="100%" stopColor="#DDA0DD" stopOpacity="0.8" />
-                    </linearGradient>
-                  </defs>
-                  <circle cx="12" cy="12" r="7" fill="url(#planetGradient)" />
-                  <ellipse cx="13" cy="10" rx="3" ry="2" fill="#E6E6FA" opacity="0.4" />
-                  <ellipse cx="10" cy="13" rx="2.5" ry="1.8" fill="#DDA0DD" opacity="0.3" />
-                  <ellipse cx="12" cy="12" rx="11" ry="2.5" fill="url(#ringGradient)" opacity="0.9" />
-                  <ellipse cx="12" cy="12" rx="9.5" ry="2.2" fill="none" stroke="#DDA0DD" strokeWidth="0.5" opacity="0.7" />
-                  <ellipse cx="12" cy="12" rx="9" ry="2" fill="url(#ringGradient)" opacity="0.8" />
-                  <ellipse cx="12" cy="12" rx="7.5" ry="1.8" fill="none" stroke="#DDA0DD" strokeWidth="0.4" opacity="0.6" />
-                  <ellipse cx="12" cy="12" rx="7" ry="1.5" fill="url(#ringGradient)" opacity="0.7" />
-                </svg>
-              ) : (
-                <img
-                  src="/images/icons/securities-universe.png"
-                  alt="Securities Universe"
-                  style={{ width: '24px', height: '24px', objectFit: 'contain' }}
-                  onError={() => setSecuritiesUniverseImageError(true)}
-                />
-              )}
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle}>SECURITIES</span>
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showSecuritiesUniverse ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
+              <span className={`whitespace-nowrap ${showSecuritiesUniverse ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 Securities Universe
               </span>
             )}
           </button>
 
-          {/* Performance Tracking Button */}
+          {/* CPI Button */}
           <button
-            onClick={() => setShowPerformanceTracking(!showPerformanceTracking)}
-            className={`rounded-md border transition-colors w-full ${showPerformanceTracking
-              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600'
+            onClick={() => toggleSidebarPanel('cpi', setShowCpiModel)}
+            className={`rounded-lg border transition-colors w-full ${showCpiModel
+              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111] dark:text-white'
+              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 text-[#333] dark:text-gray-200'
               }`}
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -943,41 +1405,30 @@ const PortfolioDashboard = () => {
               overflow: 'hidden',
               marginTop: '4px',
             }}
-            title="Performance Tracking"
+            title="CPI"
           >
-            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
-              {performanceImageError ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={showPerformanceTracking ? "text-[#111]" : "text-[#555] dark:text-gray-300"}>
-                  <polyline points="22 6 13.5 15.5 8.5 10.5 2 17" />
-                  <polyline points="16 6 22 6 22 12" />
-                </svg>
-              ) : (
-                <img
-                  src="/images/icons/performance.png"
-                  alt="Performance Tracking"
-                  style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-                  onError={() => setPerformanceImageError(true)}
-                />
-              )}
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle} aria-hidden="true">
+                CPI
+              </span>
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPerformanceTracking ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                Performance
+              <span className={`whitespace-nowrap ${showCpiModel ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
+                CPI
               </span>
             )}
           </button>
 
-          {/* Prediction Markets Button */}
+          {/* Signal Strength Button */}
           <button
-            onClick={() => setShowPredictionMarkets(!showPredictionMarkets)}
-            className={`rounded-md border transition-colors w-full ${showPredictionMarkets
-              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600'
+            onClick={() => toggleSidebarPanel('ss', setShowSignalStrength)}
+            className={`rounded-lg border transition-colors w-full ${showSignalStrength
+              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111] dark:text-white'
+              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 text-[#333] dark:text-gray-200'
               }`}
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -985,37 +1436,123 @@ const PortfolioDashboard = () => {
               overflow: 'hidden',
               marginTop: '4px',
             }}
-            title="Prediction Markets"
+            title="Signal Strength"
           >
-            <div className="shrink-0 flex items-center justify-center" style={{ width: '20px', flexShrink: 0 }}>
-              <PredictionMarketsLogo variant="icon" height={20} />
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column' }} aria-hidden="true">
+                <span>Signal</span>
+                <span>Strength</span>
+              </span>
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showPredictionMarkets ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                Prediction Markets
+              <span className={`whitespace-nowrap ${showSignalStrength ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>Signal Strength</span>
+            )}
+          </button>
+
+          {/* ETF Pro Button */}
+          <button
+            onClick={() => toggleSidebarPanel('etfPro', setShowEtfPro)}
+            className={`rounded-lg border transition-colors w-full ${showEtfPro
+              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111] dark:text-white'
+              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 text-[#333] dark:text-gray-200'
+              }`}
+            style={{
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
+              overflow: 'hidden',
+              marginTop: '4px',
+            }}
+            title="ETF Pro"
+          >
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle} aria-hidden="true">ETF Pro</span>
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`whitespace-nowrap ${showEtfPro ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>ETF Pro</span>
+            )}
+          </button>
+
+          {/* Macro Show Button */}
+          <button
+            onClick={() => toggleSidebarPanel('macroShow', setShowMacroShow)}
+            className={`rounded-lg border transition-colors w-full ${showMacroShow
+              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111] dark:text-white'
+              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 text-[#333] dark:text-gray-200'
+              }`}
+            style={{
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
+              overflow: 'hidden',
+              marginTop: '4px',
+            }}
+            title="Macro Show"
+          >
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle} aria-hidden="true">
+              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column' }}>
+                <span>Macro</span>
+                <span>Show</span>
               </span>
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`whitespace-nowrap ${showMacroShow ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>Macro Show</span>
+            )}
+          </button>
+
+          {/* Call Button */}
+          <button
+            onClick={() => toggleSidebarPanel('call', setShowCall)}
+            className={`rounded-lg border transition-colors w-full ${showCall
+              ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111] dark:text-white'
+              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 text-[#333] dark:text-gray-200'
+              }`}
+            style={{
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: showPortfolioMetrics ? 'relative' : undefined,
+              overflow: 'hidden',
+              marginTop: '4px',
+            }}
+            title="Call"
+          >
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle} aria-hidden="true">Call</span>
+            </div>
+            {showPortfolioMetrics && (
+              <span className={`whitespace-nowrap ${showCall ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>Call</span>
             )}
           </button>
 
           {/* Expand/Collapse Portfolio Bar Button */}
           <button
             onClick={() => setShowPortfolioMetrics(!showPortfolioMetrics)}
-            className="rounded-md border border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors mt-2"
+            className="rounded-lg border border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors mt-2"
             title={showPortfolioMetrics ? "Collapse Portfolio" : "Expand Portfolio"}
             style={{
-              width: '32px',
-              height: '30px',
+              width: '48px',
+              height: '40px',
               padding: '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               marginTop: '8px',
-              alignSelf: 'center'
+              alignSelf: 'center',
+              flexShrink: 0,
             }}
           >
             <svg
-              width="16"
-              height="16"
+              width="20"
+              height="20"
               viewBox="0 0 16 16"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
@@ -1035,7 +1572,7 @@ const PortfolioDashboard = () => {
         {/* Expanded Content Area */}
         {showPortfolioMetrics && (
           <div
-            className={`portfolio-sidebar-panel${portfolioExpandedUp ? ' bg-white dark:bg-gray-900' : ''}`}
+            className={`portfolio-sidebar-panel dashboard-stable-panel${portfolioExpandedUp ? ' bg-white dark:bg-gray-900' : ''}`}
             style={portfolioExpandedUp ? {
               position: 'absolute',
               top: 0,
@@ -1052,8 +1589,18 @@ const PortfolioDashboard = () => {
               )}
               <PortfolioSidebarSnapshot
                 portfolioData={displayData}
+                portfolioAccountsData={portfolioAccountsData}
                 loading={portfolioLoading}
+                refreshing={portfolioRefreshing}
                 rtaPositions={rtaPositions}
+                etfProSnapshot={etfProSnapshot}
+                exposureReconciliation={portfolioExposureReconciliation}
+                exposureReconciliationLoading={portfolioExposureReconciliationLoading}
+                predictionMarketProviderStatus={predictionMarketProviderStatus}
+                hedgeyeChangelog={hedgeyeChangelog}
+                hedgeyeChangelogLoading={hedgeyeChangelogLoading}
+                hedgeyeChangelogError={hedgeyeChangelogError}
+                hedgeyeChangelogLastSuccessAt={hedgeyeChangelogLastSuccessAt}
                 accounts={ibkrAccounts}
                 connection={ibkrConnection}
                 selectedAccount={selectedAccount}
@@ -1070,24 +1617,23 @@ const PortfolioDashboard = () => {
         <div
           style={{
             marginTop: 'auto',
-            padding: '12px',
+            padding: '10px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            borderTop: '1px solid #e5e7eb',
+            borderTop: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
           }}
           className="dark:border-gray-700"
         >
           <button
-            onClick={() => setShowWorkflowStatus(!showWorkflowStatus)}
-            className={`rounded-md border transition-colors w-full ${showWorkflowStatus
+            onClick={() => toggleSidebarPanel('analytics', setShowWorkflowStatus)}
+            className={`rounded-lg border transition-colors w-full ${showWorkflowStatus
               ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111]'
               : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600'
               }`}
             style={{
-              minWidth: '32px',
-              height: '32px',
-              padding: showPortfolioMetrics ? '0 12px' : '0',
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
@@ -1096,15 +1642,11 @@ const PortfolioDashboard = () => {
             }}
             title="Analytics"
           >
-            <div className="shrink-0 flex items-center justify-center w-5 h-5" style={{ width: '20px', flexShrink: 0 }}>
-              <img
-                src="/images/icons/analytics.png"
-                alt="Analytics"
-                style={{ width: '20px', height: '20px', objectFit: 'contain' }}
-              />
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={sidebarRailTextStyle}>ANALYTICS</span>
             </div>
             {showPortfolioMetrics && (
-              <span className={`text-sm font-medium whitespace-nowrap ${showWorkflowStatus ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
+              <span className={`whitespace-nowrap ${showWorkflowStatus ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
                 Analytics
               </span>
             )}
@@ -1113,29 +1655,32 @@ const PortfolioDashboard = () => {
       </div>
 
       {/* Expected Values Window */}
-      <ExpectedValuesWindow
-        show={showEVWindow}
-        onClose={() => setShowEVWindow(false)}
-        top={0}
-        right={showPortfolioMetrics ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' : '40px'}
-        width={showEVWindow ? `calc(100vw - ${showPortfolioMetrics ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' : '40px'})` : '0px'}
-        theme={theme}
-        showPortfolioMetrics={showPortfolioMetrics}
-      />
+      {showEVWindow && (
+        <Suspense fallback={<LazyPanelFallback label="Loading +EV..." />}>
+          <ExpectedValuesWindow
+            show={showEVWindow}
+            onClose={() => closeSidebarPanel('ev', setShowEVWindow)}
+            top={0}
+            right="var(--dashboard-active-rail-width)"
+            width="calc(100vw - var(--dashboard-active-rail-width))"
+            theme={theme}
+            zIndex={getSidebarPanelZIndex('ev', showEVWindow)}
+            showPortfolioMetrics={showPortfolioMetrics}
+          />
+        </Suspense>
+      )}
 
       {/* The Pods Window - Separate Pop-out Panel */}
       <div
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Position to the left of portfolio bar when open
-            : '40px', // Position to the left of collapsed portfolio bar
+          right: 'var(--dashboard-active-rail-width)',
           width: showPeaPodWindow
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)' // Same width as portfolio window
+            ? 'var(--dashboard-rail-expanded-width)'
             : '0px',
           height: '100vh',
-          zIndex: showPeaPodWindow ? 1200 : -1, // Higher z-index than portfolio bar when open, hidden when closed
+          zIndex: getSidebarPanelZIndex('pods', showPeaPodWindow),
           backgroundColor: '#ffffff',
           borderLeft: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
           borderRight: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
@@ -1164,7 +1709,7 @@ const PortfolioDashboard = () => {
                 cursor: 'pointer',
               }}
               className="dark:border-gray-700"
-              onClick={() => setShowPeaPodWindow(false)}
+              onClick={() => closeSidebarPanel('pods', setShowPeaPodWindow)}
             >
               <Title
                 className="dark:text-white"
@@ -1628,8 +2173,9 @@ const PortfolioDashboard = () => {
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
               >
-                <ReactMarkdown
-                  components={{
+                <Suspense fallback={<LazyPanelFallback label="Loading notes..." />}>
+                  <ReactMarkdown
+                    components={{
                     h2: ({ node, children, ...props }) => {
                       const text = String(children);
                       const section = sections.find(s => s.title === text.trim() && s.level === 2);
@@ -1755,10 +2301,11 @@ const PortfolioDashboard = () => {
                         {children}
                       </li>
                     ),
-                  }}
-                >
-                  {selectedBookContent}
-                </ReactMarkdown>
+                    }}
+                  >
+                    {selectedBookContent}
+                  </ReactMarkdown>
+                </Suspense>
               </div>
             </div>
 
@@ -1845,17 +2392,15 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
-            : '40px',
+          right: 'var(--dashboard-active-rail-width)',
           width: showSecuritiesUniverse
             ? (showPortfolioMetrics
               ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (10/12) - 40px)')
+              : 'calc((100vw - 16px) * (10/12) - var(--dashboard-rail-collapsed-width))')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
-          zIndex: showSecuritiesUniverse ? 1400 : -1,
+          zIndex: getSidebarPanelZIndex('securities', showSecuritiesUniverse),
           borderLeft: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
           borderRight: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
           borderRadius: showSecuritiesUniverse ? '0.75rem 0 0 0' : '0',
@@ -1867,7 +2412,7 @@ const PortfolioDashboard = () => {
           flexDirection: 'column',
           overflow: 'hidden',
         }}
-        className="dark:bg-gray-900 dark:border-gray-700"
+        className="dashboard-side-panel dashboard-side-panel--portfolio dark:bg-gray-900 dark:border-gray-700"
       >
         {showSecuritiesUniverse && (
           <>
@@ -1882,7 +2427,7 @@ const PortfolioDashboard = () => {
                 cursor: 'pointer',
               }}
               className="dark:border-gray-700"
-              onClick={() => setShowSecuritiesUniverse(false)}
+              onClick={() => closeSidebarPanel('securities', setShowSecuritiesUniverse)}
             >
               <Title
                 className="dark:text-white"
@@ -1905,7 +2450,9 @@ const PortfolioDashboard = () => {
                 padding: 0,
               }}
             >
-              <SecuritiesUniverse />
+              <Suspense fallback={<LazyPanelFallback label="Loading securities universe..." />}>
+                <SecuritiesUniverse />
+              </Suspense>
             </div>
           </>
         )}
@@ -1916,17 +2463,15 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
-            : '40px',
+          right: 'var(--dashboard-active-rail-width)',
           width: showPerformanceTracking
             ? (showPortfolioMetrics
               ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (9/12) - 40px)')
+              : 'calc((100vw - 16px) * (9/12) - var(--dashboard-rail-collapsed-width))')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
-          zIndex: showPerformanceTracking ? 1500 : -1,
+          zIndex: getSidebarPanelZIndex('performance', showPerformanceTracking),
           borderLeft: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
           borderRight: showPerformanceTracking ? '1px solid #e5e7eb' : 'none',
           borderRadius: showPerformanceTracking ? '0.75rem 0 0 0' : '0',
@@ -1938,7 +2483,7 @@ const PortfolioDashboard = () => {
           flexDirection: 'column',
           overflow: 'hidden',
         }}
-        className="dark:bg-gray-900 dark:border-gray-700"
+        className="dashboard-side-panel dashboard-side-panel--cpi dark:bg-gray-900 dark:border-gray-700"
       >
         {showPerformanceTracking && (
           <>
@@ -1953,7 +2498,7 @@ const PortfolioDashboard = () => {
                 cursor: 'pointer',
               }}
               className="dark:border-gray-700"
-              onClick={() => setShowPerformanceTracking(false)}
+              onClick={() => closeSidebarPanel('performance', setShowPerformanceTracking)}
             >
               <Title
                 className="dark:text-white"
@@ -1976,7 +2521,9 @@ const PortfolioDashboard = () => {
                 padding: 0,
               }}
             >
-              <PerformanceTracking />
+              <Suspense fallback={<LazyPanelFallback label="Loading performance..." />}>
+                <PerformanceTracking />
+              </Suspense>
             </div>
           </>
         )}
@@ -1987,17 +2534,15 @@ const PortfolioDashboard = () => {
         style={{
           position: 'fixed',
           top: 0,
-          right: showPortfolioMetrics
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
-            : '40px',
+          right: 'var(--dashboard-active-rail-width)',
           width: showPortfolioBreakdown
             ? (showPortfolioMetrics
               ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (9/12) - 40px)')
+              : 'calc((100vw - 16px) * (9/12) - var(--dashboard-rail-collapsed-width))')
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
-          zIndex: showPortfolioBreakdown ? 1300 : -1,
+          zIndex: getSidebarPanelZIndex('portfolio', showPortfolioBreakdown),
           borderLeft: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
           borderRight: showPortfolioBreakdown ? '1px solid #e5e7eb' : 'none',
           borderRadius: showPortfolioBreakdown ? '0.75rem 0 0 0' : '0',
@@ -2020,12 +2565,15 @@ const PortfolioDashboard = () => {
                 padding: '4px 16px 16px 16px',
               }}
             >
-              <PortfolioBreakdown
-                portfolioData={portfolioData}
-                isLoading={portfolioLoading}
-                connection={ibkrConnection}
-                onRefresh={handlePortfolioRefresh}
-              />
+              <Suspense fallback={<LazyPanelFallback label="Loading portfolio breakdown..." />}>
+                <PortfolioBreakdown
+                  portfolioData={portfolioData}
+                  isLoading={portfolioLoading}
+                  isRefreshing={portfolioRefreshing}
+                  connection={ibkrConnection}
+                  onRefresh={handlePortfolioRefresh}
+                />
+              </Suspense>
             </div>
           </>
         )}
@@ -2037,31 +2585,155 @@ const PortfolioDashboard = () => {
           position: 'fixed',
           top: 0,
           left: 0,
-          right: showPortfolioMetrics
-            ? 'calc((100vw - 16px) * (2/12) + 16px + 128px)'
-            : '40px',
-          width: showPredictionMarkets ? undefined : '0px',
+          right: 'var(--dashboard-active-rail-width)',
+          width: showCpiModel ? undefined : '0px',
           boxSizing: 'border-box',
           height: '100vh',
           backgroundColor: '#ffffff',
-          zIndex: showPredictionMarkets ? 1500 : -1,
-          borderLeft: showPredictionMarkets ? '1px solid #e5e7eb' : 'none',
-          borderRight: showPredictionMarkets ? '1px solid #e5e7eb' : 'none',
+          zIndex: getSidebarPanelZIndex('cpi', showCpiModel),
+          borderLeft: showCpiModel ? '1px solid #e5e7eb' : 'none',
+          borderRight: showCpiModel ? '1px solid #e5e7eb' : 'none',
           borderRadius: '0',
-          boxShadow: showPredictionMarkets
+          boxShadow: showCpiModel
             ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
-          display: showPredictionMarkets ? 'flex' : 'none',
+          display: showCpiModel ? 'flex' : 'none',
           flexDirection: 'column',
           overflow: 'hidden',
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showPredictionMarkets && (
+        {showCpiModel && (
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <PredictionMarkets onClose={() => setShowPredictionMarkets(false)} />
+            <Suspense fallback={<LazyPanelFallback label="Loading CPI..." />}>
+              <CpiModelPanel
+                onClose={() => closeSidebarPanel('cpi', setShowCpiModel)}
+                portfolioData={portfolioData}
+              />
+            </Suspense>
           </div>
+        )}
+      </div>
+
+      {/* Signal Strength Reference Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 'var(--dashboard-active-rail-width)',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: getSidebarPanelZIndex('ss', showSignalStrength),
+          borderRight: showSignalStrength ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showSignalStrength ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)' : 'none',
+          display: showSignalStrength ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showSignalStrength && (
+          <Suspense fallback={<LazyPanelFallback label="Loading SS..." />}>
+            <SignalStrengthPanel
+              onClose={() => closeSidebarPanel('ss', setShowSignalStrength)}
+              changelog={hedgeyeChangelog}
+              changelogLoading={hedgeyeChangelogLoading}
+              changelogError={hedgeyeChangelogError}
+              onRefreshChangelog={fetchHedgeyeChangelog}
+            />
+          </Suspense>
+        )}
+      </div>
+
+      {/* ETF Pro Reference Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 'var(--dashboard-active-rail-width)',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: getSidebarPanelZIndex('etfPro', showEtfPro),
+          borderRight: showEtfPro ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showEtfPro ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)' : 'none',
+          display: showEtfPro ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showEtfPro && (
+          <Suspense fallback={<LazyPanelFallback label="Loading ETF Pro..." />}>
+            <EtfProPanel
+              snapshot={etfProSnapshot}
+              loading={etfProLoading}
+              refreshing={etfProRefreshing}
+              error={etfProError}
+              onRefresh={() => fetchEtfProSnapshot(true)}
+              onClose={() => closeSidebarPanel('etfPro', setShowEtfPro)}
+            />
+          </Suspense>
+        )}
+      </div>
+
+      {/* Macro Show Reference Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 'var(--dashboard-active-rail-width)',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: getSidebarPanelZIndex('macroShow', showMacroShow),
+          borderRight: showMacroShow ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showMacroShow ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)' : 'none',
+          display: showMacroShow ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showMacroShow && (
+          <Suspense fallback={<LazyPanelFallback label="Loading Macro Show..." />}>
+            <HedgeyeShowPanel
+              snapshotType="the-macro-show"
+              title="Macro Show"
+              onClose={() => closeSidebarPanel('macroShow', setShowMacroShow)}
+            />
+          </Suspense>
+        )}
+      </div>
+
+      {/* Call Reference Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 'var(--dashboard-active-rail-width)',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: getSidebarPanelZIndex('call', showCall),
+          borderRight: showCall ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showCall ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)' : 'none',
+          display: showCall ? 'flex' : 'none',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+      >
+        {showCall && (
+          <Suspense fallback={<LazyPanelFallback label="Loading Call..." />}>
+            <HedgeyeShowPanel
+              snapshotType="the-call"
+              title="Call"
+              onClose={() => closeSidebarPanel('call', setShowCall)}
+            />
+          </Suspense>
         )}
       </div>
 
@@ -2076,7 +2748,7 @@ const PortfolioDashboard = () => {
             : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
-          zIndex: showWorkflowStatus ? 1600 : -1,
+          zIndex: getSidebarPanelZIndex('analytics', showWorkflowStatus),
           borderLeft: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
           borderTop: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
           borderBottom: showWorkflowStatus ? '1px solid #e5e7eb' : 'none',
@@ -2120,7 +2792,7 @@ const PortfolioDashboard = () => {
                   cursor: 'pointer',
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
                 }}
-                onClick={() => setShowWorkflowStatus(false)}
+                onClick={() => closeSidebarPanel('analytics', setShowWorkflowStatus)}
               >
                 Analytics
               </Title>
@@ -2144,7 +2816,9 @@ const PortfolioDashboard = () => {
                 padding: 0,
               }}
             >
-              <WorkflowStatus key={analyticsRefreshKey} />
+              <Suspense fallback={<LazyPanelFallback label="Loading analytics..." />}>
+                <WorkflowStatus key={analyticsRefreshKey} />
+              </Suspense>
             </div>
           </>
         )}

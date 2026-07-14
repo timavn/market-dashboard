@@ -5,11 +5,9 @@ import {
   separateLongsAndShorts,
   formatPerformance
 } from '../../utils/portfolioBreakdownUtils';
-import { getIbkrPortfolioStatusDot } from '../../utils/ibkrConnectionStatus';
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import LoadingIndicator from '../common/LoadingIndicator';
-import StatusDot from '../common/StatusDot';
 import './PortfolioConstructionIdeas.css';
 
 const ASSET_CLASS_COLORS = {
@@ -168,34 +166,6 @@ const INFLATION_CATEGORIES = new Set([
 
 const VOLATILITY_CATEGORIES = new Set(['Low Beta']);
 
-const POSITION_SIZE_PARAMETERS = {
-  long: {
-    Currencies: '4-12%',
-    'CASH': '0-100%',
-    'Fixed Income': '3-10%',
-    Equities: '2-6%',
-    Commodities: '2-4%',
-    Cryptocurrency: '1-3%',
-  },
-  short: {
-    Currencies: '2-6%',
-    'CASH': '0-100%',
-    'Fixed Income': '2-5%',
-    Equities: '1-3%',
-    Commodities: '1-2%',
-    Cryptocurrency: '0.5-1%',
-  },
-};
-
-const POSITION_SIZE_BPS_STEPS = [50, 100, 150, 200, 250];
-const POSITION_SIZE_GUIDE_ROWS = [
-  { label: 'FX', long: POSITION_SIZE_PARAMETERS.long.Currencies, short: POSITION_SIZE_PARAMETERS.short.Currencies },
-  { label: 'FI', long: POSITION_SIZE_PARAMETERS.long['Fixed Income'], short: POSITION_SIZE_PARAMETERS.short['Fixed Income'] },
-  { label: 'Eq', long: POSITION_SIZE_PARAMETERS.long.Equities, short: POSITION_SIZE_PARAMETERS.short.Equities },
-  { label: 'Com', long: POSITION_SIZE_PARAMETERS.long.Commodities, short: POSITION_SIZE_PARAMETERS.short.Commodities },
-  { label: 'Crypto', long: POSITION_SIZE_PARAMETERS.long.Cryptocurrency, short: POSITION_SIZE_PARAMETERS.short.Cryptocurrency },
-];
-
 const ASSET_CLASS_ABBREVIATIONS = {
   Equities: 'EQ',
   'Fixed Income': 'FI',
@@ -241,12 +211,6 @@ const getSecurityName = (holding) => {
   return holding?.description || holding?.name || SECURITY_NAME_BY_TICKER[symbol] || holding?.symbol || '--';
 };
 
-const getPositionSizeParameter = (holding, isLongs) => {
-  const assetClass = getAssetClassForTicker(holding?.symbol, holding);
-  const sizeMap = isLongs ? POSITION_SIZE_PARAMETERS.long : POSITION_SIZE_PARAMETERS.short;
-  return sizeMap[assetClass] || '--';
-};
-
 const getAssetClassAbbreviation = (holding) => {
   const assetClass = getAssetClassForTicker(holding?.symbol, holding);
   return ASSET_CLASS_ABBREVIATIONS[assetClass] || assetClass || '--';
@@ -256,13 +220,6 @@ const formatPct = (value, decimals = 1, { signed = false } = {}) => {
   const num = Number(value) || 0;
   const sign = signed && num > 0 ? '+' : '';
   return `${sign}${num.toFixed(decimals)}%`;
-};
-
-const formatBps = (value) => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
-  const rounded = Math.round(Number(value) * 100);
-  if (rounded > 0) return `+${rounded}`;
-  return `${rounded}`;
 };
 
 const formatSignedCurrency = (value, { compact = false } = {}) => {
@@ -279,29 +236,6 @@ const formatSignedCurrency = (value, { compact = false } = {}) => {
   return `${sign}$${absValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 };
 
-const AS_OF_TIMEZONES = {
-  pacific: {
-    label: 'PST',
-    timeZone: 'America/Los_Angeles',
-  },
-};
-
-const formatAsOf = (value, zoneKey = 'pacific') => {
-  if (!value) return 'As of --';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'As of --';
-  const zone = AS_OF_TIMEZONES[zoneKey] || AS_OF_TIMEZONES.pacific;
-  const formatted = date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: zone.timeZone,
-  });
-  return `As of ${formatted} ${zone.label}`;
-};
-
 const csvEscape = (value) => {
   const str = value === null || value === undefined ? '' : String(value);
   return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
@@ -310,7 +244,6 @@ const csvEscape = (value) => {
 const PortfolioBreakdown = ({
   portfolioData,
   isLoading = false,
-  connection = null,
   onRefresh = null,
 }) => {
   const holdings = useMemo(() => portfolioData?.holdings || [], [portfolioData?.holdings]);
@@ -1232,14 +1165,6 @@ const PortfolioBreakdown = ({
     return currentPct;
   }, [longsBasisPoints, longsPercentPortfolio, shortsBasisPoints, shortsPercentPortfolio, totalValue]);
 
-  const getHoldingGap = useCallback((holding, isLongs) => {
-    const target = getHoldingTargetPercent(holding, isLongs);
-    if (target === null || Number.isNaN(target)) return null;
-    const absolutePct = totalValue > 0 ? ((Math.abs(holding.marketValue || 0) / totalValue) * 100) : 0;
-    const currentPct = isLongs ? absolutePct : -absolutePct;
-    return currentPct - target;
-  }, [getHoldingTargetPercent, totalValue]);
-
   const getResizeShares = (holding, isLongs) => {
     const percentPortfolioState = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
     const basisPointsState = isLongs ? longsBasisPoints : shortsBasisPoints;
@@ -1302,7 +1227,7 @@ const PortfolioBreakdown = ({
     return sortHoldings(filtered, shortsSortConfig);
   }, [shorts, shortsSortConfig, shortsSearchFilter, sortHoldings]);
 
-  const sortLedgerHoldings = useCallback((rows, isLongs) => {
+  const sortLedgerHoldings = useCallback((rows) => {
     const sorted = [...rows];
     sorted.sort((a, b) => {
       const getValue = (holding) => {
@@ -1312,8 +1237,6 @@ const PortfolioBreakdown = ({
             return (holding.symbol || '').toUpperCase();
           case 'name':
             return getSecurityName(holding).toUpperCase();
-          case 'gap':
-            return Math.abs(getHoldingGap(holding, isLongs) || 0);
           case 'dayGainLoss':
             return Math.abs(getDayGainLossValue(holding) || 0);
           case 'weight':
@@ -1330,7 +1253,7 @@ const PortfolioBreakdown = ({
       return Number(bValue) - Number(aValue);
     });
     return sorted;
-  }, [getHoldingGap, ledgerSortField, totalValue]);
+  }, [ledgerSortField, totalValue]);
 
   const filterLedgerHoldings = useCallback((rows) => {
     const query = ledgerSearchFilter.trim().toLowerCase();
@@ -1344,11 +1267,11 @@ const PortfolioBreakdown = ({
   }, [ledgerSearchFilter, ledgerSleeveFilter]);
 
   const ledgerLongs = useMemo(() => {
-    return sortLedgerHoldings(filterLedgerHoldings(longs), true);
+    return sortLedgerHoldings(filterLedgerHoldings(longs));
   }, [filterLedgerHoldings, longs, sortLedgerHoldings]);
 
   const ledgerShorts = useMemo(() => {
-    return sortLedgerHoldings(filterLedgerHoldings(shorts), false);
+    return sortLedgerHoldings(filterLedgerHoldings(shorts));
   }, [filterLedgerHoldings, shorts, sortLedgerHoldings]);
 
   const ledgerRows = useMemo(() => ([
@@ -1356,43 +1279,14 @@ const PortfolioBreakdown = ({
     ...ledgerShorts.map((holding, index) => ({ holding, index, isLongs: false }))
   ]), [ledgerLongs, ledgerShorts]);
 
-  const latestHoldingTimestamp = useMemo(() => {
-    const timestamps = (portfolioData?.holdings || [])
-      .map((holding) => holding?.lastUpdated || holding?.timestamp || null)
-      .filter(Boolean)
-      .map((value) => new Date(value))
-      .filter((date) => !Number.isNaN(date.getTime()))
-      .map((date) => date.getTime());
-
-    if (timestamps.length === 0) {
-      return null;
-    }
-
-    return new Date(Math.max(...timestamps)).toISOString();
-  }, [portfolioData?.holdings]);
-
-  const portfolioUpdatedAt =
-    portfolioData?.accountSummary?.lastUpdated ||
-    portfolioData?.lastUpdated ||
-    portfolioData?.snapshotDate ||
-    portfolioData?.summary?.lastUpdated ||
-    latestHoldingTimestamp;
-
-  const asOfLabel = formatAsOf(portfolioUpdatedAt);
-  const statusDot = useMemo(
-    () => getIbkrPortfolioStatusDot({ connection, portfolioData, loading: isLoading }),
-    [connection, portfolioData, isLoading],
-  );
-
   const handleExportCsv = () => {
     const rows = [
-      ['Rank', 'Ticker', 'Name', 'Side', 'Weight % (NAV)', 'Target % (NAV)', 'Gap (bps)', 'Sleeve', 'Factor Ctrb', 'Resize (Shares)', 'Day G/L (USD)', 'Action']
+      ['Rank', 'Ticker', 'Name', 'Side', 'Weight % (NAV)', 'Target % (NAV)', 'Factor', 'Factor Ctrb', 'Resize (Shares)', 'Day G/L (USD)', 'Action']
     ];
 
     ledgerRows.forEach(({ holding, index, isLongs }) => {
       const currentPct = totalValue > 0 ? ((Math.abs(Number(holding.marketValue) || 0) / totalValue) * 100) : 0;
       const targetPct = getHoldingTargetPercent(holding, isLongs);
-      const gap = getHoldingGap(holding, isLongs);
       const sleeve = getSleeveForHolding(holding);
       const shares = getResizeShares(holding, isLongs);
       const action = getActionForResize(shares, isLongs);
@@ -1405,7 +1299,6 @@ const PortfolioBreakdown = ({
         isLongs ? 'Long' : 'Short',
         (isLongs ? currentPct : -currentPct).toFixed(2),
         Number.isFinite(targetPct) ? targetPct.toFixed(2) : '',
-        gap === null ? '' : Math.round(gap * 100),
         sleeve,
         formatPct(isLongs ? currentPct : -currentPct, 1, { signed: true }),
         shares ?? '',
@@ -1429,7 +1322,10 @@ const PortfolioBreakdown = ({
   // Don't show "no data" message if we're actively loading/polling
   if (!isLoading && (!portfolioData || !holdings || (holdings.length === 0 && totalValue === 0 && !portfolioData?.accountSummary?.netLiquidation))) {
     return (
-      <div style={{ padding: '32px', textAlign: 'center' }}>
+      <div
+        className="pcv2-reserved-state"
+        style={{ minHeight: '640px', padding: '32px', textAlign: 'center' }}
+      >
         <Text className="text-gray-500 dark:text-gray-400">
           No portfolio data available. Connect IB Gateway and the IBKR API to view portfolio breakdown.
         </Text>
@@ -1442,7 +1338,18 @@ const PortfolioBreakdown = ({
   // Show loading state if we're actively fetching
   if (isLoading && (!holdings || holdings.length === 0)) {
     return (
-      <LoadingIndicator label="Loading portfolio data..." size="lg" centered className="p-8" />
+      <div
+        className="pcv2-reserved-state"
+        style={{
+          alignItems: 'center',
+          display: 'flex',
+          justifyContent: 'center',
+          minHeight: '640px',
+          padding: '32px',
+        }}
+      >
+        <LoadingIndicator label="Loading portfolio data..." size="lg" />
+      </div>
     );
   }
 
@@ -1479,6 +1386,14 @@ const PortfolioBreakdown = ({
     [holding.positionSource && `pos: ${holding.positionSource}`, holding.priceSource && `price: ${holding.priceSource}`, holding.warning]
       .filter(Boolean)
       .join(' · ');
+
+  const renderHoldingWarningIcon = (holding) => (
+    holding.warning ? (
+      <span className="pcv2-warning-icon" aria-label="Bad data warning" title={holding.warning}>
+        ⚠
+      </span>
+    ) : null
+  );
 
   const renderTargetControl = (holding, isLongs, pctOfAccount) => {
     const percentPortfolioState = isLongs ? longsPercentPortfolio : shortsPercentPortfolio;
@@ -1572,7 +1487,7 @@ const PortfolioBreakdown = ({
     if (rows.length === 0) {
       return (
         <tr>
-          <td colSpan={11} className="pcv2-empty">
+          <td colSpan={9} className="pcv2-empty">
             No {isLongs ? 'long' : 'short'} positions
           </td>
         </tr>
@@ -1583,26 +1498,22 @@ const PortfolioBreakdown = ({
       const pctOfAccount = totalValue > 0 ? ((Math.abs(Number(holding.marketValue) || 0) / totalValue) * 100) : 0;
       const sleeve = getSleeveForHolding(holding);
       const assetClass = getAssetClassAbbreviation(holding);
-      const gap = getHoldingGap(holding, isLongs);
       const shares = getResizeShares(holding, isLongs);
       const action = getActionForResize(shares, isLongs);
       const dayGainLoss = getDayGainLossValue(holding);
-      const positionSizeParameter = getPositionSizeParameter(holding, isLongs);
 
       return (
         <tr key={`${isLongs ? 'long' : 'short'}-${holding.symbol}-${index}`} className="pcv2-ledger-row">
           <td className="pcv2-ticker">
             <span title={holdingSourceTitle(holding) || undefined}>
               {holding.symbol}
-              {holding.warning ? ' ⚠' : ''}
+              {renderHoldingWarningIcon(holding)}
             </span>
           </td>
           <td className="pcv2-num">{assetClass}</td>
           <td className="pcv2-num">{formatPct(isLongs ? pctOfAccount : -pctOfAccount, 2)}</td>
           <td className="pcv2-num">{renderTargetControl(holding, isLongs, pctOfAccount)}</td>
-          <td className={`pcv2-num ${gap === null ? '' : gap >= 0 ? 'pcv2-negative' : 'pcv2-under'}`}>{gap === null ? '--' : formatBps(gap)}</td>
           <td>{sleeve}</td>
-          <td className="pcv2-num">{positionSizeParameter}</td>
           <td className={`pcv2-num ${isLongs ? 'pcv2-positive' : 'pcv2-negative'}`}>{formatPct(isLongs ? pctOfAccount : -pctOfAccount, 1, { signed: true })}</td>
           <td className="pcv2-num">{shares ? (shares > 0 ? `+${shares}` : shares) : '0'}</td>
           <td className={`pcv2-num ${dayGainLoss > 0 ? 'pcv2-positive' : dayGainLoss < 0 ? 'pcv2-negative' : ''}`}>{dayGainLoss === null ? '--' : formatSignedCurrency(dayGainLoss)}</td>
@@ -1619,9 +1530,7 @@ const PortfolioBreakdown = ({
         <th className="pcv2-num">AC</th>
         <th className="pcv2-num">Weight %<br />(NAV)</th>
         <th className="pcv2-num">Target %<br />(NAV)</th>
-        <th className="pcv2-num">Gap<br />(BPS)</th>
-        <th>Sleeve</th>
-        <th className="pcv2-num">Pos Size<br />Params</th>
+        <th>Factor</th>
         <th className="pcv2-num">Factor Ctrb</th>
         <th className="pcv2-num">Resize<br />(Shares)</th>
         <th className="pcv2-num">Day G/L<br />(USD)</th>
@@ -1656,43 +1565,6 @@ const PortfolioBreakdown = ({
     );
   };
 
-  const renderPositionSizingGuide = () => (
-    <div className="pcv2-sizing-guide" aria-label="Position sizing guide">
-      <div className="pcv2-sizing-card pcv2-sizing-card--bps">
-        <div className="pcv2-sizing-title">Position Sizes</div>
-        <div className="pcv2-sizing-bps">
-          {POSITION_SIZE_BPS_STEPS.map((bps) => (
-            <div key={bps} className="pcv2-sizing-bps-item">
-              <span>{bps}:</span>
-              <span className="pcv2-sizing-value">
-                {totalValue > 0
-                  ? `$${Math.round((totalValue * bps) / 10000).toLocaleString()}`
-                  : '--'}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {[
-        { side: 'long', title: 'Longs', valueKey: 'long' },
-        { side: 'short', title: 'Shorts', valueKey: 'short' },
-      ].map((book) => (
-        <div key={book.side} className={`pcv2-sizing-card pcv2-sizing-card--${book.side}`}>
-          <div className="pcv2-sizing-title">{book.title}</div>
-          <div className="pcv2-sizing-ranges">
-            {POSITION_SIZE_GUIDE_ROWS.map((row) => (
-              <div key={`${book.side}-${row.label}`} className="pcv2-sizing-range-row">
-                <span>{row.label}</span>
-                <span className="pcv2-sizing-value">{row[book.valueKey]}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
   const renderUnifiedLedger = () => (
     <section className="pcv2-card pcv2-ledger-card">
       <div className="pcv2-ledger-toolbar">
@@ -1711,7 +1583,6 @@ const PortfolioBreakdown = ({
             <option value="weight">Weight</option>
             <option value="ticker">Ticker</option>
             <option value="name">Name</option>
-            <option value="gap">Gap</option>
             <option value="dayGainLoss">Day G/L</option>
           </select>
           <ChevronDown aria-hidden="true" />
@@ -1739,7 +1610,7 @@ const PortfolioBreakdown = ({
         {renderLedgerPane({ label: 'Shorts', rows: ledgerShorts, isLongs: false })}
       </div>
       <div className="pcv2-ledger-note">
-        Weights and targets are % of Net Liquidation Value (NAV). Gap in basis points (bps). Factor Contribution shows estimated impact on factor exposure.
+        Weights and targets are % of Net Liquidation Value (NAV). Factor Contribution shows estimated impact on factor exposure.
       </div>
     </section>
   );
@@ -1761,22 +1632,8 @@ const PortfolioBreakdown = ({
           <header className="pcv2-header">
             <div className="pcv2-header-main">
               <h2>Portfolio Construction</h2>
-              <div className="pcv2-header-meta">
-                <StatusDot
-                  updatedAt={statusDot.updatedAt || portfolioUpdatedAt}
-                  status={statusDot.status}
-                  emoji={statusDot.emoji}
-                  size={9}
-                  className="pcv2-header-status"
-                  label="Portfolio data"
-                  align="after"
-                  placement="bottom"
-                />
-                <span>{asOfLabel}</span>
-              </div>
             </div>
             <div className="pcv2-header-right">
-              {renderPositionSizingGuide()}
               <div className="pcv2-header-actions">
                 <button type="button" className="pcv2-export" onClick={handleExportCsv}>
                   <Download size={16} />
@@ -1913,7 +1770,7 @@ const PortfolioBreakdown = ({
                                   title={holdingSourceTitle(holding) || undefined}
                                 >
                                   {holding.symbol}
-                                  {holding.warning ? ' ⚠' : ''}
+                                  {renderHoldingWarningIcon(holding)}
                                 </span>
                               </div>
                             </td>
@@ -2050,7 +1907,7 @@ const PortfolioBreakdown = ({
                                   title={holdingSourceTitle(holding) || undefined}
                                 >
                                   {holding.symbol}
-                                  {holding.warning ? ' ⚠' : ''}
+                                  {renderHoldingWarningIcon(holding)}
                                 </span>
                               </div>
                             </td>

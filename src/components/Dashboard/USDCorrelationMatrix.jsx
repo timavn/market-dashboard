@@ -27,14 +27,30 @@ const formatPercentValue = (value) => {
 const corrHeatProps = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
-  const sign = numeric >= 0 ? 'pos' : 'neg';
-  // Correlations are in [-1, 1]. Keep tints subtle and consistent with Rates intensity scaling.
-  const intensity = Math.min(Math.abs(numeric), 1);
-  return { className: `region-mw-heat--${sign}`, style: { '--heat': intensity } };
+  // Classify the same two-decimal value the user sees in the matrix.
+  const displayedValue = Number(numeric.toFixed(2));
+  const magnitude = Math.abs(displayedValue);
+  if (magnitude <= 0.5) return { className: 'usd-corr-heat--neutral', style: {} };
+
+  const direction = displayedValue > 0 ? 'pos' : 'neg';
+  const strength = magnitude >= 0.75 ? 'strong' : 'light';
+  return { className: `usd-corr-heat--${direction}-${strength}`, style: {} };
 };
+
+const isCompleteCorrelationMetric = (metricCorrelations, metricRollingStats) => (
+  CORRELATION_PERIODS.every((period) => Number.isFinite(Number(metricCorrelations?.[`${period}D`])))
+  && ['high', 'low', 'percentPositive', 'percentNegative']
+    .every((key) => Number.isFinite(Number(metricRollingStats?.[key])))
+);
 
 const MetricIcon = ({ symbol }) => {
   switch (symbol) {
+    case 'FXVL':
+      return (
+        <span className="usd-metric-badge usd-metric-badge-fxvl" aria-hidden="true">
+          FX
+        </span>
+      );
     case 'CRB':
       return (
         <span className="usd-metric-badge usd-metric-badge-crb" aria-hidden="true">
@@ -89,14 +105,21 @@ const MetricIcon = ({ symbol }) => {
   }
 };
 
-const USDCorrelationMatrix = ({
-  correlations,
-  rollingStats,
-  correlationsTimestamp,
-  calculationDate,
-  loading,
-  error
-}) => {
+const USDCorrelationMatrix = (props) => {
+  const {
+    state,
+    variant = 'default',
+  } = props;
+  const resolvedState = state !== undefined ? (state || {}) : props;
+  const {
+    correlations,
+    rollingStats,
+    correlationsTimestamp,
+    calculationDate,
+    loading = false,
+    error = null,
+  } = resolvedState;
+  const onRetry = resolvedState.onRetry || resolvedState.retry || props.onRetry;
   const hasData = Boolean(correlations && rollingStats);
 
   const calculationDateTime = useMemo(() => {
@@ -149,13 +172,17 @@ const USDCorrelationMatrix = ({
   }, [effectiveUpdatedAt, freshness, calculationDateTime, calculationDate]);
 
   return (
-    <div className="usd-correlation-panel region-chart-panel--mw">
+    <div
+      className={`usd-correlation-panel usd-correlation-panel--${variant} region-chart-panel--mw`}
+      data-testid="usd-correlation-panel"
+      data-variant={variant}
+    >
       <div className="region-chart-header region-chart-header--mw usd-correlation-header--mw">
         <div className="region-header-left">
           <span className="card-header-icon card-header-icon--blue">
             <Share2 size={16} strokeWidth={2} />
           </span>
-          <span className="region-label region-label--lg">Key USD Correlations</span>
+          <span className="region-label region-label--lg">USD Correlations</span>
         </div>
         <div className="usd-correlation-header-note">
           <span className="usd-correlation-header-note-item">*Days = Trading Days</span>
@@ -163,14 +190,16 @@ const USDCorrelationMatrix = ({
           <span className="usd-correlation-header-note-item">52-Wk Rolling</span>
           <span className="usd-correlation-header-note-sep" aria-hidden="true">•</span>
           <span className="usd-correlation-header-note-item">30D Correlation</span>
-          <StatusDot
-            updatedAt={effectiveUpdatedAt}
-            status={statusState}
-            size={8}
-            label="USD Correlations"
-            emoji={statusEmoji}
-            sources={statusSources}
-          />
+          {variant !== 'radar' ? (
+            <StatusDot
+              updatedAt={effectiveUpdatedAt}
+              status={statusState}
+              size={8}
+              label="USD Correlations"
+              emoji={statusEmoji}
+              sources={statusSources}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -180,7 +209,14 @@ const USDCorrelationMatrix = ({
             <div className="usd-correlation-state loading">Loading correlation data...</div>
           ) : null}
           {!loading && error ? (
-            <div className="usd-correlation-state error">Error loading correlation data: {error}</div>
+            <div className="usd-correlation-state error" role="alert">
+              <span>Error loading correlation data: {error}</span>
+              {onRetry ? (
+                <button type="button" className="usd-correlation-retry" onClick={onRetry}>
+                  Retry
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {!loading && !error && !hasData ? (
             <div className="usd-correlation-state">No correlation data available</div>
@@ -219,19 +255,33 @@ const USDCorrelationMatrix = ({
                 {USD_METRICS.map((metric) => {
                   const metricCorrelations = correlations[metric.symbol] || {};
                   const metricRollingStats = rollingStats[metric.symbol] || {};
+                  const metricAvailable = isCompleteCorrelationMetric(
+                    metricCorrelations,
+                    metricRollingStats,
+                  );
                   return (
-                    <tr key={metric.symbol} className="region-mw-tr">
+                    <tr
+                      key={metric.symbol}
+                      className={`region-mw-tr${metricAvailable ? '' : ' usd-corr-row--unavailable'}`}
+                      aria-label={metricAvailable ? undefined : `${metric.symbol} correlation data unavailable`}
+                      title={metricAvailable ? undefined : `${metric.name} requires current provider history`}
+                    >
                       <td className="region-mw-td region-mw-td-name usd-corr-td-metric">
                         <span className="usd-metric-icon" aria-hidden="true">
                           <MetricIcon symbol={metric.symbol} />
                         </span>
                         <span className="usd-corr-metric-symbol">{metric.symbol}</span>
                         <span className="usd-corr-metric-name">{metric.name}</span>
+                        {!metricAvailable ? <span className="usd-corr-metric-status">NO DATA</span> : null}
                       </td>
                       {CORRELATION_PERIODS.map((period) => {
                         const correlation = metricCorrelations[`${period}D`];
-                        const displayValue = CorrelationHelpers.formatCorrelation(correlation);
-                        const heat = corrHeatProps(correlation);
+                        const displayValue = metricAvailable
+                          ? CorrelationHelpers.formatCorrelation(correlation)
+                          : '--';
+                        const heat = metricAvailable
+                          ? corrHeatProps(correlation)
+                          : { className: 'region-mw-heat--na', style: {} };
                         return (
                           <td
                             key={period}
@@ -243,16 +293,16 @@ const USDCorrelationMatrix = ({
                         );
                       })}
                       <td className="region-mw-td region-mw-td-num usd-corr-td-center usd-corr-sep-left">
-                        {formatNumeric(metricRollingStats.high, 2)}
+                        {metricAvailable ? formatNumeric(metricRollingStats.high, 2) : '--'}
                       </td>
                       <td className="region-mw-td region-mw-td-num usd-corr-td-center">
-                        {formatNumeric(metricRollingStats.low, 2)}
+                        {metricAvailable ? formatNumeric(metricRollingStats.low, 2) : '--'}
                       </td>
                       <td className="region-mw-td region-mw-td-num usd-corr-td-center usd-corr-sep-left">
-                        {formatPercentValue(metricRollingStats.percentPositive)}
+                        {metricAvailable ? formatPercentValue(metricRollingStats.percentPositive) : '--'}
                       </td>
                       <td className="region-mw-td region-mw-td-num usd-corr-td-center">
-                        {formatPercentValue(metricRollingStats.percentNegative)}
+                        {metricAvailable ? formatPercentValue(metricRollingStats.percentNegative) : '--'}
                       </td>
                     </tr>
                   );
@@ -266,4 +316,6 @@ const USDCorrelationMatrix = ({
   );
 };
 
+export { isCompleteCorrelationMetric };
+export { corrHeatProps };
 export default USDCorrelationMatrix;

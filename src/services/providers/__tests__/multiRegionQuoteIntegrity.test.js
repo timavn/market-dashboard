@@ -1,0 +1,86 @@
+const {
+  toQuoteInstrument,
+  classifyQuoteAvailability,
+  buildQuoteMetadata,
+  buildPeriodReturnsMetadata,
+} = require('../multiRegionQuoteIntegrity.cjs');
+
+const now = () => new Date().toISOString();
+
+describe('multi-region quote integrity', () => {
+  it('builds an explicit provider descriptor without leaking display fields', () => {
+    expect(toQuoteInstrument({
+      symbol: 'USDCAD',
+      name: 'USD/CAD',
+      secType: 'CASH',
+      provider: 'yahoo',
+      yahooSymbol: 'USDCAD=X',
+    })).toEqual({
+      symbol: 'USDCAD',
+      secType: 'CASH',
+      exchange: undefined,
+      currency: undefined,
+      conId: undefined,
+      provider: 'yahoo',
+      providerSymbol: 'USDCAD=X',
+    });
+  });
+
+  it('classifies only verified provider shapes as usable', () => {
+    expect(classifyQuoteAvailability({ price: '100', source: 'ibkr', dataType: 'live', timestamp: now() }))
+      .toBe('current');
+    expect(classifyQuoteAvailability({
+      price: '100',
+      source: 'yahoo',
+      dataType: 'delayed',
+      timestamp: now(),
+      warning: 'ibkr: stale_quote; yahoo_fallback',
+    })).toBe('delayed');
+    expect(classifyQuoteAvailability({ price: '4.25', source: 'fred', dataType: 'historical', timestamp: '2026-07-10T00:00:00.000Z' }))
+      .toBe('historical');
+  });
+
+  it.each([
+    [{ price: null, source: 'ibkr', timestamp: now() }, 'missing price'],
+    [{ price: '100', source: 'ibkr', timestamp: null }, 'missing timestamp'],
+    [{ price: '100', source: 'cache', timestamp: now() }, 'cache-only source'],
+    [{ price: '100', source: 'mock', timestamp: now() }, 'mock source'],
+    [{ price: '100', source: 'ibkr', timestamp: now(), warning: 'stale_quote' }, 'stale IBKR warning'],
+    [{ price: '100', source: 'yahoo', dataType: 'delayed', timestamp: '2026-06-01T00:00:00.000Z' }, 'stale delayed quote'],
+    [{ symbol: 'BTC', price: '63000', source: 'yahoo', dataType: 'delayed', timestamp: '2026-07-13T02:00:00.000Z' }, 'stale continuous crypto quote'],
+    [{ price: '100', source: 'ibkr', timestamp: now(), entitlementStatus: 'not_entitled' }, 'denied entitlement'],
+    [{ price: '100', source: 'unknown', timestamp: now() }, 'unknown source'],
+  ])('marks %s unavailable (%s)', (quote) => {
+    expect(classifyQuoteAvailability(quote)).toBe('unavailable');
+  });
+
+  it('clears quoteAsOf when a quote is unavailable while preserving diagnostics', () => {
+    expect(buildQuoteMetadata({
+      price: '100',
+      source: 'ibkr',
+      dataType: 'live',
+      timestamp: now(),
+      warning: 'provider_offline',
+    })).toMatchObject({
+      availability: 'unavailable',
+      quoteAsOf: null,
+      warning: 'provider_offline',
+      usable: false,
+    });
+  });
+
+  it('labels dated period returns historical and missing returns unavailable', () => {
+    expect(buildPeriodReturnsMetadata({
+      weekChangePct: 1.2,
+      monthChangePct: 2.3,
+      asOf: '2026-07-10T00:00:00.000Z',
+    })).toEqual({
+      periodReturnsAsOf: '2026-07-10T00:00:00.000Z',
+      periodReturnsStatus: 'historical',
+    });
+    expect(buildPeriodReturnsMetadata(null)).toEqual({
+      periodReturnsAsOf: null,
+      periodReturnsStatus: 'unavailable',
+    });
+  });
+});

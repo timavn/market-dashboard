@@ -1,0 +1,87 @@
+.ev-window-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px 12px 12px;
+}
+
+.ev-window-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.ev-window-sidebar,
+.ev-window-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 3px;
+}
+
+.ev-window-sidebar {
+  padding-left: 8px;
+}
+
+.ev-window-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ev-window-main > * {
+  flex: 0 0 auto;
+}
+
+.ev-control-card {
+  padding: 10px !important;
+}
+
+.ev-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ev-control-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ev-control-section {
+  margin-top: 10px;
+  padding-top: 9px;
+}
+
+.ev-control-heading {
+  margin-bottom: 6px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 900px) {
+  .ev-window-content {
+    overflow-y: auto;
+  }
+
+  .ev-window-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .ev-window-sidebar,
+  .ev-window-main {
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .ev-window-sidebar {
+    padding-left: 0;
+  }
+}

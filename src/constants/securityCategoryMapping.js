@@ -15,9 +15,18 @@ export const SECURITY_CATEGORY_MAPPING = {
   'SHY': { type: 'fixedIncomeSectors', category: 'Short Duration Treasurys' },
   'TIP': { type: 'fixedIncomeSectors', category: 'TIPS' },
   'TLT': { type: 'fixedIncomeSectors', category: 'Long Bond' },
+  'BIL': { type: 'assetClasses', category: 'Cash' },
+  'CLIP': { type: 'assetClasses', category: 'Cash' },
+  'GBIL': { type: 'assetClasses', category: 'Cash' },
+  'SGOV': { type: 'assetClasses', category: 'Cash' },
+  'SHV': { type: 'assetClasses', category: 'Cash' },
+  'TBIL': { type: 'assetClasses', category: 'Cash' },
+  'TFLO': { type: 'assetClasses', category: 'Cash' },
   'UST10Y': { type: 'fixedIncomeSectors', category: 'Treasury Belly' },
   'UST2Y': { type: 'fixedIncomeSectors', category: 'Short Duration Treasurys' },
   'UST30Y': { type: 'fixedIncomeSectors', category: 'Long Bond' },
+  'USFR': { type: 'assetClasses', category: 'Cash' },
+  'XBIL': { type: 'assetClasses', category: 'Cash' },
   'BNDX': { type: 'assetClasses', category: 'Fixed Income' },
   'IGOV': { type: 'assetClasses', category: 'Fixed Income' },
   'CLOZ': { type: 'fixedIncomeSectors', category: 'HY Credit' },
@@ -244,7 +253,6 @@ export const getVolatilityMetrics = (ticker) => {
 export const getSecurityCategory = (ticker) => {
   return SECURITY_CATEGORY_MAPPING[ticker] || null;
 };
-
 
 
 

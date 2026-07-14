@@ -2,7 +2,7 @@
 // Complete list of tradeable ETFs and securities
 // Generated from securities universe compilation - 119 securities
 
-import { getSecurityCategory } from './securityCategoryMapping';
+import { getSecurityCategory } from './securityCategoryMapping.js';
 
 export const SECURITIES_LIST = [
   // Fixed Income (Treasury + Corporate Bonds)

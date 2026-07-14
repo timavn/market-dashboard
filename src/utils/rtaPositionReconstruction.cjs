@@ -39,7 +39,49 @@ function deriveNetBias(longCount, shortCount) {
   return longCount > shortCount ? 'long' : 'short';
 }
 
-function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90 } = {}) {
+function getTimeMs(value) {
+  if (!value) return 0;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function seedBaselinePositions(positionMap, baseline = {}) {
+  const asOf = baseline.asOf || baseline.lastUpdated || null;
+  const positions = Array.isArray(baseline.holdings)
+    ? baseline.holdings
+    : [
+        ...(Array.isArray(baseline.longs)
+          ? baseline.longs.map((ticker) => ({ ticker, side: 'long' }))
+          : []),
+        ...(Array.isArray(baseline.shorts)
+          ? baseline.shorts.map((ticker) => ({ ticker, side: 'short' }))
+          : []),
+      ];
+
+  positions.forEach((position) => {
+    const ticker = normalizeTicker(position?.ticker || position);
+    const side = String(position?.side || '').toLowerCase() === 'short' ? 'short' : 'long';
+    if (!ticker) return;
+    positionMap.set(ticker, {
+      ticker,
+      side,
+      name: position?.name || ticker,
+      openedAt: position?.openedAt || asOf,
+      lastActionAt: position?.lastActionAt || asOf,
+      source: position?.source || 'rta-benchmark',
+    });
+  });
+
+  return asOf;
+}
+
+function normalizeAction(rawAction) {
+  const action = String(rawAction || '').toUpperCase().replace(/\s+/g, '-');
+  if (action === 'COVER-SOME') return 'COVER';
+  return action;
+}
+
+function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline = null } = {}) {
   const orderedSnapshots = Array.isArray(snapshots)
     ? [...snapshots].sort((a, b) => {
         const dateCompare = String(a?.date || '').localeCompare(String(b?.date || ''));
@@ -49,7 +91,9 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90 } = {}) {
     : [];
 
   const positionMap = new Map();
-  let lastUpdated = null;
+  const baselineAsOf = baseline ? seedBaselinePositions(positionMap, baseline) : null;
+  const baselineAsOfMs = getTimeMs(baselineAsOf);
+  let lastUpdated = baselineAsOf || null;
 
   orderedSnapshots.forEach((snapshot) => {
     const date = snapshot?.date || null;
@@ -57,10 +101,13 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90 } = {}) {
 
     alerts.forEach((alert) => {
       const ticker = normalizeTicker(alert?.ticker);
-      const action = String(alert?.action || '').toUpperCase();
+      const action = normalizeAction(alert?.action);
       if (!ticker || !action) return;
 
       const eventTime = getAlertTime(alert, date);
+      if (baselineAsOfMs > 0 && getTimeMs(eventTime || date) <= baselineAsOfMs) {
+        return;
+      }
       if (eventTime) {
         lastUpdated = eventTime;
       }
@@ -76,11 +123,6 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90 } = {}) {
       }
 
       if (action === 'SELL') {
-        const existing = positionMap.get(ticker);
-        if (existing?.side === 'long' && alert?.intent !== 'open-short') {
-          positionMap.delete(ticker);
-          return;
-        }
         openPosition(positionMap, ticker, 'short', alert, date);
         return;
       }
@@ -96,10 +138,7 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90 } = {}) {
       if (action === 'SELL-SOME') {
         const existing = positionMap.get(ticker);
         if (existing?.side === 'long') {
-          positionMap.set(ticker, {
-            ...existing,
-            lastActionAt: eventTime,
-          });
+          positionMap.delete(ticker);
         }
         return;
       }
@@ -131,6 +170,16 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90 } = {}) {
     available: holdings.length > 0,
     lastUpdated,
     windowDays,
+    positionSource: 'alert-reconstruction',
+    positionSourceConfidence: 'high',
+    baseline: baseline
+      ? {
+          id: baseline.id || null,
+          asOf: baselineAsOf,
+          source: baseline.source || 'rta-benchmark',
+        }
+      : null,
+    reconstructionWarnings: [],
     longCount,
     shortCount,
     ratioText: formatRatioText(longCount, shortCount),
@@ -140,6 +189,7 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90 } = {}) {
 }
 
 module.exports = {
+  seedBaselinePositions,
   normalizeRealTimeAlerts,
   summarizeRealTimeAlertPositions,
   formatRatioText,

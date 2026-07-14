@@ -1,9 +1,10 @@
 // USD Market Data Constants
 
 export const USD_METRICS = [
+  { symbol: 'FXVL', name: 'G5 FX CVOL Index', provider: 'CME Group' },
   { symbol: 'SPX', name: 'S&P 500', yahooTicker: '^GSPC' },
   { symbol: 'BRENT', name: 'Brent', yahooTicker: 'BZ=F' },
-  { symbol: 'CRB', name: 'CRB Index', yahooTicker: '^CRB' },
+  { symbol: 'CRB', name: 'CRB Index', yahooTicker: '^TRCCRB' },
   { symbol: 'GOLD', name: 'Gold', yahooTicker: 'GC=F' },
   { symbol: 'BTC', name: 'Bitcoin', yahooTicker: 'BTC-USD' }
 ];
@@ -47,7 +48,7 @@ export const USD_API_ENDPOINTS = {
 export const REFRESH_INTERVALS = {
   DXY: 5 * 60 * 1000,        // 5 minutes
   CURRENCY_PAIRS: 5 * 60 * 1000, // 5 minutes
-  CORRELATIONS: 24 * 60 * 60 * 1000, // 24 hours (daily updates)
+  CORRELATIONS: 60 * 60 * 1000, // 1 hour; API result is cached for the same duration
   DASHBOARD: 15 * 60 * 1000  // 15 minutes
 };
 

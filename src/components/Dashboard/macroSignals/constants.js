@@ -1,6 +1,6 @@
 import { computeRiskRangePercents } from '../../../utils/riskRangePercents';
 
-/** @typedef {'EQ'|'FI'|'FX'|'CMD'|'CRPT'} MacroAssetClass */
+/** @typedef {'MACRO'|'EQ'|'FI'|'FX'|'CMD'|'CRPT'} MacroAssetClass */
 
 function mockRangePercents(forecastLow, forecastHigh, spotPrice) {
   const p = computeRiskRangePercents(spotPrice, forecastLow, forecastHigh);
@@ -11,15 +11,31 @@ function mockRangePercents(forecastLow, forecastHigh, spotPrice) {
   };
 }
 
-/** Default tab (Equities / Index group) */
-export const DEFAULT_ASSET_CLASS = 'EQ';
+/** Default tab (aggregate macro view) */
+export const DEFAULT_ASSET_CLASS = 'MACRO';
 
 export const MACRO_ASSET_TABS = [
+  { assetClass: 'MACRO', title: 'Macro', group: 'Macro' },
   { assetClass: 'EQ', title: 'Equities', group: 'Index' },
   { assetClass: 'FI', title: 'Fixed Income', group: 'Rates' },
   { assetClass: 'FX', title: 'FX', group: 'FX' },
   { assetClass: 'CMD', title: 'Commodities', group: 'Commodities' },
   { assetClass: 'CRPT', title: 'Crypto', group: 'Crypto' },
+];
+
+export const BROAD_MACRO_SIGNAL_SYMBOLS = [
+  'UST2Y',
+  'UST10Y',
+  'UST30Y',
+  'DXY',
+  'USD',
+  'VIX',
+  'GOLD',
+  'GLD',
+  'WTIC',
+  'WTI',
+  'BRENT',
+  'COPPER',
 ];
 
 /** Map Hedgeye / universe `group` to segmented tab key */

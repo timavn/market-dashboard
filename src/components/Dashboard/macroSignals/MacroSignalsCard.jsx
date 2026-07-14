@@ -5,9 +5,14 @@ import LoadingIndicator from '../../common/LoadingIndicator';
 import StatusDot from '../../common/StatusDot';
 import Pmv2CardChrome from '../Pmv2CardChrome';
 import AssetTabs from './AssetTabs';
+import InflationNowcastPanel from './InflationNowcastPanel';
 import SignalSection from './SignalSection';
 import { isInActionZone, isOutOfRange } from './SignalRow';
-import { DEFAULT_MOCK_SIGNALS, DEFAULT_ASSET_CLASS } from './constants';
+import {
+  BROAD_MACRO_SIGNAL_SYMBOLS,
+  DEFAULT_MOCK_SIGNALS,
+  DEFAULT_ASSET_CLASS,
+} from './constants';
 import {
   buildMacroUploadSources,
   deriveMacroUploadAggregateStatus,
@@ -36,6 +41,17 @@ function hasForecastRange(signal) {
   return Number.isFinite(low) && Number.isFinite(high);
 }
 
+const BROAD_MACRO_SIGNAL_SYMBOL_SET = new Set(BROAD_MACRO_SIGNAL_SYMBOLS);
+
+function isBroadMacroSignal(signal) {
+  const ticker = String(signal?.ticker || '').toUpperCase();
+  const canonicalSymbol = String(signal?.canonical?.symbol || '').toUpperCase();
+  return (
+    BROAD_MACRO_SIGNAL_SYMBOL_SET.has(ticker) ||
+    BROAD_MACRO_SIGNAL_SYMBOL_SET.has(canonicalSymbol)
+  );
+}
+
 function MacroSignalsCard({
   signals,
   selectedSignal,
@@ -44,6 +60,7 @@ function MacroSignalsCard({
   error = null,
   onRefresh,
   uploadFreshness = null,
+  inflationNowcast = null,
 }) {
   const [selectedAssetClass, setSelectedAssetClass] = useState(DEFAULT_ASSET_CLASS);
 
@@ -52,7 +69,9 @@ function MacroSignalsCard({
 
   // Filter by selected asset-class tab
   const filteredSignals = useMemo(
-    () => effectiveSignals.filter(s => s.assetClass === selectedAssetClass),
+    () => selectedAssetClass === 'MACRO'
+      ? effectiveSignals.filter(isBroadMacroSignal)
+      : effectiveSignals.filter(s => s.assetClass === selectedAssetClass),
     [effectiveSignals, selectedAssetClass],
   );
 
@@ -115,7 +134,7 @@ function MacroSignalsCard({
       className="macro-signals-card pmv2-card-chrome--with-tabs"
       titleId="macro-signals-title-heading"
       icon={<BarChart2 size={16} />}
-      title="Macro Signals"
+      title="Signals"
       actions={(
         <StatusDot
           updatedAt={uploadUpdatedAt}
@@ -156,6 +175,9 @@ function MacroSignalsCard({
         />
       ) : (
         <>
+          {selectedAssetClass === 'MACRO' && (
+            <InflationNowcastPanel inflationNowcast={inflationNowcast} />
+          )}
           {longs.length > 0 && (
             <SignalSection
               variant="long"

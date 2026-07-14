@@ -1,15 +1,8 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import PortfolioBreakdown from '../PortfolioBreakdown';
 import PortfolioSidebarSnapshot from '../portfolio/PortfolioSidebarSnapshot';
-import { MarketDataService } from '../../../services/api/marketDataService';
-
-jest.mock('../../../services/api/marketDataService', () => ({
-  MarketDataService: {
-    getPortfolioCorrelationConcentration: jest.fn(),
-  },
-}));
 
 const portfolioData = {
   dataSource: 'ibkr_api',
@@ -27,53 +20,40 @@ const portfolioData = {
   },
 };
 
-const concentrationResponse = {
-  scores: {
-    concentrationScore: 42,
-    effectiveIndependentBets: 2.4,
-    largestClusterPct: 18,
-    grossPct: 18,
-    netPct: 18,
-  },
-  coverage: {
-    scoredPct: 18,
-    scoredCount: 2,
-    unscoredCount: 1,
-    cashPct: 5,
-  },
-  clusters: [
-    {
-      id: 'GLD-NEM',
-      label: 'Gold',
-      memberCount: 2,
-      grossClusterPct: 18,
-      netClusterPct: 18,
-      longPct: 18,
-      shortPct: 0,
-      correlationAdjustedGrossPct: 17.8,
-      topDriver: 'GLD',
-      members: [
-        { symbol: 'GLD', label: 'Gold', labelSource: 'expected-value' },
-        { symbol: 'NEM', label: 'Gold', labelSource: 'correlated-anchor' },
-      ],
-    },
-  ],
-  pairwise: [
-    { symbols: ['GLD', 'NEM'], correlation: 0.83, weightedImpact: 80 },
-  ],
-  unscored: [
-    { symbol: 'OPT', reason: 'Options are unscored in v1' },
-  ],
-};
+function currentNyDate() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
 
-function createDeferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
+function currentLocalDate() {
+  return new Date().toLocaleDateString('en-CA');
+}
+
+function makeHoldings(longCount, shortCount) {
+  return [
+    ...Array.from({ length: longCount }, (_, index) => ({
+      symbol: `LONG${index}`,
+      quantity: 1,
+      marketValue: 1000 + index,
+    })),
+    ...Array.from({ length: shortCount }, (_, index) => ({
+      symbol: `SHORT${index}`,
+      quantity: -1,
+      marketValue: -1000 - index,
+    })),
+  ];
+}
+
+function makeEtfProRows(longCount, shortCount) {
+  return [
+    ...Array.from({ length: longCount }, (_, index) => ({
+      ticker: `EL${index}`,
+      call: 'Long',
+    })),
+    ...Array.from({ length: shortCount }, (_, index) => ({
+      ticker: `ES${index}`,
+      call: 'Short',
+    })),
+  ];
 }
 
 function renderSidebar(props = {}) {
@@ -84,8 +64,20 @@ function renderSidebar(props = {}) {
       loading={false}
       rtaPositions={{ available: true, longCount: 0, shortCount: 0 }}
       etfProSnapshot={{ rows: [] }}
+      hedgeyeChangelog={null}
+      hedgeyeChangelogLoading={false}
+      hedgeyeChangelogLastSuccessAt="2026-06-18T13:00:00Z"
       accounts={['U25779973']}
       connection={{ connected: true }}
+      predictionMarketProviderStatus={{
+        providers: {
+          ibkr: {
+            status: 'connected',
+            gateway: { ok: true },
+            contracts_total: 7,
+          },
+        },
+      }}
       selectedAccount="U25779973"
       onAccountChange={jest.fn()}
       onRefresh={jest.fn()}
@@ -94,120 +86,341 @@ function renderSidebar(props = {}) {
   );
 }
 
-describe('PortfolioSidebarSnapshot correlation / exposure lens', () => {
-  beforeEach(() => {
-    MarketDataService.getPortfolioCorrelationConcentration.mockReset();
+describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
+  test('does not render the removed correlation / exposure card', () => {
+    renderSidebar();
+    const positionTable = screen.getByRole('table', {
+      name: /portfolio versus rta and etf pro position comparison/i,
+    });
+
+    expect(screen.queryByText('Correlation / Exposure')).not.toBeInTheDocument();
+    expect(screen.queryByText('Calculating correlation...')).not.toBeInTheDocument();
+    expect(screen.getByText('Gross Exposure')).toBeInTheDocument();
+    expect(within(positionTable).getByText('Portfolio')).toBeInTheDocument();
+    expect(within(positionTable).getByText('RTA')).toBeInTheDocument();
   });
 
-  test('renders first-load loading state', () => {
-    const initial = createDeferred();
-    MarketDataService.getPortfolioCorrelationConcentration.mockReturnValue(initial.promise);
+  test('ignores stale API summary counts and uses holdings-derived side counts', () => {
+    renderSidebar({
+      portfolioData: {
+        ...portfolioData,
+        summary: {
+          ...portfolioData.summary,
+          longCount: 20,
+          shortCount: 26,
+        },
+        holdings: [
+          { symbol: 'DBMF', quantity: -200, marketValue: 12000 },
+          { symbol: 'VFC', quantity: 400, marketValue: -8000 },
+          { symbol: 'CLOSED', quantity: 0, marketValue: 0 },
+        ],
+      },
+    });
+    const positionTable = screen.getByRole('table', {
+      name: /portfolio versus rta and etf pro position comparison/i,
+    });
 
-    renderSidebar();
-
-    expect(screen.getByText('Correlation / Exposure')).toBeInTheDocument();
-    expect(screen.getByText('Calculating correlation...')).toBeInTheDocument();
+    expect(within(positionTable).queryByText('20')).not.toBeInTheDocument();
+    expect(within(positionTable).queryByText('26')).not.toBeInTheDocument();
+    expect(within(positionTable).getAllByText('1').length).toBeGreaterThanOrEqual(2);
   });
 
-  test('renders populated concentration data', async () => {
-    MarketDataService.getPortfolioCorrelationConcentration.mockResolvedValue(concentrationResponse);
+  test('shows live dollar amounts and keeps 165% gross exposure within the 200% scale', () => {
+    renderSidebar({
+      portfolioData: {
+        ...portfolioData,
+        holdings: [
+          { symbol: 'LONGS', quantity: 1, marketValue: 109000 },
+          { symbol: 'SHORTS', quantity: -1, marketValue: -56000 },
+        ],
+        accountSummary: {
+          netLiquidation: 100000,
+          totalCashValue: 48000,
+          currency: 'USD',
+        },
+      },
+      hedgeyeChangelogLastSuccessAt: '2026-06-18T13:00:00Z',
+    });
 
-    renderSidebar();
+    expect(screen.getByText('165%')).toBeInTheDocument();
+    expect(screen.getByText('($165,000)')).toBeInTheDocument();
+    expect(screen.getByText('53%')).toBeInTheDocument();
+    expect(screen.getByText('(+53,000)')).toBeInTheDocument();
+    expect(screen.getByText('48%')).toBeInTheDocument();
+    expect(screen.getByText('($48,000)')).toBeInTheDocument();
 
-    expect((await screen.findAllByText('Gold')).length).toBeGreaterThan(0);
-    expect(screen.getByText('2.4')).toBeInTheDocument();
-    expect(screen.getAllByText('Long-biased').length).toBeGreaterThan(0);
-    expect(screen.getByText('GLD')).toBeInTheDocument();
-    expect(screen.getByText('NEM')).toBeInTheDocument();
-    expect(screen.getByText('Cash 5%')).toBeInTheDocument();
-    expect(screen.getByText('Unscored 1')).toBeInTheDocument();
-    expect(screen.getByText('OPT')).toBeInTheDocument();
-  });
-
-  test('renders endpoint errors instead of a blank panel', async () => {
-    MarketDataService.getPortfolioCorrelationConcentration.mockRejectedValue(new Error('Correlation failed'));
-
-    renderSidebar();
-
-    await waitFor(() => {
-      expect(screen.getByText('Correlation failed')).toBeInTheDocument();
+    expect(screen.getByTestId('exposure-segment-gross-exposure')).toHaveStyle({
+      left: '50%',
+      width: '41.25%',
     });
   });
 
-  test('does not refetch when an equivalent portfolio poll changes object identity', async () => {
-    MarketDataService.getPortfolioCorrelationConcentration.mockResolvedValue(concentrationResponse);
+  test('keeps live Gateway exposure visible when Flex baseline is unavailable', () => {
+    renderSidebar({
+      portfolioData: {
+        ...portfolioData,
+        holdings: [
+          { symbol: 'LONGS', quantity: 1, marketValue: 109000 },
+          { symbol: 'SHORTS', quantity: -1, marketValue: -56000 },
+        ],
+        accountSummary: {
+          netLiquidation: 100000,
+          totalCashValue: 48000,
+          currency: 'USD',
+        },
+      },
+      exposureReconciliation: {
+        status: 'disabled',
+        source: 'ibkr_flex_web_service',
+        flex: null,
+      },
+    });
 
-    const { rerender } = renderSidebar();
-    expect((await screen.findAllByText('Gold')).length).toBeGreaterThan(0);
-    expect(MarketDataService.getPortfolioCorrelationConcentration).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('165%')).toBeInTheDocument();
+    expect(screen.getByText('Flex baseline')).toBeInTheDocument();
+    expect(screen.getByText('Flex baseline disabled')).toBeInTheDocument();
+    expect(screen.queryByText('Long funding gap')).not.toBeInTheDocument();
+  });
 
-    rerender(
-      <PortfolioSidebarSnapshot
-        portfolioData={{
-          ...portfolioData,
-          holdings: [
-            { ...portfolioData.holdings[0], marketValue: 10020 },
-            { ...portfolioData.holdings[1], marketValue: 8010 },
+  test('shows Flex funding gap as a reconciliation baseline, not live exposure', () => {
+    renderSidebar({
+      portfolioData: {
+        ...portfolioData,
+        holdings: [
+          { symbol: 'LIVE_LONG', quantity: 1, marketValue: 100000 },
+          { symbol: 'LIVE_SHORT', quantity: -1, marketValue: -25000 },
+        ],
+        accountSummary: {
+          netLiquidation: 100000,
+          totalCashValue: 25000,
+          currency: 'USD',
+        },
+      },
+      exposureReconciliation: {
+        status: 'ready',
+        source: 'ibkr_flex_web_service',
+        flex: {
+          date: '2026-06-23',
+          reportDate: '2026-06-23',
+          accountId: 'U25779973',
+          currency: 'USD',
+          positionCount: 2,
+          exposure: {
+            hasData: true,
+            nlv: 100000,
+            longMV: 108000,
+            shortMV: 25000,
+            grossMV: 133000,
+            netMV: 83000,
+            cashValue: 10000,
+            longPct: 108,
+            shortPct: 25,
+            grossPct: 133,
+            netPct: 83,
+            cashPct: 10,
+            targetCashBuffer: 5000,
+            equityCashSurplus: -8000,
+            longFundingGap: 13000,
+          },
+        },
+      },
+    });
+
+    expect(screen.getByText('Flex baseline')).toBeInTheDocument();
+    expect(screen.getByText('Long funding gap')).toBeInTheDocument();
+    expect(screen.getByText('$13,000')).toBeInTheDocument();
+    expect(screen.getByText('Cash surplus after longs')).toBeInTheDocument();
+    expect(screen.getByText('-$8,000')).toBeInTheDocument();
+    expect(screen.getByText(/Live vs Flex differs:/)).toBeInTheDocument();
+  });
+
+  test('renders latest Hedgeye updates feed items', () => {
+    const today = currentNyDate();
+    renderSidebar({
+      hedgeyeChangelog: {
+        'real-time-alert': {
+          currentDate: today,
+          eventTime: `${today}T13:00:00Z`,
+          alerts: [
+            { ticker: 'ATZAF', action: 'BUY', signalPhrase: 'ATZAF added to Long' },
           ],
-        }}
-        portfolioAccountsData={[]}
-        loading={false}
-        rtaPositions={{ available: true, longCount: 0, shortCount: 0 }}
-        etfProSnapshot={{ rows: [] }}
-        accounts={['U25779973']}
-        connection={{ connected: true }}
-        selectedAccount="U25779973"
-        onAccountChange={jest.fn()}
-        onRefresh={jest.fn()}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(MarketDataService.getPortfolioCorrelationConcentration).toHaveBeenCalledTimes(1);
+        },
+        'risk-ranges': {
+          currentDate: today,
+          eventTime: `${today}T08:00:00Z`,
+          trendChanges: [
+            { ticker: 'NVDA', oldTrend: 'BULLISH', newTrend: 'NEUTRAL' },
+          ],
+        },
+      },
     });
+
+    expect(screen.getByText('FEED')).toBeInTheDocument();
+    expect(screen.getByLabelText(/show last updated time for latest hedgeye updates/i)).toBeInTheDocument();
+    expect(screen.getByText('ATZAF')).toBeInTheDocument();
+    expect(screen.getByText('Added to')).toBeInTheDocument();
+    expect(screen.getByText('LONG')).toBeInTheDocument();
+    expect(screen.getByTestId('latest-update-source-ATZAF')).toHaveClass('pf-update__source');
+    expect(screen.getByTestId('latest-update-source-ATZAF')).toHaveTextContent('Real Time Alerts');
+    expect(screen.getByText('NVDA')).toBeInTheDocument();
+    expect(screen.getByText('BULLISH')).toBeInTheDocument();
+    expect(screen.getByText('NEUTRAL')).toBeInTheDocument();
   });
 
-  test('keeps stale data visible while a manual refresh is loading', async () => {
-    const refresh = createDeferred();
-    MarketDataService.getPortfolioCorrelationConcentration
-      .mockResolvedValueOnce(concentrationResponse)
-      .mockReturnValueOnce(refresh.promise);
-
-    renderSidebar();
-    expect((await screen.findAllByText('Gold')).length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole('button', { name: /^Refresh$/i }));
-
-    expect(MarketDataService.getPortfolioCorrelationConcentration).toHaveBeenCalledTimes(2);
-    expect(MarketDataService.getPortfolioCorrelationConcentration.mock.calls[1][0].forceRefresh).toBe(true);
-    expect(screen.getAllByText('Gold').length).toBeGreaterThan(0);
-    expect(screen.getByText('Updating...')).toBeInTheDocument();
-
-    refresh.resolve({
-      ...concentrationResponse,
-      scores: { ...concentrationResponse.scores, effectiveIndependentBets: 3.1 },
+  test('marks portfolio status yellow when ETF Pro has data-quality warnings', () => {
+    const today = currentLocalDate();
+    renderSidebar({
+      portfolioData: {
+        ...portfolioData,
+        accountSummary: {
+          ...portfolioData.accountSummary,
+          lastUpdated: new Date().toISOString(),
+        },
+      },
+      rtaPositions: {
+        available: true,
+        lastUpdated: `${today}T16:00:00Z`,
+        longCount: 2,
+        shortCount: 0,
+      },
+      etfProSnapshot: {
+        meta: { snapshotDate: today },
+        rows: [{ ticker: 'SJM', call: 'Long' }, { ticker: 'GLD', call: 'Long' }],
+        dataQuality: {
+          status: 'warning',
+          warnings: ['ETF Pro Gmail ingestion is stale; latest stored ETF Pro email is 2026-06-18.'],
+        },
+      },
     });
 
-    await waitFor(() => {
-      expect(screen.queryByText('Updating...')).not.toBeInTheDocument();
-    });
-    expect(screen.getByText('3.1')).toBeInTheDocument();
+    const ibkrStatusButton = screen.getByLabelText(/show last updated time for ibkr/i);
+    expect(ibkrStatusButton).toHaveTextContent('🟡');
+
+    fireEvent.click(ibkrStatusButton);
+
+    const sourceCards = screen.getAllByTestId(/status-source-card-/);
+    expect(sourceCards).toHaveLength(4);
+    expect(sourceCards.map((card) => within(card).getByRole('heading').textContent)).toEqual([
+      'Portfolio',
+      'RTA',
+      'ETF Pro',
+      'Prediction markets',
+    ]);
+    expect(screen.queryByTestId('status-source-card-ibkr')).not.toBeInTheDocument();
+    expect(screen.queryByText('Connection')).not.toBeInTheDocument();
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument();
+
+    const portfolioCard = screen.getByTestId('status-source-card-portfolio');
+    expect(portfolioCard).toHaveAttribute('data-status-tone', 'live');
+    expect(within(portfolioCard).getAllByText('Live').length).toBeGreaterThan(0);
+
+    const etfProCard = screen.getByTestId('status-source-card-etf-pro');
+    expect(etfProCard).toHaveAttribute('data-status-tone', 'error');
+    expect(within(etfProCard).getByText('ETF Pro')).toBeInTheDocument();
+    expect(within(etfProCard).getByText('Error')).toBeInTheDocument();
+    expect(screen.getAllByText('Portfolio').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Live').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('ETF Pro').length).toBeGreaterThan(0);
+    expect(screen.getByText('ETF Pro data quality: warning')).toBeInTheDocument();
+    expect(screen.getByText('ETF Pro Gmail ingestion is stale; latest stored ETF Pro email is 2026-06-18.')).toBeInTheDocument();
   });
 
-  test('keeps stale data visible when refresh errors after a prior success', async () => {
-    MarketDataService.getPortfolioCorrelationConcentration
-      .mockResolvedValueOnce(concentrationResponse)
-      .mockRejectedValueOnce(new Error('Correlation failed'));
-
-    renderSidebar();
-    expect((await screen.findAllByText('Gold')).length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole('button', { name: /^Refresh$/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/Showing previous snapshot/)).toBeInTheDocument();
+  test('marks portfolio status yellow for RTA, ETF Pro, and CPI provider mismatches', () => {
+    const today = currentLocalDate();
+    renderSidebar({
+      portfolioData: {
+        ...portfolioData,
+        holdings: makeHoldings(28, 25),
+        accountSummary: {
+          ...portfolioData.accountSummary,
+          lastUpdated: new Date().toISOString(),
+        },
+      },
+      rtaPositions: {
+        available: true,
+        lastUpdated: `${today}T16:00:00Z`,
+        longCount: 7,
+        shortCount: 0,
+      },
+      etfProSnapshot: {
+        meta: { snapshotDate: today },
+        rows: makeEtfProRows(20, 14),
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+      predictionMarketProviderStatus: {
+        providers: {
+          ibkr: {
+            status: 'connected_positions_only',
+            message: 'IBKR connected; CPI positions loaded from portfolio, contract catalog missing',
+            gateway: { ok: true },
+          },
+        },
+      },
     });
-    expect(screen.getAllByText('Gold').length).toBeGreaterThan(0);
+
+    const ibkrStatusButton = screen.getByLabelText(/show last updated time for ibkr/i);
+    expect(ibkrStatusButton).toHaveTextContent('🟡');
+
+    fireEvent.click(ibkrStatusButton);
+
+    expect(screen.queryByTestId('status-source-card-ibkr')).not.toBeInTheDocument();
+    expect(screen.getByTestId('status-source-card-portfolio')).toHaveAttribute('data-status-tone', 'live');
+    expect(screen.getByTestId('status-source-card-rta')).toHaveAttribute('data-status-tone', 'live');
+    expect(screen.getByTestId('status-source-card-etf-pro')).toHaveAttribute('data-status-tone', 'live');
+    expect(screen.getByTestId('status-source-card-prediction-markets')).toHaveAttribute('data-status-tone', 'error');
+    expect(screen.queryByText('Portfolio differs')).not.toBeInTheDocument();
+    expect(screen.queryByText(/RTA count mismatch/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ETF Pro count mismatch/)).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('status-source-card-prediction-markets')).getByText('Error')).toBeInTheDocument();
+    expect(screen.getByText('Prediction markets: IBKR connected; CPI positions loaded from portfolio, contract catalog missing')).toBeInTheDocument();
+  });
+
+  test('marks portfolio status green when portfolio, RTA, ETF Pro, and CPI contracts are current', () => {
+    const today = currentLocalDate();
+    renderSidebar({
+      portfolioData: {
+        ...portfolioData,
+        holdings: makeHoldings(2, 1),
+        accountSummary: {
+          ...portfolioData.accountSummary,
+          lastUpdated: new Date().toISOString(),
+        },
+      },
+      rtaPositions: {
+        available: true,
+        lastUpdated: `${today}T16:00:00Z`,
+        longCount: 2,
+        shortCount: 1,
+      },
+      etfProSnapshot: {
+        meta: { snapshotDate: today },
+        rows: makeEtfProRows(2, 1),
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+      predictionMarketProviderStatus: {
+        providers: {
+          ibkr: {
+            status: 'connected',
+            gateway: { ok: true },
+            contracts_total: 7,
+          },
+        },
+      },
+    });
+
+    const ibkrStatusButton = screen.getByLabelText(/show last updated time for ibkr/i);
+    expect(ibkrStatusButton).toHaveTextContent('🟢');
+
+    fireEvent.click(ibkrStatusButton);
+
+    expect(screen.getAllByTestId(/status-source-card-/)).toHaveLength(4);
+    expect(screen.queryByTestId('status-source-card-ibkr')).not.toBeInTheDocument();
+    expect(screen.getByTestId('status-source-card-portfolio')).toHaveAttribute('data-status-tone', 'live');
+    expect(screen.getByTestId('status-source-card-rta')).toHaveAttribute('data-status-tone', 'live');
+    expect(screen.getByTestId('status-source-card-etf-pro')).toHaveAttribute('data-status-tone', 'live');
+    const predictionMarketsCard = screen.getByTestId('status-source-card-prediction-markets');
+    expect(predictionMarketsCard).toHaveAttribute('data-status-tone', 'live');
+    expect(within(predictionMarketsCard).getAllByText('Live').length).toBeGreaterThan(0);
   });
 });
 
@@ -216,10 +429,10 @@ describe('PortfolioBreakdown correlation cleanup', () => {
     render(<PortfolioBreakdown portfolioData={portfolioData} />);
 
     expect(screen.queryByText('Correlation Concentration')).not.toBeInTheDocument();
-    expect(screen.getByText('Position Sizes')).toBeInTheDocument();
+    expect(screen.getByText('Portfolio Construction')).toBeInTheDocument();
     expect(screen.getByText('GLD')).toBeInTheDocument();
-    expect(screen.getAllByText('Longs').length).toBeGreaterThan(1);
-    expect(screen.getAllByText('Shorts').length).toBeGreaterThan(1);
+    expect(screen.getByText('Longs')).toBeInTheDocument();
+    expect(screen.getByText('Shorts')).toBeInTheDocument();
     expect(screen.getByText('No short positions')).toBeInTheDocument();
     expect(screen.queryByText('Side:')).not.toBeInTheDocument();
   });

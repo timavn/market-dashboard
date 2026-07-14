@@ -31,13 +31,20 @@ const pctHeatProps = (val) => {
   return { className: `region-mw-heat--${sign}`, style: { '--heat': intensity } };
 };
 
-const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange, onHeaderNoteChange }) => {
+const MarketVolumeTable = ({
+  onLastUpdatedChange,
+  onSourcesChange,
+  onHeaderNoteChange,
+  onMetadataChange,
+}) => {
   const onLastUpdatedRef = useRef(onLastUpdatedChange);
   const onSourcesRef = useRef(onSourcesChange);
   const onHeaderNoteRef = useRef(onHeaderNoteChange);
+  const onMetadataRef = useRef(onMetadataChange);
   onLastUpdatedRef.current = onLastUpdatedChange;
   onSourcesRef.current = onSourcesChange;
   onHeaderNoteRef.current = onHeaderNoteChange;
+  onMetadataRef.current = onMetadataChange;
 
   const [loading, setLoading] = useState(true);
   const [metrics, setMetrics] = useState({
@@ -79,7 +86,7 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange, onHeaderNoteC
           ? responseMeta.sourceBreakdown
           : [];
 
-        setDatasetMeta({
+        const nextDatasetMeta = {
           methodologyVersion: responseMeta.methodologyVersion || null,
           sourceBreakdown,
           status: responseMeta.status || 'missing',
@@ -87,7 +94,11 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange, onHeaderNoteC
           fetchedAt: responseMeta.fetchedAt || null,
           calibration: responseMeta.calibration || null,
           footnotes: Array.isArray(responseMeta.footnotes) ? responseMeta.footnotes : []
-        });
+        };
+        setDatasetMeta(nextDatasetMeta);
+        if (onMetadataRef.current) {
+          onMetadataRef.current(nextDatasetMeta);
+        }
         setErrorMessage('');
 
         if (slideMetrics?.totalMarket && slideMetrics?.exchange) {
@@ -243,6 +254,17 @@ const MarketVolumeTable = ({ onLastUpdatedChange, onSourcesChange, onHeaderNoteC
           ...current,
           status: 'missing'
         }));
+        if (onMetadataRef.current) {
+          onMetadataRef.current({
+            methodologyVersion: null,
+            sourceBreakdown: [],
+            status: 'missing',
+            asOfTradingDate: null,
+            fetchedAt: null,
+            calibration: null,
+            footnotes: []
+          });
+        }
         if (onSourcesRef.current) {
           onSourcesRef.current([
             {

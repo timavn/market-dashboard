@@ -1,0 +1,73 @@
+{
+  "version": "2026-06-21.v1",
+  "mode": {
+    "autonomy": "read_and_recommend",
+    "alertChannels": ["dashboard"],
+    "portfolioSourcePolicy": "verified_ibkr_only"
+  },
+  "volatility": {
+    "zScoreThreshold": 2.0,
+    "rollingWindowTradingDays": 63,
+    "minimumObservations": 40,
+    "coreSet": [
+      { "name": "VIX", "yahooSymbol": "^VIX", "role": "us_equity_vol" },
+      { "name": "VVIX", "yahooSymbol": "^VVIX", "role": "vol_of_vol" },
+      { "name": "RVX", "yahooSymbol": "^RVX", "role": "russell_vol" },
+      { "name": "NazVol", "yahooSymbol": "^VXN", "role": "nasdaq_vol" },
+      { "name": "MOVE", "yahooSymbol": "^MOVE", "role": "rates_vol" },
+      { "name": "GVZ", "yahooSymbol": "^GVZ", "role": "gold_vol" },
+      { "name": "OVX", "yahooSymbol": "^OVX", "role": "oil_vol" }
+    ],
+    "vixBuckets": [
+      {
+        "key": "investable",
+        "label": "Investable",
+        "min": 9,
+        "max": 19.9999,
+        "posture": "buy dips / normal risk"
+      },
+      {
+        "key": "chop",
+        "label": "Chop",
+        "min": 20,
+        "max": 28.9999,
+        "posture": "trade ranges / reduce conviction"
+      },
+      {
+        "key": "fBucket",
+        "label": "Uninvestable",
+        "min": 29,
+        "max": null,
+        "posture": "defensive / preserve capital"
+      }
+    ]
+  },
+  "exposureCaps": {
+    "investable": {
+      "maxGrossPct": 150,
+      "maxNetLongPct": 100,
+      "maxSingleSectorPct": 35
+    },
+    "chop": {
+      "maxGrossPct": 110,
+      "maxNetLongPct": 70,
+      "maxSingleSectorPct": 25
+    },
+    "fBucket": {
+      "maxGrossPct": 70,
+      "maxNetLongPct": 40,
+      "maxSingleSectorPct": 18
+    }
+  },
+  "freshness": {
+    "ibkrPortfolioFreshMs": 300000,
+    "workflowFreshMs": 900000,
+    "hedgeyeInboxFreshMs": 1800000
+  },
+  "actions": {
+    "fBucketExposureBreach": "Review hedges and reduce gross/net long exposure before adding new risk.",
+    "chopExposureBreach": "Trim oversized risk, prioritize range trades, and avoid increasing net long exposure.",
+    "investableVolDrop": "Review add-risk candidates that already pass Hedgeye trade/trend rules.",
+    "noLivePortfolioData": "Do not make portfolio action decisions until verified live IBKR data is restored."
+  }
+}

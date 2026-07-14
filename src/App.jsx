@@ -1,9 +1,26 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { PortfolioProvider } from './context/PortfolioContext';
 import PortfolioDashboard from './components/Dashboard/PortfolioDashboard';
+import HowItWorksPage from './components/HowItWorks/HowItWorksPage';
+
+const HOW_IT_WORKS_HASH = '#/how-it-works';
+
+const getAppRoute = () => (
+  typeof window !== 'undefined' && window.location.hash === HOW_IT_WORKS_HASH
+    ? 'how-it-works'
+    : 'dashboard'
+);
 
 function App() {
+  const [route, setRoute] = useState(getAppRoute);
+
+  useEffect(() => {
+    const handleHashChange = () => setRoute(getAppRoute());
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
   // Fix scroll lock issue with Tremor Select dropdowns and prevent scroll propagation
   useEffect(() => {
     // Check if a dropdown is open
@@ -90,11 +107,15 @@ function App() {
 
   return (
     <ThemeProvider>
-      <PortfolioProvider>
-        <div className="App">
-          <PortfolioDashboard />
-        </div>
-      </PortfolioProvider>
+      <div className="App">
+        {route === 'how-it-works' ? (
+          <HowItWorksPage onBack={() => { window.location.hash = ''; }} />
+        ) : (
+          <PortfolioProvider>
+            <PortfolioDashboard onOpenHowItWorks={() => { window.location.hash = '/how-it-works'; }} />
+          </PortfolioProvider>
+        )}
+      </div>
     </ThemeProvider>
   );
 }

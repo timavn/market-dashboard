@@ -104,6 +104,7 @@ const EM_COUNTRIES = [
 ];
 
 const STORAGE_KEY = 'quadForecast_v3';
+const UPDATED_AT_STORAGE_KEY = `${STORAGE_KEY}.lastEditedAt`;
 
 const getDefaultData = () => {
   const data = {};
@@ -167,6 +168,9 @@ const GlobalQuadsCard = () => {
     }
     return getDefaultData();
   });
+  const [lastEditedAt, setLastEditedAt] = useState(() => (
+    typeof window !== 'undefined' ? localStorage.getItem(UPDATED_AT_STORAGE_KEY) : null
+  ));
 
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -176,7 +180,12 @@ const GlobalQuadsCard = () => {
 
   const handleCellChange = (country, quarter, value) => {
     if (value === '' || /^[1-4]$/.test(value)) {
+      const editedAt = new Date().toISOString();
       setData(prev => ({ ...prev, [country]: { ...prev[country], [quarter]: value } }));
+      setLastEditedAt(editedAt);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(UPDATED_AT_STORAGE_KEY, editedAt);
+      }
     }
   };
 
@@ -382,6 +391,17 @@ const GlobalQuadsCard = () => {
         </div>
         {/* Right: legend pills */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span
+            title={lastEditedAt ? `Last manually edited ${new Date(lastEditedAt).toLocaleString()}` : 'Manually maintained; no saved edit timestamp'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', border: '1px solid #cbd5e1',
+              borderRadius: '4px', padding: '2px 6px', color: isDark ? '#cbd5e1' : '#64748b',
+              background: isDark ? '#1f2937' : '#f8fafc', fontSize: '9px', fontWeight: 700,
+              letterSpacing: '0.04em', whiteSpace: 'nowrap',
+            }}
+          >
+            MANUAL · {lastEditedAt ? new Date(lastEditedAt).toLocaleDateString() : 'NO AS-OF'}
+          </span>
           {[
             { val: '1', label: 'Goldilocks',  desc: '(↑ growth, ↓ inflation)' },
             { val: '2', label: 'Reflation',   desc: '(↑ both)' },

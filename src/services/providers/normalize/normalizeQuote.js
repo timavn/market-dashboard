@@ -24,9 +24,11 @@ function normalizeQuote(raw, source, opts = {}) {
 
   const mid = computeMid(bid, ask);
   const mark = computeMark({ mid, last, close });
-  const timestamp = raw.timestamp || raw.fetched_at || new Date().toISOString();
+  const timestamp = raw.timestamp || raw.fetched_at || null;
+  const hasValidTimestamp = Boolean(timestamp) && Number.isFinite(new Date(timestamp).getTime());
   const stale = source === 'ibkr' && isStaleTimestamp(timestamp);
   const warnings = [...(opts.warnings || [])];
+  if (!hasValidTimestamp) warnings.push('missing_timestamp');
   if (stale) warnings.push('stale_quote');
   if (!isValidPositiveNumber(mark) && source === 'ibkr') {
     warnings.push('invalid_mark');
@@ -52,7 +54,7 @@ function normalizeQuote(raw, source, opts = {}) {
     dataType: raw.dataType || (source === 'yahoo' ? 'delayed' : 'unknown'),
     entitlementStatus: raw.entitlementStatus || null,
     warning: warnings.length ? warnings.join('; ') : null,
-    valid: isValidPositiveNumber(mark) && !stale,
+    valid: isValidPositiveNumber(mark) && hasValidTimestamp && !stale,
   };
 }
 

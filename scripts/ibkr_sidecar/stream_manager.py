@@ -17,6 +17,7 @@ STREAM_DEBOUNCE_MS = int(os.environ.get("IBKR_STREAM_DEBOUNCE_MS", "150"))
 RECONNECT_BASE_MS = int(os.environ.get("IBKR_RECONNECT_BASE_MS", "1000"))
 ACCOUNT_SUMMARY_REFRESH_SEC = float(os.environ.get("IBKR_ACCOUNT_SUMMARY_REFRESH_SEC", "30"))
 CLIENT_ID_MAX_ATTEMPTS = int(os.environ.get("IB_GATEWAY_CLIENT_ID_ATTEMPTS", "10"))
+PORTFOLIO_SYNC_TIMEOUT_SEC = float(os.environ.get("IBKR_PORTFOLIO_SYNC_TIMEOUT_SEC", "8"))
 
 ACCOUNT_SUMMARY_TAG_SET = {
     "NetLiquidation",
@@ -159,7 +160,9 @@ class StreamManager:
 
     async def _initial_connect(self) -> None:
         try:
-            await self.connect()
+            result = await self.connect()
+            if result.get("ok"):
+                asyncio.ensure_future(self._pre_warm_portfolio())
         except Exception as exc:
             self.last_error = str(exc)
             self.connected = False
@@ -210,7 +213,6 @@ class StreamManager:
             if self.ib.isConnected():
                 self.connected = True
                 self.reconnecting = False
-                await self._ensure_portfolio_stream()
                 await self._resubscribe_all()
                 return {"ok": True, "status": "connected", "client_id": self.client_id}
 
@@ -223,7 +225,6 @@ class StreamManager:
                     self.connected = True
                     self.reconnecting = False
                     self.last_error = None
-                    await self._ensure_portfolio_stream()
                     await self._resubscribe_all()
                     return {"ok": True, "status": "connected", "client_id": self.client_id}
                 last_msg = f"clientId {candidate} unavailable (in use or timed out)"
@@ -270,45 +271,96 @@ class StreamManager:
             if result.get("ok"):
                 attempt = 0
                 self._broadcast_status("connected", None)
+                asyncio.ensure_future(self._pre_warm_portfolio())
             else:
                 attempt += 1
                 self.last_error = result.get("message")
                 self._broadcast_status("reconnecting", result.get("message"))
+
+    async def _pre_warm_portfolio(self) -> None:
+        """Pre-warm the portfolio cache for all managed accounts after connect."""
+        try:
+            await asyncio.sleep(1.0)  # brief settle for account list
+            accounts = self.ib.managedAccounts()
+            for acct in accounts:
+                try:
+                    await asyncio.wait_for(self._ensure_portfolio_stream(acct), timeout=25)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     async def _ensure_portfolio_stream(self, account: Optional[str] = None) -> None:
         accounts = self.ib.managedAccounts()
         if not accounts:
             return
         acct = account if account and account in accounts else accounts[0]
-        if self._portfolio_account == acct and self._account_updates_active:
-            return
+
+        # Positions are account-wide and reliable across managed accounts. Do this
+        # before account-updates streaming so retirement accounts do not disappear
+        # when reqAccountUpdates stalls.
+        await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10)
+        await asyncio.sleep(0.1)
+        self._sync_positions_from_ib(acct)
+        await self._subscribe_portfolio_quotes(acct)
+
+        try:
+            await asyncio.wait_for(self._refresh_account_summary(acct), timeout=10)
+        except Exception as exc:
+            self.last_error = f"account_summary: {exc}"
+
+        loop = asyncio.get_event_loop()
         if self._portfolio_account and self._portfolio_account != acct and self._account_updates_active:
             try:
-                self.ib.reqAccountUpdates('')
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self.ib.reqAccountUpdates, ''),
+                    timeout=PORTFOLIO_SYNC_TIMEOUT_SEC,
+                )
             except Exception:
                 pass
             self._account_updates_active = False
         self._portfolio_account = acct
-        try:
-            self.ib.reqAccountUpdates(acct)
-            self._account_updates_active = True
-            await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10)
-            await asyncio.sleep(0.3)
-            self._sync_positions_from_ib(acct)
-            await asyncio.wait_for(self._refresh_account_summary(acct), timeout=10)
-        except Exception as exc:
-            self.last_error = f"portfolio_stream: {exc}"
 
-    async def sync_account_portfolio(self, account: str) -> None:
+        if self._account_updates_active:
+            return
+
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.ib.reqAccountUpdates, acct),
+                timeout=PORTFOLIO_SYNC_TIMEOUT_SEC,
+            )
+            self._account_updates_active = True
+        except Exception as exc:
+            self.last_error = f"portfolio_stream_optional: {exc}"
+
+    async def sync_account_portfolio(self, account: str) -> Dict[str, Any]:
         """One-shot sync for a specific account (multi-account support)."""
         if not self.ib.isConnected():
-            return
+            return {"ok": False, "status": "gateway_offline", "message": "IB Gateway is not connected"}
         accounts = self.ib.managedAccounts()
         if account not in accounts:
-            return
-        await self._ensure_portfolio_stream(account)
+            return {
+                "ok": False,
+                "status": "account_not_found",
+                "message": f"Account {account} is not available",
+            }
+        try:
+            await asyncio.wait_for(
+                self._ensure_portfolio_stream(account),
+                timeout=PORTFOLIO_SYNC_TIMEOUT_SEC + 12,
+            )
+            return {"ok": True, "status": "synced", "account": account}
+        except Exception as exc:
+            self.last_error = f"portfolio_sync_failed: {exc}"
+            return {
+                "ok": False,
+                "status": "portfolio_sync_failed",
+                "message": str(exc) or "Portfolio sync timed out",
+                "account": account,
+            }
 
     def _sync_positions_from_ib(self, acct: str) -> None:
+        old_positions = self._portfolio_positions.get(acct) or {}
         positions: Dict[int, Dict[str, Any]] = {}
         for pos in self.ib.positions():
             if pos.account != acct:
@@ -317,6 +369,7 @@ class StreamManager:
             cid = int(c.conId) if c.conId else None
             if cid is None:
                 continue
+            old_pos = old_positions.get(cid) or {}
             positions[cid] = {
                 "account": pos.account,
                 "symbol": c.symbol,
@@ -327,12 +380,42 @@ class StreamManager:
                 "localSymbol": c.localSymbol or c.symbol,
                 "position": float(pos.position),
                 "avgCost": float(pos.avgCost),
-                "marketValue": None,
-                "unrealizedPnL": None,
-                "realizedPnL": None,
+                "marketValue": old_pos.get("marketValue"),
+                "unrealizedPnL": old_pos.get("unrealizedPnL"),
+                "realizedPnL": old_pos.get("realizedPnL"),
                 "updated_at": now_iso(),
             }
         self._portfolio_positions[acct] = positions
+
+    async def _subscribe_portfolio_quotes(self, acct: str) -> None:
+        """Keep quote cache warm for active portfolio positions."""
+        rows = list((self._portfolio_positions.get(acct) or {}).values())
+        if not rows:
+            return
+
+        async with self._lock:
+            for row in rows:
+                cid = int(row.get("conId") or 0)
+                if not cid or cid in self._ref_counts:
+                    continue
+                if len(self._ref_counts) >= MAX_STREAM_SUBS:
+                    self.last_error = f"portfolio_quote_warmup_limited: max {MAX_STREAM_SUBS}"
+                    return
+
+                contract = Contract()
+                contract.conId = cid
+                contract.symbol = row.get("symbol") or ""
+                contract.secType = row.get("secType") or "STK"
+                contract.exchange = row.get("exchange") or "SMART"
+                contract.currency = row.get("currency") or "USD"
+
+                try:
+                    ticker = self.ib.reqMktData(contract, "", False, False)
+                    self._ref_counts[cid] = 1
+                    self._contracts[cid] = contract
+                    self._tickers[cid] = ticker
+                except Exception as exc:
+                    self.last_error = f"portfolio_quote_warmup: {exc}"
 
     def _on_update_portfolio(self, item: Any) -> None:
         acct = getattr(item, "account", None) or self._portfolio_account
@@ -344,6 +427,11 @@ class StreamManager:
             return
         if acct not in self._portfolio_positions:
             self._portfolio_positions[acct] = {}
+        position = float(item.position)
+        market_value = float(item.marketValue) if item.marketValue == item.marketValue else None
+        if position == 0 and (market_value is None or market_value == 0):
+            self._portfolio_positions[acct].pop(cid, None)
+            return
         self._portfolio_positions[acct][cid] = {
             "account": acct,
             "symbol": c.symbol,
@@ -352,9 +440,9 @@ class StreamManager:
             "exchange": c.exchange,
             "currency": c.currency or "USD",
             "localSymbol": c.localSymbol or c.symbol,
-            "position": float(item.position),
+            "position": position,
             "avgCost": float(item.averageCost),
-            "marketValue": float(item.marketValue) if item.marketValue == item.marketValue else None,
+            "marketValue": market_value,
             "unrealizedPnL": float(item.unrealizedPNL) if item.unrealizedPNL == item.unrealizedPNL else None,
             "realizedPnL": float(item.realizedPNL) if item.realizedPNL == item.realizedPNL else None,
             "updated_at": now_iso(),
@@ -366,7 +454,10 @@ class StreamManager:
             if not self.ib.isConnected() or not self._portfolio_account:
                 continue
             try:
-                await self._refresh_account_summary(self._portfolio_account)
+                await asyncio.wait_for(
+                    self._refresh_account_summary(self._portfolio_account),
+                    timeout=10,
+                )
             except Exception as exc:
                 self.last_error = f"account_summary: {exc}"
 
@@ -548,7 +639,11 @@ class StreamManager:
         acct = account or self._portfolio_account
         if not acct:
             return {"ok": False, "message": "No account", "positions": [], "fetched_at": now_iso()}
-        positions = list((self._portfolio_positions.get(acct) or {}).values())
+        raw_positions = list((self._portfolio_positions.get(acct) or {}).values())
+        positions = [
+            p for p in raw_positions
+            if float(p.get("position") or 0) != 0 or float(p.get("marketValue") or 0) != 0
+        ]
         return {
             "ok": True,
             "account": acct,

@@ -5,7 +5,10 @@ import VolumePanel from './VolumePanel';
 const MIN_HEIGHT = 40; // Minimum visible height (collapsed state - tab only)
 const MAX_HEIGHT = 400; // Maximum panel height
 // Expanded panels take up 40% of screen height
-const getDefaultHeight = () => Math.round(window.innerHeight * 0.4);
+const getDefaultHeight = () => {
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+  return Math.min(MAX_HEIGHT, Math.max(260, Math.round(viewportHeight * 0.4)));
+};
 // Match portfolio bar width: calc((100vw - 16px) * (2/12) + 16px + 128px)
 const PORTFOLIO_BAR_WIDTH = 'calc((100vw - 16px) * (2/12) + 16px + 128px)';
 
@@ -62,10 +65,10 @@ const BottomPanel = ({
         // Collapsed Tab State - Simple, clean tab spanning full width
         <button
           onClick={handleTabClick}
-          className={`w-full px-5 py-2 bg-white dark:bg-gray-900 shadow-sm border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-200 ${
+          className={`w-full px-5 py-2 bg-white dark:bg-gray-900 shadow-sm border-t border-blue-500 dark:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-800 transition-colors duration-200 ${
             position === 'left' 
-              ? 'border-l border-r border-gray-300 dark:border-gray-600 rounded-tl-xl rounded-tr-xl' 
-              : 'border-r border-l border-gray-300 dark:border-gray-600 rounded-tr-xl rounded-tl-xl'
+              ? 'border-l border-r border-blue-500 dark:border-blue-400 rounded-tl-xl rounded-tr-xl' 
+              : 'border-r border-l border-blue-500 dark:border-blue-400 rounded-tr-xl rounded-tl-xl'
           }`}
           style={{
             display: 'flex',
@@ -100,7 +103,7 @@ const BottomPanel = ({
             </h3>
           </button>
           {/* Panel Content */}
-          <div className="flex-1 p-3" style={{ minHeight: 0, overflow: 'visible' }}>
+          <div className="flex-1 p-3" style={{ minHeight: 0, overflow: 'auto' }}>
             {children}
           </div>
         </div>
@@ -126,4 +129,3 @@ const ResizableBottomPanels = () => {
 };
 
 export default ResizableBottomPanels;
-

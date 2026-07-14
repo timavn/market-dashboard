@@ -1,23 +1,24 @@
-const { sidecarRequest } = require('../ibkrSidecarClient');
+const { sidecarRequest, getSidecarProviderStatus } = require('../ibkrSidecarClient');
 const { normalizeIbkrRaw } = require('../normalize/normalizeQuote');
-const { resolveInstrument } = require('../instruments/instrumentResolver');
+const {
+  resolveInstrument,
+  instrumentCacheKey,
+  canUseSymbolStream,
+} = require('../instruments/instrumentResolver');
 const { getCachedCanonical, STREAM_ENABLED } = require('../../ibkr/ibkrStreamBridge');
 const {
   setIbkrConnected,
   setIbkrLastQuoteAt,
+  getProviderStatusSnapshot,
 } = require('../providerStatus');
 
 const CACHE_TTL_MS = Number(process.env.IBKR_QUOTE_CACHE_TTL_MS || 3000);
 const ENABLED = process.env.IBKR_MARKET_DATA_ENABLED !== 'false';
 const quoteCache = new Map();
 
-function cacheKey(instrument) {
-  return instrument.conid ? `conid:${instrument.conid}` : `sym:${instrument.symbol}`;
-}
-
 async function checkConnection() {
   try {
-    const status = await sidecarRequest('/status', { timeoutMs: 3000 });
+    const status = await getSidecarProviderStatus('ibkr');
     const connected = Boolean(status.connected);
     setIbkrConnected(connected, status.message || null);
     return connected;
@@ -28,20 +29,9 @@ async function checkConnection() {
 }
 
 async function getProviderStatus() {
-  try {
-    const status = await sidecarRequest('/status', { timeoutMs: 3000 });
-    setIbkrConnected(Boolean(status.connected), status.message);
-    return {
-      name: 'ibkr',
-      connected: Boolean(status.connected),
-      status: status.status,
-      accounts: status.accounts || [],
-      message: status.message,
-    };
-  } catch (err) {
-    setIbkrConnected(false, err.message);
-    return { name: 'ibkr', connected: false, status: 'sidecar_offline', message: err.message, accounts: [] };
-  }
+  const status = await getSidecarProviderStatus('ibkr');
+  setIbkrConnected(Boolean(status.connected), status.message);
+  return status;
 }
 
 /**
@@ -57,13 +47,17 @@ async function getQuote(symbolOrInstrument) {
     return { canonical: null, error: instrument.reason || 'unsupported' };
   }
 
-  const key = cacheKey(instrument);
+  const key = instrumentCacheKey(symbolOrInstrument);
   const cached = quoteCache.get(key);
-  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-    return { canonical: { ...cached.data, source: 'cache' }, fromCache: true };
+  const providerState = getProviderStatusSnapshot().ibkr;
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS && providerState.connected) {
+    return { canonical: { ...cached.data, source: 'ibkr' }, fromCache: true };
+  }
+  if (cached && !providerState.connected) {
+    quoteCache.delete(key);
   }
 
-  if (STREAM_ENABLED) {
+  if (STREAM_ENABLED && canUseSymbolStream(symbolOrInstrument)) {
     const streamCached = getCachedCanonical(instrument.symbol);
     if (streamCached?.valid) {
       setIbkrLastQuoteAt(streamCached.timestamp || new Date().toISOString());

@@ -1,9 +1,13 @@
 const {
   setProviderStatus,
-  getIbkrStaleEvents,
   setIbkrStaleEvents,
 } = require('../cache');
 const { sidecarRequest, SIDECAR_BASE } = require('./ibkrHttp');
+
+const CPI_REFRESH_TIMEOUT_MS = Number(process.env.IBKR_CPI_REFRESH_TIMEOUT_MS || 30000);
+const REFRESH_TIMEOUT_MS = Number(process.env.IBKR_REFRESH_TIMEOUT_MS || 5000);
+const CPI_DISCOVER_TIMEOUT_MS = Number(process.env.IBKR_CPI_DISCOVER_TIMEOUT_MS || 20000);
+const DISCOVER_TIMEOUT_MS = Number(process.env.IBKR_DISCOVER_TIMEOUT_MS || 60000);
 
 function ibkrEnabled() {
   return process.env.IBKR_INGEST_ENABLED !== 'false';
@@ -17,18 +21,12 @@ function mapSidecarStatus(status) {
   return status || 'unknown';
 }
 
-function staleWithFlag(events) {
-  return (events || []).map((event) => ({
-    ...event,
-    data_quality_flags: [...new Set([...(event.data_quality_flags || []), 'stale_quote'])],
-  }));
-}
-
-function setIbkrFamilyStatus(status, message, lastSuccessAt = null) {
+function setIbkrFamilyStatus(status, message, lastSuccessAt = null, extra = {}) {
   const payload = {
     status,
     message,
     ...(lastSuccessAt ? { last_success_at: lastSuccessAt } : {}),
+    ...(extra || {}),
   };
   setProviderStatus('ibkr', payload);
   setProviderStatus('forecastex', payload);
@@ -74,22 +72,41 @@ async function checkGatewayHealth() {
   }
 }
 
-async function fetchIBKREvents() {
+async function fetchIBKREvents(options = {}) {
   if (!ibkrEnabled()) {
     setIbkrFamilyStatus('unknown', 'IBKR ingest disabled');
-    return getIbkrStaleEvents();
+    return [];
   }
 
   try {
-    const result = await sidecarRequest('/refresh', { method: 'POST', timeoutMs: 5000 });
+    const body = options?.cpi ? { cpi: options.cpi } : undefined;
+    const result = await sidecarRequest('/refresh', {
+      method: 'POST',
+      body,
+      timeoutMs: body?.cpi ? CPI_REFRESH_TIMEOUT_MS : REFRESH_TIMEOUT_MS,
+    });
     const provider = result.providers?.ibkr || {};
     const status = mapSidecarStatus(provider.status);
     const events = Array.isArray(result.events) ? result.events : [];
+    const cpiDiscovery = result.cpi_discovery || null;
+    const timing = result.timing || null;
 
-    setIbkrFamilyStatus(status, provider.message || null, provider.last_success_at || result.fetched_at);
+    setIbkrFamilyStatus(
+      status,
+      provider.message || null,
+      provider.last_success_at || result.fetched_at,
+      {
+        ...(cpiDiscovery ? { cpi_discovery: cpiDiscovery } : {}),
+        ...(timing ? { cpi_timing: timing } : {}),
+        gateway: { ok: status === 'connected' },
+        contracts_added: result.contracts_added ?? 0,
+        contracts_total: result.contracts_total ?? events.length,
+        portfolio_seed_count: result.portfolio_seed_count ?? 0,
+      },
+    );
 
     if (status !== 'connected') {
-      return staleWithFlag(getIbkrStaleEvents());
+      return [];
     }
 
     setIbkrStaleEvents(events);
@@ -101,18 +118,37 @@ async function fetchIBKREvents() {
         ? `IBKR sidecar not reachable at ${SIDECAR_BASE}`
         : err.message;
     console.error('[IBKR] sidecar refresh error:', message);
-    setIbkrFamilyStatus(reason, message);
-    return staleWithFlag(getIbkrStaleEvents());
+    setIbkrFamilyStatus(reason, message, null, { gateway: { ok: false } });
+    return [];
   }
 }
 
-async function discoverIbkrEventContracts() {
+async function discoverIbkrEventContracts(body = {}) {
   if (!ibkrEnabled()) {
     return { ok: false, contracts_added: 0, contracts_total: 0, message: 'IBKR ingest disabled' };
   }
 
   try {
-    return await sidecarRequest('/discover', { method: 'POST', timeoutMs: 60000 });
+    const result = await sidecarRequest('/discover', {
+      method: 'POST',
+      body,
+      timeoutMs: body?.cpi ? CPI_DISCOVER_TIMEOUT_MS : DISCOVER_TIMEOUT_MS,
+    });
+    const status = mapSidecarStatus(result.status);
+    setIbkrFamilyStatus(
+      status,
+      result.message || null,
+      status === 'connected' ? new Date().toISOString() : null,
+      {
+        ...(result.cpi_discovery ? { cpi_discovery: result.cpi_discovery } : {}),
+        ...(result.timing ? { cpi_timing: result.timing } : {}),
+        gateway: { ok: status === 'connected' },
+        contracts_added: result.contracts_added ?? 0,
+        contracts_total: result.contracts_total ?? 0,
+        portfolio_seed_count: result.portfolio_seed_count ?? 0,
+      },
+    );
+    return result;
   } catch (err) {
     const reason = err.reason === 'sidecar_offline' ? 'sidecar_offline' : 'error';
     const message =

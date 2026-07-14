@@ -1,8 +1,8 @@
 
 const express = require('express');
 const router = express.Router();
-const AWS = require('aws-sdk');
-const dynamodb = new AWS.DynamoDB.DocumentClient();
+const DynamoDB = require('aws-sdk/clients/dynamodb');
+const dynamodb = new DynamoDB.DocumentClient();
 
 const PERFORMANCE_TABLE = 'PerformanceHistory';
 const POSITION_PERFORMANCE_TABLE = 'PositionPerformance';

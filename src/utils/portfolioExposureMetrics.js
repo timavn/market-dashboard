@@ -1,3 +1,5 @@
+import { GLOBAL_MARKETS, getMarketStatus } from '../constants/globalMarkets';
+
 function isCashHolding(holding) {
   const secType = (holding.secType || holding.assetType || '').toUpperCase();
   const assetClass = (holding.assetClass || '').toLowerCase();
@@ -69,11 +71,16 @@ export function computePortfolioExposure({ holdings = [], accountSummary = null,
     };
   }
 
+  const longPct = (longMV / nlv) * 100;
+  const shortPct = (shortMV / nlv) * 100;
+  const grossPct = Math.round(longPct) + Math.round(shortPct);
+  const netPct = Math.round(longPct) - Math.round(shortPct);
+
   return {
-    grossPct: ((longMV + shortMV) / nlv) * 100,
-    netPct: (netMV / nlv) * 100,
-    longPct: (longMV / nlv) * 100,
-    shortPct: (shortMV / nlv) * 100,
+    grossPct,
+    netPct,
+    longPct,
+    shortPct,
     cashPct: cashValue != null ? (cashValue / nlv) * 100 : null,
     nlv,
     longMV,
@@ -118,6 +125,73 @@ export function computeDailyPnLPercent(dailyPnL, nlv) {
   const priorClose = nlv - dailyPnL;
   if (!priorClose || priorClose <= 0) return null;
   return (dailyPnL / priorClose) * 100;
+}
+
+const NYSE_MARKET = GLOBAL_MARKETS.find((market) => market.id === 'nyc');
+
+export function isUsEquitySessionActive(now = new Date()) {
+  if (!NYSE_MARKET) return false;
+  const nyTime = new Date(now.toLocaleString('en-US', { timeZone: NYSE_MARKET.timezone }));
+  const status = getMarketStatus(NYSE_MARKET, nyTime);
+  return status === 'open' || status === 'pre-market' || status === 'post-market';
+}
+
+export function resolvePortfolioHeaderSnapshot({
+  nlv,
+  dailyPnL = null,
+  dailyPnLPercent = null,
+  sessionActive = false,
+  cachedCloseSnapshot = null,
+} = {}) {
+  const numericNlv = Number(nlv);
+  const hasNlv = Number.isFinite(numericNlv);
+  const hasDailyPnL = dailyPnL != null && dailyPnL !== '';
+  const numericDailyPnL = hasDailyPnL ? Number(dailyPnL) : null;
+  const hasDailyPnLPercent = dailyPnLPercent != null && dailyPnLPercent !== '';
+  const numericDailyPnLPercent = hasDailyPnLPercent ? Number(dailyPnLPercent) : null;
+  const liveDailyPct = Number.isFinite(numericDailyPnLPercent)
+    ? numericDailyPnLPercent
+    : Number.isFinite(numericDailyPnL) && hasNlv
+      ? computeDailyPnLPercent(numericDailyPnL, numericNlv)
+      : null;
+
+  if (liveDailyPct != null && Number.isFinite(liveDailyPct)) {
+    return {
+      displayNlv: hasNlv ? numericNlv : null,
+      displayDailyPct: liveDailyPct,
+      snapshotToCache: sessionActive
+        ? null
+        : {
+            netLiquidation: numericNlv,
+            dailyPct: liveDailyPct,
+          },
+    };
+  }
+
+  const cachedNlv = Number(cachedCloseSnapshot?.netLiquidation);
+  const cachedDailyPct = Number(cachedCloseSnapshot?.dailyPct);
+  if (!sessionActive && Number.isFinite(cachedDailyPct)) {
+    // Ignore old buggy cache entries that persisted a fake 0.00% close move
+    // when IBKR returned no dailyPnL data after the session.
+    if (cachedDailyPct === 0 && !hasDailyPnL) {
+      return {
+        displayNlv: hasNlv ? numericNlv : null,
+        displayDailyPct: null,
+        snapshotToCache: null,
+      };
+    }
+    return {
+      displayNlv: Number.isFinite(cachedNlv) ? cachedNlv : hasNlv ? numericNlv : null,
+      displayDailyPct: cachedDailyPct,
+      snapshotToCache: null,
+    };
+  }
+
+  return {
+    displayNlv: hasNlv ? numericNlv : null,
+    displayDailyPct: null,
+    snapshotToCache: null,
+  };
 }
 
 function pickSummaryNumber(raw, key) {

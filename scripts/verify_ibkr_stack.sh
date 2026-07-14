@@ -6,9 +6,19 @@ SIDECAR="${IBKR_SIDECAR_URL:-http://localhost:8765}"
 BACKEND="${REACT_APP_BACKEND_URL:-http://localhost:3001}"
 
 echo "=== 1. Sidecar GET /status ==="
-STATUS_RAW=$(curl -sf "${SIDECAR%/}/status") || {
-  echo "FAIL: sidecar not reachable at ${SIDECAR}"
-  echo "Start with: npm run ibkr-sidecar"
+LIVEZ_RAW=$(curl -sf --max-time 2 "${SIDECAR%/}/livez") || {
+  echo "FAIL: sidecar not responsive at ${SIDECAR}"
+  echo "If nothing is listening, start with: npm run ibkr-sidecar"
+  echo "If :8765 is occupied, restart it with: pkill -f 'uvicorn app:app' && npm run ibkr-sidecar"
+  exit 1
+}
+echo "$LIVEZ_RAW" | python3 -m json.tool
+
+echo ""
+echo "=== 1a. Sidecar GET /status ==="
+STATUS_RAW=$(curl -sf --max-time 5 "${SIDECAR%/}/status") || {
+  echo "FAIL: sidecar is alive but /status did not respond."
+  echo "Recommended action: pkill -f 'uvicorn app:app' && npm run ibkr-sidecar"
   exit 1
 }
 echo "$STATUS_RAW" | python3 -m json.tool
@@ -27,11 +37,11 @@ print('  last_tick_at:', s.get('last_tick_at'))
 
 echo ""
 echo "=== 2. Sidecar POST /refresh ==="
-curl -sf -X POST "${SIDECAR%/}/refresh" | python3 -m json.tool
+curl -sf --max-time 10 -X POST "${SIDECAR%/}/refresh" | python3 -m json.tool
 
 echo ""
 echo "=== 3. Express GET /api/prediction-markets/providers/status ==="
-if curl -sf "${BACKEND%/}/api/prediction-markets/providers/status" | python3 -m json.tool; then
+if curl -sf --max-time 12 "${BACKEND%/}/api/prediction-markets/providers/status" | python3 -m json.tool; then
   echo "OK"
 else
   echo "WARN: backend not reachable at ${BACKEND} (run npm run server)"

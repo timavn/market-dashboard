@@ -1,5 +1,5 @@
 /** Friendly names for IBKR account dropdown (value stays full account id). */
-const IBKR_ACCOUNT_LABELS = {
+export const IBKR_ACCOUNT_LABELS = {
   U25779973: 'Individual',
   U25465536: 'Roth IRA',
 };

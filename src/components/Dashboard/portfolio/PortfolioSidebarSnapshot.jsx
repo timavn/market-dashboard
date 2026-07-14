@@ -1,10 +1,8 @@
 import React, { useMemo, useEffect, useCallback, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { ArrowRight, RefreshCw } from 'lucide-react';
 import StatusDot from '../../common/StatusDot';
 import LoadingIndicator from '../../common/LoadingIndicator';
 import PopoverSelect from '../../common/PopoverSelect';
-import RefreshButton from '../../common/RefreshButton';
-import { usePortfolioCorrelationConcentration } from '../../../hooks/usePortfolioCorrelationConcentration';
 import {
   getIbkrPortfolioStatusDot,
   getPortfolioOfflinePanel,
@@ -19,26 +17,20 @@ import {
   isUsEquitySessionActive,
   resolvePortfolioHeaderSnapshot,
 } from '../../../utils/portfolioExposureMetrics';
+import { getLongShortPositionSnapshot } from '../../../utils/portfolioBreakdownUtils';
+import {
+  buildHedgeyeLatestUpdatesFeed,
+  buildHedgeyeLatestUpdatesStatus,
+  formatHedgeyeFeedTime,
+} from '../../../utils/hedgeyeLatestUpdatesFeed';
 import { saveSelectedAccount, loadIbkrAccounts, saveIbkrAccounts } from '../../../constants/ibkrAccountStorage';
 import { formatIbkrAccountLabel, IBKR_ACCOUNT_LABELS } from '../../../constants/ibkrAccountLabels';
+import portfolioFolderIcon from '../../../assets/portfolio-folder-icon.png';
 import './PortfolioSidebarSnapshot.css';
 
 const STRATEGY_SUBTITLE = 'Long/Short Global Macro';
 const PORTFOLIO_CLOSE_CACHE_PREFIX = 'portfolioCloseSnapshot:';
-
-function formatLensPct(value, decimals = 0, { signed = false } = {}) {
-  if (value == null || !Number.isFinite(Number(value))) return '--';
-  const number = Number(value);
-  const sign = signed && number > 0 ? '+' : '';
-  return `${sign}${number.toFixed(decimals)}%`;
-}
-
-function getClusterTone(cluster = {}) {
-  const netPct = Number((cluster || {}).netClusterPct) || 0;
-  if (netPct > 2) return { key: 'long', label: 'Long-biased' };
-  if (netPct < -2) return { key: 'short', label: 'Short-biased' };
-  return { key: 'offset', label: 'Offsetting' };
-}
+const FLEX_RECONCILIATION_TOLERANCE_PCT = 2.5;
 
 function AccountDropdownLabel({ accountId, value, currency, dailyPct }) {
   const label = formatIbkrAccountLabel(accountId);
@@ -81,36 +73,61 @@ function SetupStep({ done, label }) {
   );
 }
 
-function ExposureBar({ label, pct, variant = 'neutral', signed = false, tooltip, scaleMin = -150, scaleMax = 150 }) {
-  const display = formatExposurePct(pct, { signed });
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatSignedNominal(value) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const abs = new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+  }).format(Math.abs(value));
+  if (value > 0) return `+${abs}`;
+  if (value < 0) return `-${abs}`;
+  return abs;
+}
+
+function ExposureBar({ label, pct, amount, currency = 'USD', netAmount = false, tooltip, scaleMin = -200, scaleMax = 200 }) {
+  const display = formatExposurePct(pct);
+  const amountDisplay = netAmount ? formatSignedNominal(amount) : formatCurrency(amount, currency);
+  const hasAmount = amountDisplay !== '—';
+  const segmentTestId = `exposure-segment-${label.toLowerCase().replace(/\s+/g, '-')}`;
   const value = pct != null && Number.isFinite(pct) ? pct : 0;
+  const roundedValue = Math.round(value);
   const scaleRange = scaleMax - scaleMin;
+  const tone = roundedValue > 0 ? 'positive' : roundedValue < 0 ? 'negative' : 'neutral';
 
   // Calculate positions as percentages of the scale
   const zeroPos = ((0 - scaleMin) / scaleRange) * 100;
-  const valuePos = ((value - scaleMin) / scaleRange) * 100;
+  const valuePos = clampPercent(((value - scaleMin) / scaleRange) * 100);
 
   // Determine bar segment: from zero to value
   const barStart = Math.min(zeroPos, valuePos);
   const barWidth = Math.abs(valuePos - zeroPos);
 
-  // Color mapping
+  // Color mapping follows the displayed value: below 0 red, 0 black, above 0 green.
   const colorMap = {
     positive: '#059669',
     negative: '#dc2626',
-    blue: '#2563eb',
-    neutral: '#9ca3af',
+    neutral: '#111827',
   };
-  const barColor = colorMap[variant] || colorMap.neutral;
+  const barColor = colorMap[tone];
 
-  // Tick marks at -150, -100, -50, 0, 50, 100, 150
-  const ticks = [-150, -100, -50, 0, 50, 100, 150];
+  // Tick marks at -200, -100, 0, 100, 200
+  const ticks = [-200, -100, 0, 100, 200];
 
   return (
     <div className="pf-bar" title={tooltip || undefined}>
       <div className="pf-bar__row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="pf-label">{label}</span>
-        <span className={`pf-bar__value pf-bar__value--${variant}`} style={{ marginLeft: 'auto' }}>{display}</span>
+        <span className={`pf-bar__value pf-bar__value--${tone}`} style={{ marginLeft: 'auto' }}>
+          <span>{display}</span>
+          {hasAmount && (
+            <span className={`pf-bar__amount${netAmount ? ' pf-bar__amount--net' : ''}`}>
+              ({amountDisplay})
+            </span>
+          )}
+        </span>
       </div>
       <div className="pf-bar__track-container">
         <div className="pf-bar__track">
@@ -130,9 +147,10 @@ function ExposureBar({ label, pct, variant = 'neutral', signed = false, tooltip,
           <div className="pf-bar__zero-line" style={{ left: `${zeroPos}%` }} />
 
           {/* Active bar segment from 0 to value */}
-          {value !== 0 && (
+          {value !== 0 && barWidth > 0 && (
             <div
               className="pf-bar__segment"
+              data-testid={segmentTestId}
               style={{
                 left: `${barStart}%`,
                 width: `${barWidth}%`,
@@ -156,16 +174,275 @@ function ExposureBar({ label, pct, variant = 'neutral', signed = false, tooltip,
   );
 }
 
+function getFeedTokenTone(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized === 'BULLISH' || normalized === 'LONG') return 'positive';
+  if (normalized === 'BEARISH' || normalized === 'SHORT') return 'negative';
+  return 'neutral';
+}
+
+function FeedStatusToken({ children }) {
+  return (
+    <span className={`pf-update__status-token pf-update__status-token--${getFeedTokenTone(children)}`}>
+      {String(children || '').toUpperCase()}
+    </span>
+  );
+}
+
+function FeedArrow() {
+  return (
+    <ArrowRight className="pf-update__arrow-icon" size={13} strokeWidth={1.9} aria-hidden="true" />
+  );
+}
+
+function FeedAction({ item }) {
+  if (item.trendFrom && item.trendTo) {
+    return (
+      <span className="pf-update__action" aria-label={`${item.trendFrom} to ${item.trendTo}`}>
+        <FeedStatusToken>{item.trendFrom}</FeedStatusToken>
+        <FeedArrow />
+        <FeedStatusToken>{item.trendTo}</FeedStatusToken>
+      </span>
+    );
+  }
+
+  const displayAction = String(item.displayAction || '').trim();
+  const transitionMatch = displayAction.match(/^(.+?)\s*->\s*(.+)$/);
+  if (transitionMatch) {
+    return (
+      <span className="pf-update__action">
+        <FeedStatusToken>{transitionMatch[1]}</FeedStatusToken>
+        <FeedArrow />
+        <FeedStatusToken>{transitionMatch[2]}</FeedStatusToken>
+      </span>
+    );
+  }
+
+  const addedMatch = displayAction.match(/^(Added to|Doubling)\s+(.+)$/i);
+  if (addedMatch) {
+    return (
+      <span className="pf-update__action">
+        <span>{addedMatch[1]}</span>
+        <FeedStatusToken>{addedMatch[2]}</FeedStatusToken>
+      </span>
+    );
+  }
+
+  return <span className="pf-update__action">{displayAction.toUpperCase()}</span>;
+}
+
+function LatestUpdatesFeed({ changelog, loading = false, error = null, now, lastSuccessAt }) {
+  const items = useMemo(() => buildHedgeyeLatestUpdatesFeed(changelog, { now }), [changelog, now]);
+  const feedStatus = useMemo(
+    () => buildHedgeyeLatestUpdatesStatus(changelog, { loading, error, now, lastSuccessAt }),
+    [changelog, error, lastSuccessAt, loading, now],
+  );
+  const hasItems = items.length > 0;
+
+  return (
+    <section className="pf-updates" aria-label="Latest Hedgeye updates">
+      <header className="pf-updates__header">
+        <h2 className="pf-updates__title">FEED</h2>
+        <StatusDot
+          updatedAt={feedStatus.updatedAt}
+          status={feedStatus.status}
+          emoji={feedStatus.emoji}
+          size={8}
+          label={feedStatus.label}
+          overallLabel={feedStatus.overallLabel}
+          sources={feedStatus.sources}
+          align="right"
+          placement="side"
+        />
+      </header>
+      <div className="pf-updates__body">
+        {loading && !hasItems ? (
+          <div className="pf-updates__state">
+            <LoadingIndicator label="Loading updates…" size="sm" />
+          </div>
+        ) : error && !hasItems ? (
+          <div className="pf-updates__state pf-updates__state--error">
+            Unable to load latest updates.
+          </div>
+        ) : !hasItems ? (
+          <div className="pf-updates__state">
+            No latest updates available.
+          </div>
+        ) : (
+          <div className="pf-updates__list" role="list">
+            {items.map((item) => (
+              <article className={`pf-update${item.trendFrom && item.trendTo ? ' pf-update--trend' : ''}`} role="listitem" key={item.id}>
+                <div className="pf-update__topline">
+                  <span className="pf-update__ticker">{item.ticker}</span>
+                  <FeedAction item={item} />
+                  <span className="pf-update__source" data-testid={`latest-update-source-${item.ticker}`}>
+                    {item.source}
+                  </span>
+                </div>
+                <p className="pf-update__description">{item.description}</p>
+                <time className="pf-update__time" dateTime={item.eventTime || item.currentDate || undefined}>
+                  {formatHedgeyeFeedTime(item, now)}
+                </time>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function formatBaselineDate(value) {
+  if (!value) return null;
+  const dateOnly = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatFlexAmount(value, currency = 'USD') {
+  if (value == null || !Number.isFinite(Number(value))) return '--';
+  return formatCurrency(Number(value), currency);
+}
+
+function FlexMetric({ label, value, tone = 'neutral' }) {
+  return (
+    <div className="pf-flex-recon__metric">
+      <span className="pf-flex-recon__metric-label">{label}</span>
+      <span className={`pf-flex-recon__metric-value pf-flex-recon__metric-value--${tone}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function FlexReconciliationPanel({
+  liveExposure,
+  currency = 'USD',
+  reconciliation = null,
+  loading = false,
+}) {
+  const flex = reconciliation?.flex || null;
+  const flexExposure = flex?.exposure || null;
+  const hasReadyFlex = reconciliation?.status === 'ready' && flexExposure?.hasData;
+  const latestDate = formatBaselineDate(reconciliation?.latestSnapshot?.date);
+
+  if (loading && !reconciliation) {
+    return (
+      <div className="pf-flex-recon pf-flex-recon--state">
+        <LoadingIndicator label="Loading Flex baseline..." size="sm" />
+      </div>
+    );
+  }
+
+  if (!hasReadyFlex) {
+    const status = reconciliation?.status || 'missing';
+    const message = status === 'disabled'
+      ? 'Flex baseline disabled'
+      : status === 'error'
+        ? 'Flex baseline unavailable'
+        : 'Flex baseline missing';
+    const detail = reconciliation?.error
+      || (latestDate ? `Latest saved baseline: ${latestDate}` : 'Run an IBKR Flex sync after the Activity Flex Query is configured.');
+
+    return (
+      <div className="pf-flex-recon pf-flex-recon--state">
+        <div className="pf-flex-recon__header">
+          <span className="pf-flex-recon__title">Flex baseline</span>
+          <span className="pf-flex-recon__status pf-flex-recon__status--muted">{message}</span>
+        </div>
+        <p className="pf-flex-recon__state">{detail}</p>
+      </div>
+    );
+  }
+
+  const baselineDate = formatBaselineDate(flex.reportDate || flex.date);
+  const mismatchRows = [
+    ['Long', liveExposure?.longPct, flexExposure.longPct],
+    ['Short', liveExposure?.shortPct, flexExposure.shortPct],
+    ['Gross', liveExposure?.grossPct, flexExposure.grossPct],
+    ['Net', liveExposure?.netPct, flexExposure.netPct],
+    ['Cash', liveExposure?.cashPct, flexExposure.cashPct],
+  ].filter(([, liveValue, flexValue]) => (
+    Number.isFinite(Number(liveValue)) &&
+    Number.isFinite(Number(flexValue)) &&
+    Math.abs(Number(liveValue) - Number(flexValue)) >= FLEX_RECONCILIATION_TOLERANCE_PCT
+  ));
+
+  const fundingGap = Number(flexExposure.longFundingGap || 0);
+  const cashSurplus = Number(flexExposure.equityCashSurplus || 0);
+
+  return (
+    <div className="pf-flex-recon">
+      <div className="pf-flex-recon__header">
+        <span className="pf-flex-recon__title">Flex baseline</span>
+        <span className="pf-flex-recon__status">
+          {baselineDate || 'Saved report'}
+        </span>
+      </div>
+      <div className="pf-flex-recon__grid">
+        <FlexMetric
+          label="Cash surplus after longs"
+          value={formatFlexAmount(cashSurplus, flex.currency || currency)}
+          tone={cashSurplus >= 0 ? 'positive' : 'negative'}
+        />
+        <FlexMetric
+          label="Long funding gap"
+          value={formatFlexAmount(fundingGap, flex.currency || currency)}
+          tone={fundingGap > 0 ? 'negative' : 'positive'}
+        />
+        <FlexMetric
+          label="Long baseline"
+          value={`${formatExposurePct(flexExposure.longPct)} (${formatFlexAmount(flexExposure.longMV, flex.currency || currency)})`}
+          tone={flexExposure.longPct > 100 ? 'warning' : 'neutral'}
+        />
+        <FlexMetric
+          label="Short baseline"
+          value={`${formatExposurePct(flexExposure.shortPct)} (${formatFlexAmount(flexExposure.shortMV, flex.currency || currency)})`}
+          tone="neutral"
+        />
+      </div>
+      {mismatchRows.length > 0 && (
+        <p className="pf-flex-recon__warning">
+          Live vs Flex differs: {mismatchRows.map(([label, liveValue, flexValue]) => {
+            const diff = Number(liveValue) - Number(flexValue);
+            return `${label} ${diff > 0 ? '+' : ''}${diff.toFixed(1)} pts`;
+          }).join(', ')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 const KNOWN_ACCOUNT_IDS = Object.keys(IBKR_ACCOUNT_LABELS);
+
+function resolvePositionSideCounts(portfolioData) {
+  const holdings = Array.isArray(portfolioData?.holdings) ? portfolioData.holdings : [];
+  const { longCount, shortCount } = getLongShortPositionSnapshot(holdings);
+  return { longCount, shortCount };
+}
 
 const PortfolioSidebarSnapshot = ({
   portfolioData,
   portfolioAccountsData = [],
   rtaPositions,
   etfProSnapshot,
+  exposureReconciliation,
+  exposureReconciliationLoading = false,
+  hedgeyeChangelog,
+  hedgeyeChangelogLoading = false,
+  hedgeyeChangelogError = null,
+  hedgeyeChangelogLastSuccessAt = null,
   loading = false,
+  refreshing = false,
   accounts = [],
   connection = null,
+  predictionMarketProviderStatus = null,
   selectedAccount,
   onAccountChange,
   onRefresh,
@@ -212,29 +489,6 @@ const PortfolioSidebarSnapshot = ({
   });
   const currency = portfolioData?.accountSummary?.currency || 'USD';
   const sidebarBanner = getPortfolioSidebarBanner({ portfolioData, selectedAccount });
-  const qualityWarnings = useMemo(() => {
-    const warnings = [];
-    if (Array.isArray(portfolioData?.reconciliationWarnings)) {
-      warnings.push(...portfolioData.reconciliationWarnings);
-    }
-    if (Array.isArray(portfolioData?.dataQuality?.warnings)) {
-      warnings.push(...portfolioData.dataQuality.warnings);
-    }
-    if (etfProSnapshot?.dataQuality?.status && etfProSnapshot.dataQuality.status !== 'ok') {
-      warnings.push(...(etfProSnapshot.dataQuality.warnings || ['ETF Pro update is partial']));
-    }
-    const rtaWarnings = rtaPositions?.sourceDiagnostics?.reconstructionWarnings || rtaPositions?.reconstructionWarnings || [];
-    if (Array.isArray(rtaWarnings) && rtaWarnings.length > 0) {
-      warnings.push(...rtaWarnings.map((warning) => `RTA: ${warning}`));
-    }
-    return [...new Set(warnings)].slice(0, 3);
-  }, [
-    portfolioData?.reconciliationWarnings,
-    portfolioData?.dataQuality,
-    etfProSnapshot?.dataQuality,
-    rtaPositions?.sourceDiagnostics,
-    rtaPositions?.reconstructionWarnings,
-  ]);
   const showMetrics =
     showPortfolioContent && exposure.nlv != null && Number.isFinite(exposure.nlv);
 
@@ -262,21 +516,24 @@ const PortfolioSidebarSnapshot = ({
   }, [portfolioAccountsData]);
 
   const statusDot = useMemo(
-    () => getIbkrPortfolioStatusDot({ connection, portfolioData, loading }),
-    [connection, portfolioData, loading],
+    () => getIbkrPortfolioStatusDot({
+      connection,
+      portfolioData,
+      loading,
+      rtaPositions,
+      etfProSnapshot,
+      predictionMarketProviderStatus,
+    }),
+    [connection, portfolioData, loading, rtaPositions, etfProSnapshot, predictionMarketProviderStatus],
   );
 
   const offlinePanel = useMemo(
     () => getPortfolioOfflinePanel({ connection, portfolioData }),
     [connection, portfolioData],
   );
-  const liveLongCount = useMemo(
-    () => (portfolioData?.holdings || []).filter((holding) => (parseFloat(holding.marketValue) || 0) > 0).length,
-    [portfolioData?.holdings],
-  );
-  const liveShortCount = useMemo(
-    () => (portfolioData?.holdings || []).filter((holding) => (parseFloat(holding.marketValue) || 0) < 0).length,
-    [portfolioData?.holdings],
+  const { longCount: liveLongCount, shortCount: liveShortCount } = useMemo(
+    () => resolvePositionSideCounts(portfolioData),
+    [portfolioData],
   );
   const rtaLongCount = rtaPositions?.available ? (rtaPositions.longCount || 0) : null;
   const rtaShortCount = rtaPositions?.available ? (rtaPositions.shortCount || 0) : null;
@@ -428,35 +685,13 @@ const PortfolioSidebarSnapshot = ({
     );
   }, [accountSnapshotsById, accountValueLabel, selectedAccount, usEquitySessionActive]);
 
-  const correlationLens = usePortfolioCorrelationConcentration({
-    holdings: portfolioData?.holdings || [],
-    totalValue: exposure.nlv,
-    enabled: showMetrics,
-  });
-
-  const correlationClusters = useMemo(() => (
-    [...(correlationLens.data?.clusters || [])]
-      .sort((a, b) => (b.correlationAdjustedGrossPct || 0) - (a.correlationAdjustedGrossPct || 0))
-      .slice(0, 3)
-  ), [correlationLens.data?.clusters]);
-  const topCorrelationCluster = correlationClusters[0] || null;
-  const topClusterTone = getClusterTone(topCorrelationCluster);
-  const unscoredCorrelationItems = (correlationLens.data?.unscored || []).slice(0, 3);
-
   return (
     <div className="pf-snapshot">
       <header className="pf-header">
         <div className="pf-header__top">
           <div className="pf-header__brand">
             <div className="pf-header__logo" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
-                <path
-                  d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-              </svg>
+              <img className="pf-header__logo-img" src={portfolioFolderIcon} alt="" />
             </div>
             <div style={{ minWidth: 0 }}>
               <h1 className="pf-header__title">Portfolio</h1>
@@ -505,11 +740,11 @@ const PortfolioSidebarSnapshot = ({
               type="button"
               className="pf-icon-btn"
               onClick={onRefresh}
-              disabled={loading}
-              title="Refresh portfolio"
+              disabled={loading || refreshing}
+              title={refreshing ? 'Refreshing portfolio' : 'Refresh portfolio'}
               aria-label="Refresh portfolio"
             >
-              <RefreshCw className={`pf-icon-btn__arrow${loading ? ' pf-spin' : ''}`} size={15} strokeWidth={2} />
+              <RefreshCw className={`pf-icon-btn__arrow${loading || refreshing ? ' pf-spin' : ''}`} size={15} strokeWidth={2} />
             </button>
             <StatusDot
               status={statusDot.status}
@@ -520,7 +755,7 @@ const PortfolioSidebarSnapshot = ({
               sources={statusDot.sources}
               updatedAt={statusDot.updatedAt}
               align="right"
-              placement="top"
+              placement="bottom"
             />
           </div>
         </div>
@@ -547,11 +782,11 @@ const PortfolioSidebarSnapshot = ({
       </header>
 
       <div className="pf-body-container">
-        {loading && (
-        <div className="pf-loading pf-loading--centered">
-          <LoadingIndicator label="Syncing…" size="sm" />
-        </div>
-      )}
+        {loading && !showMetrics && (
+          <div className="pf-loading pf-loading--centered">
+            <LoadingIndicator label="Syncing…" size="sm" />
+          </div>
+        )}
 
       {!isPortfolioLive && !loading && (
         <div className="pf-card pf-card--muted pf-setup">
@@ -577,8 +812,8 @@ const PortfolioSidebarSnapshot = ({
           <div className="pf-metrics-row">
             <div className="pf-position-compare" role="table" aria-label="Portfolio versus RTA and ETF Pro position comparison">
               <div className="pf-position-compare__header pf-position-compare__cell" />
-              <div className="pf-position-compare__header pf-position-compare__cell">Portfolio count</div>
-              <div className="pf-position-compare__header pf-position-compare__cell">RTA signal count</div>
+              <div className="pf-position-compare__header pf-position-compare__cell">Portfolio</div>
+              <div className="pf-position-compare__header pf-position-compare__cell">RTA</div>
               <div className="pf-position-compare__header pf-position-compare__cell">ETF Pro</div>
 
               <div className="pf-position-compare__label pf-position-compare__label--long pf-position-compare__cell">Long</div>
@@ -640,121 +875,55 @@ const PortfolioSidebarSnapshot = ({
           {/* Exposure */}
           <div className="pf-section">
             <div className="pf-bars">
-              <ExposureBar label="Gross Exposure" pct={exposure.grossPct} variant="blue" />
-              <ExposureBar label="Net Exposure" pct={exposure.netPct} variant="positive" signed />
-              <ExposureBar label="Long Exposure" pct={exposure.longPct} variant="positive" />
-              <ExposureBar label="Short Exposure" pct={exposure.shortPct} variant="negative" />
-              <ExposureBar label="CASH" pct={exposure.cashPct} variant="neutral" tooltip={IDLE_CASH_TOOLTIP} />
+              <ExposureBar
+                label="Gross Exposure"
+                pct={exposure.grossPct}
+                amount={exposure.longMV + exposure.shortMV}
+                currency={currency}
+              />
+              <ExposureBar
+                label="Net Exposure"
+                pct={exposure.netPct}
+                amount={exposure.netMV}
+                netAmount
+                currency={currency}
+              />
+              <ExposureBar
+                label="Long Exposure"
+                pct={exposure.longPct}
+                amount={exposure.longMV}
+                currency={currency}
+              />
+              <ExposureBar
+                label="Short Exposure"
+                pct={exposure.shortPct}
+                amount={exposure.shortMV}
+                currency={currency}
+              />
+              <ExposureBar
+                label="CASH"
+                pct={exposure.cashPct}
+                amount={exposure.cashValue}
+                currency={currency}
+                tooltip={IDLE_CASH_TOOLTIP}
+              />
             </div>
           </div>
 
-          <div className="pf-section pf-corr-lens">
-            <div className="pf-corr-lens__head">
-              <div className="pf-section__head">Correlation / Exposure</div>
-              <div className="pf-corr-lens__actions">
-                {correlationLens.loading && correlationLens.data ? (
-                  <LoadingIndicator label="Updating..." size="sm" className="pf-corr-lens__updating" />
-                ) : null}
-                <RefreshButton
-                  onClick={correlationLens.refresh}
-                  loading={correlationLens.loading}
-                  disabled={!correlationLens.hasInput}
-                  label={correlationLens.data ? 'Refresh' : 'Calculate'}
-                  className="pf-corr-lens__refresh"
-                />
-              </div>
-            </div>
+          <FlexReconciliationPanel
+            liveExposure={exposure}
+            currency={currency}
+            reconciliation={exposureReconciliation}
+            loading={exposureReconciliationLoading}
+          />
 
-            {correlationLens.loading && !correlationLens.data ? (
-              <LoadingIndicator label="Calculating correlation..." size="sm" centered className="pf-corr-lens__loading" />
-            ) : null}
-
-            {!correlationLens.loading && correlationLens.error && !correlationLens.data ? (
-              <div className="pf-corr-lens__state pf-corr-lens__state--error">{correlationLens.error}</div>
-            ) : null}
-
-            {!correlationLens.loading && !correlationLens.error && !correlationLens.data ? (
-              <div className="pf-corr-lens__state">No correlation data available.</div>
-            ) : null}
-
-            {correlationLens.data && correlationLens.error ? (
-              <div className="pf-corr-lens__state pf-corr-lens__state--error">
-                Showing previous snapshot. Refresh failed: {correlationLens.error}
-              </div>
-            ) : null}
-
-            {correlationLens.data ? (
-              <>
-                <div className="pf-corr-lens__kpis">
-                  <div>
-                    <span>Effective Bets</span>
-                    <strong>{correlationLens.data.scores?.effectiveIndependentBets ?? '--'}</strong>
-                  </div>
-                  <div>
-                    <span>Concentration</span>
-                    <strong>{correlationLens.data.scores?.concentrationScore ?? '--'}</strong>
-                  </div>
-                  <div>
-                    <span>Largest</span>
-                    <strong>{formatLensPct(correlationLens.data.scores?.largestClusterPct || 0)}</strong>
-                  </div>
-                  <div>
-                    <span>Coverage</span>
-                    <strong>{formatLensPct(correlationLens.data.coverage?.scoredPct || 0)}</strong>
-                  </div>
-                </div>
-
-                {topCorrelationCluster ? (
-                  <div className={`pf-corr-lens__hero pf-corr-lens__hero--${topClusterTone.key}`}>
-                    <div className="pf-corr-lens__hero-main">
-                      <span>{topClusterTone.label}</span>
-                      <strong>{topCorrelationCluster.label}</strong>
-                    </div>
-                    <div className="pf-corr-lens__hero-stats">
-                      <span>Gross {formatLensPct(topCorrelationCluster.grossClusterPct || 0)}</span>
-                      <span>Net {formatLensPct(topCorrelationCluster.netClusterPct || 0, 1, { signed: true })}</span>
-                    </div>
-                    <div className="pf-corr-lens__members">
-                      {(topCorrelationCluster.members || []).slice(0, 5).map((member) => (
-                        <span key={member.symbol}>{member.symbol}</span>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="pf-corr-lens__state">No correlated clusters yet.</div>
-                )}
-
-                {correlationClusters.length > 0 ? (
-                  <div className="pf-corr-lens__clusters" aria-label="Top correlated clusters">
-                    {correlationClusters.map((cluster) => {
-                      const tone = getClusterTone(cluster);
-                      return (
-                        <div key={cluster.id} className="pf-corr-lens__cluster-row">
-                          <span className={`pf-corr-lens__tone pf-corr-lens__tone--${tone.key}`}>{tone.label}</span>
-                          <span className="pf-corr-lens__cluster-name">{cluster.label}</span>
-                          <span className="pf-corr-lens__cluster-value">{formatLensPct(cluster.correlationAdjustedGrossPct || cluster.grossClusterPct || 0)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                <div className="pf-corr-lens__coverage">
-                  <span>Cash {formatLensPct(correlationLens.data.coverage?.cashPct || 0)}</span>
-                  <span>Unscored {correlationLens.data.coverage?.unscoredCount || 0}</span>
-                  {unscoredCorrelationItems.map((item) => (
-                    <span key={`${item.symbol}-${item.reason}`}>{item.symbol}</span>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
-
-          {showPortfolioContent && qualityWarnings.length > 0 && !loading && (
-            <div className="pf-banner pf-banner--warning">
-              {qualityWarnings.join(' · ')}
-            </div>
-          )}
+          <LatestUpdatesFeed
+            changelog={hedgeyeChangelog}
+            loading={hedgeyeChangelogLoading}
+            error={hedgeyeChangelogError}
+            now={sessionClock}
+            lastSuccessAt={hedgeyeChangelogLastSuccessAt}
+          />
 
         </div>
 

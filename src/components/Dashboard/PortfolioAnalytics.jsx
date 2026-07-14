@@ -1,12 +1,28 @@
-import React, { useState, useCallback } from 'react';
-import { Card, Title, Text, Grid, Badge, Flex } from '@tremor/react';
-import MacroFactorRadar from './MacroFactorRadar';
+import React, { useState, useCallback, useMemo } from 'react';
+import { Card, Title, Text } from '@tremor/react';
 import { calculateMacroFactorExposures } from '../../utils/macroAnalysisUtils';
 
 const TOP_N_DEFAULT = 3;
 
+const factorViewOptions = [
+  { id: 'audit', label: 'Audit', description: 'One-line scorecard' },
+  { id: 'drivers', label: 'Drivers', description: 'Contributor tables by factor' },
+  { id: 'signed', label: 'Signed', description: 'Positive and negative exposure split' }
+];
+
+const parseNum = (value) => {
+  const next = Number.parseFloat(value);
+  return Number.isFinite(next) ? next : 0;
+};
+
+const formatSigned = (value, decimals = 1) => {
+  const num = parseNum(value);
+  return `${num > 0 ? '+' : ''}${num.toFixed(decimals)}%`;
+};
+
 const PortfolioAnalytics = ({ portfolioData }) => {
   const [expandedFactors, setExpandedFactors] = useState(new Set());
+  const [factorView, setFactorView] = useState('audit');
 
   const toggleExpand = useCallback((factorId) => {
     setExpandedFactors((prev) => {
@@ -17,19 +33,44 @@ const PortfolioAnalytics = ({ portfolioData }) => {
     });
   }, []);
 
-  // Calculate factor exposures with detailed contributors - ALWAYS call hooks at top level
-  const factorData = React.useMemo(() => {
+  const factorData = useMemo(() => {
     if (!portfolioData?.holdings) return [];
     return calculateMacroFactorExposures(portfolioData.holdings, portfolioData.summary?.totalValue);
   }, [portfolioData]);
+
+  const factorRows = useMemo(() => {
+    return factorData.map((factor) => {
+      const contributors = factor.allContributors ?? factor.topContributors ?? [];
+      const positive = contributors
+        .filter((item) => parseNum(item.contributionPercent) > 0)
+        .sort((a, b) => parseNum(b.contributionPercent) - parseNum(a.contributionPercent));
+      const negative = contributors
+        .filter((item) => parseNum(item.contributionPercent) < 0)
+        .sort((a, b) => parseNum(a.contributionPercent) - parseNum(b.contributionPercent));
+      const topContributor = contributors[0];
+      const totalPositive = positive.reduce((sum, item) => sum + parseNum(item.contributionPercent), 0);
+      const totalNegative = negative.reduce((sum, item) => sum + parseNum(item.contributionPercent), 0);
+      const avgBeta = contributors.length
+        ? contributors.reduce((sum, item) => sum + parseNum(item.beta), 0) / contributors.length
+        : 0;
+
+      return {
+        ...factor,
+        contributors,
+        positive,
+        negative,
+        topContributor,
+        totalPositive,
+        totalNegative,
+        avgBeta
+      };
+    });
+  }, [factorData]);
 
   if (!portfolioData || !portfolioData.summary) {
     return (
       <Card className="dark:bg-gray-800">
         <Title className="mb-2 dark:text-white">Portfolio Analysis</Title>
-        <Text className="text-sm font-medium text-gray-400 italic mb-6">
-          "Every metric on this page should help me decide whether to size a position up or down."
-        </Text>
         <Text className="text-xs text-gray-500 dark:text-gray-400">
           No portfolio data available
         </Text>
@@ -37,92 +78,166 @@ const PortfolioAnalytics = ({ portfolioData }) => {
     );
   }
 
-  // Use pre-calculated metrics or fallbacks
-  const analytics = portfolioData.riskMetrics || {};
+  const renderSwitcher = () => (
+    <div className="pfa-switcher" role="tablist" aria-label="Factor exposure design variants">
+      {factorViewOptions.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="tab"
+          aria-selected={factorView === option.id}
+          className={`pfa-switcher__button ${factorView === option.id ? 'is-active' : ''}`}
+          onClick={() => setFactorView(option.id)}
+          title={option.description}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const renderScoreStrip = () => (
+    <div className="pfa-score-strip">
+      {factorRows.map((factor) => (
+        <div key={factor.factorId} className="pfa-metric">
+          <span>{factor.subject}</span>
+          <strong className={factor.score >= 0 ? 'pfa-positive' : 'pfa-negative'}>
+            {formatSigned(factor.score, 0)}
+          </strong>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderAuditView = () => (
+    <table className="pfa-table">
+      <thead>
+        <tr>
+          <th>Factor</th>
+          <th className="pfa-num">Net</th>
+          <th className="pfa-num">Positive</th>
+          <th className="pfa-num">Negative</th>
+          <th className="pfa-num">Avg Beta</th>
+          <th>Largest Driver</th>
+          <th className="pfa-num">Driver Ctrb</th>
+        </tr>
+      </thead>
+      <tbody>
+        {factorRows.map((factor) => (
+          <tr key={factor.factorId}>
+            <td>
+              <strong style={{ color: factor.color }}>{factor.subject}</strong>
+              <div className="pfa-subtitle">{factor.calculationMethod}</div>
+            </td>
+            <td className={`pfa-num ${factor.score >= 0 ? 'pfa-positive' : 'pfa-negative'}`}>{formatSigned(factor.score, 0)}</td>
+            <td className="pfa-num pfa-positive">{formatSigned(factor.totalPositive)}</td>
+            <td className="pfa-num pfa-negative">{formatSigned(factor.totalNegative)}</td>
+            <td className="pfa-num">{factor.avgBeta.toFixed(2)}</td>
+            <td>{factor.topContributor?.symbol || '--'}</td>
+            <td className={`pfa-num ${parseNum(factor.topContributor?.contributionPercent) >= 0 ? 'pfa-positive' : 'pfa-negative'}`}>
+              {factor.topContributor ? formatSigned(factor.topContributor.contributionPercent, 2) : '--'}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  const renderDriversView = () => (
+    <div className="pfa-factor-grid">
+      {factorRows.map((factor) => {
+        const isExpanded = expandedFactors.has(factor.factorId);
+        const visibleRows = isExpanded ? factor.contributors : factor.contributors.slice(0, TOP_N_DEFAULT);
+
+        return (
+          <section key={factor.factorId} className="pfa-factor-card" style={{ borderLeftColor: factor.color }}>
+            <div className="pfa-factor-card__head">
+              <div>
+                <strong>{factor.subject}</strong>
+                <span>{factor.calculationMethod}</span>
+              </div>
+              <strong className={factor.score >= 0 ? 'pfa-positive' : 'pfa-negative'}>{formatSigned(factor.score, 0)}</strong>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th className="pfa-num">Wgt</th>
+                  <th className="pfa-num">Beta</th>
+                  <th className="pfa-num">Ctrb</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((c, idx) => (
+                  <tr key={`${factor.factorId}-${c.symbol}-${idx}`}>
+                    <td>{c.symbol}</td>
+                    <td className="pfa-num">{c.weightPercent}%</td>
+                    <td className="pfa-num">{parseNum(c.beta).toFixed(2)}</td>
+                    <td className={`pfa-num ${parseNum(c.contributionPercent) >= 0 ? 'pfa-positive' : 'pfa-negative'}`}>
+                      {formatSigned(c.contributionPercent, 2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {factor.contributors.length > TOP_N_DEFAULT && (
+              <button type="button" className="pfa-expand" onClick={() => toggleExpand(factor.factorId)}>
+                {isExpanded ? 'Show less' : `Show all ${factor.contributors.length}`}
+              </button>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+
+  const renderSignedView = () => (
+    <div className="pfa-signed-grid">
+      {factorRows.map((factor) => (
+        <section key={factor.factorId} className="pfa-signed-card">
+          <h4 style={{ color: factor.color }}>{factor.subject}</h4>
+          <div className="pfa-signed-row">
+            <span>Net</span>
+            <strong className={factor.score >= 0 ? 'pfa-positive' : 'pfa-negative'}>{formatSigned(factor.score, 0)}</strong>
+          </div>
+          <div className="pfa-signed-row">
+            <span>Positive</span>
+            <strong className="pfa-positive">{formatSigned(factor.totalPositive)}</strong>
+          </div>
+          <div className="pfa-signed-row">
+            <span>Negative</span>
+            <strong className="pfa-negative">{formatSigned(factor.totalNegative)}</strong>
+          </div>
+          <div className="pfa-signed-row">
+            <span>Top +</span>
+            <strong>{factor.positive[0]?.symbol || '--'} {factor.positive[0] ? formatSigned(factor.positive[0].contributionPercent, 2) : ''}</strong>
+          </div>
+          <div className="pfa-signed-row">
+            <span>Top -</span>
+            <strong>{factor.negative[0]?.symbol || '--'} {factor.negative[0] ? formatSigned(factor.negative[0].contributionPercent, 2) : ''}</strong>
+          </div>
+        </section>
+      ))}
+    </div>
+  );
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
-      {/* Remove Header "Macro Risk Audit" - streamlined layout as requested */}
-
-      <Grid numItems={12} className="gap-6">
-        {/* Main Radar Chart - Centerpiece */}
-        <div className="col-span-12 md:col-span-6 lg:col-span-5">
-          <MacroFactorRadar portfolioData={portfolioData} />
+    <section className="pfa-shell">
+      <div className="pfa-header">
+        <div>
+          <span className="pcv-eyebrow">Macro Factor Exposure</span>
+          <Title className="pfa-title dark:text-white">Numeric Risk Audit</Title>
+          <div className="pfa-subtitle">Beta-adjusted exposure by macro driver. Positive values add exposure; negative values hedge or detract.</div>
         </div>
+        {renderSwitcher()}
+      </div>
 
-        {/* Detailed Factor Breakdown - Right Column: no scroll, top 3 + expand */}
-        <div className="col-span-12 md:col-span-6 lg:col-span-7 space-y-4">
-          {factorData.map((factor) => {
-            const contributors = factor.allContributors ?? factor.topContributors ?? [];
-            const isExpanded = expandedFactors.has(factor.factorId);
-            const visibleRows = isExpanded ? contributors : contributors.slice(0, TOP_N_DEFAULT);
-            const hasMore = contributors.length > TOP_N_DEFAULT;
-
-            return (
-              <div key={factor.factorId} className="mb-2 p-2 border-l-2" style={{ borderLeftColor: factor.color }}>
-                <div className="flex justify-between items-center mb-1">
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <Text className="text-sm font-bold whitespace-nowrap flex-shrink-0" style={{ color: factor.color }}>{factor.subject}</Text>
-                    <Text className="text-[10px] text-gray-500 italic truncate min-w-0">{factor.calculationMethod}</Text>
-                  </div>
-                  <Badge size="xs" className="px-1.5 py-0 flex-shrink-0 ml-2" style={{ backgroundColor: `${factor.color}20`, color: factor.color }}>
-                    {factor.score > 0 ? '+' : ''}{factor.score}%
-                  </Badge>
-                </div>
-
-                {/* Compact Contributors Table - top 3 by default */}
-                <div className="mt-1">
-                  <div className="overflow-hidden rounded border-b border-gray-700/30">
-                    <table className="w-full text-[10px] text-gray-900 dark:text-white">
-                      <thead className="bg-gray-700/30">
-                        <tr>
-                          <th className="px-2 py-0.5 text-left text-gray-900 dark:text-white font-medium">Ticker</th>
-                          <th className="px-2 py-0.5 text-right text-gray-900 dark:text-white font-medium">Wgt</th>
-                          <th className="px-2 py-0.5 text-right text-gray-900 dark:text-white font-medium">Ctrb</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-700/30 text-gray-900 dark:text-white">
-                        {visibleRows.map((c, idx) => (
-                          <tr key={idx} className="hover:bg-gray-700/20">
-                            <td className="px-2 py-0.5 font-medium text-gray-900 dark:text-white">{c.symbol}</td>
-                            <td className="px-2 py-0.5 text-right text-gray-900 dark:text-white">{c.weightPercent}%</td>
-                            <td className="px-2 py-0.5 text-right font-medium text-gray-900 dark:text-white">
-                              {parseFloat(c.contributionPercent) > 0 ? '+' : ''}{c.contributionPercent}%
-                            </td>
-                          </tr>
-                        ))}
-                        {contributors.length === 0 && (
-                          <tr>
-                            <td colSpan="3" className="px-2 py-1 text-center text-gray-900 dark:text-white italic">No contributors</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  {/* Expand / collapse: click to view all securities under this factor */}
-                  {contributors.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => toggleExpand(factor.factorId)}
-                      className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors cursor-pointer"
-                      aria-label={isExpanded ? 'Show less' : 'Expand to view all securities'}
-                    >
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded border border-gray-400 dark:border-gray-500 hover:border-gray-600 dark:hover:border-gray-300" aria-hidden="true">
-                        ⋯
-                      </span>
-                      <span>{isExpanded ? 'Show less' : `Expand to view all (${contributors.length})`}</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Grid>
-    </div>
+      {renderScoreStrip()}
+      {factorView === 'audit' && renderAuditView()}
+      {factorView === 'drivers' && renderDriversView()}
+      {factorView === 'signed' && renderSignedView()}
+    </section>
   );
 };
 
 export default PortfolioAnalytics;
-
-

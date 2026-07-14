@@ -20,14 +20,14 @@ async function trySpecialQuote(symbol) {
 }
 
 async function getCanonicalQuote(symbolOrInstrument) {
-  const symbol =
-    typeof symbolOrInstrument === 'object'
-      ? symbolOrInstrument.symbol
-      : String(symbolOrInstrument).toUpperCase();
-
   const instrument = resolveInstrument(symbolOrInstrument);
-  if (!instrument.supported && instrument.reason !== 'forecast_event_todo') {
-    const yahooResult = await yahoo.getQuote(symbol);
+  if (!['auto', 'ibkr', 'yahoo'].includes(instrument.provider)) {
+    setMarketMeta(instrument.provider, `${instrument.provider}_quote_unavailable`);
+    return null;
+  }
+  const shouldUseYahooDirectly = instrument.provider === 'yahoo' || !instrument.supported;
+  if (shouldUseYahooDirectly && instrument.reason !== 'forecast_event_todo') {
+    const yahooResult = await yahoo.getQuote(symbolOrInstrument);
     if (yahooResult.canonical?.valid) {
       setMarketMeta('yahoo', yahooResult.canonical.warning);
       return yahooResult.canonical;
@@ -41,7 +41,7 @@ async function getCanonicalQuote(symbolOrInstrument) {
     return ibkrResult.canonical;
   }
 
-  const yahooResult = await yahoo.getQuote(symbol);
+  const yahooResult = await yahoo.getQuote(symbolOrInstrument);
   if (yahooResult.canonical) {
     yahooResult.canonical.source = 'yahoo';
     yahooResult.canonical.warning = [

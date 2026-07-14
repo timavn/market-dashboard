@@ -61,7 +61,9 @@ async function fetchYahooQuote(yahooTicker) {
       change: (currentPrice - previousClose).toFixed(2),
       changePercent: previousClose > 0 ? (((currentPrice - previousClose) / previousClose) * 100).toFixed(2) : '0.00',
       previousClose: previousClose.toFixed(2),
-      timestamp: new Date().toISOString(),
+      timestamp: Number.isFinite(meta.regularMarketTime)
+        ? new Date(meta.regularMarketTime * 1000).toISOString()
+        : new Date().toISOString(),
     };
   } catch {
     return null;
@@ -73,7 +75,11 @@ async function getQuote(symbolOrInstrument) {
     typeof symbolOrInstrument === 'object'
       ? symbolOrInstrument.symbol
       : String(symbolOrInstrument).toUpperCase();
-  const mapping = (getTickerMappingFn || defaultMapping)(symbol);
+  const explicitProviderSymbol =
+    typeof symbolOrInstrument === 'object' ? symbolOrInstrument.providerSymbol : null;
+  const mapping = explicitProviderSymbol
+    ? { source: 'yahoo', ticker: explicitProviderSymbol }
+    : (getTickerMappingFn || defaultMapping)(symbol);
   if (mapping.source !== 'yahoo') {
     return { canonical: null, error: 'not_yahoo_symbol' };
   }
@@ -103,7 +109,11 @@ async function getHistoricalBars(symbolOrInstrument, range, interval) {
     typeof symbolOrInstrument === 'object'
       ? symbolOrInstrument.symbol
       : String(symbolOrInstrument).toUpperCase();
-  const mapping = (getTickerMappingFn || defaultMapping)(symbol);
+  const explicitProviderSymbol =
+    typeof symbolOrInstrument === 'object' ? symbolOrInstrument.providerSymbol : null;
+  const mapping = explicitProviderSymbol
+    ? { source: 'yahoo', ticker: explicitProviderSymbol }
+    : (getTickerMappingFn || defaultMapping)(symbol);
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(mapping.ticker)}`;
   try {
     const response = await axios.get(url, {

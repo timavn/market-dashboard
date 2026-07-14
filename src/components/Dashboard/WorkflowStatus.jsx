@@ -27,9 +27,12 @@ const WorkflowStatus = () => {
   const [riskRanges, setRiskRanges] = useState({});
   const [freshnessData, setFreshnessData] = useState(null);
   const [changelogData, setChangelogData] = useState(null);
+  const [hermesDirectorData, setHermesDirectorData] = useState(null);
+  const [hermesCommandLoading, setHermesCommandLoading] = useState('');
+  const [hermesCommandMessage, setHermesCommandMessage] = useState('');
   const [changelogLoading, setChangelogLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(new Date());
-  const [activeTab, setActiveTab] = useState('freshness'); // 'freshness', 'preview', 'services'
+  const [activeTab, setActiveTab] = useState('freshness'); // 'freshness', 'preview', 'services', 'hermes'
   const [serviceTotals, setServiceTotals] = useState(null);
   const [csvUrl, setCsvUrl] = useState(null);
   const [previewViewMode, setPreviewViewMode] = useState('table'); // 'table' or 'json'
@@ -50,6 +53,7 @@ const WorkflowStatus = () => {
     { key: 'portfolio-solutions', label: 'Portfolio Solutions' },
     { key: 'the-macro-show', label: 'Macro Show' },
     { key: 'the-call', label: 'The Call' },
+    { key: 'real-time-alert', label: 'Real-Time Alerts' },
     { key: 'etf-pro', label: 'ETF Pro' },
     { key: 'cftc-positioning', label: 'CFTC Net Long' },
   ];
@@ -69,6 +73,11 @@ const WorkflowStatus = () => {
   /** When Hedgeye has not scraped yet, Data Preview lists ETF Pro alone (workbook-driven). */
   const previewCardTypes = hedgeyeStatus.lastRun ? DATA_TYPES : DATA_TYPES.filter((t) => t.key === 'etf-pro');
   const csvStatus = workflowStatus?.csvUpload || {};
+  const hermesInboxStatus = workflowStatus?.hermesInbox || {};
+  const hermesDirector = hermesDirectorData?.director || workflowStatus?.hermesDirector || null;
+  const hermesWorkers = hermesDirectorData?.workers || workflowStatus?.hermesWorkers || [];
+  const hermesAlerts = hermesDirectorData?.alerts || workflowStatus?.hermesAlerts || [];
+  const hermesRecentRuns = hermesDirectorData?.recentRuns || [];
 
   // Fetch workflow status and data
   const fetchData = async () => {
@@ -80,13 +89,12 @@ const WorkflowStatus = () => {
       console.log('[WorkflowStatus] Backend URL:', backendUrl);
 
       // Helper for individual timeouts
-      // Increased to 60s because server can be busy with price fetches
       const withTimeout = (promise, ms) => Promise.race([
         promise,
         new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out - server may be busy')), ms))
       ]);
 
-      const TIMEOUT_MS = 60000; // 60s individual timeout (server can be busy with price fetches)
+      const TIMEOUT_MS = 15000; // 15s timeout to match axios client config
 
       // Execute all fetches in parallel using Promise.allSettled
       // This ensures that if one request fails/hangs, others are still processed
@@ -94,7 +102,8 @@ const WorkflowStatus = () => {
         withTimeout(axios.get(`${backendUrl}${ENDPOINTS.WORKFLOW_STATUS || '/api/workflow-status'}`), TIMEOUT_MS),
         withTimeout(MarketDataService.getRiskRanges(), TIMEOUT_MS),
         withTimeout(MarketDataService.getHedgeyeFreshness(), TIMEOUT_MS),
-        withTimeout(axios.get(`${backendUrl}/api/hedgeye/changelog`), TIMEOUT_MS)
+        withTimeout(axios.get(`${backendUrl}/api/hedgeye/changelog`), TIMEOUT_MS),
+        withTimeout(MarketDataService.getHermesDirectorStatus(), TIMEOUT_MS),
       ]);
 
       console.log('[WorkflowStatus] All promises settled, processing results...');
@@ -118,6 +127,15 @@ const WorkflowStatus = () => {
             lastUpload: null,
             records: 0,
             fileName: null
+          },
+          hermesInbox: {
+            status: 'unknown',
+            lastRun: null,
+            attachmentCount: 0,
+            storedCount: 0,
+            errorCount: 0,
+            pendingCount: 0,
+            latestFilename: null
           }
         });
       }
@@ -156,7 +174,7 @@ const WorkflowStatus = () => {
                   date: d,
                   scrapedAt: etf.meta?.parsedAt,
                   itemCount: rowCount,
-                  source: 'EtfProLocal',
+                  source: etf.meta?.source || 'EtfProLocal',
                 },
               },
             };
@@ -177,6 +195,13 @@ const WorkflowStatus = () => {
       } else {
         console.error('Error fetching Hedgeye changelog:', results[3].reason);
         setChangelogData(null);
+      }
+
+      if (results[4].status === 'fulfilled') {
+        setHermesDirectorData(results[4].value);
+      } else {
+        console.error('Error fetching Hermes director status:', results[4].reason);
+        setHermesDirectorData(null);
       }
 
       setLastRefresh(new Date());
@@ -283,6 +308,58 @@ const WorkflowStatus = () => {
           setAllSnapshotData((prev) => ({
             ...prev,
             [key]: null,
+          }));
+        }
+        return;
+      }
+
+      if (key === 'real-time-alert') {
+        setAllPdfData((prev) => ({
+          ...prev,
+          [key]: { ...prev[key], loading: true, error: null },
+        }));
+        try {
+          const cacheKey = `${key}-${date}`;
+          const snapshotResponse = await axios.get(
+            `${backendUrl}/api/hedgeye/snapshot/${key}?date=${date}`
+          );
+          const snapshotData = snapshotResponse.data;
+
+          setSnapshotCache((prev) => ({
+            ...prev,
+            [cacheKey]: snapshotData,
+          }));
+          setAllSnapshotData((prev) => ({
+            ...prev,
+            [key]: snapshotData,
+          }));
+          setAllPdfData((prev) => ({
+            ...prev,
+            [key]: {
+              loading: false,
+              url: null,
+              type: null,
+              error: null,
+              workbookOnly: true,
+              actionOnly: true,
+            },
+          }));
+        } catch (err) {
+          console.warn('[Preview] Real-Time Alerts fetch failed:', err?.message || err);
+          setAllSnapshotData((prev) => ({
+            ...prev,
+            [key]: null,
+          }));
+          setAllPdfData((prev) => ({
+            ...prev,
+            [key]: {
+              loading: false,
+              url: null,
+              type: null,
+              error: 'No real-time alert snapshot for this date',
+              workbookOnly: true,
+              actionOnly: true,
+            },
           }));
         }
         return;
@@ -494,15 +571,64 @@ const WorkflowStatus = () => {
     switch (status) {
       case 'success':
       case 'healthy':
+      case 'succeeded':
         return 'emerald';
       case 'warning':
       case 'stale':
+      case 'running':
         return 'yellow';
       case 'error':
       case 'failed':
+      case 'critical':
         return 'red';
+      case 'acknowledged':
+      case 'snoozed':
+        return 'yellow';
       default:
         return 'gray';
+    }
+  };
+
+  const formatShortTimestamp = (timestamp) => {
+    if (!timestamp) return 'Never';
+    return new Date(timestamp).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  };
+
+  const runHermesCommand = async (command, payload = {}) => {
+    try {
+      setHermesCommandLoading(command);
+      const result = await MarketDataService.runHermesDirectorCommand(command, payload);
+      if (result?.snapshot) {
+        setHermesDirectorData(result.snapshot);
+      }
+      setHermesCommandMessage(result?.message || `${command} completed.`);
+      setLastRefresh(new Date());
+    } catch (error) {
+      console.error(`Error running Hermes command ${command}:`, error);
+      setHermesCommandMessage(error.message || `Failed to run ${command}`);
+    } finally {
+      setHermesCommandLoading('');
+    }
+  };
+
+  const handleHermesAlertAction = async (alertId, action, payload = {}) => {
+    try {
+      setHermesCommandLoading(`${action}:${alertId}`);
+      const result = await MarketDataService.updateHermesAlert(alertId, action, payload);
+      if (result?.snapshot) {
+        setHermesDirectorData(result.snapshot);
+      }
+      setHermesCommandMessage(`Alert ${action}d.`);
+    } catch (error) {
+      console.error(`Error updating Hermes alert ${alertId}:`, error);
+      setHermesCommandMessage(error.message || `Failed to ${action} alert`);
+    } finally {
+      setHermesCommandLoading('');
     }
   };
 
@@ -574,9 +700,10 @@ const WorkflowStatus = () => {
         }}
         className="dark:border-gray-700"
       >
-        {['freshness', 'preview', 'services'].map((tab) => {
+        {['freshness', 'hermes', 'preview', 'services'].map((tab) => {
           const tabLabels = {
             freshness: 'Data Upload',
+            hermes: 'Hermes Command',
             preview: 'Data Preview',
             services: 'Services & Costs'
           };
@@ -683,13 +810,32 @@ const WorkflowStatus = () => {
                     'portfolio-solutions': { name: 'Portfolio Solutions', unit: 'items' },
                     'the-macro-show': { name: 'Macro Show', unit: 'positions' },
                     'the-call': { name: 'The Call', unit: 'positions' },
+                    'real-time-alert': { name: 'Real-Time Alerts', unit: 'alerts' },
                     'etf-pro': { name: 'ETF Pro', unit: 'items' },
-                    'cftc-positioning': { name: 'CFTC Net Long', unit: 'metrics' }
+                    'cftc-positioning': { name: 'CFTC Net Long', unit: 'metrics' },
+                    'hermes-inbox': { name: 'Hermes Inbox', unit: 'files' }
                   };
 
                   const dataTypeRows = Object.entries(dataTypeConfig);
                   return dataTypeRows.map(([key, config], index) => {
-                    const data = freshnessData?.dataTypes?.[key] || { status: 'missing', itemCount: 0 };
+                    const data = key === 'hermes-inbox'
+                      ? (freshnessData?.dataTypes?.[key] || {
+                        status: hermesInboxStatus.status === 'success' ? 'fresh' : (hermesInboxStatus.status || 'missing'),
+                        itemCount: hermesInboxStatus.attachmentCount || 0,
+                        lastUpdated: hermesInboxStatus.lastUpdated || hermesInboxStatus.lastRun,
+                        scrapedAt: hermesInboxStatus.lastUpdated || hermesInboxStatus.lastRun,
+                        latestFilename: hermesInboxStatus.latestFilename,
+                        gmailAccount: hermesInboxStatus.gmailAccount,
+                        gmailQuery: hermesInboxStatus.gmailQuery,
+                      })
+                      : (freshnessData?.dataTypes?.[key] || { status: 'missing', itemCount: 0 });
+                    const hermesSourceTitle = key === 'hermes-inbox'
+                      ? [
+                        data.gmailAccount ? `Account: ${data.gmailAccount}` : null,
+                        data.gmailQuery ? `Query: ${data.gmailQuery}` : null,
+                        data.latestFilename ? `Latest: ${data.latestFilename}` : null,
+                      ].filter(Boolean).join(' | ')
+                      : undefined;
 
                     // Get background color based on status
                     const getBackgroundColor = (status) => {
@@ -732,14 +878,27 @@ const WorkflowStatus = () => {
                         }}
                       >
                         {/* Source Column */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1px' }}>
                           <Text style={{
                             fontSize: '5px',
                             fontWeight: 500,
                             color: isDark ? '#f9fafb' : '#111827'
-                          }}>
+                          }}
+                          title={hermesSourceTitle || undefined}
+                          >
                             {config.name}
                           </Text>
+                          {key === 'hermes-inbox' && (data.gmailAccount || data.gmailQuery) && (
+                            <Text style={{
+                              fontSize: '4.5px',
+                              color: isDark ? '#9ca3af' : '#6b7280',
+                              lineHeight: 1,
+                            }}
+                            title={hermesSourceTitle || undefined}
+                            >
+                              {data.gmailAccount || data.gmailQuery}
+                            </Text>
+                          )}
                         </div>
 
                         {/* Items Column */}
@@ -824,6 +983,7 @@ const WorkflowStatus = () => {
                     { key: 'momo-tracker', label: 'MOMO Tracker' },
                     { key: 'the-call', label: 'The Call' },
                     { key: 'the-macro-show', label: 'The Macro Show' },
+                    { key: 'real-time-alert', label: 'Real-Time Alerts' },
                     { key: 'etf-pro', label: 'ETF Pro' },
                     { key: 'cftc-positioning', label: 'CFTC Net Long' }
                   ].map(({ key, label }) => {
@@ -832,7 +992,7 @@ const WorkflowStatus = () => {
                     // Always show these cards (including placeholders with no data)
                     const alwaysShow = [
                       'risk-ranges', 'early-look', 'bitcoin-trend-tracker', 'portfolio-solutions',
-                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show', 'etf-pro', 'cftc-positioning'
+                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show', 'real-time-alert', 'etf-pro', 'cftc-positioning'
                     ].includes(key);
 
                     if (!alwaysShow) {
@@ -851,7 +1011,8 @@ const WorkflowStatus = () => {
                       (diff.updates && diff.updates.length > 0) ||
                       (diff.trendChanges && diff.trendChanges.length > 0) ||
                       (diff.cryptoTrendChanges && diff.cryptoTrendChanges.length > 0) ||
-                      (diff.etfTrendChanges && diff.etfTrendChanges.length > 0)
+                      (diff.etfTrendChanges && diff.etfTrendChanges.length > 0) ||
+                      (diff.alerts && diff.alerts.length > 0)
                     );
 
                     return (
@@ -1222,6 +1383,63 @@ const WorkflowStatus = () => {
                           </div>
                         )}
 
+                        {/* REAL-TIME ALERTS: intraday action signals from Hedgeye email */}
+                        {key === 'real-time-alert' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {diff && diff.available && diff.alerts?.length > 0 ? (
+                              diff.alerts.map((alert, idx) => {
+                                const action = String(alert.action || '').toUpperCase();
+                                const actionColor = action === 'BUY' ? '#10b981' : action === 'SELL' ? '#ef4444' : '#2563eb';
+                                return (
+                                  <div
+                                    key={`${alert.ticker || alert.headline || idx}-${idx}`}
+                                    style={{
+                                      border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                                      borderRadius: '6px',
+                                      padding: '8px',
+                                      backgroundColor: isDark ? 'rgba(15, 23, 42, 0.45)' : '#ffffff',
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                                      <span
+                                        style={{
+                                          fontSize: '11px',
+                                          fontWeight: 800,
+                                          color: actionColor,
+                                          backgroundColor: action === 'BUY'
+                                            ? (isDark ? 'rgba(16, 185, 129, 0.16)' : '#dcfce7')
+                                            : action === 'SELL'
+                                              ? (isDark ? 'rgba(239, 68, 68, 0.16)' : '#fee2e2')
+                                              : (isDark ? 'rgba(37, 99, 235, 0.16)' : '#dbeafe'),
+                                          padding: '3px 7px',
+                                          borderRadius: '999px',
+                                          letterSpacing: '0.05em',
+                                        }}
+                                      >
+                                        {action || 'ALERT'}
+                                      </span>
+                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280' }}>
+                                        {diff.currentDate ? formatDate(diff.currentDate) : ''}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: '16px', fontWeight: 800, color: isDark ? '#f9fafb' : '#111827', lineHeight: 1.1 }}>
+                                      {alert.ticker || 'Ticker pending'}
+                                    </div>
+                                    <div style={{ fontSize: '10px', color: isDark ? '#d1d5db' : '#374151', marginTop: '4px' }}>
+                                      {alert.signalPhrase || alert.headline || 'Real-time Hedgeye alert'}
+                                      {alert.analyst ? ` - ${alert.analyst}` : ''}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                                No real-time alert captured for the latest snapshot.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* ETF PRO: Added/Removed blue bars (same hierarchy as Signal Strength), then LONGS / SHORTS */}
                         {key === 'etf-pro' && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1439,7 +1657,7 @@ const WorkflowStatus = () => {
                         )}
 
                         {/* GENERIC FALLBACK: Added/Removed Table for any others */}
-                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && key !== 'etf-pro' && key !== 'cftc-positioning' && hasData && (
+                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && key !== 'real-time-alert' && key !== 'etf-pro' && key !== 'cftc-positioning' && hasData && (
                           <div>
                             {/* Section Header - match Risk Ranges style */}
                             <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
@@ -1491,6 +1709,273 @@ const WorkflowStatus = () => {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        ) : activeTab === 'hermes' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <Card
+              className={isDark ? 'dark:bg-gray-800' : ''}
+              style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '12px', flexWrap: 'wrap' }}>
+                <div>
+                  <Title style={{ fontSize: '16px', marginBottom: '4px', color: isDark ? '#f9fafb' : '#111827' }}>
+                    The Managing Director
+                  </Title>
+                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
+                    Single chat front door for Hermes worker orchestration, summaries, and alerts.
+                  </Text>
+                </div>
+                <Badge color={getStatusColor(hermesDirector?.status)} size="sm">
+                  {hermesDirector?.status || 'idle'}
+                </Badge>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginTop: '16px' }}>
+                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
+                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Summary</Text>
+                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
+                    {hermesDirector?.summary || 'Hermes orchestration status will appear here once loaded.'}
+                  </Text>
+                </div>
+                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
+                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Open Alerts</Text>
+                  <Metric style={{ color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
+                    {hermesDirector?.openAlertCount ?? hermesAlerts.length}
+                  </Metric>
+                </div>
+                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
+                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Last Updated</Text>
+                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
+                    {formatShortTimestamp(hermesDirector?.lastUpdated || lastRefresh)}
+                  </Text>
+                </div>
+                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
+                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Today</Text>
+                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
+                    {hermesDirector?.latestSummary || 'No runs recorded yet today.'}
+                  </Text>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '16px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {[
+                  'status',
+                  'run analyst now',
+                  'run dev now',
+                  'run security now',
+                  'summarize today',
+                  'what changed',
+                  'morning setup',
+                  'close review',
+                  'snooze alerts',
+                ].map((command) => (
+                  <Button
+                    key={command}
+                    size="xs"
+                    loading={hermesCommandLoading === command}
+                    onClick={() => runHermesCommand(command)}
+                    variant={command.startsWith('run ') ? 'primary' : 'secondary'}
+                  >
+                    {command}
+                  </Button>
+                ))}
+              </div>
+
+              {hermesCommandMessage && (
+                <div style={{
+                  marginTop: '16px',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  backgroundColor: isDark ? '#111827' : '#f9fafb',
+                  border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
+                }}>
+                  <Text style={{ fontSize: '12px', color: isDark ? '#d1d5db' : '#374151' }}>
+                    {hermesCommandMessage}
+                  </Text>
+                </div>
+              )}
+            </Card>
+
+            <Card
+              className={isDark ? 'dark:bg-gray-800' : ''}
+              style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
+            >
+              <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
+                Worker Health
+              </Title>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                {hermesWorkers.length > 0 ? hermesWorkers.map((worker) => (
+                  <div
+                    key={worker.key}
+                    style={{
+                      border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                      borderRadius: '8px',
+                      padding: '12px',
+                      backgroundColor: isDark ? '#111827' : '#f9fafb'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                      <Text style={{ fontSize: '13px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827' }}>
+                        {worker.name}
+                      </Text>
+                      <Badge color={getStatusColor(worker.status)} size="xs">
+                        {worker.status}
+                      </Badge>
+                    </div>
+                    <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
+                      {worker.description}
+                    </Text>
+                    <div style={{ marginTop: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <div>
+                        <Text style={{ fontSize: '10px', color: isDark ? '#6b7280' : '#9ca3af' }}>Schedule</Text>
+                        <Text style={{ fontSize: '11px', color: isDark ? '#e5e7eb' : '#111827', marginTop: '2px' }}>{worker.schedule}</Text>
+                      </div>
+                      <div>
+                        <Text style={{ fontSize: '10px', color: isDark ? '#6b7280' : '#9ca3af' }}>Last Run</Text>
+                        <Text style={{ fontSize: '11px', color: isDark ? '#e5e7eb' : '#111827', marginTop: '2px' }}>{formatShortTimestamp(worker.lastRun)}</Text>
+                      </div>
+                    </div>
+                    <Text style={{ fontSize: '11px', color: isDark ? '#d1d5db' : '#374151', marginTop: '10px' }}>
+                      {worker.summary}
+                    </Text>
+                    <Text style={{ fontSize: '10px', color: isDark ? '#6b7280' : '#9ca3af', marginTop: '8px' }}>
+                      Open alerts: {worker.openAlertCount ?? 0}
+                    </Text>
+                  </div>
+                )) : (
+                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
+                    Worker state will populate after the first Hermes status load.
+                  </Text>
+                )}
+              </div>
+            </Card>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+              <Card
+                className={isDark ? 'dark:bg-gray-800' : ''}
+                style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
+              >
+                <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
+                  Alerts
+                </Title>
+                {hermesAlerts.length === 0 ? (
+                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
+                    No unresolved alerts.
+                  </Text>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {hermesAlerts.map((alert) => (
+                      <div
+                        key={alert.alertId}
+                        style={{
+                          border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                          borderRadius: '8px',
+                          padding: '12px',
+                          backgroundColor: isDark ? '#111827' : '#f9fafb'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
+                          <div>
+                            <Text style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827' }}>
+                              {alert.title}
+                            </Text>
+                            <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
+                              {alert.worker} • {formatShortTimestamp(alert.createdAt)}
+                            </Text>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            {alert.priority && <Badge color={alert.priority === 'P0' ? 'red' : 'amber'} size="xs">{alert.priority}</Badge>}
+                            {alert.type && <Badge color={alert.type === 'backlog' ? 'blue' : 'gray'} size="xs">{alert.type}</Badge>}
+                            <Badge color={getStatusColor(alert.status)} size="xs">{alert.status}</Badge>
+                            <Badge color={getStatusColor(alert.severity)} size="xs">{alert.severity}</Badge>
+                          </div>
+                        </div>
+                        <Text style={{ fontSize: '12px', color: isDark ? '#d1d5db' : '#374151', marginTop: '8px' }}>
+                          {alert.message}
+                        </Text>
+                        {alert.recommendedAction && (
+                          <Text style={{ fontSize: '12px', color: isDark ? '#bfdbfe' : '#1d4ed8', marginTop: '8px', fontWeight: 600 }}>
+                            Action: {alert.recommendedAction}
+                          </Text>
+                        )}
+                        {alert.type === 'backlog' && alert.details?.recommendedPatch && (
+                          <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '6px' }}>
+                            Patch: {alert.details.recommendedPatch}
+                          </Text>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            loading={hermesCommandLoading === `acknowledge:${alert.alertId}`}
+                            onClick={() => handleHermesAlertAction(alert.alertId, 'acknowledge')}
+                          >
+                            Acknowledge
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            loading={hermesCommandLoading === `snooze:${alert.alertId}`}
+                            onClick={() => handleHermesAlertAction(alert.alertId, 'snooze', { hours: 2 })}
+                          >
+                            Snooze 2h
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            loading={hermesCommandLoading === `resolve:${alert.alertId}`}
+                            onClick={() => handleHermesAlertAction(alert.alertId, 'resolve')}
+                          >
+                            Resolve
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              <Card
+                className={isDark ? 'dark:bg-gray-800' : ''}
+                style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
+              >
+                <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
+                  Recent Runs
+                </Title>
+                {hermesRecentRuns.length === 0 ? (
+                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
+                    No worker runs recorded today yet.
+                  </Text>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {hermesRecentRuns.map((run) => (
+                      <div
+                        key={run.runId}
+                        style={{
+                          border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                          borderRadius: '8px',
+                          padding: '12px',
+                          backgroundColor: isDark ? '#111827' : '#f9fafb'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                          <Text style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827' }}>
+                            {run.worker}
+                          </Text>
+                          <Badge color={getStatusColor(run.status)} size="xs">{run.status}</Badge>
+                        </div>
+                        <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
+                          {formatShortTimestamp(run.startedAt)} • {run.triggerType}
+                        </Text>
+                        <Text style={{ fontSize: '12px', color: isDark ? '#d1d5db' : '#374151', marginTop: '8px' }}>
+                          {run.summary}
+                        </Text>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
             </div>
           </div>
         ) : activeTab === 'preview_old_status' ? (
@@ -1995,7 +2480,9 @@ const WorkflowStatus = () => {
                             textAlign: 'center',
                             lineHeight: 1.45,
                           }}>
-                            ETF Pro positions come from workbook upload or collect:etfpro — no Hedgeye screenshot is paired with this source.
+                            {pdfData.actionOnly
+                              ? 'Real-time alerts are email action events. No paired screenshot is stored for this source.'
+                              : 'ETF Pro positions come from workbook upload or collect:etfpro - no Hedgeye screenshot is paired with this source.'}
                           </Text>
                           {pdfData.error && (
                             <Text style={{ fontSize: '11px', color: '#ef4444', textAlign: 'center' }}>
@@ -2073,7 +2560,7 @@ const WorkflowStatus = () => {
                         // No data yet (avoid infinite loading on ETF fetch error / empty)
                         if (!data) {
                           if (
-                            key === 'etf-pro'
+                            (key === 'etf-pro' || key === 'real-time-alert')
                             && snapshotData === null
                             && !(allPdfData[key] || {}).loading
                           ) {
@@ -2088,7 +2575,7 @@ const WorkflowStatus = () => {
                                 fontSize: '12px',
                                 textAlign: 'center'
                               }}>
-                                {(allPdfData[key] || {}).error || 'Unable to load ETF Pro'}
+                                {(allPdfData[key] || {}).error || `Unable to load ${label}`}
                               </div>
                             );
                           }
@@ -2266,6 +2753,61 @@ const WorkflowStatus = () => {
                                 </Text>
                                 {tickerTable(shortPos)}
                               </div>
+                            </div>
+                          );
+                        }
+
+                        // Real-Time Alerts - intraday action events from Gmail.
+                        if (key === 'real-time-alert') {
+                          const alerts = Array.isArray(data.alerts)
+                            ? data.alerts
+                            : (data.alert ? [data.alert] : []);
+
+                          return (
+                            <div style={{ padding: '12px' }}>
+                              <Text style={{
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                color: isDark ? '#f3f4f6' : '#111827',
+                                marginBottom: '8px',
+                                display: 'block',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                              }}>
+                                Action alerts ({alerts.length})
+                              </Text>
+                              <Table>
+                                <TableHead>
+                                  <TableRow>
+                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Action</TableHeaderCell>
+                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
+                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Signal</TableHeaderCell>
+                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Analyst</TableHeaderCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {alerts.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell colSpan={4} style={{ padding: '8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
+                                        No alerts captured for this date.
+                                      </TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    alerts.map((alert, idx) => {
+                                      const action = String(alert.action || '').toUpperCase();
+                                      const actionColor = action === 'BUY' ? '#10b981' : action === 'SELL' ? '#ef4444' : 'inherit';
+                                      return (
+                                        <TableRow key={`${alert.ticker || alert.headline || idx}-${idx}`}>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 800, color: actionColor }}>{action || 'ALERT'}</TableCell>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 800 }}>{alert.ticker || '--'}</TableCell>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px' }}>{alert.signalPhrase || alert.headline || '--'}</TableCell>
+                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>{alert.analyst || '--'}</TableCell>
+                                        </TableRow>
+                                      );
+                                    })
+                                  )}
+                                </TableBody>
+                              </Table>
                             </div>
                           );
                         }
