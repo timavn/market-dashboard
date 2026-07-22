@@ -4,20 +4,25 @@
  * legacy yes/no mids for TradePlanCard.
  */
 function normalizedToDashboardEvent(event, userContract = null) {
-  const yes = event.yes_mid ?? event.last_price ?? event.yes_bid ?? 0;
-  const no = event.no_mid ?? event.no_bid ?? 1 - yes;
+  const finiteOrNull = (value) => (
+    value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+      ? Number(value)
+      : null
+  );
+  const yes = finiteOrNull(event.yes_mid);
+  const no = finiteOrNull(event.no_mid);
   return {
     ...event,
     id: event.id,
     question: event.question || event.contract_title || event.event_title,
     category: event.category || 'Other Macro',
     settle: event.event_date || event.close_time?.slice(0, 10) || '—',
-    yes: Number(yes) || 0,
-    no: Number(no) || 0,
+    yes,
+    no,
     myProb: userContract?.adjustedProbability ?? userContract?.myProbability ?? null,
-    side: userContract?.contractSide || 'Yes',
+    side: userContract?.contractSide || null,
     sizeUsd: 0,
-    payoutMultiplier: event.max_payout_per_contract || 1,
+    payoutMultiplier: finiteOrNull(event.max_payout_per_contract),
     normalized: event,
     contract: userContract,
   };

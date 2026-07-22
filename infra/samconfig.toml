@@ -1,0 +1,17 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+stack_name = "market-dashboard-readiness-v2"
+region = "us-west-1"
+resolve_s3 = true
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+fail_on_empty_changeset = false
+parameter_overrides = "GmailScheduleState=DISABLED QuantAnalystScheduleState=DISABLED QuantDeveloperScheduleState=DISABLED SecurityScheduleState=DISABLED OperationalAlarmsState=DISABLED"

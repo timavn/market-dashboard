@@ -1,12 +1,55 @@
-const fs = require('fs');
-const path = require('path');
+const { releaseKeyForEvent } = require('./cpiRelease');
+const { getCatalogStorageConfig } = require('./catalogSchema');
 
-const TABLE = process.env.FINANCIAL_PREDICTION_EVENTS_TABLE || 'FinancialPredictionEvents';
-const META_ID = 'INGEST_META#global';
-const LOCAL_CACHE_PATH = path.join(__dirname, 'mock', '.local-ingest-cache.json');
-
-const memoryCache = new Map();
+const { tableName: TABLE } = getCatalogStorageConfig();
+const META_CONTRACT_KEY = '__META__';
+const CONTROL_RELEASE_KEY = '__CONTROL__';
+const CURRENT_CPI_CONTRACT_KEY = 'CPI#CURRENT';
 let dynamodb;
+
+// Catalog persistence is deliberately contract metadata only. Live books,
+// trades, implied probabilities, model outputs, volume, freshness, and data
+// quality belong to the in-memory provider response and must never be revived
+// from DynamoDB as if they were live.
+const CONTRACT_METADATA_FIELDS = Object.freeze([
+  'api_raw_id',
+  'api_raw_symbol',
+  'category',
+  'catalog_source',
+  'catalog_validated_at',
+  'close_time',
+  'comparison_group_id',
+  'conid',
+  'conId',
+  'contract_title',
+  'currency',
+  'description',
+  'event_date',
+  'event_ticker',
+  'event_title',
+  'exchange',
+  'expiration_time',
+  'lastTradeDateOrContractMonth',
+  'localSymbol',
+  'max_payout_per_contract',
+  'multiplier',
+  'native_side',
+  'question',
+  'quote_side',
+  'releaseCode',
+  'reportMonthId',
+  'right',
+  'secType',
+  'series',
+  'settlement_source',
+  'settlement_terms',
+  'strike',
+  'symbol',
+  'tradable_in_ibkr',
+  'tradingClass',
+  'underlying',
+  'venue',
+]);
 
 function getDynamo() {
   if (!dynamodb) {
@@ -18,126 +61,311 @@ function getDynamo() {
   return dynamodb;
 }
 
-function cacheKey(provider) {
-  return `pm_ingest_${provider}`;
-}
-
-function getMemory(key) {
-  const entry = memoryCache.get(key);
-  if (!entry) return null;
-  if (entry.expiresAt && Date.now() > entry.expiresAt) return null;
-  return entry.data;
-}
-
-function setMemory(key, data, ttlSec) {
-  memoryCache.set(key, {
-    data,
-    expiresAt: ttlSec ? Date.now() + ttlSec * 1000 : null,
-  });
-}
-
-async function loadEventsFromDynamo() {
-  try {
-    const result = await getDynamo()
-      .scan({
-        TableName: TABLE,
-        FilterExpression: 'attribute_exists(#payload) AND NOT begins_with(eventId, :meta)',
-        ExpressionAttributeNames: { '#payload': 'payload' },
-        ExpressionAttributeValues: { ':meta': 'INGEST_META' },
-      })
-      .promise();
-    return (result.Items || []).map((item) => item.payload);
-  } catch (err) {
-    console.warn('[PM Ingest] DynamoDB load failed:', err.message);
-    return null;
+function contractMetadata(event = {}, releaseKey) {
+  const metadata = { releaseKey };
+  for (const field of CONTRACT_METADATA_FIELDS) {
+    if (
+      event[field] !== undefined
+      && event[field] !== null
+      && (typeof event[field] !== 'number' || Number.isFinite(event[field]))
+    ) {
+      metadata[field] = event[field];
+    }
   }
+  return metadata;
 }
 
-async function saveEventsToDynamo(events) {
+function eventCatalogItem(event, now = new Date().toISOString()) {
+  const releaseKey = releaseKeyForEvent(event);
+  const venue = String(event?.venue || '').trim();
+  const nativeId = String(event?.api_raw_id || event?.conid || event?.conId || '').trim();
+  if (!releaseKey || !venue || !nativeId) {
+    throw new Error('Prediction catalog items require releaseKey, venue, and a native contract ID.');
+  }
+  return {
+    releaseKey,
+    contractKey: `${venue}#${nativeId}`,
+    updatedAt: now,
+    itemType: 'contract',
+    venue,
+    ...(event.comparison_group_id != null
+      ? { comparisonGroupId: event.comparison_group_id }
+      : {}),
+    ...(event.event_date != null ? { event_date: event.event_date } : {}),
+    metadata: contractMetadata(event, releaseKey),
+  };
+}
+
+async function loadCatalogMetadataByRelease(releaseKey) {
+  if (!releaseKey) return null;
+  const items = [];
+  let exclusiveStartKey;
+  do {
+    const result = await getDynamo().query({
+      TableName: TABLE,
+      KeyConditionExpression: '#releaseKey = :releaseKey',
+      ExpressionAttributeNames: { '#releaseKey': 'releaseKey' },
+      ExpressionAttributeValues: { ':releaseKey': releaseKey },
+      ConsistentRead: true,
+      ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+    }).promise();
+    items.push(...(result.Items || []));
+    exclusiveStartKey = result.LastEvaluatedKey;
+  } while (exclusiveStartKey);
+  return items
+    .filter((item) => item.contractKey !== META_CONTRACT_KEY && item.itemType !== 'meta')
+    .map((item) => item.metadata)
+    .filter(Boolean);
+}
+
+function venueFromCatalogKey(item = {}) {
+  if (item.venue) return String(item.venue);
+  const separator = String(item.contractKey || '').indexOf('#');
+  return separator > 0 ? String(item.contractKey).slice(0, separator) : null;
+}
+
+async function loadCurrentCpiCatalogPointer(db = getDynamo()) {
+  const result = await db.query({
+    TableName: TABLE,
+    KeyConditionExpression: '#releaseKey = :releaseKey',
+    ExpressionAttributeNames: { '#releaseKey': 'releaseKey' },
+    ExpressionAttributeValues: { ':releaseKey': CONTROL_RELEASE_KEY },
+    ConsistentRead: true,
+  }).promise();
+  return (result.Items || []).find((item) => item.contractKey === CURRENT_CPI_CONTRACT_KEY) || null;
+}
+
+async function loadOperationalCatalogByRelease(releaseKey, {
+  venues = null,
+  requireCurrent = true,
+} = {}) {
+  if (!releaseKey) {
+    const error = new Error('An exact releaseKey is required to load the operational prediction catalog.');
+    error.code = 'CATALOG_RELEASE_REQUIRED';
+    throw error;
+  }
+  const db = getDynamo();
+  const [items, pointer] = await Promise.all([
+    loadReleaseCatalogKeys(db, releaseKey),
+    requireCurrent ? loadCurrentCpiCatalogPointer(db) : Promise.resolve(null),
+  ]);
+  const meta = items.find((item) => item.contractKey === META_CONTRACT_KEY);
+  if (
+    !meta
+    || meta.itemType !== 'meta'
+    || meta.metadata?.schemaVersion !== 2
+    || meta.metadata?.atomicReplacement !== true
+    || meta.metadata?.promotionState !== 'active'
+  ) {
+    const error = new Error(`Release ${releaseKey} has not been atomically promoted in ${TABLE}.`);
+    error.code = 'CATALOG_NOT_PROMOTED';
+    throw error;
+  }
+  if (requireCurrent && pointer?.metadata?.currentReleaseKey !== releaseKey) {
+    const error = new Error(`Release ${releaseKey} is not the active CPI catalog generation.`);
+    error.code = 'CATALOG_RELEASE_NOT_CURRENT';
+    throw error;
+  }
+  const allowedVenues = venues?.length
+    ? new Set(venues.map((venue) => String(venue).toUpperCase()))
+    : null;
+  return items
+    .filter((item) => item.contractKey !== META_CONTRACT_KEY && item.itemType !== 'meta')
+    .filter((item) => !allowedVenues || allowedVenues.has(String(venueFromCatalogKey(item) || '').toUpperCase()))
+    .map((item) => item.metadata)
+    .filter(Boolean);
+}
+
+async function loadReleaseCatalogKeys(db, releaseKey) {
+  const keys = [];
+  let exclusiveStartKey;
+  do {
+    const result = await db.query({
+      TableName: TABLE,
+      KeyConditionExpression: '#releaseKey = :releaseKey',
+      ExpressionAttributeNames: { '#releaseKey': 'releaseKey' },
+      ExpressionAttributeValues: { ':releaseKey': releaseKey },
+      ProjectionExpression: 'releaseKey, contractKey, updatedAt, itemType, venue, metadata',
+      ConsistentRead: true,
+      ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+    }).promise();
+    keys.push(...(result.Items || []));
+    exclusiveStartKey = result.LastEvaluatedKey;
+  } while (exclusiveStartKey);
+  return keys;
+}
+
+async function saveEventsToDynamo(events, meta = {}) {
   const db = getDynamo();
   const now = new Date().toISOString();
-  const batchSize = 25;
+  const releaseEvents = (events || []).filter((event) => releaseKeyForEvent(event));
+  const itemsByRelease = new Map();
+  for (const event of releaseEvents) {
+    const item = eventCatalogItem(event, now);
+    if (!itemsByRelease.has(item.releaseKey)) itemsByRelease.set(item.releaseKey, new Map());
+    itemsByRelease.get(item.releaseKey).set(item.contractKey, item);
+  }
+  if (itemsByRelease.size === 0) return { releases: [], contracts: 0, retired: 0 };
 
-  for (let i = 0; i < events.length; i += batchSize) {
-    const chunk = events.slice(i, i + batchSize);
-    const requests = chunk.map((event) => ({
-      PutRequest: {
-        Item: {
-          eventId: `${event.venue}#${event.api_raw_id}`,
-          updatedAt: event.updated_at || now,
-          venue: event.venue,
-          status: event.status,
-          comparisonGroupId: event.comparison_group_id,
-          event_date: event.event_date,
-          payload: event,
+  if (meta.releaseKey && [...itemsByRelease.keys()].some((key) => key !== meta.releaseKey)) {
+    const error = new Error('Catalog promotion contained a contract from the wrong release.');
+    error.code = 'CATALOG_RELEASE_MISMATCH';
+    throw error;
+  }
+  if (meta.promoteCurrent === true && itemsByRelease.size !== 1) {
+    const error = new Error('Current CPI catalog promotion must contain exactly one release.');
+    error.code = 'CATALOG_PROMOTION_AMBIGUOUS';
+    throw error;
+  }
+
+  const transactItems = [];
+  let retired = 0;
+  let activeContracts = 0;
+  for (const [releaseKey, itemMap] of itemsByRelease) {
+    const existingKeys = await loadReleaseCatalogKeys(db, releaseKey);
+    const existingMeta = existingKeys.find((key) => key.contractKey === META_CONTRACT_KEY);
+    const desiredKeys = new Set(itemMap.keys());
+    const requestedVenues = meta.venues?.length
+      ? new Set(meta.venues.map((venue) => String(venue).toUpperCase()))
+      : new Set([...itemMap.values()].map((item) => String(item.venue).toUpperCase()));
+    const replaceVenues = meta.replaceVenues === true;
+    if (requestedVenues.size === 0) {
+      const error = new Error('A successful catalog replacement must name at least one venue.');
+      error.code = 'CATALOG_VENUE_REQUIRED';
+      throw error;
+    }
+    for (const item of itemMap.values()) {
+      if (!requestedVenues.has(String(item.venue).toUpperCase())) {
+        const error = new Error(`Catalog contract ${item.contractKey} is outside the replacement venue scope.`);
+        error.code = 'CATALOG_VENUE_SCOPE_MISMATCH';
+        throw error;
+      }
+    }
+    for (const item of itemMap.values()) {
+      transactItems.push({ Put: { TableName: TABLE, Item: item } });
+    }
+    for (const key of existingKeys) {
+      const keyVenue = String(venueFromCatalogKey(key) || '').toUpperCase();
+      if (
+        !replaceVenues
+        ||
+        key.contractKey === META_CONTRACT_KEY
+        || desiredKeys.has(key.contractKey)
+        || !requestedVenues.has(keyVenue)
+      ) continue;
+      transactItems.push({
+        Delete: {
+          TableName: TABLE,
+          Key: { releaseKey, contractKey: key.contractKey },
         },
-      },
-    }));
-    await db
-      .batchWrite({ RequestItems: { [TABLE]: requests } })
-      .promise();
-  }
-
-  await db
-    .put({
-      TableName: TABLE,
-      Item: {
-        eventId: META_ID,
-        updatedAt: now,
-        payload: { lastIngestAt: now, eventCount: events.length },
-      },
-    })
-    .promise();
-}
-
-function loadLocalFileCache() {
-  try {
-    if (fs.existsSync(LOCAL_CACHE_PATH)) {
-      return JSON.parse(fs.readFileSync(LOCAL_CACHE_PATH, 'utf8'));
+      });
+      retired += 1;
     }
-  } catch (err) {
-    console.warn('[PM Ingest] local cache read failed:', err.message);
+    const retainedKeys = existingKeys.filter((key) => (
+      key.contractKey !== META_CONTRACT_KEY
+      && (
+        !replaceVenues
+        || !requestedVenues.has(String(venueFromCatalogKey(key) || '').toUpperCase())
+      )
+    ));
+    const activeKeys = new Set([
+      ...retainedKeys.map((key) => key.contractKey),
+      ...itemMap.keys(),
+    ]);
+    activeContracts += activeKeys.size;
+    transactItems.push({
+      Put: {
+        TableName: TABLE,
+        Item: {
+          releaseKey,
+          contractKey: META_CONTRACT_KEY,
+          updatedAt: now,
+          itemType: 'meta',
+          metadata: {
+            lastIngestAt: now,
+            eventCount: activeKeys.size,
+            retiredCount: existingKeys.filter((key) => (
+              replaceVenues
+              &&
+              key.contractKey !== META_CONTRACT_KEY
+              && requestedVenues.has(String(venueFromCatalogKey(key) || '').toUpperCase())
+              && !desiredKeys.has(key.contractKey)
+            )).length,
+            releaseKey,
+            schemaVersion: 2,
+            atomicReplacement: true,
+            promotionState: 'active',
+            replacementMode: replaceVenues ? 'venue_snapshot' : 'upsert_only',
+            ...(replaceVenues
+              ? { replacedVenues: [...requestedVenues].sort() }
+              : { upsertedVenues: [...requestedVenues].sort() }),
+            ...(meta.source ? { source: meta.source } : {}),
+          },
+        },
+        ConditionExpression: existingMeta?.updatedAt
+          ? '#updatedAt = :previousUpdatedAt'
+          : 'attribute_not_exists(#updatedAt)',
+        ExpressionAttributeNames: { '#updatedAt': 'updatedAt' },
+        ...(existingMeta?.updatedAt
+          ? { ExpressionAttributeValues: { ':previousUpdatedAt': existingMeta.updatedAt } }
+          : {}),
+      },
+    });
   }
-  return null;
+
+  if (meta.promoteCurrent === true) {
+    const currentReleaseKey = [...itemsByRelease.keys()][0];
+    const existingPointer = await loadCurrentCpiCatalogPointer(db);
+    transactItems.push({
+      Put: {
+        TableName: TABLE,
+        Item: {
+          releaseKey: CONTROL_RELEASE_KEY,
+          contractKey: CURRENT_CPI_CONTRACT_KEY,
+          updatedAt: now,
+          itemType: 'control',
+          metadata: {
+            schemaVersion: 2,
+            currentReleaseKey,
+            promotedAt: now,
+            promotionState: 'active',
+            ...(meta.source ? { source: meta.source } : {}),
+          },
+        },
+        ConditionExpression: existingPointer?.updatedAt
+          ? '#updatedAt = :previousUpdatedAt'
+          : 'attribute_not_exists(#updatedAt)',
+        ExpressionAttributeNames: { '#updatedAt': 'updatedAt' },
+        ...(existingPointer?.updatedAt
+          ? { ExpressionAttributeValues: { ':previousUpdatedAt': existingPointer.updatedAt } }
+          : {}),
+      },
+    });
+  }
+
+  if (transactItems.length > 100) {
+    const error = new Error(`Atomic catalog replacement requires ${transactItems.length} operations; DynamoDB supports at most 100.`);
+    error.code = 'CATALOG_ATOMIC_WRITE_LIMIT';
+    throw error;
+  }
+
+  await db.transactWrite({
+    TransactItems: transactItems,
+    ClientRequestToken: `pm-catalog-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+  }).promise();
+
+  return {
+    releases: [...itemsByRelease.keys()],
+    contracts: [...itemsByRelease.values()].reduce((sum, itemMap) => sum + itemMap.size, 0),
+    activeContracts,
+    retired,
+    atomic: true,
+    promotedCurrent: meta.promoteCurrent === true,
+  };
 }
 
-function saveLocalFileCache(data) {
-  try {
-    const dir = path.dirname(LOCAL_CACHE_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(LOCAL_CACHE_PATH, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.warn('[PM Ingest] local cache write failed:', err.message);
-  }
-}
-
-async function getCachedEvents() {
-  const mem = getMemory('aggregated_events');
-  if (mem) return mem;
-
-  const dynamo = await loadEventsFromDynamo();
-  if (dynamo && dynamo.length) {
-    setMemory('aggregated_events', dynamo, Number(process.env.PM_EVENTS_CACHE_TTL_SEC) || 300);
-    return dynamo;
-  }
-
-  const local = loadLocalFileCache();
-  if (local?.events) return local.events;
-
-  return null;
-}
-
-async function setCachedEvents(events, meta = {}) {
-  setMemory('aggregated_events', events, Number(process.env.PM_EVENTS_CACHE_TTL_SEC) || 300);
-  saveLocalFileCache({ events, meta, savedAt: new Date().toISOString() });
-
-  if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE) {
-    try {
-      await saveEventsToDynamo(events);
-    } catch (err) {
-      console.error('[PM Ingest] DynamoDB save failed:', err.message);
-    }
-  }
+async function persistCatalogEvents(events, meta = {}) {
+  return saveEventsToDynamo(events, meta);
 }
 
 const providerStatusMemory = {
@@ -159,29 +387,18 @@ function setProviderStatus(provider, update) {
   };
 }
 
-function getIbkrStaleEvents() {
-  const stale = getMemory('ibkr_events_stale') || loadLocalFileCache()?.ibkrEvents;
-  return stale || [];
-}
-
-function setIbkrStaleEvents(events) {
-  setMemory('ibkr_events_stale', events, Number(process.env.PM_IBKR_STALE_TTL_SEC) || 900);
-  const local = loadLocalFileCache() || {};
-  local.ibkrEvents = events;
-  local.ibkrSavedAt = new Date().toISOString();
-  saveLocalFileCache(local);
-}
-
 module.exports = {
-  getCachedEvents,
-  setCachedEvents,
+  persistCatalogEvents,
   getProviderStatus,
   setProviderStatus,
-  getIbkrStaleEvents,
-  setIbkrStaleEvents,
-  setMemory,
-  getMemory,
-  cacheKey,
-  loadEventsFromDynamo,
+  eventCatalogItem,
+  loadCatalogMetadataByRelease,
+  loadOperationalCatalogByRelease,
+  loadCurrentCpiCatalogPointer,
   saveEventsToDynamo,
+  contractMetadata,
+  CONTROL_RELEASE_KEY,
+  CURRENT_CPI_CONTRACT_KEY,
+  META_CONTRACT_KEY,
+  _setDynamoForTests: (client) => { dynamodb = client; },
 };

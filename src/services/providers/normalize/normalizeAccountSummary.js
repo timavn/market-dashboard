@@ -22,6 +22,8 @@ function normalizeAccountSummary(raw) {
     sma: pick('SMA'),
     accruedCash: pick('AccruedCash'),
     lastUpdated: raw.fetched_at || null,
+    source: raw.source || null,
+    socketVerifiedAt: raw.socket_verified_at || null,
   };
 }
 

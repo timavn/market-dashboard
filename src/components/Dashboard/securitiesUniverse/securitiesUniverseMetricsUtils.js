@@ -15,22 +15,22 @@ export function formatSecurityPrice(price, ticker) {
 
 export function getIvolPremColor(value) {
   if (value === null || value === undefined) return '#6b7280';
-  if (value > 5) return '#ef4444';
-  if (value < -2) return '#10b981';
+  if (value > 5) return '#dc2626';
+  if (value < -2) return '#059669';
   return '#f59e0b';
 }
 
 export function getTTMZScoreColor(value) {
   if (value === null || value === undefined) return '#6b7280';
-  if (value < -0.5) return '#10b981';
-  if (value > 0.5) return '#ef4444';
+  if (value < -0.5) return '#059669';
+  if (value > 0.5) return '#dc2626';
   return '#f59e0b';
 }
 
 export function getIOVRPercentileColor(value) {
   if (value === null || value === undefined) return '#6b7280';
-  if (value < 30) return '#10b981';
-  if (value > 70) return '#ef4444';
+  if (value < 30) return '#059669';
+  if (value > 70) return '#dc2626';
   return '#f59e0b';
 }
 
@@ -43,13 +43,13 @@ export function formatVolatilityMetric(value, isPercentage = false) {
 export function getQuadColor(quadNum) {
   switch (quadNum) {
     case 1:
-      return '#10b981';
+      return '#059669';
     case 2:
-      return '#34d399';
+      return '#059669';
     case 3:
       return '#f59e0b';
     case 4:
-      return '#ef4444';
+      return '#dc2626';
     default:
       return '#6b7280';
   }
@@ -66,10 +66,10 @@ export function getRiskRangeColor(currentValue, previousValue, isFirstDay, ath =
     if (isHRR && ath && ath > 0 && currentValue > ath) {
       return '#3b82f6';
     }
-    return '#10b981';
+    return '#059669';
   }
   if (currentValue < previousValue) {
-    return '#ef4444';
+    return '#dc2626';
   }
   return '#6b7280';
 }
@@ -84,8 +84,8 @@ export function formatTradingDate(date) {
 }
 
 export function priceChangeToHex(colorName) {
-  if (colorName === 'emerald') return '#10b981';
-  if (colorName === 'red') return '#ef4444';
+  if (colorName === 'emerald') return '#059669';
+  if (colorName === 'red') return '#dc2626';
   return '#6b7280';
 }
 

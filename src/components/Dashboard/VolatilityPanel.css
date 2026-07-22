@@ -54,7 +54,7 @@
 }
 
 .level-badge.green {
-  background: #00FF00;
+  background: #059669;
   color: #000000;
   box-shadow: 4px 4px 0px 0px #000000;
 }
@@ -66,7 +66,7 @@
 }
 
 .level-badge.red {
-  background: #FF0000;
+  background: #dc2626;
   color: #FFFFFF;
   box-shadow: 4px 4px 0px 0px #000000;
 }
@@ -165,13 +165,13 @@
 }
 
 .vix-value .change.positive {
-  background-color: #00FF00;
+  background-color: #059669;
   color: #000000;
   box-shadow: 3px 3px 0px 0px #000000;
 }
 
 .vix-value .change.negative {
-  background-color: #FF0000;
+  background-color: #dc2626;
   color: #FFFFFF;
   box-shadow: 3px 3px 0px 0px #000000;
 }
@@ -190,7 +190,7 @@
 }
 
 .vix-level .level.green {
-  background: #00FF00;
+  background: #059669;
   color: #000000;
   box-shadow: 4px 4px 0px 0px #000000;
 }
@@ -202,7 +202,7 @@
 }
 
 .vix-level .level.red {
-  background: #FF0000;
+  background: #dc2626;
   color: #FFFFFF;
   box-shadow: 4px 4px 0px 0px #000000;
 }

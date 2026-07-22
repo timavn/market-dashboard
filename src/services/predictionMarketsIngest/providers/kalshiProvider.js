@@ -3,6 +3,7 @@ const { normalizeEvent } = require('../normalize/normalizeEvent');
 const { isFinancialMacroEvent } = require('../filter/isFinancialMacroEvent');
 const { setProviderStatus } = require('../cache');
 const { paginateKalshi, kalshiFetch } = require('./kalshiClient');
+const { normalizeCpiMonthId } = require('../cpiRelease');
 
 const CPI_MONTHS = {
   JANUARY: 'JAN',
@@ -50,7 +51,7 @@ function getCpiYoyEventTicker(cpi = {}) {
   return null;
 }
 
-function normalizeKalshiCpiMarket(market, eventTicker) {
+function normalizeKalshiCpiMarket(market, eventTicker, cpi = {}) {
   const event = normalizeEvent({
     market,
     series: {
@@ -68,6 +69,10 @@ function normalizeKalshiCpiMarket(market, eventTicker) {
   const threshold = market.subtitle ?? market.floor_strike ?? '';
   return {
     ...event,
+    releaseKey: cpi.releaseKey || null,
+    reportMonthId: cpi.reportMonthId || normalizeCpiMonthId(cpi.reportMonth || cpi.forecastMonth || eventTicker),
+    forecastMonth: cpi.forecastMonth || null,
+    releaseDate: cpi.releaseDate || null,
     category: 'Inflation',
     underlying: 'KXCPIYOY',
     event_title: market.title || event.event_title || 'Headline CPI YoY',
@@ -78,7 +83,7 @@ function normalizeKalshiCpiMarket(market, eventTicker) {
 
 async function fetchKalshiCpiEvents(cpi = {}, options = {}) {
   const eventTicker = getCpiYoyEventTicker(cpi);
-  if (!eventTicker || process.env.PM_USE_MOCK === 'true' || options.useMock) return [];
+  if (!eventTicker) return [];
 
   try {
     const markets = await paginateKalshi(
@@ -88,13 +93,29 @@ async function fetchKalshiCpiEvents(cpi = {}, options = {}) {
       options.maxPages || 2,
     );
     const normalized = markets
-      .filter((market) => String(market.status || '').toLowerCase() === 'active')
-      .map((market) => normalizeKalshiCpiMarket(market, eventTicker));
+      .filter((market) => {
+        if (String(market.status || '').toLowerCase() !== 'active') return false;
+        const closesAt = Date.parse(market.close_time || market.expiration_time || '');
+        return !Number.isFinite(closesAt) || closesAt > Date.now();
+      })
+      .map((market) => normalizeKalshiCpiMarket(market, eventTicker, cpi));
+
+    const quoteBearing = normalized.filter((event) => (
+      Number.isFinite(Number(event.yes_bid)) && Number.isFinite(Number(event.yes_ask))
+      && Number.isFinite(Number(event.no_bid)) && Number.isFinite(Number(event.no_ask))
+    ));
 
     setProviderStatus('kalshi', {
-      status: 'connected',
+      status: normalized.length === 0
+        ? 'connected_no_contracts'
+        : quoteBearing.length === 0 ? 'connected_no_quotes' : 'connected_live',
       last_success_at: new Date().toISOString(),
-      message: null,
+      message: normalized.length === 0
+        ? `No active Kalshi contracts found for ${eventTicker}.`
+        : quoteBearing.length === 0 ? `Kalshi returned ${normalized.length} contract(s) without complete native books.` : null,
+      releaseKey: cpi.releaseKey || null,
+      contracts_total: normalized.length,
+      quote_contracts: quoteBearing.length,
     });
     return normalized;
   } catch (err) {
@@ -109,9 +130,6 @@ async function fetchKalshiCpiEvents(cpi = {}, options = {}) {
 }
 
 async function fetchKalshiEvents(options = {}) {
-  const useMock = process.env.PM_USE_MOCK === 'true' || options.useMock;
-  if (useMock) return [];
-
   const hasCreds =
     process.env.KALSHI_API_KEY_ID &&
     (process.env.KALSHI_PRIVATE_KEY_PEM || process.env.KALSHI_PRIVATE_KEY_PATH);
@@ -128,7 +146,6 @@ async function fetchKalshiEvents(options = {}) {
   try {
     const seriesList = await fetchFinancialSeries();
     const normalized = [];
-    const seriesByTicker = new Map(seriesList.map((s) => [s.ticker, s]));
 
     for (const series of seriesList.slice(0, options.maxSeries || 50)) {
       let markets;
@@ -175,4 +192,5 @@ module.exports = {
   fetchFinancialSeries,
   fetchKalshiCpiEvents,
   getCpiYoyEventTicker,
+  normalizeKalshiCpiMarket,
 };

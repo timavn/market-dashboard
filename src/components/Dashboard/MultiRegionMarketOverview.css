@@ -616,19 +616,19 @@
 }
 
 .mw-trend-up {
-  color: #15803d;
+  color: #059669;
 }
 
 .mw-trend-down {
-  color: #b91c1c;
+  color: #dc2626;
 }
 
 .region-mw-td-num.positive {
-  color: #15803d;
+  color: #059669;
 }
 
 .region-mw-td-num.negative {
-  color: #b91c1c;
+  color: #dc2626;
 }
 
 /* Heatmap cells: --heat in [0, 1] scales tint (day % today; extend for weekly/monthly/ytd later) */
@@ -901,7 +901,7 @@
 }
 
 .index-tab-price.positive {
-  color: #16a34a;
+  color: #059669;
 }
 
 .index-tab-price.negative {
@@ -918,7 +918,7 @@
 }
 
 .index-tab-change.positive {
-  color: #16a34a;
+  color: #059669;
 }
 
 .index-tab-change.negative {
@@ -1091,7 +1091,7 @@
 }
 
 .volume-value.positive {
-  color: #16a34a;
+  color: #059669;
 }
 
 .volume-value.negative {
@@ -1386,7 +1386,7 @@
 }
 
 .index-change.positive {
-  color: #16a34a;
+  color: #059669;
   /* Dark green for positive */
 }
 
@@ -1418,7 +1418,7 @@
 }
 
 .index-percent.positive {
-  color: #16a34a;
+  color: #059669;
   /* Dark green for positive */
 }
 
@@ -1524,7 +1524,7 @@
 }
 
 .liquidity-metric-value.positive {
-  color: #16a34a;
+  color: #059669;
   /* Dark green for positive */
 }
 
@@ -1679,8 +1679,8 @@
 }
 
 .dollar-liquidity-status.ok {
-  color: #065f46;
-  background: #d1fae5;
+  color: #059669;
+  background: #ecfdf5;
 }
 
 .dollar-liquidity-status.partial {
@@ -1689,8 +1689,8 @@
 }
 
 .dollar-liquidity-status.unavailable {
-  color: #991b1b;
-  background: #fee2e2;
+  color: #dc2626;
+  background: #fef2f2;
 }
 
 .dollar-liquidity-headlines {
@@ -1727,7 +1727,7 @@
 }
 
 .dollar-liquidity-headlines strong.is-green {
-  color: #047857;
+  color: #059669;
 }
 
 .dollar-liquidity-headlines strong.is-yellow {
@@ -1735,7 +1735,7 @@
 }
 
 .dollar-liquidity-headlines strong.is-red {
-  color: #b91c1c;
+  color: #dc2626;
 }
 
 .dollar-liquidity-headlines strong.is-muted {
@@ -1835,9 +1835,9 @@
 }
 
 .dollar-liquidity-empty.error {
-  border-color: #fecaca;
+  border-color: #dc2626;
   background: #fef2f2;
-  color: #991b1b;
+  color: #dc2626;
 }
 
 .dollar-liquidity-empty strong {

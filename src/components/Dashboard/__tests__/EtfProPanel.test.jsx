@@ -36,4 +36,20 @@ describe('EtfProPanel', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Search ETF Pro positions' }), { target: { value: 'not-found' } });
     expect(screen.getByText('No ETF Pro positions match this view.')).toBeInTheDocument();
   });
+
+  test('labels a last-good API fallback as stale reference data', () => {
+    render(
+      <EtfProPanel
+        snapshot={{
+          ...snapshot,
+          _cache: { status: 'stale', stale: true, ageSeconds: 900 },
+        }}
+        onRefresh={jest.fn()}
+        onClose={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText('Cached fallback · 15 minutes old')).toBeInTheDocument();
+    expect(screen.getByText(/last-good cached ETF Pro reference/i)).toBeInTheDocument();
+  });
 });

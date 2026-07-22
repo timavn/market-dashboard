@@ -65,16 +65,23 @@ See [docs/IBKR_READ_ONLY_BOUNDARIES.md](../../docs/IBKR_READ_ONLY_BOUNDARIES.md)
 ## Endpoints
 
 - `GET /status`: connection, accounts, and `stream` metadata
-- `GET /events`: last sidecar snapshot
-- `POST /refresh`: fetch seeded contracts from `event_contracts.json`
-- `POST /discover`: search ForecastEx / CME EC contracts and merge into `event_contracts.json` (requires Gateway online)
+- `GET /livez`: process liveness plus invoked and real Python interpreter,
+  environment prefix, app, and dependency provenance (`RUNTIME_DRIFT` if the
+  managed workspace runtime is not in use)
+- `GET /events`: last sidecar snapshot for diagnostics/readiness only; active
+  trading routes must use `POST /refresh`
+- `POST /refresh`: quote the exact metadata generation supplied by Express from `PredictionMarketCatalogV2` for the server-owned current release
+- `POST /discover`: query IB ContractDetails for the server-owned current release and return a candidate generation; it never promotes local state
 - `GET /accounts`: managed account IDs
+- `GET /portfolio/live-positions`: verify the current IB socket and return identity/quantity for every managed account without cache, prices, or fallback
+- `GET /portfolio/live-account-summary?account=`: verify the current IB socket and fetch a native account summary including NLV without cache or fallback
 - `POST /quotes`: snapshot fallback; uses stream cache when subscribed
 - `POST /historical`: body `{ "instrument", "range", "interval" }` — historical bars
 - `GET /portfolio/positions?account=`: open positions (cache-first when streaming)
 - `GET /portfolio/account-summary?account=`: net liquidation, cash, margins (cache-first)
 - `GET /portfolio/open-orders?account=`: read-only open orders (dev only; not exposed in dashboard UI)
-- `GET /portfolio/pnl?account=`: account PnL when available
+- `GET /portfolio/pnl?account=`: freshly subscribed native account PnL after a
+  current socket round trip; it never derives a percentage from cached NLV
 
 From repo root, verify market/portfolio providers:
 
@@ -84,4 +91,11 @@ npm run verify:ibkr-providers
 
 Gateway install steps: [GATEWAY_SETUP.md](./GATEWAY_SETUP.md)
 
-Add known event contract conids manually, or run `npm run ibkr-sidecar:discover` after Gateway is connected.
+Run `npm run ibkr-sidecar:discover` after Gateway is connected. The command goes
+through Express, which supplies the current CPI release, validates fresh native
+ContractDetails coverage, and atomically promotes the generation and current
+release pointer in `PredictionMarketCatalogV2`. The sidecar's ignored JSON files
+are legacy diagnostics only and are never read by `/refresh` or written by
+`/discover`. A failed or partial discovery leaves the prior V2 generation
+untouched. Live event serialization carries the native conId, exchange, trading
+class, expiry, catalog source, and YES/NO side used by the shared execution gate.

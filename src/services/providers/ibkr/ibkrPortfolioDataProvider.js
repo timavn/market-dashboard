@@ -9,9 +9,7 @@ const {
 
 const ENABLED = process.env.IBKR_PORTFOLIO_ENABLED !== 'false';
 const ACCOUNT_ID = process.env.IBKR_ACCOUNT_ID || '';
-const lastValidPnlByAccount = new Map();
-const lastForcedSyncByAccount = new Map();
-const FORCE_SYNC_COOLDOWN_MS = Number(process.env.IBKR_FORCE_SYNC_COOLDOWN_MS || 30_000);
+const LIVE_EVIDENCE_MAX_AGE_MS = Number(process.env.IBKR_LIVE_EVIDENCE_MAX_AGE_MS || 5 * 60_000);
 
 function isOpenPosition(row) {
   return Number(row?.position || 0) !== 0 || Number(row?.marketValue || 0) !== 0;
@@ -24,150 +22,108 @@ async function getAccounts() {
   return res.accounts || [];
 }
 
-async function resolveAccountId(accountId) {
-  if (accountId) return accountId;
-  if (ACCOUNT_ID) return ACCOUNT_ID;
-  const accounts = await getAccounts();
-  const candidates = [];
-  for (const acct of accounts) {
-    try {
-      const res = await sidecarRequest(`/cache/portfolio?account=${encodeURIComponent(acct)}`, {
-        timeoutMs: 1000,
-      });
-      const positions = Array.isArray(res.positions) ? res.positions.filter(isOpenPosition) : [];
-      candidates.push({ accountId: acct, positionCount: positions.length });
-    } catch {
-      candidates.push({ accountId: acct, positionCount: 0 });
-    }
-  }
-
-  const bestByPositions = candidates
-    .filter((candidate) => candidate.positionCount > 0)
-    .sort((a, b) => b.positionCount - a.positionCount)[0];
-  if (bestByPositions) {
-    return bestByPositions.accountId;
-  }
-
-  try {
-    const status = await sidecarRequest('/status', { timeoutMs: 1500 });
-    const streamedAccount = status?.stream?.portfolio_account;
-    if (streamedAccount && accounts.includes(streamedAccount)) {
-      return streamedAccount;
-    }
-  } catch {
-    // Fall back to cache probing below.
-  }
-  return accounts[0] || null;
+function isFreshEvidence(value) {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const age = Date.now() - timestamp;
+  return age >= -5_000 && age <= LIVE_EVIDENCE_MAX_AGE_MS;
 }
 
-async function getCachedPositions(accountId) {
-  const acct = await resolveAccountId(accountId);
-  if (!acct) return null;
-  const res = await sidecarRequest(`/cache/portfolio?account=${encodeURIComponent(acct)}`, {
-    timeoutMs: 2000,
-  });
-  if (!res.ok || !Array.isArray(res.positions) || res.positions.length === 0) {
-    return null;
-  }
-  const positions = res.positions.filter(isOpenPosition);
-  if (positions.length === 0) {
-    return null;
-  }
-
-  const missingMarketValues = positions.some(
-    (p) => Number(p.position || 0) !== 0 && (p.marketValue == null || Number.isNaN(Number(p.marketValue))),
+function verifiedLiveResponse(response) {
+  return Boolean(
+    response?.ok === true
+    && response?.connected === true
+    && response?.status === 'live'
+    && response?.source === 'ibkr_live_session'
+    && isFreshEvidence(response?.observed_at)
+    && isFreshEvidence(response?.socket_verified_at)
   );
-  const lastForced = lastForcedSyncByAccount.get(acct) || 0;
-  if (missingMarketValues && Date.now() - lastForced > FORCE_SYNC_COOLDOWN_MS) {
-    lastForcedSyncByAccount.set(acct, Date.now());
-    try {
-      const synced = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(acct)}`, {
-        timeoutMs: 12000,
-      });
-      const syncedPositions = Array.isArray(synced.positions)
-        ? synced.positions.filter(isOpenPosition)
-        : [];
-      if (synced.ok && syncedPositions.length > 0) {
-        setIbkrLastPortfolioAt(synced.fetched_at || new Date().toISOString());
-        return {
-          positions: syncedPositions,
-          accountId: acct,
-          fetchedAt: synced.fetched_at,
-          fromCache: false,
-          forcedSync: true,
-        };
-      }
-    } catch (err) {
-      console.warn('[Portfolio] IBKR forced portfolio sync failed:', err.message);
-    }
-  }
-
-  setIbkrLastPortfolioAt(res.fetched_at || new Date().toISOString());
-  return { positions, accountId: acct, fetchedAt: res.fetched_at, fromCache: true };
 }
 
 async function getPositions(accountId) {
-  try {
-    const cached = await getCachedPositions(accountId);
-    if (cached) return cached;
-  } catch {
-    // fall through to REST snapshot
-  }
-
-  const acct = await resolveAccountId(accountId);
-  if (!acct) return { positions: [], accountId: null };
   let res;
   try {
-    res = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(acct)}`);
+    res = await sidecarRequest('/portfolio/live-positions', { timeoutMs: 5000 });
   } catch (err) {
     setIbkrConnected(false, err.message);
     return {
       positions: [],
-      accountId: acct,
+      accountId: accountId || ACCOUNT_ID || null,
       error: err.message,
       fetchedAt: new Date().toISOString(),
+      liveSessionVerified: false,
     };
   }
-  if (!res.ok) {
-    setIbkrConnected(false, res.message);
-    return { positions: [], accountId: acct, error: res.message };
+  if (!verifiedLiveResponse(res) || !Array.isArray(res.accounts) || !Array.isArray(res.positions)) {
+    const error = res?.message || 'The sidecar did not return a fresh socket-verified live position snapshot.';
+    setIbkrConnected(false, error);
+    return {
+      positions: [],
+      accountId: accountId || ACCOUNT_ID || null,
+      error,
+      fetchedAt: res?.observed_at || new Date().toISOString(),
+      liveSessionVerified: false,
+    };
   }
-  setIbkrLastPortfolioAt(res.fetched_at || new Date().toISOString());
+
+  const requested = accountId || ACCOUNT_ID || null;
+  const counts = new Map(res.accounts.map((account) => [account, 0]));
+  for (const position of res.positions) {
+    if (counts.has(position.account) && isOpenPosition(position)) {
+      counts.set(position.account, counts.get(position.account) + 1);
+    }
+  }
+  const acct = requested || [...counts.entries()]
+    .sort((left, right) => right[1] - left[1])[0]?.[0] || null;
+  if (!acct || !res.accounts.includes(acct)) {
+    const error = acct
+      ? `Account ${acct} is not managed by the verified live IB session.`
+      : 'The verified live IB session returned no managed account.';
+    return {
+      positions: [],
+      accountId: acct,
+      error,
+      fetchedAt: res.observed_at,
+      liveSessionVerified: false,
+    };
+  }
+
+  const fetchedAt = res.observed_at;
+  setIbkrConnected(true);
+  setIbkrLastPortfolioAt(fetchedAt);
   return {
-    positions: (res.positions || []).filter(isOpenPosition),
+    positions: res.positions
+      .filter((position) => position.account === acct)
+      .filter(isOpenPosition)
+      .map((position) => ({ ...position, fetched_at: fetchedAt })),
     accountId: acct,
-    fetchedAt: res.fetched_at,
+    fetchedAt,
+    socketVerifiedAt: res.socket_verified_at,
+    liveSessionVerified: true,
+    fromCache: false,
   };
 }
 
-async function getCachedAccountSummary(accountId) {
-  const acct = await resolveAccountId(accountId);
-  if (!acct) return null;
-  const res = await sidecarRequest(
-    `/cache/account-summary?account=${encodeURIComponent(acct)}`,
-    { timeoutMs: 2000 },
-  );
-  if (!res.ok || !res.summary || Object.keys(res.summary).length === 0) {
-    return null;
-  }
-  return normalizeAccountSummary({ ...res.summary, fetched_at: res.fetched_at });
+async function resolveAccountId(accountId) {
+  const requested = accountId || ACCOUNT_ID || null;
+  const accounts = await getAccounts();
+  if (requested) return accounts.includes(requested) ? requested : null;
+  return accounts[0] || null;
 }
 
 async function getAccountSummary(accountId) {
-  try {
-    const cached = await getCachedAccountSummary(accountId);
-    if (cached) return cached;
-  } catch {
-    // fall through to REST snapshot
-  }
-
   const acct = await resolveAccountId(accountId);
   if (!acct) return null;
   const res = await sidecarRequest(
-    `/portfolio/account-summary?account=${encodeURIComponent(acct)}`,
+    `/portfolio/live-account-summary?account=${encodeURIComponent(acct)}`,
   );
-  if (!res.ok || !res.summary) return null;
-  return normalizeAccountSummary({ ...res.summary, fetched_at: res.fetched_at });
+  if (!verifiedLiveResponse(res) || !res.summary || res.account !== acct) return null;
+  return normalizeAccountSummary({
+    ...res.summary,
+    fetched_at: res.observed_at || res.fetched_at,
+    source: res.source,
+    socket_verified_at: res.socket_verified_at,
+  });
 }
 
 async function getBalances(accountId) {
@@ -197,16 +153,22 @@ async function getPnL(accountId) {
     pnl &&
     ['dailyPnL', 'unrealizedPnL', 'realizedPnL'].some((key) => Number.isFinite(Number(pnl[key])));
 
-  if (hasValidPnl) {
-    const cached = {
+  if (verifiedLiveResponse(res) && res.account === acct && hasValidPnl) {
+    const dailyPnLPercent = pnl.dailyPnLPercentSource === 'ibkr_live_account_summary'
+      && Number.isFinite(Number(pnl.dailyPnLPercent))
+      ? Number(pnl.dailyPnLPercent)
+      : null;
+    return {
       ...pnl,
-      fetchedAt: res.fetched_at || new Date().toISOString(),
+      dailyPnLPercent,
+      dailyPnLPercentSource: dailyPnLPercent == null ? null : pnl.dailyPnLPercentSource,
+      fetchedAt: res.observed_at,
+      socketVerifiedAt: res.socket_verified_at,
+      source: res.source,
+      fromCache: false,
     };
-    lastValidPnlByAccount.set(acct, cached);
-    return cached;
   }
-
-  return lastValidPnlByAccount.get(acct) || null;
+  return null;
 }
 
 async function getAccountSummaryBestEffort(accountId) {
@@ -279,23 +241,26 @@ function buildDataQuality(raw, holdings, fetchedAt) {
   };
 }
 
-async function getPortfolioSnapshot(accountId, quoteFn) {
-  const { positions: raw, accountId: acct, error, fetchedAt } = await getPositions(accountId);
+async function getPortfolioSnapshot(accountId) {
+  const {
+    positions: raw,
+    accountId: acct,
+    error,
+    fetchedAt,
+    socketVerifiedAt,
+    liveSessionVerified,
+  } = await getPositions(accountId);
 
   if (error) {
-    const [accountSummary, pnl] = await Promise.all([
-      acct ? getAccountSummaryBestEffort(acct) : null,
-      acct ? getPnLBestEffort(acct) : null,
-    ]);
     return {
       holdings: [],
-      accountSummary,
-      pnl,
+      accountSummary: null,
+      pnl: null,
       accountId: acct,
       error,
-      summary: buildSnapshotSummary([], accountSummary),
+      summary: buildSnapshotSummary([], null),
       fetchedAt,
-      dataSource: accountSummary ? 'ibkr_api' : undefined,
+      liveSessionVerified: false,
     };
   }
 
@@ -313,27 +278,17 @@ async function getPortfolioSnapshot(accountId, quoteFn) {
       summary: buildSnapshotSummary([], accountSummary),
       fetchedAt,
       dataSource: 'ibkr_api',
+      liveSessionVerified,
+      socketVerifiedAt,
+      fromCache: false,
     };
   }
 
-  const needsQuotes = raw.some((p) => p.marketValue == null || Number.isNaN(Number(p.marketValue)));
-  const symbols = needsQuotes
-    ? [
-        ...new Set(
-          raw
-            .filter((p) => p.marketValue == null || Number.isNaN(Number(p.marketValue)))
-            .map((p) => p.symbol)
-            .filter(Boolean),
-        ),
-      ]
-    : [];
-  const quotesBySymbol = quoteFn && symbols.length > 0 ? await quoteFn(symbols) : {};
-
   const holdings = raw
-    .map((p) => {
-      const q = quotesBySymbol[(p.symbol || '').toUpperCase()];
-      return normalizeIbkrPosition(p, q);
-    })
+    .map((p) => ({
+      ...normalizeIbkrPosition(p),
+      positionSource: 'ibkr_live_session',
+    }))
     .filter((h) => Number(h.quantity || 0) !== 0 || Number(h.marketValue || 0) !== 0);
 
   return {
@@ -345,6 +300,9 @@ async function getPortfolioSnapshot(accountId, quoteFn) {
     fetchedAt,
     dataQuality: buildDataQuality(raw, holdings, fetchedAt),
     dataSource: 'ibkr_api',
+    liveSessionVerified,
+    socketVerifiedAt,
+    fromCache: false,
   };
 }
 

@@ -31,20 +31,9 @@ function fromForecastEx(price) {
   return n;
 }
 
-function deriveNoFromYes(yesBid, yesAsk) {
-  const yb = toNum(yesBid);
-  const ya = toNum(yesAsk);
-  if (yb == null && ya == null) return { no_bid: null, no_ask: null };
-  return {
-    no_bid: ya != null ? 1 - ya : null,
-    no_ask: yb != null ? 1 - yb : null,
-  };
-}
-
 module.exports = {
   toNum,
   fromKalshiCents,
   fromCmeSnapshot,
   fromForecastEx,
-  deriveNoFromYes,
 };

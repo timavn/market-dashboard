@@ -166,7 +166,7 @@ const RealizedGainLossDashboard = ({ lots = [], searchQuery = '', loading = fals
     const gain = payload.gainLossDollar || 0;
     
     const fill = gain >= 0 ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)';
-    const stroke = gain >= 0 ? '#16a34a' : '#dc2626';
+    const stroke = gain >= 0 ? '#059669' : '#dc2626';
     const strokeWidth = isOutlier ? 2 : 1;
     
     return <circle cx={cx} cy={cy} r={r} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />;
@@ -359,7 +359,7 @@ const RealizedGainLossDashboard = ({ lots = [], searchQuery = '', loading = fals
                     <ReferenceLine yAxisId="left" y={0} stroke={isDark ? '#4b5563' : '#9ca3af'} strokeWidth={1.5} />
                     <Bar yAxisId="left" dataKey="dailyPnL" name="Daily P/L">
                       {overviewData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.dailyPnL >= 0 ? '#10b981' : '#ef4444'} />
+                        <Cell key={`cell-${index}`} fill={entry.dailyPnL >= 0 ? '#059669' : '#dc2626'} />
                       ))}
                     </Bar>
                     <Line yAxisId="right" type="monotone" dataKey="cumulativePnL" name="Cumulative P/L" stroke="#3b82f6" strokeWidth={2} dot={false} />

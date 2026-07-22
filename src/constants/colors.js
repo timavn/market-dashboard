@@ -4,8 +4,8 @@ export const COLORS = {
   accent: '#4682B4',        // Steel Blue
   secondary: '#D3D3D3',     // Light Gray
   panel: '#E6E6E6',         // Light Panel
-  success: '#10B981',       // Green
-  danger: '#EF4444',        // Red
+  success: '#059669',       // Portfolio benchmark green
+  danger: '#DC2626',        // Portfolio benchmark red
   warning: '#F59E0B'        // Amber
 };
 

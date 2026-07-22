@@ -141,6 +141,7 @@ export function kellyFraction(userProb, contractPrice) {
  * Caps at maxBetCap dollars of risk.
  */
 export function fractionalKellySizing(userProb, contractPrice, kellyMultiplier, portfolioEquity, maxBetCapDollars, payoutMultiplier = 1) {
+  if (!Number.isFinite(Number(portfolioEquity)) || Number(portfolioEquity) <= 0) return 0;
   const kf = kellyFraction(userProb, contractPrice);
   if (kf <= 0) return 0;
   const fractionedKelly = kf * (kellyMultiplier ?? 0.25);
@@ -164,7 +165,7 @@ export function conservativeKellySizing(userProb, contractPrice, portfolioEquity
  */
 export function fixedDollarSizing(fixedRiskDollars, contractPrice, payoutMultiplier = 1) {
   const riskPerContract = contractPrice * payoutMultiplier;
-  if (riskPerContract <= 0) return 0;
+  if (!Number.isFinite(Number(fixedRiskDollars)) || Number(fixedRiskDollars) <= 0 || riskPerContract <= 0) return 0;
   return Math.max(0, Math.floor(fixedRiskDollars / riskPerContract));
 }
 
@@ -226,7 +227,7 @@ export function getRecommendation(contract, settings = {}) {
     slippageBuffer = 0,
     modelErrorBuffer = 0,
     minConfidence = 0.5,
-    portfolioEquity = 100000,
+    portfolioEquity = null,
     kellyMultiplier = 0.25,
     sizingMode = 'fractional_kelly',
     fixedDollar = 500,
@@ -242,6 +243,18 @@ export function getRecommendation(contract, settings = {}) {
   }
   if (!yesPrice || !noPrice) {
     return { action: 'No Trade', side: null, reason: 'Contract prices missing.', warnings: ['Yes/No prices required.'], suggestedContracts: 0, ev: 0, maxLoss: 0, maxProfit: 0 };
+  }
+  if (!Number.isFinite(Number(portfolioEquity)) || Number(portfolioEquity) <= 0) {
+    return {
+      action: 'No Trade',
+      side: null,
+      reason: 'Live net liquidation value is unavailable.',
+      warnings: ['Position sizing and order fields are disabled until live NLV is verified.'],
+      suggestedContracts: 0,
+      ev: 0,
+      maxLoss: 0,
+      maxProfit: 0,
+    };
   }
   if (prob < 0 || prob > 1) {
     warnings.push('Probability out of range (0–1).');

@@ -181,8 +181,8 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                                     <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                                         <defs>
                                             <linearGradient id="riskRangeGradient" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1} />
-                                                <stop offset="95%" stopColor="#ef4444" stopOpacity={0.1} />
+                                                <stop offset="5%" stopColor="#dc2626" stopOpacity={0.1} />
+                                                <stop offset="95%" stopColor="#dc2626" stopOpacity={0.1} />
                                             </linearGradient>
                                         </defs>
                                         <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#e5e7eb'} vertical={false} />
@@ -227,8 +227,8 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                                     Simplified: Just plot lines for now or use range chart if supported.
                                     Actually, let's just plot Line for LRR/HRR for clarity first.
                                 */}
-                                        <Line type="monotone" dataKey="hrr" stroke="#ef4444" strokeDasharray="3 3" dot={false} strokeWidth={1} name="Top of Risk" />
-                                        <Line type="monotone" dataKey="lrr" stroke="#22c55e" strokeDasharray="3 3" dot={false} strokeWidth={1} name="Bottom of Risk" />
+                                        <Line type="monotone" dataKey="hrr" stroke="#dc2626" strokeDasharray="3 3" dot={false} strokeWidth={1} name="Top of Risk" />
+                                        <Line type="monotone" dataKey="lrr" stroke="#059669" strokeDasharray="3 3" dot={false} strokeWidth={1} name="Bottom of Risk" />
 
                                         <Line
                                             type="monotone"
@@ -247,7 +247,7 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                                                     x={d.date}
                                                     y={d.price}
                                                     r={5}
-                                                    fill={t.action.toLowerCase().includes('buy') ? '#22c55e' : '#ef4444'}
+                                                    fill={t.action.toLowerCase().includes('buy') ? '#059669' : '#dc2626'}
                                                     stroke="white"
                                                     strokeWidth={1}
                                                 />

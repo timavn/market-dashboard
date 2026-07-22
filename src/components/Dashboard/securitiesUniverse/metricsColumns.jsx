@@ -177,8 +177,8 @@ export const METRICS_COLUMNS = [
         <title>ATR (stop sign)</title>
         <polygon
           points="30,5 70,5 95,30 95,70 70,95 30,95 5,70 5,30"
-          fill="#c81e1e"
-          stroke="#7f1d1d"
+          fill="#dc2626"
+          stroke="#dc2626"
           strokeWidth="3"
           strokeLinejoin="miter"
         />

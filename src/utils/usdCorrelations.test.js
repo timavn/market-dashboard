@@ -41,10 +41,15 @@ describe('USD correlation calculations', () => {
     const positiveSnapshot = buildUsdCorrelationSnapshot(positive, options);
     const negativeSnapshot = buildUsdCorrelationSnapshot(negative, options);
 
-    for (const window of CORRELATION_WINDOWS) {
-      expect(positiveSnapshot.correlations.SPX[`${window}D`]).toBe(1);
-      expect(negativeSnapshot.correlations.SPX[`${window}D`]).toBe(-1);
+    for (const { key } of CORRELATION_WINDOWS) {
+      expect(positiveSnapshot.correlations.SPX[key]).toBe(1);
+      expect(negativeSnapshot.correlations.SPX[key]).toBe(-1);
     }
+    expect(positiveSnapshot.correlations.SPX).toEqual(expect.objectContaining({
+      '90D': 1,
+      '120D': 1,
+      '180D': 1,
+    }));
     expect(positiveSnapshot.rollingStats.SPX).toEqual({
       high: 1,
       low: 1,

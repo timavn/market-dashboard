@@ -57,6 +57,11 @@ const EtfProPanel = ({ snapshot, loading = false, refreshing = false, error = nu
   const changes = snapshot?.changes || {};
   const snapshotDate = snapshot?.meta?.snapshotDate || null;
   const fresh = isFreshForToday(snapshotDate);
+  const cacheIsStale = snapshot?._cache?.stale === true;
+  const cacheAgeSeconds = Number(snapshot?._cache?.ageSeconds);
+  const cacheAgeLabel = Number.isFinite(cacheAgeSeconds)
+    ? `${Math.max(1, Math.round(cacheAgeSeconds / 60))} minutes old`
+    : 'age unavailable';
   const quality = snapshot?.dataQuality || {};
 
   const normalizedRows = useMemo(() => rows.map((row) => {
@@ -117,13 +122,18 @@ const EtfProPanel = ({ snapshot, loading = false, refreshing = false, error = nu
     <ReferencePanelShell
       title="ETF Pro"
       subtitle={`Published ETF Pro reference · ${formatDate(snapshotDate)} · ${snapshot?.meta?.source || 'source unavailable'}`}
-      status={snapshotDate ? (fresh ? 'Current snapshot' : `Snapshot ${formatDate(snapshotDate)}`) : 'No snapshot'}
-      statusTone={snapshotDate ? (fresh ? 'fresh' : 'stale') : 'error'}
+      status={cacheIsStale
+        ? `Cached fallback · ${cacheAgeLabel}`
+        : snapshotDate
+          ? (fresh ? 'Current snapshot' : `Snapshot ${formatDate(snapshotDate)}`)
+          : 'No snapshot'}
+      statusTone={snapshotDate ? (fresh && !cacheIsStale ? 'fresh' : 'stale') : 'error'}
       onRefresh={onRefresh}
       refreshing={refreshing}
       onClose={onClose}
     >
       {error && <div className="reference-alert reference-alert--error">{error}</div>}
+      {cacheIsStale && <div className="reference-alert">The API returned a last-good cached ETF Pro reference. Treat it as dated research, not fresh data.</div>}
       {snapshotDate && !fresh && <div className="reference-alert">This is a dated published reference snapshot, not current executable market data.</div>}
       {qualityWarnings.length > 0 && <div className="reference-alert">{qualityWarnings.join(' · ')}</div>}
 

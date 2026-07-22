@@ -11,22 +11,24 @@ import LoadingIndicator from '../common/LoadingIndicator';
 import PortfolioSidebarSnapshot from './portfolio/PortfolioSidebarSnapshot';
 import { loadSelectedAccount, saveSelectedAccount, saveIbkrAccounts } from '../../constants/ibkrAccountStorage';
 import { getIbkrConnectionDisplay, getPreferredIbkrAccount } from '../../utils/ibkrConnectionStatus';
+import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 
 const ReactMarkdown = lazy(() => import('react-markdown'));
+const SystemReadinessPanel = lazy(() => import('./SystemReadinessPanel'));
 const WorkflowStatus = lazy(() => import('./WorkflowStatus'));
 const SecuritiesUniverse = lazy(() => import('./SecuritiesUniverse'));
 const PerformanceTracking = lazy(() => import('./PerformanceTracking'));
 const PortfolioBreakdown = lazy(() => import('./PortfolioBreakdown'));
 const ExpectedValuesWindow = lazy(() => import('./ExpectedValuesWindow'));
-const CpiModelPanel = lazy(() => import('./PredictionMarkets'));
+const PredictionMarketsHubPanel = lazy(() => import('./PredictionMarketsHub'));
 const SignalStrengthPanel = lazy(() => import('./SignalStrengthPanel'));
 const EtfProPanel = lazy(() => import('./EtfProPanel'));
 const HedgeyeShowPanel = lazy(() => import('./HedgeyeShowPanel'));
 
 const PORTFOLIO_POLL_MS = 10000;
 const PORTFOLIO_ACCOUNTS_POLL_MS = 60000;
-const RTA_POLL_MS = 30000;
-const ETFPRO_POLL_MS = 60000;
+const REFERENCE_DATA_POLL_MS = 5 * 60 * 1000;
+const PREDICTION_PROVIDER_STATUS_POLL_MS = 30000;
 const PROVIDER_STATUS_POLL_MS = 5000;
 const PROVIDER_STATUS_POLL_OFFLINE_MS = 15000;
 const PROVIDER_STATUS_TIMEOUT_MS = 3500;
@@ -34,12 +36,16 @@ const SIDEBAR_PANEL_Z_INDEX_BASE = 1300;
 const DASHBOARD_PANEL_STATE_KEY = 'marketDashboard.panelState.v1';
 const DASHBOARD_RAIL_COLLAPSED_WIDTH = '76px';
 const DASHBOARD_RAIL_EXPANDED_WIDTH = 'calc((100vw - 16px) * (2/12) + 16px + 128px)';
+const RTA_STALE_WARNING = 'The API is serving a last-good cached RTA response.';
+const RTA_REFRESH_WARNING = 'The latest RTA refresh failed; retained positions are a prior dated reference.';
+const ETF_PRO_STALE_WARNING = 'The API is serving a last-good cached ETF Pro response.';
 const PERSISTED_SIDEBAR_PANELS = new Set([
+  'system',
   'analytics',
   'securities',
   'performance',
   'portfolio',
-  'cpi',
+  'predictionMarkets',
   'ss',
   'etfPro',
   'macroShow',
@@ -85,6 +91,69 @@ const isConnectedProviderStatus = (status) => Boolean(
   status?.portfolio?.ibkr?.status === 'connected',
 );
 
+const appendUniqueWarning = (warnings, warning) => (
+  [...new Set([...(Array.isArray(warnings) ? warnings : []), warning].filter(Boolean))]
+);
+
+const getReferenceDataQuality = (snapshot) => (
+  snapshot?.dataQuality || snapshot?.meta?.dataQuality || null
+);
+
+const prepareReferenceComparisonSnapshot = (snapshot, {
+  requireAvailable = false,
+  staleWarning,
+} = {}) => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return {
+      available: false,
+      comparisonAvailable: false,
+      dataQuality: { status: 'error', warnings: ['Reference response was unavailable.'] },
+    };
+  }
+
+  const cacheIsStale = snapshot?._cache?.stale === true;
+  const quality = getReferenceDataQuality(snapshot);
+  const qualityStatus = quality?.status;
+  const available = requireAvailable ? snapshot?.available === true : snapshot?.available !== false;
+  const comparisonAvailable = available && !cacheIsStale && qualityStatus === 'ok';
+  const prepared = {
+    ...snapshot,
+    _cache: snapshot?._cache,
+    comparisonAvailable,
+  };
+
+  if (cacheIsStale) {
+    prepared.dataQuality = {
+      ...(quality || {}),
+      status: qualityStatus && qualityStatus !== 'ok' ? qualityStatus : 'warning',
+      warnings: appendUniqueWarning(quality?.warnings, staleWarning),
+    };
+  }
+
+  return prepared;
+};
+
+const markReferenceRefreshFailed = (current, {
+  warning,
+  error,
+  emptyState,
+} = {}) => {
+  const previous = current && typeof current === 'object' ? current : emptyState;
+  const quality = getReferenceDataQuality(previous);
+  return {
+    ...(previous || {}),
+    _cache: previous?._cache,
+    available: false,
+    comparisonAvailable: false,
+    dataQuality: {
+      ...(quality || {}),
+      status: 'error',
+      warnings: appendUniqueWarning(quality?.warnings, warning),
+    },
+    refreshError: error || warning,
+  };
+};
+
 const LazyPanelFallback = ({ label = 'Loading...' }) => (
   <div
     className="flex h-full items-center justify-center p-4"
@@ -118,18 +187,72 @@ const writeDashboardPanelState = (state) => {
 
 const readPersistedBoolean = (state, key) => state?.[key] === true;
 
-const normalizePersistedSidebarPanelKey = (key) => {
-  if (key === 'predictionMarkets') return 'cpi';
-  return key;
+const PREDICTION_MARKET_VIEWS = new Set(['overview', 'wti', 'spx', 'cpi']);
+const WTI_CADENCES = new Set(['daily', 'weekly']);
+
+export const migratePredictionMarketsPanelState = (state = {}) => {
+  const stack = Array.isArray(state?.sidebarPanelStack) ? state.sidebarPanelStack : [];
+  const legacyCpiVisible = state?.showCpiModel === true || state?.showPredictionMarkets === true;
+  const legacySpxVisible = state?.showPredictionMarketsSandbox === true;
+  const currentVisible = state?.showPredictionMarketsHub === true;
+  const visible = currentVisible || legacyCpiVisible || legacySpxVisible;
+
+  let lastLegacyView = null;
+  const migratedStack = [];
+  const pushLast = (key) => {
+    const withoutKey = migratedStack.filter((entry) => entry !== key);
+    migratedStack.splice(0, migratedStack.length, ...withoutKey, key);
+  };
+
+  stack.forEach((key) => {
+    let applicablePredictionAlias = false;
+    if (key === 'cpi' && legacyCpiVisible) {
+      applicablePredictionAlias = true;
+      lastLegacyView = 'cpi';
+    } else if (key === 'predMkts' && legacySpxVisible) {
+      applicablePredictionAlias = true;
+      lastLegacyView = 'spx';
+    } else if (key === 'predictionMarkets' && (currentVisible || state?.showPredictionMarkets === true)) {
+      applicablePredictionAlias = true;
+      if (!currentVisible && state?.showPredictionMarkets === true) lastLegacyView = 'cpi';
+    }
+
+    if (applicablePredictionAlias) {
+      pushLast('predictionMarkets');
+      return;
+    }
+    if (key === 'cpi' || key === 'predMkts' || key === 'predictionMarkets') return;
+    if (PERSISTED_SIDEBAR_PANELS.has(key) && !migratedStack.includes(key)) migratedStack.push(key);
+  });
+
+  if (visible && !migratedStack.includes('predictionMarkets')) migratedStack.push('predictionMarkets');
+
+  let activePredictionMarket = 'overview';
+  if (visible) {
+    if (currentVisible && PREDICTION_MARKET_VIEWS.has(state?.activePredictionMarket)) {
+      activePredictionMarket = state.activePredictionMarket;
+    } else if (lastLegacyView) {
+      activePredictionMarket = lastLegacyView;
+    } else if (legacySpxVisible) {
+      // SPX was the later overlay in the legacy render order.
+      activePredictionMarket = 'spx';
+    } else if (legacyCpiVisible) {
+      activePredictionMarket = 'cpi';
+    }
+  }
+
+  return {
+    ...state,
+    showPredictionMarketsHub: visible,
+    activePredictionMarket,
+    activeWtiCadence: WTI_CADENCES.has(state?.activeWtiCadence) ? state.activeWtiCadence : 'daily',
+    sidebarPanelStack: migratedStack,
+  };
 };
 
 const readPersistedSidebarStack = (state) => (
   Array.isArray(state?.sidebarPanelStack)
-    ? [...new Set(
-      state.sidebarPanelStack
-        .map(normalizePersistedSidebarPanelKey)
-        .filter((key) => PERSISTED_SIDEBAR_PANELS.has(key))
-    )]
+    ? [...new Set(state.sidebarPanelStack.filter((key) => PERSISTED_SIDEBAR_PANELS.has(key)))]
     : []
 );
 
@@ -154,7 +277,11 @@ const PERIOD_RETURN_METADATA_FIELDS = [
 
 const QUOTE_VISUAL_FIELDS = ['sparklineData'];
 
-const mergeRowsPreservingPeriods = (previousRows = [], nextRows = []) => {
+const mergeRowsPreservingPeriods = (
+  previousRows = [],
+  nextRows = [],
+  { preservePeriods = true } = {},
+) => {
   if (!Array.isArray(previousRows) || !Array.isArray(nextRows)) return nextRows;
   const previousBySymbol = new Map(previousRows.map((row) => [row?.symbol, row]));
   return nextRows.map((row) => {
@@ -162,12 +289,12 @@ const mergeRowsPreservingPeriods = (previousRows = [], nextRows = []) => {
     if (!previous) return row;
     const merged = { ...previous, ...row };
     PERIOD_RETURN_FIELDS.forEach((field) => {
-      if (row[field] == null && previous[field] != null) {
+      if (preservePeriods && row[field] == null && previous[field] != null) {
         merged[field] = previous[field];
       }
     });
     PERIOD_RETURN_METADATA_FIELDS.forEach((field) => {
-      if (row[field] == null && previous[field] != null) {
+      if (preservePeriods && previous[field] != null) {
         merged[field] = previous[field];
       }
     });
@@ -180,18 +307,18 @@ const mergeRowsPreservingPeriods = (previousRows = [], nextRows = []) => {
   });
 };
 
-const mergeMarketDataPreservingPeriods = (previous = {}, next = {}) => {
+const mergeMarketDataPreservingPeriods = (previous = {}, next = {}, options = {}) => {
   const merged = { ...previous, ...next };
   Object.entries(next || {}).forEach(([regionKey, regionValue]) => {
     if (Array.isArray(regionValue)) {
-      merged[regionKey] = mergeRowsPreservingPeriods(previous?.[regionKey], regionValue);
+      merged[regionKey] = mergeRowsPreservingPeriods(previous?.[regionKey], regionValue, options);
       return;
     }
     if (regionValue && typeof regionValue === 'object') {
       merged[regionKey] = Object.fromEntries(
         Object.entries(regionValue).map(([tabKey, rows]) => [
           tabKey,
-          mergeRowsPreservingPeriods(previous?.[regionKey]?.[tabKey], rows),
+          mergeRowsPreservingPeriods(previous?.[regionKey]?.[tabKey], rows, options),
         ])
       );
     }
@@ -230,7 +357,7 @@ const sidebarTabCenteredLabelStyle = {
 
 const sidebarRailControlStyle = {
   minWidth: '56px',
-  height: '44px',
+  height: 'var(--dashboard-rail-control-height)',
   flexShrink: 0,
 };
 
@@ -255,7 +382,10 @@ const sidebarRailTextStyle = {
   whiteSpace: 'nowrap',
 };
 
-const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = '/how-it-works'; } }) => {
+const PortfolioDashboard = ({ onOpenProcess, onOpenWhitePaper }) => {
+  const openProcess = onOpenProcess || onOpenWhitePaper || (() => {
+    window.location.hash = '/process';
+  });
   const { theme } = useTheme();
   const [portfolioData, setPortfolioData] = useState(null);
   const [portfolioAccountsData, setPortfolioAccountsData] = useState([]);
@@ -283,7 +413,10 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
   const ibkrConnectionRef = useRef(null);
   const lastGoodProviderStatusRef = useRef(null);
   const portfolioDataRef = useRef(null);
-  const persistedPanelState = useMemo(readDashboardPanelState, []);
+  const persistedPanelState = useMemo(
+    () => migratePredictionMarketsPanelState(readDashboardPanelState()),
+    [],
+  );
   const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(() => readPersistedBoolean(persistedPanelState, 'showPortfolioMetrics'));
   const [showPeaPodWindow, setShowPeaPodWindow] = useState(() => readPersistedBoolean(persistedPanelState, 'showPeaPodWindow'));
   const [showEVWindow, setShowEVWindow] = useState(() => readPersistedBoolean(persistedPanelState, 'showEVWindow'));
@@ -295,12 +428,23 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
   const bookMenuRef = useRef(null);
   const bookPopoverRef = useRef(null);
   const [showWorkflowStatus, setShowWorkflowStatus] = useState(() => readPersistedBoolean(persistedPanelState, 'showWorkflowStatus'));
+  const [showSystemReadiness, setShowSystemReadiness] = useState(() => readPersistedBoolean(persistedPanelState, 'showSystemReadiness'));
+  const [systemReadinessStatus, setSystemReadinessStatus] = useState('checking');
   const [analyticsRefreshKey, setAnalyticsRefreshKey] = useState(0);
   const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(() => readPersistedBoolean(persistedPanelState, 'showSecuritiesUniverse'));
   const [showPerformanceTracking, setShowPerformanceTracking] = useState(() => readPersistedBoolean(persistedPanelState, 'showPerformanceTracking'));
-  const [showCpiModel, setShowCpiModel] = useState(() => (
-    readPersistedBoolean(persistedPanelState, 'showCpiModel') ||
-    readPersistedBoolean(persistedPanelState, 'showPredictionMarkets')
+  const [showPredictionMarketsHub, setShowPredictionMarketsHub] = useState(() => (
+    readPersistedBoolean(persistedPanelState, 'showPredictionMarketsHub')
+  ));
+  const [activePredictionMarket, setActivePredictionMarket] = useState(() => (
+    PREDICTION_MARKET_VIEWS.has(persistedPanelState.activePredictionMarket)
+      ? persistedPanelState.activePredictionMarket
+      : 'overview'
+  ));
+  const [activeWtiCadence, setActiveWtiCadence] = useState(() => (
+    WTI_CADENCES.has(persistedPanelState.activeWtiCadence)
+      ? persistedPanelState.activeWtiCadence
+      : 'daily'
   ));
   const [showSignalStrength, setShowSignalStrength] = useState(() => readPersistedBoolean(persistedPanelState, 'showSignalStrength'));
   const [showEtfPro, setShowEtfPro] = useState(() => readPersistedBoolean(persistedPanelState, 'showEtfPro'));
@@ -345,6 +489,25 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
     removeSidebarPanelFromStack(panelKey);
   }, [removeSidebarPanelFromStack]);
 
+  const togglePredictionMarketsHub = useCallback(() => {
+    if (showPredictionMarketsHub) {
+      setShowPredictionMarketsHub(false);
+      setActivePredictionMarket('overview');
+      removeSidebarPanelFromStack('predictionMarkets');
+      return;
+    }
+    // An explicit reopen always returns to the cross-market overview.
+    setActivePredictionMarket('overview');
+    setShowPredictionMarketsHub(true);
+    bringSidebarPanelToFront('predictionMarkets');
+  }, [bringSidebarPanelToFront, removeSidebarPanelFromStack, showPredictionMarketsHub]);
+
+  const closePredictionMarketsHub = useCallback(() => {
+    setShowPredictionMarketsHub(false);
+    setActivePredictionMarket('overview');
+    removeSidebarPanelFromStack('predictionMarkets');
+  }, [removeSidebarPanelFromStack]);
+
   const getSidebarPanelZIndex = useCallback((panelKey, isVisible) => {
     if (!isVisible) return -1;
 
@@ -357,10 +520,13 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
       showPortfolioMetrics,
       showPeaPodWindow,
       showEVWindow,
+      showSystemReadiness,
       showWorkflowStatus,
       showSecuritiesUniverse,
       showPerformanceTracking,
-      showCpiModel,
+      showPredictionMarketsHub,
+      activePredictionMarket,
+      activeWtiCadence,
       showSignalStrength,
       showEtfPro,
       showMacroShow,
@@ -373,10 +539,13 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
     showPortfolioMetrics,
     showPeaPodWindow,
     showEVWindow,
+    showSystemReadiness,
     showWorkflowStatus,
     showSecuritiesUniverse,
     showPerformanceTracking,
-    showCpiModel,
+    showPredictionMarketsHub,
+    activePredictionMarket,
+    activeWtiCadence,
     showSignalStrength,
     showEtfPro,
     showMacroShow,
@@ -386,6 +555,15 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
     portfolioExpandedUp,
   ]);
 
+  const handleSystemReadinessStatus = useCallback((status) => {
+    const normalized = String(status || '').trim().toLowerCase();
+    setSystemReadinessStatus(
+      ['ready', 'degraded', 'blocked', 'checking'].includes(normalized)
+        ? normalized
+        : 'blocked',
+    );
+  }, []);
+
   const fetchMultiRegionQuotes = useCallback(async ({ includePeriodReturns = false } = {}) => {
     try {
       const data = await MarketDataService.getMultiRegionQuotes(
@@ -393,7 +571,12 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
         !includePeriodReturns,
         includePeriodReturns,
       );
-      setMultiRegionMarketData((current) => mergeMarketDataPreservingPeriods(current, data));
+      setMultiRegionMarketData((current) => mergeMarketDataPreservingPeriods(current, data, {
+        // Fast quote-only refreshes intentionally omit the slower historical
+        // series. Keep the last dated period snapshot only on that path; a
+        // requested period refresh remains authoritative and can clear it.
+        preservePeriods: !includePeriodReturns,
+      }));
       setMultiRegionLoading(false);
       setMultiRegionError(null);
 
@@ -496,6 +679,11 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
       portfolioDataRef.current = data;
       return data;
     } catch (e) {
+      // Never keep a previously live portfolio mounted after its refresh
+      // fails. Active sizing and position surfaces must fail closed rather
+      // than silently aging the last successful response.
+      setPortfolioData(null);
+      portfolioDataRef.current = null;
       if (!silent || !hasExistingPortfolio) {
         setPortfolioError(e.message || 'Failed to load portfolio');
       }
@@ -543,11 +731,31 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
   const fetchRtaPositions = useCallback(async () => {
     try {
       const data = await MarketDataService.getRealTimeAlertPositions();
-      setRtaPositions(data);
-      return data;
+      const prepared = prepareReferenceComparisonSnapshot(data, {
+        requireAvailable: true,
+        staleWarning: RTA_STALE_WARNING,
+      });
+      if (data?._cache?.stale) {
+        prepared.reconstructionWarnings = appendUniqueWarning(
+          data.reconstructionWarnings,
+          RTA_STALE_WARNING,
+        );
+      }
+      setRtaPositions(prepared);
+      return prepared;
     } catch (e) {
       console.error('Failed to load real-time alert positions:', e);
-      setRtaPositions((current) => current || { available: false });
+      setRtaPositions((current) => ({
+        ...markReferenceRefreshFailed(current, {
+          warning: RTA_REFRESH_WARNING,
+          error: e.message || 'Failed to load real-time alert positions',
+          emptyState: { longCount: null, shortCount: null },
+        }),
+        reconstructionWarnings: appendUniqueWarning(
+          current?.reconstructionWarnings,
+          RTA_REFRESH_WARNING,
+        ),
+      }));
       return null;
     }
   }, []);
@@ -558,12 +766,20 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
     setEtfProError(null);
     try {
       const data = await MarketDataService.getHedgeyeEtfPro();
-      setEtfProSnapshot(data);
-      return data;
+      const prepared = prepareReferenceComparisonSnapshot(data, {
+        staleWarning: ETF_PRO_STALE_WARNING,
+      });
+      setEtfProSnapshot(prepared);
+      return prepared;
     } catch (e) {
       console.error('Failed to load ETF Pro snapshot:', e);
-      setEtfProError(e.message || 'Failed to load ETF Pro snapshot');
-      setEtfProSnapshot((current) => current || { available: false, rows: [] });
+      const error = e.message || 'Failed to load ETF Pro snapshot';
+      setEtfProError(error);
+      setEtfProSnapshot((current) => markReferenceRefreshFailed(current, {
+        warning: 'The latest ETF Pro refresh failed; retained rows are a prior dated reference.',
+        error,
+        emptyState: { rows: [], longCount: null, shortCount: null },
+      }));
       return null;
     } finally {
       setEtfProLoading(false);
@@ -592,7 +808,17 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
       setHedgeyeChangelogError(null);
       const data = await MarketDataService.getHedgeyeChangelog();
       setHedgeyeChangelog(data);
-      setHedgeyeChangelogLastSuccessAt(new Date().toISOString());
+      const cacheAgeSeconds = Number(data?._cache?.ageSeconds);
+      const responseTimestamp = Number.isFinite(cacheAgeSeconds)
+        ? Date.now() - (cacheAgeSeconds * 1000)
+        : Date.now();
+      setHedgeyeChangelogLastSuccessAt(new Date(responseTimestamp).toISOString());
+      if (data?._cache?.stale) {
+        const ageLabel = Number.isFinite(cacheAgeSeconds)
+          ? ` (${Math.max(1, Math.round(cacheAgeSeconds / 60))} minutes old)`
+          : '';
+        setHedgeyeChangelogError(`Showing a stale cached changelog response${ageLabel}.`);
+      }
       return data;
     } catch (e) {
       console.error('Failed to load Hedgeye changelog:', e);
@@ -727,14 +953,19 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
         }
         cancelDeferredSecondary = scheduleBackgroundTask(() => {
           if (cancelled) return;
-          Promise.allSettled([
+          const secondaryRequests = [
             pollingFnsRef.current.fetchPortfolioAccounts(),
             pollingFnsRef.current.fetchPortfolioExposureReconciliation(),
-            pollingFnsRef.current.fetchRtaPositions(),
-            pollingFnsRef.current.fetchEtfProSnapshot(),
             pollingFnsRef.current.fetchPredictionMarketProviderStatus(),
-            pollingFnsRef.current.fetchHedgeyeChangelog(),
-          ]).catch(() => {});
+          ];
+          if (typeof document === 'undefined' || !document.hidden) {
+            secondaryRequests.push(
+              pollingFnsRef.current.fetchRtaPositions(),
+              pollingFnsRef.current.fetchEtfProSnapshot(),
+              pollingFnsRef.current.fetchHedgeyeChangelog(),
+            );
+          }
+          Promise.allSettled(secondaryRequests).catch(() => {});
         }, 1200);
       } catch (err) {
         if (!cancelled) {
@@ -756,15 +987,18 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
       pollingFnsRef.current.fetchPortfolioAccounts().catch(() => {});
     }, PORTFOLIO_ACCOUNTS_POLL_MS);
 
-    const rtaInterval = setInterval(() => {
-      pollingFnsRef.current.fetchRtaPositions().catch(() => {});
+    const predictionProviderStatusInterval = setInterval(() => {
       pollingFnsRef.current.fetchPredictionMarketProviderStatus().catch(() => {});
-      pollingFnsRef.current.fetchHedgeyeChangelog(true).catch(() => {});
-    }, RTA_POLL_MS);
+    }, PREDICTION_PROVIDER_STATUS_POLL_MS);
 
-    const etfProInterval = setInterval(() => {
-      pollingFnsRef.current.fetchEtfProSnapshot(true).catch(() => {});
-    }, ETFPRO_POLL_MS);
+    const stopReferencePolling = startVisibilityAwarePolling({
+      intervalMs: REFERENCE_DATA_POLL_MS,
+      poll: () => Promise.allSettled([
+        pollingFnsRef.current.fetchRtaPositions(),
+        pollingFnsRef.current.fetchEtfProSnapshot(true),
+        pollingFnsRef.current.fetchHedgeyeChangelog(true),
+      ]),
+    });
 
     let statusTimeout;
     const scheduleStatusPoll = () => {
@@ -783,8 +1017,8 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
       cancelDeferredSecondary?.();
       clearInterval(portfolioInterval);
       clearInterval(portfolioAccountsInterval);
-      clearInterval(rtaInterval);
-      clearInterval(etfProInterval);
+      clearInterval(predictionProviderStatusInterval);
+      stopReferencePolling();
       clearTimeout(statusTimeout);
     };
     // Polling callbacks are read from pollingFnsRef so UI state changes do not
@@ -875,13 +1109,18 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
 
   // Book/Notes file configuration
   const bookFiles = [
-    { name: 'The Coach', path: 'main/The Coach.md' },
-    { name: 'The Process', path: 'main/The Process.md' },
-    { name: 'The Playbook', path: 'main/The Playbook.md' },
-    { name: 'Stop Losses', path: 'main/Stop Losses.md' }
+    { name: 'The Coach — Source Notes', contentKey: 'The Coach', path: 'main/The Coach.md' },
+    {
+      name: 'Process Source Notes — Legacy',
+      contentKey: 'The Process',
+      path: 'main/The Process.md',
+    },
+    { name: 'The Playbook — Legacy', contentKey: 'The Playbook', path: 'main/The Playbook.md' },
+    { name: 'Stop Losses — Legacy', contentKey: 'Stop Losses', path: 'main/Stop Losses.md' }
   ];
 
-  const openBookFile = async (fileName) => {
+  const openBookFile = async (file) => {
+    const fileName = file.contentKey || file.name;
     let contentMap = bookContentMap;
     if (!contentMap) {
       setBookContentLoading(true);
@@ -901,7 +1140,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
     const content = contentMap[fileName];
     if (content) {
       setSelectedBookContent(content);
-      setSelectedBookTitle(fileName);
+      setSelectedBookTitle(file.name);
       setShowBookModal(true);
       setShowBookMenu(false);
       setSelectedTag(null); // Reset selected tag when opening new file
@@ -1045,7 +1284,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
         '--dashboard-rail-collapsed-width': DASHBOARD_RAIL_COLLAPSED_WIDTH,
         '--dashboard-rail-expanded-width': DASHBOARD_RAIL_EXPANDED_WIDTH,
         '--dashboard-rail-control-width': '56px',
-        '--dashboard-rail-control-height': '44px',
+        '--dashboard-rail-control-height': showPortfolioMetrics ? '30px' : '44px',
         '--dashboard-rail-icon-size': '26px',
         '--dashboard-active-rail-width': showPortfolioMetrics
           ? DASHBOARD_RAIL_EXPANDED_WIDTH
@@ -1107,20 +1346,76 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
         <div
           data-testid="dashboard-rail-navigation"
           style={{
-            padding: '12px 10px',
+            padding: showPortfolioMetrics ? '6px 10px' : '12px 10px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
-            minHeight: '120px',
-            flex: showPortfolioMetrics ? '0 1 54vh' : '1 1 auto',
-            maxHeight: showPortfolioMetrics ? '560px' : 'none',
-            overflowY: 'auto',
+            minHeight: showPortfolioMetrics ? 0 : '120px',
+            flex: showPortfolioMetrics ? '0 0 auto' : '1 1 auto',
+            maxHeight: 'none',
+            overflowY: showPortfolioMetrics ? 'hidden' : 'auto',
             overflowX: 'hidden',
             scrollbarWidth: 'thin',
           }}
           className="dark:border-gray-700"
         >
+          {/* System readiness is the permanent morning-operations entry point. */}
+          <button
+            type="button"
+            onClick={() => toggleSidebarPanel('system', setShowSystemReadiness)}
+            className={`rounded-lg border transition-colors w-full ${showSystemReadiness
+              ? 'bg-gray-100 dark:bg-gray-700'
+              : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            style={{
+              ...sidebarRailControlStyle,
+              padding: showPortfolioMetrics ? '0 14px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
+              position: 'relative',
+              overflow: 'hidden',
+              marginBottom: showPortfolioMetrics ? '4px' : '8px',
+              borderColor: systemReadinessStatus === 'ready'
+                ? '#059669'
+                : systemReadinessStatus === 'degraded'
+                  ? '#d97706'
+                  : systemReadinessStatus === 'blocked'
+                    ? '#dc2626'
+                    : '#60a5fa',
+            }}
+            title="System Readiness"
+            aria-label={`System Readiness: ${systemReadinessStatus}`}
+            aria-pressed={showSystemReadiness}
+            data-readiness-status={systemReadinessStatus}
+          >
+            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
+              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column', gap: '4px' }} aria-hidden="true">
+                <span>SYS</span>
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '999px',
+                    backgroundColor: systemReadinessStatus === 'ready'
+                      ? '#059669'
+                      : systemReadinessStatus === 'degraded'
+                        ? '#d97706'
+                        : systemReadinessStatus === 'blocked'
+                          ? '#dc2626'
+                          : '#60a5fa',
+                  }}
+                />
+              </span>
+            </div>
+            {showPortfolioMetrics && (
+              <span className="text-[15px] text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
+                System Readiness
+              </span>
+            )}
+          </button>
+
           {/* X/Twitter Logo Button */}
           <button
             onClick={() => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer')}
@@ -1162,6 +1457,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
+              marginTop: showPortfolioMetrics ? '4px' : undefined,
             }}
             title="The Pods"
           >
@@ -1190,6 +1486,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
+              marginTop: showPortfolioMetrics ? '4px' : undefined,
             }}
             title="Expected Values"
           >
@@ -1216,6 +1513,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
+              marginTop: showPortfolioMetrics ? '4px' : undefined,
             }}
             title="Open Notes"
           >
@@ -1229,12 +1527,12 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
             )}
           </button>
 
-          {/* How It Works Button */}
+          {/* The Process Button */}
           <button
             type="button"
             onClick={() => {
               setShowBookMenu(false);
-              onOpenHowItWorks();
+              openProcess();
             }}
             className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full mt-2"
             style={{
@@ -1245,31 +1543,39 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
+              marginTop: showPortfolioMetrics ? '4px' : undefined,
             }}
-            title="How It Works"
-            aria-label="How It Works"
+            title="The Process"
+            aria-label="The Process"
           >
             <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <svg
-                width="25"
-                height="25"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+              <span
                 aria-hidden="true"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: showPortfolioMetrics ? '9px' : '8px',
+                  fontWeight: 800,
+                  lineHeight: 1.02,
+                  letterSpacing: showPortfolioMetrics ? '0.04em' : '-0.01em',
+                }}
               >
-                <circle cx="6" cy="6" r="2.25" />
-                <circle cx="18" cy="6" r="2.25" />
-                <circle cx="12" cy="18" r="2.25" />
-                <path d="M8.2 6h7.6M7.5 8l3.2 7.8M16.5 8l-3.2 7.8" />
-              </svg>
+                {showPortfolioMetrics ? (
+                  <span>TP</span>
+                ) : (
+                  <>
+                    <span>THE</span>
+                    <span>/</span>
+                    <span>PROCESS</span>
+                  </>
+                )}
+              </span>
             </div>
             {showPortfolioMetrics && (
               <span className="text-[15px] font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                How It Works
+                THE PROCESS
               </span>
             )}
           </button>
@@ -1295,7 +1601,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               {bookFiles.map((file, index) => (
                 <button
                   key={index}
-                  onClick={() => openBookFile(file.name)}
+                  onClick={() => openBookFile(file)}
                   disabled={bookContentLoading}
                   style={{
                     width: '100%',
@@ -1327,7 +1633,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
             width: '100%',
             height: '1px',
             backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb',
-            margin: '12px 0 8px 0'
+            margin: showPortfolioMetrics ? '8px 0 4px' : '12px 0 8px'
           }} />
 
           {/* Portfolio Breakdown Button */}
@@ -1345,7 +1651,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              marginTop: '4px',
+              marginTop: showPortfolioMetrics ? '2px' : '4px',
             }}
             title="Portfolio Breakdown"
           >
@@ -1374,7 +1680,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              marginTop: '4px',
+              marginTop: showPortfolioMetrics ? '2px' : '4px',
             }}
             title="Securities Universe"
           >
@@ -1388,10 +1694,10 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
             )}
           </button>
 
-          {/* CPI Button */}
+          {/* Prediction Markets Hub Button */}
           <button
-            onClick={() => toggleSidebarPanel('cpi', setShowCpiModel)}
-            className={`rounded-lg border transition-colors w-full ${showCpiModel
+            onClick={togglePredictionMarketsHub}
+            className={`rounded-lg border transition-colors w-full ${showPredictionMarketsHub
               ? 'bg-gray-100 border-gray-300 dark:bg-blue-600 hover:bg-gray-200 dark:hover:bg-blue-700 text-[#111] dark:text-white'
               : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 text-[#333] dark:text-gray-200'
               }`}
@@ -1403,18 +1709,20 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              marginTop: '4px',
+              marginTop: showPortfolioMetrics ? '2px' : '4px',
             }}
-            title="CPI"
+            title="Prediction Markets"
+            aria-label="Prediction Markets"
           >
             <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle} aria-hidden="true">
-                CPI
+              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column' }} aria-hidden="true">
+                <span>PRED</span>
+                <span>MKTS</span>
               </span>
             </div>
             {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showCpiModel ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                CPI
+              <span className={`whitespace-nowrap ${showPredictionMarketsHub ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
+                Prediction Markets
               </span>
             )}
           </button>
@@ -1434,7 +1742,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              marginTop: '4px',
+              marginTop: showPortfolioMetrics ? '2px' : '4px',
             }}
             title="Signal Strength"
           >
@@ -1464,7 +1772,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              marginTop: '4px',
+              marginTop: showPortfolioMetrics ? '2px' : '4px',
             }}
             title="ETF Pro"
           >
@@ -1491,7 +1799,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              marginTop: '4px',
+              marginTop: showPortfolioMetrics ? '2px' : '4px',
             }}
             title="Macro Show"
           >
@@ -1521,7 +1829,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
               position: showPortfolioMetrics ? 'relative' : undefined,
               overflow: 'hidden',
-              marginTop: '4px',
+              marginTop: showPortfolioMetrics ? '2px' : '4px',
             }}
             title="Call"
           >
@@ -1540,12 +1848,12 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
             title={showPortfolioMetrics ? "Collapse Portfolio" : "Expand Portfolio"}
             style={{
               width: '48px',
-              height: '40px',
+              height: showPortfolioMetrics ? '32px' : '40px',
               padding: '0',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              marginTop: '8px',
+              marginTop: showPortfolioMetrics ? '4px' : '8px',
               alignSelf: 'center',
               flexShrink: 0,
             }}
@@ -1613,8 +1921,8 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
           </div>
         )}
 
-        {/* Analytics Button - Docked at Bottom of Portfolio Bar */}
-        <div
+        {/* Analytics stays on the collapsed utility rail, not the expanded portfolio bar. */}
+        {!showPortfolioMetrics && <div
           style={{
             marginTop: 'auto',
             padding: '10px',
@@ -1651,7 +1959,7 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               </span>
             )}
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Expected Values Window */}
@@ -2579,37 +2887,43 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
         )}
       </div>
 
-      {/* Prediction Markets Panel */}
+      {/* Unified Prediction Markets Hub */}
       <div
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 'var(--dashboard-active-rail-width)',
-          width: showCpiModel ? undefined : '0px',
+          width: showPredictionMarketsHub ? undefined : '0px',
           boxSizing: 'border-box',
           height: '100vh',
           backgroundColor: '#ffffff',
-          zIndex: getSidebarPanelZIndex('cpi', showCpiModel),
-          borderLeft: showCpiModel ? '1px solid #e5e7eb' : 'none',
-          borderRight: showCpiModel ? '1px solid #e5e7eb' : 'none',
+          zIndex: getSidebarPanelZIndex('predictionMarkets', showPredictionMarketsHub),
+          borderLeft: showPredictionMarketsHub ? '1px solid #e5e7eb' : 'none',
+          borderRight: showPredictionMarketsHub ? '1px solid #e5e7eb' : 'none',
           borderRadius: '0',
-          boxShadow: showCpiModel
+          boxShadow: showPredictionMarketsHub
             ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
             : 'none',
           transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
-          display: showCpiModel ? 'flex' : 'none',
+          display: showPredictionMarketsHub ? 'flex' : 'none',
           flexDirection: 'column',
           overflow: 'hidden',
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showCpiModel && (
+        {showPredictionMarketsHub && (
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <Suspense fallback={<LazyPanelFallback label="Loading CPI..." />}>
-              <CpiModelPanel
-                onClose={() => closeSidebarPanel('cpi', setShowCpiModel)}
+            <Suspense fallback={<LazyPanelFallback label="Loading prediction markets..." />}>
+              <PredictionMarketsHubPanel
+                onClose={closePredictionMarketsHub}
                 portfolioData={portfolioData}
+                selectedAccount={selectedAccount}
+                activeMarket={activePredictionMarket}
+                onActiveMarketChange={setActivePredictionMarket}
+                activeWtiCadence={activeWtiCadence}
+                onWtiCadenceChange={setActiveWtiCadence}
+                ibkrConnection={ibkrConnection}
               />
             </Suspense>
           </div>
@@ -2737,12 +3051,49 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
         )}
       </div>
 
+      {/* System Readiness Panel */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: 'var(--dashboard-active-rail-width)',
+          width: showSystemReadiness
+            ? 'min(560px, calc(100vw - var(--dashboard-active-rail-width) - 16px))'
+            : '0px',
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: getSidebarPanelZIndex('system', showSystemReadiness),
+          borderLeft: showSystemReadiness ? '1px solid #e5e7eb' : 'none',
+          borderTop: showSystemReadiness ? '1px solid #e5e7eb' : 'none',
+          borderBottom: showSystemReadiness ? '1px solid #e5e7eb' : 'none',
+          boxShadow: showSystemReadiness
+            ? '-2px 0 12px rgba(0, 0, 0, 0.12)'
+            : 'none',
+          transition: 'width 0.3s ease-in-out',
+          display: showSystemReadiness ? 'flex' : 'none',
+          visibility: showSystemReadiness ? 'visible' : 'hidden',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: showSystemReadiness ? '0.75rem 0 0 0' : '0',
+        }}
+        className="dark:bg-gray-900 dark:border-gray-700"
+        data-testid="system-readiness-sheet"
+      >
+        <Suspense fallback={<LazyPanelFallback label="Loading system readiness..." />}>
+          <SystemReadinessPanel
+            open={showSystemReadiness}
+            onClose={() => closeSidebarPanel('system', setShowSystemReadiness)}
+            onStatusChange={handleSystemReadinessStatus}
+          />
+        </Suspense>
+      </div>
+
       {/* Workflow Status Panel */}
       <div
         style={{
           position: 'fixed',
           top: 0,
-          right: 0,
+          right: 'var(--dashboard-active-rail-width)',
           width: showWorkflowStatus
             ? 'calc((100vw - 16px) * (5/12))'
             : '0px',
@@ -2817,7 +3168,12 @@ const PortfolioDashboard = ({ onOpenHowItWorks = () => { window.location.hash = 
               }}
             >
               <Suspense fallback={<LazyPanelFallback label="Loading analytics..." />}>
-                <WorkflowStatus key={analyticsRefreshKey} />
+                <WorkflowStatus
+                  key={analyticsRefreshKey}
+                  portfolioData={portfolioData}
+                  connection={ibkrConnection}
+                  forceRefresh={analyticsRefreshKey > 0}
+                />
               </Suspense>
             </div>
           </>

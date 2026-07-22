@@ -1,60 +1,51 @@
 /**
- * Presigned Upload Service
- * Uploads files to S3 using presigned URLs (no credentials needed in browser)
+ * Upload portfolio CSVs through a constrained S3 presigned POST policy.
+ * AWS credentials and bucket details remain server-side.
  */
 
+const MAX_CSV_SIZE_BYTES = 10 * 1024 * 1024;
+const CSV_CONTENT_TYPE = 'text/csv';
+
 export class PresignedUploadService {
-  
-  /**
-   * Get presigned URL from backend and upload file
-   */
   static async uploadCSV(file) {
     try {
-      // Step 1: Get presigned URL from backend
-      // Use full URL to bypass proxy issues
+      this.validateCSV(file);
+
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-
-      console.log('🔍 DEBUG: Starting CSV upload');
-      console.log('🔍 DEBUG: Backend URL:', backendUrl);
-      console.log('🔍 DEBUG: File name:', file.name);
-      console.log('🔍 DEBUG: File size:', file.size);
-
-      const requestUrl = `${backendUrl}/api/presigned-url`;
-      console.log('🔍 DEBUG: Fetching presigned URL from:', requestUrl);
-
-      const presignedResponse = await fetch(requestUrl, {
+      const presignedResponse = await fetch(`${backendUrl}/api/presigned-url`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          filename: this.generateFilename(file.name),
-          contentType: 'text/csv'
-        })
+          filename: file.name,
+          contentType: CSV_CONTENT_TYPE,
+          sizeBytes: file.size,
+        }),
       });
-
-      console.log('🔍 DEBUG: Presigned response status:', presignedResponse.status);
-      console.log('🔍 DEBUG: Presigned response ok:', presignedResponse.ok);
 
       if (!presignedResponse.ok) {
         const errorData = await presignedResponse.json().catch(() => ({}));
-        const errorMessage = errorData.details || errorData.error || 'Failed to get presigned URL';
-        throw new Error(errorMessage);
+        throw new Error(errorData.details || errorData.error || 'Failed to authorize upload');
       }
 
-      const { presignedUrl, key } = await presignedResponse.json();
+      const { url, fields, key, expiresAt } = await presignedResponse.json();
+      if (!url || !fields || typeof fields !== 'object' || !key || !expiresAt) {
+        throw new Error('Upload authorization response is incomplete');
+      }
+      if (!key.startsWith('portfolio-uploads/') || !key.toLowerCase().endsWith('.csv')) {
+        throw new Error('Upload authorization returned an invalid portfolio key');
+      }
 
-      console.log('🔍 DEBUG: Got presigned URL:', presignedUrl.substring(0, 100) + '...');
-      console.log('🔍 DEBUG: S3 key:', key);
+      const formData = new FormData();
+      Object.entries(fields).forEach(([field, value]) => {
+        formData.append(field, String(value));
+      });
+      formData.append('file', file, file.name);
 
-      // Step 2: Upload file directly to S3 using presigned URL
-      console.log('🔍 DEBUG: Uploading to S3...');
-      const uploadResponse = await fetch(presignedUrl, {
-        method: 'PUT',
-        body: file,
-        headers: {
-          'Content-Type': 'text/csv',
-        }
+      const uploadResponse = await fetch(url, {
+        method: 'POST',
+        body: formData,
       });
 
       if (!uploadResponse.ok) {
@@ -63,45 +54,34 @@ export class PresignedUploadService {
 
       return {
         success: true,
-        location: `https://market-dashboard-csv-data.s3.us-west-1.amazonaws.com/${key}`,
-        key: key,
-        bucket: 'market-dashboard-csv-data'
+        key,
+        expiresAt,
       };
-      
     } catch (error) {
-      console.error('❌ DEBUG: Upload error caught:', error);
-      console.error('❌ DEBUG: Error type:', error.constructor.name);
-      console.error('❌ DEBUG: Error message:', error.message);
-      console.error('❌ DEBUG: Error stack:', error.stack);
       throw new Error(`Upload failed: ${error.message}`);
     }
   }
 
-  /**
-   * Generate unique filename with timestamp
-   */
-  static generateFilename(originalName) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const baseName = originalName.replace('.csv', '');
-    return `uploads/${baseName}-${timestamp}.csv`;
-  }
-
-  /**
-   * Validate CSV file
-   */
   static validateCSV(file) {
     if (!file) {
       throw new Error('No file provided');
     }
 
-    if (!file.name.toLowerCase().endsWith('.csv')) {
+    const filename = String(file.name || '');
+    if (!filename || filename.includes('/') || filename.includes('\\') || !filename.toLowerCase().endsWith('.csv')) {
       throw new Error('File must be a CSV');
     }
 
-    if (file.size > 10 * 1024 * 1024) { // 10MB limit
+    if (!Number.isFinite(file.size) || file.size <= 0) {
+      throw new Error('CSV file is empty');
+    }
+
+    if (file.size > MAX_CSV_SIZE_BYTES) {
       throw new Error('File too large (max 10MB)');
     }
 
     return true;
   }
 }
+
+export { MAX_CSV_SIZE_BYTES };

@@ -4,7 +4,7 @@ export const VOL_RANGES = Object.freeze({
     source: 'The Process',
     ranges: Object.freeze([
       Object.freeze({ min: 0, max: 20, label: 'Investable', color: 'green', desc: 'Buy dips, normal risk' }),
-      Object.freeze({ min: 20, max: 29, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges, be aggressive on longs' }),
+      Object.freeze({ min: 20, max: 29, label: 'Chop', color: 'yellow', desc: 'Trade ranges, be aggressive on longs' }),
       Object.freeze({ min: 29, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive, preserve capital' }),
     ]),
   }),
@@ -13,7 +13,7 @@ export const VOL_RANGES = Object.freeze({
     source: 'Heuristic framework (not source-defined)',
     ranges: Object.freeze([
       Object.freeze({ min: 0, max: 24, label: 'Investable', color: 'green', desc: 'Typically ~1.2x VIX' }),
-      Object.freeze({ min: 24, max: 36, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' }),
+      Object.freeze({ min: 24, max: 36, label: 'Chop', color: 'yellow', desc: 'Trade ranges' }),
       Object.freeze({ min: 36, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }),
     ]),
   }),
@@ -22,7 +22,7 @@ export const VOL_RANGES = Object.freeze({
     source: 'Heuristic framework (not source-defined)',
     ranges: Object.freeze([
       Object.freeze({ min: 0, max: 24, label: 'Investable', color: 'green', desc: 'Typically ~1.2x VIX' }),
-      Object.freeze({ min: 24, max: 36, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' }),
+      Object.freeze({ min: 24, max: 36, label: 'Chop', color: 'yellow', desc: 'Trade ranges' }),
       Object.freeze({ min: 36, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }),
     ]),
   }),
@@ -31,7 +31,7 @@ export const VOL_RANGES = Object.freeze({
     source: 'Heuristic framework based on The Process',
     ranges: Object.freeze([
       Object.freeze({ min: 0, max: 24, label: 'Investable', color: 'green', desc: 'Low vol regime' }),
-      Object.freeze({ min: 24, max: 36, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' }),
+      Object.freeze({ min: 24, max: 36, label: 'Chop', color: 'yellow', desc: 'Trade ranges' }),
       Object.freeze({ min: 36, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }),
     ]),
   }),
@@ -40,7 +40,7 @@ export const VOL_RANGES = Object.freeze({
     source: 'Heuristic framework (not source-defined)',
     ranges: Object.freeze([
       Object.freeze({ min: 0, max: 40, label: 'Investable', color: 'green', desc: 'Lower vol regime' }),
-      Object.freeze({ min: 40, max: 55, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' }),
+      Object.freeze({ min: 40, max: 55, label: 'Chop', color: 'yellow', desc: 'Trade ranges' }),
       Object.freeze({ min: 55, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }),
     ]),
   }),
@@ -49,7 +49,7 @@ export const VOL_RANGES = Object.freeze({
     source: 'Heuristic framework for the Treasury-volatility scale',
     ranges: Object.freeze([
       Object.freeze({ min: 0, max: 100, label: 'Investable', color: 'green', desc: 'Lower vol regime' }),
-      Object.freeze({ min: 100, max: 120, label: 'Chop bucket', color: 'yellow', desc: 'Trade ranges' }),
+      Object.freeze({ min: 100, max: 120, label: 'Chop', color: 'yellow', desc: 'Trade ranges' }),
       Object.freeze({ min: 120, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }),
     ]),
   }),
@@ -58,7 +58,7 @@ export const VOL_RANGES = Object.freeze({
     source: 'Heuristic framework for Cboe VVIX',
     ranges: Object.freeze([
       Object.freeze({ min: 0, max: 95, label: 'Investable', color: 'green', desc: 'Lower vol-of-vol' }),
-      Object.freeze({ min: 95, max: 115, label: 'Chop bucket', color: 'yellow', desc: 'Elevated vol-of-vol' }),
+      Object.freeze({ min: 95, max: 115, label: 'Chop', color: 'yellow', desc: 'Elevated vol-of-vol' }),
       Object.freeze({ min: 115, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive' }),
     ]),
   }),
@@ -70,4 +70,11 @@ export const getBucketForSeries = (seriesName, value) => {
   if (!ranges?.length) return null;
   const numeric = Number(value);
   return ranges.find((range) => numeric >= range.min && (range.max == null || numeric < range.max))?.color || null;
+};
+
+export const formatVolatilityRange = (range) => {
+  if (!range) return null;
+  if (range.max == null) return `${range.min}+`;
+  if (Number(range.min) === 0) return `<${range.max}`;
+  return `${range.min}–${range.max}`;
 };

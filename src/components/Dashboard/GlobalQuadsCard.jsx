@@ -133,12 +133,12 @@ const getDefaultData = () => {
 };
 
 // Colors derived directly from the QUAD logo letters:
-// Q=#008000 (Quad1), U=#7CB342 (Quad2), A=#FFC107 (Quad3), D=#FE0000 (Quad4)
+// Q=#059669 (Quad1), U=#7CB342 (Quad2), A=#FFC107 (Quad3), D=#dc2626 (Quad4)
 const QUAD_COLORS = {
-  '1': { bg: '#008000', text: '#ffffff' }, // Q - dark green
+  '1': { bg: '#059669', text: '#ffffff' }, // Q - dark green
   '2': { bg: '#7CB342', text: '#ffffff' }, // U - light green
   '3': { bg: '#FFC107', text: '#1a1a1a' }, // A - amber (dark text for contrast)
-  '4': { bg: '#FE0000', text: '#ffffff' }, // D - red
+  '4': { bg: '#dc2626', text: '#ffffff' }, // D - red
 };
 
 const getCellColor = (value) => {
@@ -377,12 +377,12 @@ const GlobalQuadsCard = () => {
             lineHeight: 1, fontSize: '20px', display: 'flex', flexDirection: 'column', userSelect: 'none',
           }}>
             <div style={{ display: 'flex' }}>
-              <span style={{ color: '#008000' }}>Q</span>
+              <span style={{ color: '#059669' }}>Q</span>
               <span style={{ color: '#7CB342' }}>U</span>
             </div>
             <div style={{ display: 'flex' }}>
               <span style={{ color: '#FFC107' }}>A</span>
-              <span style={{ color: '#FE0000' }}>D</span>
+              <span style={{ color: '#dc2626' }}>D</span>
             </div>
           </div>
           <Title style={{ fontSize: '14px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', margin: 0 }}>

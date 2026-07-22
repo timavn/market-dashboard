@@ -15,6 +15,28 @@ describe('mapNormalizedRowToMacroSignal', () => {
     expect(view.side).toBe('long');
     expect(view.forecastLow).toBe(400);
     expect(view.forecastHigh).toBe(450);
+    expect(view.trade).toBeNull();
+    expect(view.trend).toBe('bull');
+  });
+
+  test('preserves independent Trade and Trend sources without manufacturing either signal', () => {
+    const trackerOnly = mapNormalizedRowToMacroSignal({
+      symbol: 'SPY',
+      trackerTrend: 'BULLISH',
+      riskTrend: null,
+    });
+    expect(trackerOnly.trade).toBe('Buy');
+    expect(trackerOnly.trend).toBeNull();
+    expect(trackerOnly.side).toBeNull();
+
+    const rangeOnly = mapNormalizedRowToMacroSignal({
+      symbol: 'TLT',
+      trackerTrend: null,
+      riskTrend: 'BEARISH',
+    });
+    expect(rangeOnly.trade).toBeNull();
+    expect(rangeOnly.trend).toBe('bear');
+    expect(rangeOnly.side).toBe('short');
   });
 
   test('leaves side null for NEUTRAL riskTrend with range data', () => {

@@ -57,8 +57,69 @@ const dedupedGet = (url, config = {}) => {
   return request;
 };
 
+const readResponseHeader = (headers, name) => {
+  if (!headers) return undefined;
+  if (typeof headers.get === 'function') {
+    const value = headers.get(name);
+    if (value != null) return value;
+  }
+  return headers[name] ?? headers[name.toLowerCase()];
+};
+
+const attachReferenceCacheMetadata = (response) => {
+  const data = response?.data;
+  if (!data || typeof data !== 'object') return data;
+
+  const rawStatus = readResponseHeader(response.headers, 'x-data-cache')
+    ?? readResponseHeader(response.headers, 'x-cache-status');
+  const rawAge = readResponseHeader(response.headers, 'x-data-age')
+    ?? readResponseHeader(response.headers, 'age');
+  const status = rawStatus ? String(rawStatus).trim().toLowerCase() : null;
+  const parsedAge = Number(rawAge);
+  const ageSeconds = Number.isFinite(parsedAge) && parsedAge >= 0 ? parsedAge : null;
+
+  if (!status && ageSeconds === null) return data;
+
+  const value = Array.isArray(data) ? [...data] : { ...data };
+  Object.defineProperty(value, '_cache', {
+    configurable: true,
+    enumerable: false,
+    value: {
+      status: status || 'unknown',
+      ageSeconds,
+      stale: status === 'stale',
+      receivedAt: new Date().toISOString(),
+    },
+  });
+  return value;
+};
+
 // Market Data Service
 export class MarketDataService {
+  static async getSystemReadiness({ refresh = false } = {}) {
+    try {
+      const response = await dedupedGet(ENDPOINTS.SYSTEM_READINESS, {
+        params: refresh ? { refresh: 1 } : {},
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching system readiness:', error);
+      throw error;
+    }
+  }
+
+  static async runSystemReadinessRepair(actionId) {
+    if (!actionId || typeof actionId !== 'string') {
+      throw new Error('A readiness repair action ID is required.');
+    }
+    const response = await apiClient.post(
+      `${ENDPOINTS.SYSTEM_READINESS}/actions/${encodeURIComponent(actionId)}`,
+      {},
+      { headers: { 'X-Readiness-Repair': '1' } },
+    );
+    return response.data;
+  }
+
   static async getProviderStatus() {
     try {
       const response = await dedupedGet(ENDPOINTS.PROVIDERS_STATUS);
@@ -178,39 +239,22 @@ export class MarketDataService {
           accountId: data.accountId || null,
           pnl: data.pnl || null,
           empty: Boolean(data.empty),
+          liveSessionVerified: data.liveSessionVerified === true,
+          socketVerifiedAt: data.socketVerifiedAt || data.accountSummary?.socketVerifiedAt || null,
+          fromCache: data.fromCache === true,
           reconciliationWarnings: data.reconciliationWarnings || [],
           dataQuality: data.dataQuality || null,
 
-          // Mock analytics for local development
-          riskMetrics: {
-            volatility: '18.75%',
-            sharpeRatio: '-0.13',
-            sortinoRatio: '-0.02',
-            var95: '$5571',
-            maxDrawdown: '0.00%'
+          // Analytics are exposed only when the server computed them from the
+          // verified response. Never fill an active portfolio with demo values.
+          riskMetrics: data.riskMetrics || null,
+          exposureMetrics: data.exposureMetrics || null,
+          concentrationMetrics: data.concentrationMetrics || null,
+          factorExposures: data.factorExposures || null,
+          analyticsAvailability: data.analyticsAvailability || {
+            available: false,
+            reason: 'No verified live analytics were returned by the portfolio API.',
           },
-          exposureMetrics: {
-            grossExposure: '100.0%',
-            netLongExposure: '100.0%',
-            netShortExposure: '0.0%',
-            netExposure: '100.0%'
-          },
-          concentrationMetrics: {
-            top10HoldingsPercent: '65.2%',
-            largestPositionPercent: '18.2%',
-            hhiIndex: '0.15'
-          },
-          factorExposures: {
-            'Momentum': { long: '18.5%', short: '8.2%' },
-            'Value': { long: '12.4%', short: '15.1%' },
-            'Quality': { long: '22.1%', short: '5.4%' },
-            'Volatility': { long: '5.2%', short: '12.8%' },
-            'Growth': { long: '28.4%', short: '10.2%' },
-            'Size': { long: '8.5%', short: '2.1%' },
-            'Liquidity': { long: '15.8%', short: '3.5%' },
-            'Carry': { long: '10.2%', short: '4.8%' },
-            'Crowding': { long: '4.5%', short: '14.2%' }
-          }
         };
       }
 
@@ -321,6 +365,17 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching VIX data:', error);
+      throw error;
+    }
+  }
+
+  // Get the consolidated live volatility snapshot with provider/freshness metadata
+  static async getVolatilitySnapshot() {
+    try {
+      const response = await dedupedGet('/api/volatility-snapshot');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching volatility snapshot:', error);
       throw error;
     }
   }
@@ -471,6 +526,34 @@ export class MarketDataService {
     }
   }
 
+  // Get read-only historical beta, ATR14, records, and completed daily
+  // high/low price structure.
+  // The server response is explicitly historicalOnly/non-executable and must
+  // never be substituted for a verified live quote or portfolio value.
+  static async getSecurityRiskMetrics(symbols, { forceRefresh = false } = {}) {
+    const requested = Array.from(new Set(
+      (Array.isArray(symbols) ? symbols : [symbols])
+        .map((symbol) => String(symbol || '').trim().toUpperCase())
+        .filter(Boolean)
+    ));
+    if (requested.length === 0) {
+      throw new TypeError('At least one symbol is required for historical risk metrics');
+    }
+
+    try {
+      const response = await dedupedGet('/api/security-risk-metrics', {
+        params: {
+          symbols: requested.join(','),
+          ...(forceRefresh ? { forceRefresh: 1 } : {}),
+        }
+      });
+      return attachReferenceCacheMetadata(response);
+    } catch (error) {
+      console.error('Error fetching historical security risk metrics:', error);
+      throw error;
+    }
+  }
+
   // Get risk range history for a specific ticker
   static async getRiskRangeHistory(ticker, limit = 30) {
     try {
@@ -532,7 +615,7 @@ export class MarketDataService {
   static async getHedgeyeChangelog() {
     try {
       const response = await dedupedGet('/api/hedgeye/changelog');
-      return response.data;
+      return attachReferenceCacheMetadata(response);
     } catch (error) {
       console.error('Error fetching Hedgeye changelog:', error);
       throw error;
@@ -542,7 +625,7 @@ export class MarketDataService {
   static async getRealTimeAlertPositions() {
     try {
       const response = await dedupedGet('/api/hedgeye/real-time-alert/positions');
-      return response.data;
+      return attachReferenceCacheMetadata(response);
     } catch (error) {
       console.error('Error fetching real-time alert positions:', error);
       throw error;
@@ -588,7 +671,7 @@ export class MarketDataService {
   static async getHedgeyeEtfPro() {
     try {
       const response = await dedupedGet('/api/hedgeye/etfpro');
-      return response.data;
+      return attachReferenceCacheMetadata(response);
     } catch (error) {
       console.error('Error fetching ETF Pro snapshot:', error);
       throw error;

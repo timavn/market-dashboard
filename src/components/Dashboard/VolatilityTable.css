@@ -15,17 +15,17 @@
   --vol-level-col: 76px;
   --vol-roc-col: 72px;
   /* Site-consistent red/green (matches MarketChartCard, MultiRegionMarketOverview, USDCorrelationMatrix) */
-  --vol-green: #16a34a;
-  --vol-red: #dc2626;
-  --vol-regime-green: #22c55e;
+  --vol-green: var(--dashboard-positive);
+  --vol-red: var(--dashboard-negative);
+  --vol-regime-green: var(--dashboard-positive);
   --vol-regime-yellow: #d58648;
-  --vol-regime-red: #f0524b;
-  --vol-regime-green-surface: #dcefe4;
+  --vol-regime-red: var(--dashboard-negative);
+  --vol-regime-green-surface: var(--dashboard-positive-soft);
   --vol-regime-yellow-surface: #f5e1d1;
-  --vol-regime-red-surface: #f7d9dc;
-  --vol-regime-green-text: #276344;
+  --vol-regime-red-surface: var(--dashboard-negative-soft);
+  --vol-regime-green-text: var(--dashboard-positive);
   --vol-regime-yellow-text: #a65320;
-  --vol-regime-red-text: #b52f3a;
+  --vol-regime-red-text: var(--dashboard-negative);
 }
 
 .volatility-table-loading {
@@ -136,7 +136,7 @@
 }
 
 .vol-cell.red {
-  background: #f9dada;
+  background: #fef2f2;
   color: #111827;
 }
 
@@ -447,14 +447,14 @@
 }
 
 .dark .volatility-table {
-  --vol-green: #22c55e;
-  --vol-red: #ef4444;
-  --vol-regime-green-surface: rgba(34, 197, 94, 0.2);
+  --vol-green: #059669;
+  --vol-red: #dc2626;
+  --vol-regime-green-surface: var(--dashboard-positive-soft);
   --vol-regime-yellow-surface: rgba(213, 134, 72, 0.24);
-  --vol-regime-red-surface: rgba(240, 82, 75, 0.24);
-  --vol-regime-green-text: #bbf7d0;
+  --vol-regime-red-surface: var(--dashboard-negative-soft);
+  --vol-regime-green-text: var(--dashboard-positive);
   --vol-regime-yellow-text: #efad76;
-  --vol-regime-red-text: #ff9d99;
+  --vol-regime-red-text: var(--dashboard-negative);
 }
 
 .dark .volatility-table,
@@ -700,8 +700,8 @@
 }
 
 .vol-ranges-range-green {
-  background: #dcfce7;
-  border-left: 3px solid #16a34a;
+  background: #ecfdf5;
+  border-left: 3px solid #059669;
 }
 
 .vol-ranges-range-yellow {
@@ -710,8 +710,8 @@
 }
 
 .vol-ranges-range-red {
-  background: #f9dada;
-  border-left: 3px solid #e13f37;
+  background: #fef2f2;
+  border-left: 3px solid #dc2626;
 }
 
 .vol-ranges-range-label {
@@ -765,7 +765,7 @@
 
 .dark .vol-ranges-range-green {
   background: rgba(34, 197, 94, 0.2);
-  border-left-color: #22c55e;
+  border-left-color: #059669;
 }
 
 .dark .vol-ranges-range-yellow {

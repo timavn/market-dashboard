@@ -321,6 +321,24 @@ const defaultSettings = {
 };
 
 describe('getRecommendation', () => {
+  test('never substitutes a hypothetical portfolio value when live NLV is missing', () => {
+    const rec = getRecommendation({
+      yesPrice: 0.43,
+      noPrice: 0.57,
+      myProbability: 0.65,
+      confidenceScore: 0.85,
+    }, {
+      ...defaultSettings,
+      portfolioEquity: null,
+    });
+
+    expect(rec).toMatchObject({
+      action: 'No Trade',
+      suggestedContracts: 0,
+      reason: 'Live net liquidation value is unavailable.',
+    });
+  });
+
   test('recommends Trade Yes when Yes has clear positive net edge', () => {
     const contract = {
       yesPrice: 0.43, noPrice: 0.57, myProbability: 0.65,

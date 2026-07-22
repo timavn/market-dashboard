@@ -145,9 +145,14 @@ describe('computeVolatilityMetrics', () => {
     expect(metrics).toMatchObject({
       lastPx: last,
       day1Ago: rows.at(-2).close,
+      day15Ago: rows.at(-16).close,
       week1Ago: rows.at(-6).close,
       week4Ago: rows.at(-22).close,
+      month3Ago: rows.at(-64).close,
+      month6Ago: rows.at(-127).close,
+      priorYearClose: rows[0].close,
       dayChangePct: percentageChange(last, rows.at(-2).close),
+      fifteenDayChangePct: percentageChange(last, rows.at(-16).close),
       weekChangePct: percentageChange(last, rows.at(-6).close),
       monthChangePct: percentageChange(last, rows.at(-22).close),
       threeMonthChangePct: percentageChange(last, rows.at(-64).close),
@@ -159,7 +164,12 @@ describe('computeVolatilityMetrics', () => {
   test('returns null for periods without enough history instead of using the oldest value', () => {
     const metrics = computeVolatilityMetrics(tradingRows('2026-06-01', 10, 10));
     expect(metrics.weekChangePct).not.toBeNull();
+    expect(metrics.fifteenDayChangePct).toBeNull();
+    expect(metrics.day15Ago).toBeNull();
     expect(metrics.monthChangePct).toBeNull();
+    expect(metrics.month3Ago).toBeNull();
+    expect(metrics.month6Ago).toBeNull();
+    expect(metrics.priorYearClose).toBeNull();
     expect(metrics.threeMonthChangePct).toBeNull();
     expect(metrics.sixMonthChangePct).toBeNull();
     expect(metrics.ytdChangePct).toBeNull();
@@ -306,18 +316,20 @@ describe('createVolatilitySnapshotService', () => {
     });
   });
 
-  test('withholds the prior close after a new session completes until Yahoo publishes it', async () => {
+  test('retains the last verified close after a new session completes until Yahoo publishes it', async () => {
     const now = new Date('2026-07-14T20:45:00.000Z');
+    const retainedRows = tradingRowsThrough('2025-12-31', '2026-07-10', 20);
     const waiting = await createVolatilitySnapshotService({
       httpClient: buildFakeProvider(),
       now: () => now,
       logger: { warn: jest.fn() },
     }).fetchSnapshot();
     expect(waiting.MOVE).toMatchObject({
-      availability: 'unavailable',
-      freshness: 'stale',
-      error: 'stale_quote',
-      lastPx: null,
+      availability: 'historical',
+      freshness: 'historical',
+      quoteMode: 'end-of-day',
+      lastPx: retainedRows.at(-1).close,
+      asOf: '2026-07-10T17:00:00.000Z',
     });
 
     const published = await createVolatilitySnapshotService({
@@ -335,26 +347,65 @@ describe('createVolatilitySnapshotService', () => {
     });
   });
 
-  test('rejects obsolete, malformed, failed, and incomplete MOVE responses', async () => {
+  test('uses the newest verified daily row when Yahoo has two null completed-session bars', async () => {
+    const priorRows = tradingRowsThrough('2025-12-31', '2026-07-10', 20);
+    const ambiguousCurrentPrice = 75.0326;
+    const snapshot = await createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({
+        moveAsOf: '2026-07-15T19:30:00.000Z',
+        moveHistoryRows: [
+          ...priorRows,
+          { date: '2026-07-13', close: null },
+          { date: '2026-07-14', close: null },
+          { date: '2026-07-15', close: ambiguousCurrentPrice },
+        ],
+        movePrice: ambiguousCurrentPrice,
+      }),
+      now: () => new Date('2026-07-15T20:00:00.000Z'),
+      logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+
+    expect(snapshot.MOVE).toMatchObject({
+      availability: 'historical',
+      freshness: 'historical',
+      quoteMode: 'end-of-day',
+      lastPx: priorRows.at(-1).close,
+      day1Ago: priorRows.at(-2).close,
+      asOf: '2026-07-10T17:00:00.000Z',
+    });
+    expect(snapshot.MOVE.lastPx).not.toBe(ambiguousCurrentPrice);
+  });
+
+  test('retains verified history for stale metadata and rejects responses with no verified history', async () => {
     const now = () => new Date('2026-07-14T14:00:00.000Z');
-    const cases = [
+    const retainedCases = [
       buildFakeProvider({ moveAsOf: '2026-07-10T20:30:00.000Z' }),
       buildFakeProvider({ invalidMove: true }),
-      buildFakeProvider({ failMove: true }),
       buildFakeProvider({ moveHistoryEnd: '2026-07-09' }),
     ];
 
-    const snapshots = await Promise.all(cases.map((httpClient) => (
+    const retainedSnapshots = await Promise.all(retainedCases.map((httpClient) => (
       createVolatilitySnapshotService({ httpClient, now, logger: { warn: jest.fn() } }).fetchSnapshot()
     )));
+    expect(retainedSnapshots.map((snapshot) => snapshot.MOVE.availability))
+      .toEqual(['historical', 'historical', 'historical']);
+    expect(retainedSnapshots.map((snapshot) => snapshot.MOVE.asOf)).toEqual([
+      '2026-07-10T17:00:00.000Z',
+      '2026-07-10T17:00:00.000Z',
+      '2026-07-09T17:00:00.000Z',
+    ]);
 
-    expect(snapshots.map((snapshot) => snapshot.MOVE.error)).toEqual([
-      'stale_quote',
+    const rejectedSnapshots = await Promise.all([
+      buildFakeProvider({ invalidMove: true, moveHistoryRows: [] }),
+      buildFakeProvider({ failMove: true }),
+    ].map((httpClient) => (
+      createVolatilitySnapshotService({ httpClient, now, logger: { warn: jest.fn() } }).fetchSnapshot()
+    )));
+    expect(rejectedSnapshots.map((snapshot) => snapshot.MOVE.error)).toEqual([
       'invalid_quote',
       'provider_error',
-      'incomplete_history',
     ]);
-    snapshots.forEach((snapshot) => {
+    rejectedSnapshots.forEach((snapshot) => {
       expect(snapshot.MOVE).toMatchObject({ availability: 'unavailable', lastPx: null });
     });
   });

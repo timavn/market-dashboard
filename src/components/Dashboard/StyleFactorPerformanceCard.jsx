@@ -10,7 +10,7 @@ const GROUPS = [
   { id: 'yield', label: 'YIELD',     Icon: Percent,    bgColor: '#78350f', rows: ['High Yield', 'Low Yield'] },
   { id: 'mcap',  label: 'MKT\nCAP', Icon: PieChart,   bgColor: '#4c1d95', rows: ['MCAP Bottom 25%', 'MCAP Top 25%'] },
   { id: 'sales', label: 'SALES',     Icon: TrendingUp, bgColor: '#1d4ed8', rows: ['Top 25% Sales Growth', 'Bottom 25% Sales Growth'] },
-  { id: 'eps',   label: 'EPS',       Icon: DollarSign, bgColor: '#065f46', rows: ['Top 25% EPS Growth', 'Bottom 25% EPS Growth'] },
+  { id: 'eps',   label: 'EPS',       Icon: DollarSign, bgColor: '#059669', rows: ['Top 25% EPS Growth', 'Bottom 25% EPS Growth'] },
 ];
 
 const COLUMNS = ['1D', '1W', '1M', '3M', '6M', 'YTD'];
@@ -116,7 +116,7 @@ const StyleFactorPerformanceCard = () => {
   const renderCell = (row, col) => {
     const value = data[row]?.[col] || '';
     const isTop = topValues[col]?.has(row);
-    const bgColor = isTop ? (isDark ? '#059669' : '#10b981') : 'transparent';
+    const bgColor = isTop ? (isDark ? '#059669' : '#059669') : 'transparent';
     const textColor = isTop ? '#ffffff' : (isDark ? '#d1d5db' : '#374151');
 
     return (

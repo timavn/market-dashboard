@@ -164,7 +164,7 @@
 }
 
 .inflation-nowcast-scenario-upside strong {
-  color: #0f9f8f;
+  color: #059669;
 }
 
 .inflation-nowcast-scenario-downside strong {
@@ -202,11 +202,11 @@
 }
 
 .signal-section-icon-long {
-  background: #dcfce7;
+  background: #ecfdf5;
 }
 
 .signal-section-icon-short {
-  background: #fee2e2;
+  background: #fef2f2;
 }
 
 .signal-section-icon-neutral {
@@ -222,11 +222,11 @@
 }
 
 .signal-section-long .signal-section-heading {
-  color: #07843f;
+  color: #059669;
 }
 
 .signal-section-short .signal-section-heading {
-  color: #c92127;
+  color: #dc2626;
 }
 
 .signal-section-neutral .signal-section-heading {
@@ -246,13 +246,13 @@
 }
 
 .signal-section-long .signal-count-badge {
-  background: #dcfce7;
-  color: #166534;
+  background: #ecfdf5;
+  color: #059669;
 }
 
 .signal-section-short .signal-count-badge {
-  background: #fee2e2;
-  color: #991b1b;
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 .signal-section-neutral .signal-count-badge {
@@ -342,7 +342,7 @@
 }
 
 .signal-row.signal-row-action-long:hover {
-  background: #dcfce7;
+  background: #ecfdf5;
 }
 
 .signal-row.signal-row-action-short {
@@ -350,7 +350,7 @@
 }
 
 .signal-row.signal-row-action-short:hover {
-  background: #fee2e2;
+  background: #fef2f2;
 }
 
 /* Out-of-range breakout — super emphasis */
@@ -409,11 +409,11 @@
 }
 
 .signal-pct-downside.signal-pct-negative {
-  color: #ef4444;
+  color: #dc2626;
 }
 
 .signal-pct-upside.signal-pct-positive {
-  color: #10b981;
+  color: #059669;
 }
 
 /* ── Range widget (forecast band) ──────────────────────────────────────── */
@@ -527,7 +527,7 @@
 }
 
 .range-dot.long {
-  background: #07843f;
+  background: #059669;
 }
 
 .range-dot.short {
@@ -551,7 +551,7 @@
 }
 
 .range-spot-price.long {
-  color: #07843f;
+  color: #059669;
 }
 
 .range-spot-price.short {
@@ -565,8 +565,8 @@
 /* ── Out-of-range alert emphasis ─────────────────────────────────────── */
 
 .range-dot-alert.long {
-  background: #035a2b;
-  border-color: #dcfce7;
+  background: #059669;
+  border-color: #ecfdf5;
   box-shadow: 0 0 0 2px rgba(3, 90, 43, 0.35), 0 0 6px rgba(3, 90, 43, 0.25);
   width: 12px;
   height: 12px;
@@ -574,8 +574,8 @@
 }
 
 .range-dot-alert.short {
-  background: #991b1b;
-  border-color: #fee2e2;
+  background: #dc2626;
+  border-color: #fef2f2;
   box-shadow: 0 0 0 2px rgba(153, 27, 27, 0.35), 0 0 6px rgba(153, 27, 27, 0.25);
   width: 12px;
   height: 12px;
@@ -583,13 +583,13 @@
 }
 
 .range-spot-alert.long {
-  color: #035a2b;
+  color: #059669;
   font-size: 9.5px;
   font-weight: 900;
 }
 
 .range-spot-alert.short {
-  color: #991b1b;
+  color: #dc2626;
   font-size: 9.5px;
   font-weight: 900;
 }
@@ -603,7 +603,7 @@
 }
 
 .signal-arrow-bullish {
-  color: #07843f;
+  color: #059669;
 }
 
 .signal-arrow-bearish {
@@ -646,7 +646,7 @@
 
 .macro-signals-error {
   font-size: 11px;
-  color: #b91c1c;
+  color: #dc2626;
   padding: 6px 0 4px;
   display: flex;
   flex-wrap: wrap;

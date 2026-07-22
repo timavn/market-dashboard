@@ -5,8 +5,10 @@
 function normalizeIbkrPosition(raw, marketQuote = null) {
   const conid = raw.conId ?? raw.conid ?? null;
   const accountId = raw.account || '';
-  const quantity = Number(raw.position) || 0;
-  const avgCost = Number(raw.avgCost) || 0;
+  const quantityValue = raw.position == null || raw.position === '' ? null : Number(raw.position);
+  const avgCostValue = raw.avgCost == null || raw.avgCost === '' ? null : Number(raw.avgCost);
+  const quantity = Number.isFinite(quantityValue) ? quantityValue : null;
+  const avgCost = Number.isFinite(avgCostValue) ? avgCostValue : null;
   const isPredictionMarket = isPredictionMarketContract(raw);
   const mark = marketQuote?.mark ?? null;
   const rawMarketValue =
@@ -16,25 +18,25 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
   const derivedMark =
     mark != null
       ? mark
-      : rawMarketValue != null && quantity !== 0
+      : rawMarketValue != null && quantity != null && quantity !== 0
         ? Math.abs(rawMarketValue / quantity)
         : null;
   const marketValue =
     rawMarketValue != null
       ? rawMarketValue
       : derivedMark != null
-        ? quantity * derivedMark
+        ? quantity != null ? quantity * derivedMark : null
         : null;
-  const costBasis = quantity * avgCost;
+  const costBasis = quantity != null && avgCost != null ? quantity * avgCost : null;
   const gainLoss =
     raw.unrealizedPnL != null && Number.isFinite(Number(raw.unrealizedPnL))
       ? Number(raw.unrealizedPnL)
-      : marketValue != null
+      : marketValue != null && costBasis != null
         ? marketValue - costBasis
         : null;
   const warning =
     marketQuote?.warning ||
-    (quantity !== 0 && marketValue == null && !isPredictionMarket ? 'missing_market_value' : null);
+    (quantity != null && quantity !== 0 && marketValue == null && !isPredictionMarket ? 'missing_market_value' : null);
 
   return {
     positionId: conid ? `${accountId}#${conid}` : `${accountId}#${raw.symbol}`,
@@ -49,7 +51,7 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
     costBasis,
     gainLoss,
     gainLossPercent:
-      costBasis !== 0 && gainLoss != null
+      costBasis != null && costBasis !== 0 && gainLoss != null
         ? (gainLoss / Math.abs(costBasis)) * 100
         : null,
     unrealizedPnL: raw.unrealizedPnL != null ? Number(raw.unrealizedPnL) : null,
@@ -79,9 +81,11 @@ function isPredictionMarketContract(raw = {}) {
     .join(' ')
     .toUpperCase();
   const secType = String(raw.secType || '').toUpperCase();
+  const exchange = String(raw.exchange || raw.primaryExchange || '').toUpperCase();
 
   return (
     secType === 'EVENT' ||
+    exchange === 'FORECASTX' ||
     /\bKX[A-Z0-9]+\b/.test(text) ||
     /\bCPIY\b/.test(text) ||
     /(?:^|[-_ ])(?:YES|NO)(?:$|[-_ ])/.test(text)

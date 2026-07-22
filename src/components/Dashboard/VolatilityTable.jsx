@@ -4,17 +4,15 @@ import useVolatilitySnapshot, {
   getVolatilitySnapshotMetadata,
   VOLATILITY_SERIES,
 } from '../../hooks/useVolatilitySnapshot';
-import { getBucketForSeries, VOL_RANGES } from '../../utils/volatilityRegimes';
+import {
+  formatVolatilityRange,
+  getBucketForSeries,
+  VOL_RANGES,
+} from '../../utils/volatilityRegimes';
 import './VolatilityTable.css';
 
 // All 7 series in one table — VVIX under VIX; MOVE from RATES
 const ALL_SERIES = VOLATILITY_SERIES;
-
-const formatRangeMath = (range, index) => {
-  if (range.max == null) return `${range.min}+`;
-  if (index === 0) return `<${range.max}`;
-  return `${range.min}–${range.max}`;
-};
 
 const HEAT_CAP_PCT = 15;
 
@@ -140,16 +138,16 @@ const VolatilityTable = ({
                   1D AGO
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1W AGO
+                  15D AGO
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  4W AGO
+                  1M AGO
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric vol-mw-sep-left" scope="col">
                   DAY (%)
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  WEEKLY (%)
+                  15D (%)
                 </th>
                 <th
                   className="region-mw-th region-mw-th-num region-mw-th-metric"
@@ -163,9 +161,6 @@ const VolatilityTable = ({
                 </th>
                 <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
                   6M (%)
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  YTD (%)
                 </th>
               </tr>
             </thead>
@@ -191,16 +186,15 @@ const VolatilityTable = ({
 
                 const bucketSpot = getBucketForSeries(s.name, row?.lastPx);
                 const bucket1d = getBucketForSeries(s.name, row?.day1Ago);
-                const bucket1w = getBucketForSeries(s.name, row?.week1Ago);
+                const bucket15d = getBucketForSeries(s.name, row?.day15Ago);
                 const bucket4w = getBucketForSeries(s.name, row?.week4Ago);
 
                 const periodCells = [
                   { key: 'day', value: row?.dayChangePct, sep: true },
-                  { key: 'week', value: row?.weekChangePct },
+                  { key: 'fifteenDay', value: row?.fifteenDayChangePct },
                   { key: 'month', value: row?.monthChangePct },
                   { key: 'threeMonth', value: row?.threeMonthChangePct },
                   { key: 'sixMonth', value: row?.sixMonthChangePct },
-                  { key: 'ytd', value: row?.ytdChangePct },
                 ];
 
                 const bucketClass = (bucket) => (bucket ? `vol-mw-bucket vol-mw-bucket-${bucket}` : '');
@@ -234,7 +228,6 @@ const VolatilityTable = ({
                           }
                         >
                           {regimeRanges.map((range) => {
-                            const originalIndex = VOL_RANGES[s.name].ranges.indexOf(range);
                             const isActive = !seriesMissing && bucketSpot === range.color;
                             return (
                               <span
@@ -244,7 +237,7 @@ const VolatilityTable = ({
                                 data-active={isActive ? 'true' : 'false'}
                                 aria-hidden="true"
                               >
-                                {formatRangeMath(range, originalIndex)}
+                                {formatVolatilityRange(range)}
                               </span>
                             );
                           })}
@@ -270,10 +263,10 @@ const VolatilityTable = ({
                       {seriesMissing ? 'N/A' : formatValue(row.day1Ago)}
                     </td>
                     <td
-                      className={`region-mw-td region-mw-td-num ${seriesMissing ? 'region-mw-heat--na' : bucketClass(bucket1w)}`}
+                      className={`region-mw-td region-mw-td-num ${seriesMissing ? 'region-mw-heat--na' : bucketClass(bucket15d)}`}
                       {...cellCommonProps}
                     >
-                      {seriesMissing ? 'N/A' : formatValue(row.week1Ago)}
+                      {seriesMissing ? 'N/A' : formatValue(row.day15Ago)}
                     </td>
                     <td
                       className={`region-mw-td region-mw-td-num ${seriesMissing ? 'region-mw-heat--na' : bucketClass(bucket4w)}`}
@@ -340,7 +333,7 @@ const VolRangesPopover = ({ indicatorKey, onClose }) => {
           <div className="vol-ranges-indicator-source">Source: {info.source}</div>
           <div className="vol-ranges-ranges">
             {info.ranges.map((r, i) => {
-              const math = formatRangeMath(r, i);
+              const math = formatVolatilityRange(r);
               return (
                 <div key={i} className={`vol-ranges-range vol-ranges-range-${r.color}`}>
                   <span className="vol-ranges-range-label">{r.label}:</span>

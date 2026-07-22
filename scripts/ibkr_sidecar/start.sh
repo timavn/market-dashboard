@@ -41,24 +41,26 @@ if command -v lsof >/dev/null 2>&1 && lsof -i :8765 -sTCP:LISTEN >/dev/null 2>&1
   exit 1
 fi
 
-if [[ ! -d .venv ]]; then
-  echo "Creating Python venv..."
-  python3 -m venv .venv
+if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
+  echo "The repo-owned sidecar runtime is missing; creating it now."
+  "$ROOT/rebuild_venv.sh"
 fi
 
-# shellcheck disable=SC1091
-source .venv/bin/activate
+VENV_PYTHON="$ROOT/.venv/bin/python"
+"$VENV_PYTHON" - "$ROOT/.venv" <<'PY'
+import os
+import sys
 
-if python - <<'PY' >/dev/null 2>&1
+expected = os.path.realpath(sys.argv[1])
+if os.path.realpath(sys.prefix) != expected:
+    raise SystemExit(f"RUNTIME_DRIFT: interpreter prefix {sys.prefix} is outside {expected}")
 import fastapi
 import ib_insync
 import uvicorn
+for module in (fastapi, ib_insync, uvicorn):
+    if not os.path.realpath(module.__file__).startswith(expected + os.sep):
+        raise SystemExit(f"RUNTIME_DRIFT: {module.__name__} resolved to {module.__file__}")
 PY
-then
-  echo "IBKR sidecar Python dependencies already available."
-else
-  pip install -q -r requirements.txt
-fi
 
 echo "IBKR sidecar → http://127.0.0.1:8765 (Gateway ${IB_GATEWAY_HOST}:${IB_GATEWAY_PORT}, clientId ${IB_GATEWAY_CLIENT_ID})"
-exec uvicorn app:app --host 127.0.0.1 --port 8765 --loop asyncio
+exec "$VENV_PYTHON" -m uvicorn app:app --host 127.0.0.1 --port 8765 --loop asyncio

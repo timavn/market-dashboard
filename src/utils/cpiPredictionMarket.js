@@ -10,7 +10,7 @@ import {
 export const CPI_SCENARIO_PROBABILITY = 1 / 3;
 
 const DEFAULT_CPI_SETTINGS = {
-  portfolioEquity: 100000,
+  portfolioEquity: null,
   maxRiskPerBet: 500,
   maxOpenRisk: 10000,
   kellyMultiplier: 0.25,
@@ -46,6 +46,114 @@ function normalizePercentValue(value) {
 
 function normalizeTextToken(value) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9.]+/g, ' ');
+}
+
+const CPI_MONTH_CODES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+function normalizeCpiYear(value) {
+  const year = Number(value);
+  if (!Number.isInteger(year)) return null;
+  if (year >= 0 && year <= 99) return 2000 + year;
+  return year >= 2000 && year <= 2099 ? year : null;
+}
+
+function toCpiMonthId(yearValue, monthCode) {
+  const year = normalizeCpiYear(yearValue);
+  const month = CPI_MONTH_CODES.indexOf(String(monthCode || '').slice(0, 3).toUpperCase());
+  if (year == null || month < 0) return null;
+  return `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Normalize CPI report/event month labels and KX ticker month codes to YYYY-MM.
+ * Settlement dates are deliberately not accepted because CPI contracts commonly
+ * settle in the month after the report month.
+ */
+export function normalizeCpiMonthId(value) {
+  if (value && typeof value === 'object' && value.id) {
+    return normalizeCpiMonthId(value.id);
+  }
+
+  const text = String(value || '').trim().toUpperCase();
+  if (!text) return null;
+
+  const iso = text.match(/^(20\d{2})-(0[1-9]|1[0-2])$/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+
+  const ticker = text.match(/(?:^|[-_\s])(\d{2}|20\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:[-_\s]|$)/);
+  if (ticker) return toCpiMonthId(ticker[1], ticker[2]);
+
+  const monthThenYear = text.match(/\b(JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:TEMBER)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?)\b\D{0,6}(\d{2}|20\d{2})\b/);
+  if (monthThenYear) return toCpiMonthId(monthThenYear[2], monthThenYear[1]);
+
+  const yearThenMonth = text.match(/\b(\d{2}|20\d{2})\b\D{0,6}(JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:TEMBER)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?)\b/);
+  if (yearThenMonth) return toCpiMonthId(yearThenMonth[1], yearThenMonth[2]);
+
+  return null;
+}
+
+function cpiMonthIdentityValues(value = {}) {
+  const raw = value?.raw && value.raw !== value ? value.raw : {};
+  return [
+    value.forecastMonth,
+    value.forecast_month,
+    value.reportMonth,
+    value.report_month,
+    value.releaseMonth,
+    value.release_month,
+    value.sourceMonth,
+    value.source_month,
+    value.eventMonth,
+    value.event_month,
+    value.releaseCode,
+    value.release_code,
+    value.event_ticker,
+    value.eventTicker,
+    value.api_raw_symbol,
+    value.localSymbol,
+    value.event_title,
+    value.eventTitle,
+    value.contract_title,
+    value.contractTitle,
+    value.question,
+    value.description,
+    value.ticker,
+    value.symbol,
+    raw.forecastMonth,
+    raw.reportMonth,
+    raw.releaseMonth,
+    raw.sourceMonth,
+    raw.eventMonth,
+    raw.releaseCode,
+    raw.event_ticker,
+    raw.eventTicker,
+    raw.api_raw_symbol,
+    raw.localSymbol,
+    raw.event_title,
+    raw.eventTitle,
+    raw.contract_title,
+    raw.contractTitle,
+    raw.question,
+    raw.description,
+    raw.ticker,
+    raw.symbol,
+  ];
+}
+
+export function getCpiContractMonthIds(value = {}) {
+  return [...new Set(cpiMonthIdentityValues(value).map(normalizeCpiMonthId).filter(Boolean))];
+}
+
+export function getCpiContractMonthId(value = {}) {
+  const monthIds = getCpiContractMonthIds(value);
+  return monthIds.length === 1 ? monthIds[0] : null;
+}
+
+export function isCpiContractForMonth(value = {}, activeMonth = null) {
+  const targetMonthId = normalizeCpiMonthId(activeMonth);
+  if (!targetMonthId) return false;
+  const monthIds = getCpiContractMonthIds(value);
+  return monthIds.length === 1 && monthIds[0] === targetMonthId;
 }
 
 function cpiSearchText(value = {}) {
@@ -183,21 +291,30 @@ export function extractCpiAboveThreshold(event) {
 export function isIbkrTradableCpiEvent(event) {
   const venue = String(event?.venue || '').toLowerCase();
   const status = String(event?.status || '').toLowerCase();
+  const source = String(event?.source_api || '');
+  const flags = new Set([...(event?.data_quality_flags || []), ...(event?.flags || [])]);
+  const rejectedFlags = [
+    'cached', 'expired_contract', 'fallback', 'mock', 'no_live_quote',
+    'portfolio_discovered', 'portfolio_seed', 'stale_quote',
+    'unknown_contract_side', 'wrong_release',
+  ];
+  if (
+    event?.heldPosition ||
+    source === 'IBKR_PORTFOLIO' ||
+    rejectedFlags.some((flag) => flags.has(flag)) ||
+    (status && !['open', 'active'].includes(status))
+  ) return false;
   const liveKalshiCpi = (
     venue === 'kalshi' &&
-    event?.source_api === 'kalshi_trade_api_v2' &&
+    source === 'kalshi_trade_api_v2' &&
     ['open', 'active'].includes(status || 'open')
   );
-  const ibkrTradable = Boolean(
-    event?.ibkr_tradable ||
-    event?.tradable_in_ibkr ||
-    event?.source_api === 'IBKR_CPAPI' ||
-    venue === 'forecastex' ||
-    venue === 'cme' ||
-    venue === 'ibkr' ||
-    liveKalshiCpi,
+  const nativeIbkrCpi = Boolean(
+    event?.tradable_in_ibkr === true &&
+    ['IBKR_TWS_API', 'IBKR_CPAPI'].includes(source) &&
+    ['forecastex', 'cme', 'ibkr'].includes(venue),
   );
-  return ibkrTradable && hasCpiToken(event) && extractCpiAboveThreshold(event) != null;
+  return (nativeIbkrCpi || liveKalshiCpi) && hasCpiToken(event) && extractCpiAboveThreshold(event) != null;
 }
 
 function getPrice(event, side) {
@@ -292,7 +409,8 @@ function getHeldCostBasis(event = {}, quantity = 0) {
 }
 
 function getHeldSide(event = {}) {
-  return String(event.heldContractSide || inferContractSide(event.heldPosition || event) || 'YES').toUpperCase();
+  const side = event.heldContractSide || inferContractSide(event.heldPosition || event);
+  return side ? String(side).toUpperCase() : null;
 }
 
 function createMissingCpiStrikeRow(threshold, cpiModel = null) {
@@ -369,13 +487,14 @@ function eventKey(event) {
   return event?.id || event?.api_raw_id || event?.conid || event?.conId || eventTitle(event);
 }
 
-export function buildCpiContractLadder(events = [], cpiModel = null, rawSettings = {}) {
+export function buildCpiContractLadder(events = [], cpiModel = null, rawSettings = {}, activeCpiMonth = null) {
   const settings = { ...DEFAULT_CPI_SETTINGS, ...(rawSettings || {}) };
   const scenarios = cpiModel?.scenarios || [];
   const totalCap = Math.max(0, Math.min(settings.maxRiskPerBet ?? 0, settings.maxOpenRisk ?? Infinity));
 
   const candidates = (events || [])
     .filter(isIbkrTradableCpiEvent)
+    .filter((event) => !activeCpiMonth || isCpiContractForMonth(event, activeCpiMonth))
     .map((event) => {
       const threshold = extractCpiAboveThreshold(event);
       const heldRow = Boolean(
@@ -397,7 +516,9 @@ export function buildCpiContractLadder(events = [], cpiModel = null, rawSettings
             ? heldCostBasis / openContracts
             : openSide === 'NO'
               ? noQuote.price
-              : yesQuote.price)
+              : openSide === 'YES'
+                ? yesQuote.price
+                : null)
         : null;
       const openEstimatedCost = openContracts > 0 && openRiskPerContract != null
         ? openContracts * openRiskPerContract * payoutMultiplier
@@ -414,22 +535,38 @@ export function buildCpiContractLadder(events = [], cpiModel = null, rawSettings
       const noNetEdge = modelYesProbability == null || noQuote.price == null
         ? null
         : netEdge(grossEdgeNo(modelYesProbability, noQuote.price), fees, slippage, modelError);
-      const recommendedSide = (yesNetEdge ?? -Infinity) >= (noNetEdge ?? -Infinity) ? 'YES' : 'NO';
-      const recommendedQuote = recommendedSide === 'YES' ? yesQuote : noQuote;
-      const modelProbability = recommendedSide === 'YES' ? modelYesProbability : modelNoProbability;
-      const netEdgeValue = recommendedSide === 'YES' ? yesNetEdge : noNetEdge;
-      const liquidity = getLiquidityCap(event, recommendedSide, settings);
+      const hasYesEdge = Number.isFinite(yesNetEdge);
+      const hasNoEdge = Number.isFinite(noNetEdge);
+      const recommendedSide = !hasYesEdge && !hasNoEdge
+        ? null
+        : hasYesEdge && (!hasNoEdge || yesNetEdge >= noNetEdge) ? 'YES' : 'NO';
+      const recommendedQuote = recommendedSide === 'YES'
+        ? yesQuote
+        : recommendedSide === 'NO' ? noQuote : { price: null, source: null, executable: false };
+      const modelProbability = recommendedSide === 'YES'
+        ? modelYesProbability
+        : recommendedSide === 'NO' ? modelNoProbability : null;
+      const netEdgeValue = recommendedSide === 'YES'
+        ? yesNetEdge
+        : recommendedSide === 'NO' ? noNetEdge : null;
+      const liquidity = recommendedSide
+        ? getLiquidityCap(event, recommendedSide, settings)
+        : { cap: 0, warning: null };
       const evPerContract = modelProbability == null || recommendedQuote.price == null
         ? 0
         : recommendedSide === 'YES'
           ? evYesPerContract(modelProbability, recommendedQuote.price, payoutMultiplier)
           : evNoPerContract(modelYesProbability, recommendedQuote.price, payoutMultiplier);
-      const rawContracts = modelProbability != null && recommendedQuote.price != null
+      const livePortfolioEquity = Number(settings.portfolioEquity);
+      const rawContracts = modelProbability != null
+        && recommendedQuote.price != null
+        && Number.isFinite(livePortfolioEquity)
+        && livePortfolioEquity > 0
         ? fractionalKellySizing(
             modelProbability,
             recommendedQuote.price,
             settings.kellyMultiplier,
-            settings.portfolioEquity,
+            livePortfolioEquity,
             settings.maxRiskPerBet,
             payoutMultiplier,
           )
@@ -578,78 +715,69 @@ function deriveLastPrice(position, quantity) {
   return null;
 }
 
-export function summarizeCpiPositions(positions = []) {
-  return (positions || []).filter(isCpiPredictionPosition).map((position) => {
-    const quantity = Number(position.quantity || 0);
-    const lastPrice = deriveLastPrice(position, quantity);
-    const avgPrice = deriveAveragePrice(position, quantity);
-    const marketValue = toNumber(position.marketValue);
-    const costBasis = toNumber(position.costBasis) ?? (avgPrice != null ? Math.abs(quantity) * avgPrice : null);
-    const currentValue = marketValue != null
-      ? marketValue
-      : lastPrice != null
-        ? Math.abs(quantity) * lastPrice
-        : null;
-    const unrealizedPnl = toNumber(position.unrealizedPnl ?? position.unrealizedPnL ?? position.unrealizedPNL ?? position.gainLoss) ??
-      (currentValue != null && costBasis != null ? currentValue - costBasis : null);
-    const side = quantity >= 0 ? 'LONG' : 'SHORT';
-    const riskPrice = avgPrice ?? lastPrice;
-    const maxLoss = riskPrice != null ? Math.abs(quantity) * riskPrice : null;
-    const maxProfit = riskPrice != null ? Math.abs(quantity) * (1 - riskPrice) : null;
-    const contractSide = inferContractSide(position);
+export function summarizeCpiPositions(positions = [], activeCpiMonth = null) {
+  return (positions || [])
+    .filter(isCpiPredictionPosition)
+    .filter((position) => !activeCpiMonth || isCpiContractForMonth(position, activeCpiMonth))
+    .map((position) => {
+      const quantity = Number(position.quantity || 0);
+      const lastPrice = deriveLastPrice(position, quantity);
+      const avgPrice = deriveAveragePrice(position, quantity);
+      const marketValue = toNumber(position.marketValue);
+      const costBasis = toNumber(position.costBasis) ?? (avgPrice != null ? Math.abs(quantity) * avgPrice : null);
+      const currentValue = marketValue != null
+        ? marketValue
+        : lastPrice != null
+          ? Math.abs(quantity) * lastPrice
+          : null;
+      const unrealizedPnl = toNumber(position.unrealizedPnl ?? position.unrealizedPnL ?? position.unrealizedPNL ?? position.gainLoss) ??
+        (currentValue != null && costBasis != null ? currentValue - costBasis : null);
+      const side = quantity >= 0 ? 'LONG' : 'SHORT';
+      const riskPrice = avgPrice ?? lastPrice;
+      const maxLoss = riskPrice != null ? Math.abs(quantity) * riskPrice : null;
+      const maxProfit = riskPrice != null ? Math.abs(quantity) * (1 - riskPrice) : null;
+      const contractSide = inferContractSide(position);
 
-    return {
-      id: position.positionId || position.conid || position.symbol || position.description,
-      title: position.description || position.localSymbol || position.symbol || 'CPI position',
-      symbol: position.symbol,
-      conid: position.conid ?? position.conId ?? null,
-      accountId: position.accountId,
-      side,
-      quantity,
-      avgPrice,
-      lastPrice,
-      currentValue,
-      maxLoss,
-      maxProfit,
-      unrealizedPnl,
-      contractSide,
-      costBasis,
-      raw: position,
-    };
-  });
+      return {
+        id: position.positionId || position.conid || position.symbol || position.description,
+        title: position.description || position.localSymbol || position.symbol || 'CPI position',
+        symbol: position.symbol,
+        conid: position.conid ?? position.conId ?? null,
+        accountId: position.accountId,
+        side,
+        quantity,
+        avgPrice,
+        lastPrice,
+        currentValue,
+        maxLoss,
+        maxProfit,
+        unrealizedPnl,
+        contractSide,
+        costBasis,
+        raw: position,
+      };
+    });
 }
 
 function inferContractSide(position = {}) {
   const text = cpiSearchText(position);
   const match = text.match(/(?:^|[-_\s])(YES|NO)(?:$|[-_\s])/i);
-  return match ? match[1].toUpperCase() : 'YES';
+  return match ? match[1].toUpperCase() : null;
 }
 
-export function buildCpiEventsFromPositions(positions = []) {
-  return summarizeCpiPositions(positions)
+export function buildCpiEventsFromPositions(positions = [], activeCpiMonth = null) {
+  return summarizeCpiPositions(positions, activeCpiMonth)
     .map((position) => {
       const raw = position.raw || {};
       const threshold = extractCpiAboveThreshold(raw) ?? extractCpiAboveThreshold(position);
       if (threshold == null) return null;
 
       const contractSide = inferContractSide(raw);
-      const sidePrice = position.lastPrice ?? position.avgPrice;
-      const yesPrice = sidePrice == null
-        ? null
-        : contractSide === 'NO'
-          ? Math.max(0, 1 - sidePrice)
-          : sidePrice;
-      const noPrice = sidePrice == null
-        ? null
-        : contractSide === 'NO'
-          ? sidePrice
-          : Math.max(0, 1 - sidePrice);
-
       return {
         id: `held-${position.id}`,
         venue: 'IBKR',
         source_api: 'IBKR_PORTFOLIO',
-        tradable_in_ibkr: true,
+        tradable_in_ibkr: false,
         category: 'Inflation',
         underlying: raw.symbol || position.symbol || 'CPI',
         event_title: raw.symbol || position.symbol || 'IBKR CPI position',
@@ -657,10 +785,6 @@ export function buildCpiEventsFromPositions(positions = []) {
         question: position.title,
         description: position.title,
         conid: position.conid,
-        yes_mid: yesPrice,
-        no_mid: noPrice,
-        last_price: sidePrice,
-        volume: Math.abs(position.quantity || 0),
         heldQuantity: position.quantity,
         heldAvgPrice: position.avgPrice,
         heldLastPrice: position.lastPrice,
@@ -668,9 +792,8 @@ export function buildCpiEventsFromPositions(positions = []) {
         heldMaxLoss: position.maxLoss,
         heldMaxProfit: position.maxProfit,
         heldContractSide: contractSide,
-        max_payout_per_contract: 1,
-        price_source: position.lastPrice != null ? 'portfolio mark' : 'average cost',
-        data_quality_flags: ['open_position', 'catalog_missing'],
+        price_source: 'position_exposure_only',
+        data_quality_flags: ['open_position', 'catalog_missing', 'portfolio_derived', 'no_live_quote'],
         heldPosition: raw,
         updated_at: raw.lastUpdated || raw.updated_at || null,
       };

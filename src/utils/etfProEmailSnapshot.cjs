@@ -47,6 +47,17 @@ function getItemDate(item = {}) {
   return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 }
 
+function getSourceMeta(item = {}) {
+  const sourceMessageId = item.messageId || item.gmailMessageId || null;
+  const sequenceMatch = String(item.attachmentId || '').match(/(\d+)$/);
+  const sourceSequence = sequenceMatch ? Number(sequenceMatch[1]) : 0;
+  return {
+    sourceMessageId,
+    sourceSequence,
+    sourceEventKey: [getItemTimestamp(item) || '', sourceMessageId || '', String(sourceSequence).padStart(4, '0')].join('#'),
+  };
+}
+
 function uniqueTickers(values) {
   return [...new Set(values.map(normalizeTicker).filter(Boolean))];
 }
@@ -140,6 +151,7 @@ function parseEtfProWeeklyTableEmail(item = {}, htmlBody = '') {
     meta: {
       snapshotDate,
       parsedAt: getItemTimestamp(item),
+      ...getSourceMeta(item),
       sourceFile: item.s3Key || null,
       source: 'gmail-html-full-book',
       headline: item.subject || null,
@@ -200,6 +212,7 @@ function parseEtfProFullBookEmail(item = {}, htmlBody = '') {
     meta: {
       snapshotDate,
       parsedAt: getItemTimestamp(item),
+      ...getSourceMeta(item),
       sourceFile: item.s3Key || null,
       source: 'gmail-html-full-book',
       headline: item.subject || null,
@@ -270,6 +283,7 @@ function parseEtfProActionEmail(item = {}, htmlBody = '') {
     meta: {
       snapshotDate,
       parsedAt: getItemTimestamp(item),
+      ...getSourceMeta(item),
       sourceFile: item.s3Key || null,
       source: 'gmail-html-action',
       headline: item.subject || null,

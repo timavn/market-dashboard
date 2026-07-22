@@ -8,9 +8,9 @@
   --pf-text: #111827;
   --pf-text-muted: #6b7280;
   --pf-text-subtle: #9ca3af;
-  --pf-green: #059669;
+  --pf-green: var(--dashboard-positive);
   --pf-green-soft: #ecfdf5;
-  --pf-red: #dc2626;
+  --pf-red: var(--dashboard-negative);
   --pf-red-soft: #fef2f2;
   --pf-blue: #2563eb;
   --pf-blue-soft: #eff6ff;
@@ -528,11 +528,11 @@
 }
 
 .pf-netbar__segment--long {
-  background: linear-gradient(90deg, #16a34a 0%, #10b981 100%);
+  background: linear-gradient(90deg, #059669 0%, #059669 100%);
 }
 
 .pf-netbar__segment--short {
-  background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+  background: linear-gradient(90deg, #dc2626 0%, #dc2626 100%);
 }
 
 .pf-netbar__marker {
@@ -1196,12 +1196,12 @@
 }
 
 .dark .pf-update__pill--positive {
-  color: #86efac;
+  color: #059669;
   background: rgba(22, 163, 74, 0.18);
 }
 
 .dark .pf-update__pill--negative {
-  color: #fca5a5;
+  color: #dc2626;
   background: rgba(220, 38, 38, 0.18);
 }
 

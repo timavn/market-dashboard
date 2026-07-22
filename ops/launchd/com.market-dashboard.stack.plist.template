@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.market-dashboard.stack</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_PATH__</string>
+    <string>__REPO_PATH__/scripts/dev-stack/cli.js</string>
+    <string>monitor</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO_PATH__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__PATH_VALUE__</string>
+    <key>MARKET_DASHBOARD_LAUNCHD_LABEL</key>
+    <string>com.market-dashboard.stack</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__/launchd.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_PATH__/launchd.stderr.log</string>
+</dict>
+</plist>

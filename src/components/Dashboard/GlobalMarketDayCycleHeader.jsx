@@ -46,7 +46,6 @@ const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
       className={`global-session-strip${compact ? ' global-session-strip--compact' : ''}${className ? ` ${className}` : ''}`}
       aria-label="Global market clocks"
     >
-      <div className="global-session-strip__map" aria-hidden="true" />
       <div className="global-session-strip__regions">
         {groups.map((group) => (
           <section

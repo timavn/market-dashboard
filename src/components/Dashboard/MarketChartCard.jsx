@@ -197,7 +197,7 @@ const MarketChartCard = ({
     return true;
   }, [chartData, initialData]);
 
-  const gradientColor = isPositive ? '#16a34a' : '#dc2626';
+  const gradientColor = isPositive ? '#059669' : '#dc2626';
   const gradientId = `chartGradient-${symbol}-${isPositive ? 'up' : 'down'}`;
 
   const yDomain = useMemo(() => {

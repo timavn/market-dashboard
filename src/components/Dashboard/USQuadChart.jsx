@@ -16,18 +16,18 @@ import {
 const USQuadChart = () => {
   // Standard colors: Q=green (1), U=dark green (2), A=yellow (3), D=red (4)
   const QUAD_COLORS = {
-    1: '#008000', // Quad 1
+    1: '#059669', // Quad 1
     2: '#7CB342', // Quad 2 - toned down light green
     3: '#FFC107', // Quad 3 - toned down yellow
-    4: '#FE0000', // Quad 4
+    4: '#dc2626', // Quad 4
   };
 
   // Chart colors match QUAD colors
   const CHART_COLORS = {
-    1: '#008000', // Quad 1
+    1: '#059669', // Quad 1
     2: '#7CB342', // Quad 2 - toned down light green
     3: '#FFC107', // Quad 3 - toned down yellow
-    4: '#FE0000', // Quad 4
+    4: '#dc2626', // Quad 4
   };
 
   // Data from image: Sep-25 to Aug-26, normalized to sum to 100%
@@ -393,32 +393,32 @@ const USQuadChart = () => {
                     </td>
                     <td style={{
                       ...tdPct,
-                      backgroundColor: row.d1 >= 0 ? '#16a34a22' : '#dc262622',
-                      color: row.d1 >= 0 ? '#15803d' : '#b91c1c',
+                      backgroundColor: row.d1 >= 0 ? '#05966922' : '#dc262622',
+                      color: row.d1 >= 0 ? '#059669' : '#dc2626',
                       fontWeight: 700,
                     }}>
                       {row.d1 >= 0 ? '+' : ''}{row.d1.toFixed(2)}%
                     </td>
                     <td style={{
                       ...tdPct,
-                      backgroundColor: row.mtd >= 0 ? '#16a34a22' : '#dc262622',
-                      color: row.mtd >= 0 ? '#15803d' : '#b91c1c',
+                      backgroundColor: row.mtd >= 0 ? '#05966922' : '#dc262622',
+                      color: row.mtd >= 0 ? '#059669' : '#dc2626',
                       fontWeight: 700,
                     }}>
                       {row.mtd >= 0 ? '+' : ''}{row.mtd.toFixed(2)}%
                     </td>
                     <td style={{
                       ...tdPct,
-                      backgroundColor: row.qtd >= 0 ? '#16a34a22' : '#dc262622',
-                      color: row.qtd >= 0 ? '#15803d' : '#b91c1c',
+                      backgroundColor: row.qtd >= 0 ? '#05966922' : '#dc262622',
+                      color: row.qtd >= 0 ? '#059669' : '#dc2626',
                       fontWeight: 700,
                     }}>
                       {row.qtd >= 0 ? '+' : ''}{row.qtd.toFixed(2)}%
                     </td>
                     <td style={{
                       ...tdPct,
-                      backgroundColor: row.ytd >= 0 ? '#16a34a22' : '#dc262622',
-                      color: row.ytd >= 0 ? '#15803d' : '#b91c1c',
+                      backgroundColor: row.ytd >= 0 ? '#05966922' : '#dc262622',
+                      color: row.ytd >= 0 ? '#059669' : '#dc2626',
                       fontWeight: 700,
                     }}>
                       {row.ytd >= 0 ? '+' : ''}{row.ytd.toFixed(2)}%

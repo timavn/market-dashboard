@@ -4,6 +4,8 @@ import StatusDot from '../common/StatusDot';
 import { getSourceFreshness } from '../../utils/timeUtils';
 import { USD_METRICS, CORRELATION_PERIODS, REFRESH_INTERVALS } from '../../constants/usdMarket';
 import { CorrelationHelpers } from '../../services/api/usdMarketService';
+import VolatilityMetricRow, { isCompleteVolatilityMetricRow } from './VolatilityMetricRow';
+import './MultiRegionMarketOverview.css';
 import './USDCorrelationMatrix.css';
 
 const toDateValue = (value) => {
@@ -38,10 +40,43 @@ const corrHeatProps = (value) => {
 };
 
 const isCompleteCorrelationMetric = (metricCorrelations, metricRollingStats) => (
-  CORRELATION_PERIODS.every((period) => Number.isFinite(Number(metricCorrelations?.[`${period}D`])))
+  CORRELATION_PERIODS.every(({ key }) => Number.isFinite(Number(metricCorrelations?.[key])))
   && ['high', 'low', 'percentPositive', 'percentNegative']
     .every((key) => Number.isFinite(Number(metricRollingStats?.[key])))
 );
+
+const isCmeFxvlSnapshot = (row) => /^cme(?:\b|[-_])/i.test(String(row?.source || '').trim());
+
+const hasValidFxvlAsOf = (row) => Boolean(toDateValue(row?.asOf));
+
+const isCurrentFxvlSnapshot = (row) => {
+  const quoteMode = String(row?.quoteMode || '').toLowerCase();
+  return row?.availability === 'available'
+    && row?.freshness === 'current'
+    && ['live', 'real-time', 'realtime', 'delayed'].includes(quoteMode)
+    && isCmeFxvlSnapshot(row)
+    && hasValidFxvlAsOf(row)
+    && isCompleteVolatilityMetricRow(row);
+};
+
+const isHistoricalFxvlSnapshot = (row) => (
+  row?.availability === 'historical'
+  && row?.freshness === 'historical'
+  && row?.quoteMode === 'end-of-day'
+  && isCmeFxvlSnapshot(row)
+  && hasValidFxvlAsOf(row)
+  && isCompleteVolatilityMetricRow(row)
+);
+
+const isDisplayableFxvlSnapshot = (row) => (
+  isCurrentFxvlSnapshot(row) || isHistoricalFxvlSnapshot(row)
+);
+
+const formatFxvlAsOfDate = (value) => toDateValue(value)?.toLocaleDateString('en-US', {
+  month: 'short',
+  day: 'numeric',
+  timeZone: 'America/New_York',
+}).toUpperCase() || 'UNKNOWN';
 
 const MetricIcon = ({ symbol }) => {
   switch (symbol) {
@@ -105,10 +140,21 @@ const MetricIcon = ({ symbol }) => {
   }
 };
 
+const CorrelationMethodNote = ({ children = null }) => (
+  <div className="usd-correlation-header-note">
+    <span className="usd-correlation-header-note-item">*M = 21 / 63 / 126 Trading Days</span>
+    <span className="usd-correlation-header-note-sep" aria-hidden="true">•</span>
+    <span className="usd-correlation-header-note-item">1Y Stats · 30D Rolling</span>
+    {children}
+  </div>
+);
+
 const USDCorrelationMatrix = (props) => {
   const {
     state,
     variant = 'default',
+    correlationStatus = null,
+    currencyPanel = null,
   } = props;
   const resolvedState = state !== undefined ? (state || {}) : props;
   const {
@@ -116,6 +162,7 @@ const USDCorrelationMatrix = (props) => {
     rollingStats,
     correlationsTimestamp,
     calculationDate,
+    fxvlSnapshot = null,
     loading = false,
     error = null,
   } = resolvedState;
@@ -171,26 +218,28 @@ const USDCorrelationMatrix = (props) => {
     return sources;
   }, [effectiveUpdatedAt, freshness, calculationDateTime, calculationDate]);
 
+  const fxvlHistorical = isHistoricalFxvlSnapshot(fxvlSnapshot);
+  const fxvlAvailable = isDisplayableFxvlSnapshot(fxvlSnapshot);
+  const fxvlAsOfLabel = fxvlHistorical ? formatFxvlAsOfDate(fxvlSnapshot.asOf) : null;
+  const tableMetrics = variant === 'radar'
+    ? USD_METRICS.filter(({ symbol }) => symbol !== 'FXVL')
+    : USD_METRICS;
+
   return (
     <div
       className={`usd-correlation-panel usd-correlation-panel--${variant} region-chart-panel--mw`}
       data-testid="usd-correlation-panel"
       data-variant={variant}
     >
-      <div className="region-chart-header region-chart-header--mw usd-correlation-header--mw">
-        <div className="region-header-left">
-          <span className="card-header-icon card-header-icon--blue">
-            <Share2 size={16} strokeWidth={2} />
-          </span>
-          <span className="region-label region-label--lg">USD Correlations</span>
-        </div>
-        <div className="usd-correlation-header-note">
-          <span className="usd-correlation-header-note-item">*Days = Trading Days</span>
-          <span className="usd-correlation-header-note-sep" aria-hidden="true">•</span>
-          <span className="usd-correlation-header-note-item">52-Wk Rolling</span>
-          <span className="usd-correlation-header-note-sep" aria-hidden="true">•</span>
-          <span className="usd-correlation-header-note-item">30D Correlation</span>
-          {variant !== 'radar' ? (
+      {variant !== 'radar' ? (
+        <div className="region-chart-header region-chart-header--mw usd-correlation-header--mw">
+          <div className="region-header-left">
+            <span className="card-header-icon card-header-icon--blue">
+              <Share2 size={16} strokeWidth={2} />
+            </span>
+            <span className="region-label region-label--lg">USD Correlations</span>
+          </div>
+          <CorrelationMethodNote>
             <StatusDot
               updatedAt={effectiveUpdatedAt}
               status={statusState}
@@ -199,9 +248,41 @@ const USDCorrelationMatrix = (props) => {
               emoji={statusEmoji}
               sources={statusSources}
             />
-          ) : null}
+          </CorrelationMethodNote>
         </div>
-      </div>
+      ) : null}
+
+      {variant === 'radar' ? (
+        <section className="usd-card-section usd-card-section--fxvl" aria-label="FX Volatility">
+          <VolatilityMetricRow
+            row={fxvlSnapshot}
+            symbol="FXVL"
+            available={fxvlAvailable}
+            historical={fxvlHistorical}
+            asOfLabel={fxvlAsOfLabel}
+            className="usd-corr-fxvl-summary"
+            ariaLabel={
+              fxvlAvailable
+                ? fxvlHistorical
+                  ? `FXVL closing volatility as of ${fxvlAsOfLabel}`
+                  : 'FXVL current volatility'
+                : 'FXVL volatility data unavailable'
+            }
+          />
+        </section>
+      ) : null}
+
+      {variant === 'radar' ? currencyPanel : null}
+
+      {variant === 'radar' ? (
+        <header className="usd-card-section__header usd-card-correlations__header">
+          <h3>Correlations</h3>
+          <CorrelationMethodNote />
+          {correlationStatus ? (
+            <div className="usd-card-correlations__status">{correlationStatus}</div>
+          ) : null}
+        </header>
+      ) : null}
 
       <div className="region-mw-body usd-corr-body">
         <div className="region-mw-table-wrap usd-corr-table-wrap">
@@ -223,15 +304,15 @@ const USDCorrelationMatrix = (props) => {
           ) : null}
 
           {!loading && !error && hasData ? (
-            <table className="region-mw-quotes-table usd-corr-table">
+            <table className="region-mw-quotes-table usd-corr-table" aria-label="USD correlations">
               <thead>
                 <tr>
                   <th className="region-mw-th region-mw-th-name usd-corr-th-metric" scope="col">
                     METRIC
                   </th>
-                  {CORRELATION_PERIODS.map((period) => (
-                    <th key={period} className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                      {period}D
+                  {CORRELATION_PERIODS.map(({ key, label }) => (
+                    <th key={key} className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                      {label}
                     </th>
                   ))}
                   <th className="region-mw-th region-mw-th-num region-mw-th-metric usd-corr-sep-left" scope="col">
@@ -252,7 +333,7 @@ const USDCorrelationMatrix = (props) => {
                 </tr>
               </thead>
               <tbody>
-                {USD_METRICS.map((metric) => {
+                {tableMetrics.map((metric) => {
                   const metricCorrelations = correlations[metric.symbol] || {};
                   const metricRollingStats = rollingStats[metric.symbol] || {};
                   const metricAvailable = isCompleteCorrelationMetric(
@@ -274,8 +355,8 @@ const USDCorrelationMatrix = (props) => {
                         <span className="usd-corr-metric-name">{metric.name}</span>
                         {!metricAvailable ? <span className="usd-corr-metric-status">NO DATA</span> : null}
                       </td>
-                      {CORRELATION_PERIODS.map((period) => {
-                        const correlation = metricCorrelations[`${period}D`];
+                      {CORRELATION_PERIODS.map(({ key }) => {
+                        const correlation = metricCorrelations[key];
                         const displayValue = metricAvailable
                           ? CorrelationHelpers.formatCorrelation(correlation)
                           : '--';
@@ -284,7 +365,7 @@ const USDCorrelationMatrix = (props) => {
                           : { className: 'region-mw-heat--na', style: {} };
                         return (
                           <td
-                            key={period}
+                            key={key}
                             className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} usd-corr-td-center`}
                             style={heat.style}
                           >
@@ -316,6 +397,11 @@ const USDCorrelationMatrix = (props) => {
   );
 };
 
-export { isCompleteCorrelationMetric };
+export {
+  isCompleteCorrelationMetric,
+  isCurrentFxvlSnapshot,
+  isDisplayableFxvlSnapshot,
+  isHistoricalFxvlSnapshot,
+};
 export { corrHeatProps };
 export default USDCorrelationMatrix;

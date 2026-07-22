@@ -218,7 +218,7 @@ const UsModelPanel = ({ model }) => {
                   <XAxis dataKey="date" tickFormatter={compactDate} tick={{ fontSize: 10 }} minTickGap={24} />
                   <YAxis tick={{ fontSize: 10 }} width={48} tickFormatter={(value) => `${Number(value).toFixed(1)}x`} />
                   <Tooltip labelFormatter={formatDate} formatter={(value) => [formatRatio(value), 'Stack/GDP']} />
-                  <Area type="monotone" dataKey="stackToGdp" stroke="#059669" fill="#bbf7d0" strokeWidth={1.5} />
+                  <Area type="monotone" dataKey="stackToGdp" stroke="#059669" fill="#ecfdf5" strokeWidth={1.5} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

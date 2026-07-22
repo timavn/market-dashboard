@@ -6,12 +6,46 @@ jest.mock('../services/api/usdMarketService', () => ({
 }));
 
 const LIVE_RESPONSE = {
-  correlations: { SPX: { '15D': 0.1, '30D': 0.2, '90D': 0.3, '120D': 0.4, '180D': 0.5 } },
+  correlations: {
+    SPX: {
+      '5D': 0.05,
+      '15D': 0.1,
+      '30D': 0.2,
+      '1M': 0.25,
+      '3M': 0.3,
+      '6M': 0.4,
+      '90D': 0.3,
+      '120D': 0.4,
+      '180D': 0.5,
+    },
+  },
   rollingStats: { SPX: { high: 0.8, low: -0.7, percentPositive: 60, percentNegative: 40 } },
   timestamp: '2026-07-13T22:00:00.000Z',
   calculationDate: '2026-07-13',
   source: 'Yahoo Finance daily bars',
   sourceStatus: 'current',
+};
+
+const FXVL_SNAPSHOT = {
+  lastPx: 5.75,
+  day1Ago: 6.29,
+  day15Ago: 6.1,
+  week1Ago: 6.47,
+  week4Ago: 7.12,
+  month3Ago: 5.61,
+  month6Ago: 6.8,
+  priorYearClose: 6.56,
+  dayChangePct: -8.59,
+  fifteenDayChangePct: -5.74,
+  monthChangePct: -19.24,
+  threeMonthChangePct: 2.42,
+  sixMonthChangePct: -15.44,
+  ytdChangePct: -12.31,
+  availability: 'available',
+  freshness: 'current',
+  quoteMode: 'delayed',
+  source: 'cme',
+  asOf: '2026-07-14T19:59:46.000Z',
 };
 
 describe('useUsdCorrelations', () => {
@@ -55,10 +89,28 @@ describe('useUsdCorrelations', () => {
     expect(service.getCorrelations).toHaveBeenCalledTimes(2);
   });
 
+  test('preserves an optional verified FXVL snapshot from the API contract', async () => {
+    const service = {
+      getCorrelations: jest.fn().mockResolvedValue({
+        ...LIVE_RESPONSE,
+        fxvlSnapshot: FXVL_SNAPSHOT,
+      }),
+    };
+    const retryDelaysMs = [10000];
+    const { result } = renderHook(() => useUsdCorrelations({
+      service,
+      retryDelaysMs,
+      failurePollMs: 10000,
+      successPollMs: 10000,
+    }));
+
+    await waitFor(() => expect(result.current.fxvlSnapshot).toEqual(FXVL_SNAPSHOT));
+  });
+
   test('clears verified rows when a scheduled refresh fails', async () => {
     const service = {
       getCorrelations: jest.fn()
-        .mockResolvedValueOnce(LIVE_RESPONSE)
+        .mockResolvedValueOnce({ ...LIVE_RESPONSE, fxvlSnapshot: FXVL_SNAPSHOT })
         .mockRejectedValueOnce(new Error('provider unavailable')),
     };
     const retryDelaysMs = [10000];
@@ -73,6 +125,7 @@ describe('useUsdCorrelations', () => {
     await waitFor(() => expect(result.current.error).toBe('provider unavailable'));
     expect(result.current.correlations).toBeNull();
     expect(result.current.rollingStats).toBeNull();
+    expect(result.current.fxvlSnapshot).toBeNull();
   });
 
   test('rejects responses that are not explicitly current', async () => {

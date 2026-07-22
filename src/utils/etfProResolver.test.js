@@ -108,6 +108,21 @@ const june28Shorts = [
   'PALL',
 ];
 
+const postJune28Actions = [
+  actionBook('2026-06-29', { addedShorts: ['EPOL', 'XOP', 'FXB'], removedShorts: ['IHI'] }),
+  actionBook('2026-06-30', { addedLongs: ['XLU', 'PAVE'], removedLongs: ['VYMI'], removedShorts: ['UGA'] }),
+  actionBook('2026-07-01', { addedLongs: ['VCLT', 'ZROZ'], addedShorts: ['XLC'] }),
+  actionBook('2026-07-02', { addedLongs: ['YCS'], removedLongs: ['DRAM'], addedShorts: ['SIL'], removedShorts: ['EWG', 'EPOL'] }),
+  actionBook('2026-07-08', { addedLongs: ['JETS'], removedLongs: ['DBJP', 'VCLT'], addedShorts: ['NORW', 'EWT'], removedShorts: ['BTAL', 'SOLZ', 'MAGS', 'FXB'] }),
+  actionBook('2026-07-09', { addedLongs: ['FAB'], removedLongs: ['YCS'], removedShorts: ['XLY', 'IVES', 'EWT'] }),
+  actionBook('2026-07-10', { addedLongs: ['ARKG', 'DESK'], removedLongs: ['XAR', 'TINY', 'LQD'], addedShorts: ['EWH'], removedShorts: ['EWZ'] }),
+  actionBook('2026-07-13', { addedLongs: ['BUG'], removedLongs: ['PAVE'], addedShorts: ['COAL'], removedShorts: ['XOP', 'XLC'] }),
+  actionBook('2026-07-14', { addedLongs: ['VOOG', 'NOBL'], removedLongs: ['ZROZ'], addedShorts: ['INDA'], removedShorts: ['PALL', 'EWM'] }),
+  actionBook('2026-07-15', { addedShorts: ['EWK', 'FXC'], removedShorts: ['EWH'] }),
+  actionBook('2026-07-16', { addedLongs: ['EWZ'], removedLongs: ['UUP', 'TLT', 'JETS'], addedShorts: ['EWG', 'QAT'] }),
+  actionBook('2026-07-17', { addedLongs: ['COLO', 'ENZL'], removedLongs: ['VXF'], addedShorts: ['EWQ'], removedShorts: ['FXE', 'USO', 'HARD', 'NORW'] }),
+];
+
 describe('ETF Pro resolver', () => {
   test('applies June 10 and June 11 action emails to the active June 9 base', () => {
     const payload = resolveEtfProPayloadFromSources({
@@ -219,6 +234,11 @@ describe('ETF Pro resolver', () => {
     expect(payload.dataQuality.duplicateAdds).toEqual(['AAPL']);
     expect(payload.dataQuality.removedButMissing).toEqual(['XLU']);
     expect(payload.dataQuality.status).toBe('warning');
+    expect(payload.available).toBe(false);
+    expect(payload.longCount).toBeNull();
+    expect(payload.shortCount).toBeNull();
+    expect(payload.meta.longCount).toBeNull();
+    expect(payload.meta.shortCount).toBeNull();
   });
 
   test('recomputes metadata counts from final rows after Gmail actions', () => {
@@ -276,5 +296,116 @@ describe('ETF Pro resolver', () => {
     expect(summary.shorts.has('UGA')).toBe(true);
     expect(summary.longs.has('NEWL')).toBe(true);
     expect(summary.shorts.has('PALL')).toBe(false);
+  });
+
+  test('replays every materialized action after the June 28 baseline to the current 21 / 13 book', () => {
+    const payload = resolveEtfProPayloadFromSources({
+      localPayload: activeBook('2026-06-28', june28Longs, june28Shorts),
+      hermesPayloads: {
+        actions: [...postJune28Actions].reverse().concat(postJune28Actions[5]),
+        fullBooks: [],
+      },
+      now: new Date('2026-07-17T16:00:00.000Z'),
+    });
+
+    expect(payload).toMatchObject({
+      available: true,
+      longCount: 21,
+      shortCount: 13,
+      dataQuality: { status: 'ok', warnings: [] },
+      meta: {
+        snapshotDate: '2026-07-17',
+        baseSnapshotDate: '2026-06-28',
+        rowCount: 34,
+        longCount: 21,
+        shortCount: 13,
+      },
+    });
+    expect(payload.meta.appliedActionDates).toEqual(postJune28Actions.map((action) => action.meta.snapshotDate));
+  });
+
+  test('uses a newer full book as the reset point and ignores actions at or before it', () => {
+    const payload = resolveEtfProPayloadFromSources({
+      localPayload: activeBook('2026-06-28', june28Longs, june28Shorts),
+      hermesPayloads: {
+        fullBooks: [{
+          ...activeBook('2026-07-10', ['RESETL'], ['RESETS']),
+          meta: {
+            snapshotDate: '2026-07-10',
+            parsedAt: '2026-07-10T16:00:00.000Z',
+            source: 'gmail-html-full-book',
+          },
+        }],
+        actions: [
+          actionBook('2026-07-09', { addedLongs: ['OLDL'] }),
+          actionBook('2026-07-11', { addedLongs: ['NEWL'], removedShorts: ['RESETS'] }),
+        ],
+      },
+      now: new Date('2026-07-11T18:00:00.000Z'),
+    });
+
+    expect(payload.available).toBe(true);
+    expect(payload.meta.baseSnapshotDate).toBe('2026-07-10');
+    expect(payload.meta.appliedActionDates).toEqual(['2026-07-11']);
+    expect([...classifyEtfProRows(payload.rows).longs].sort()).toEqual(['NEWL', 'RESETL']);
+    expect([...classifyEtfProRows(payload.rows).shorts]).toEqual([]);
+  });
+
+  test('keeps a structurally valid book available through quiet days and weekends when polling is healthy', () => {
+    const payload = resolveEtfProPayloadFromSources({
+      localPayload: activeBook('2026-07-17', ['SPY'], ['TLT']),
+      hermesPayloads: { actions: [], fullBooks: [] },
+      ingestionHealth: {
+        status: 'healthy',
+        checkedAt: '2026-07-21T17:00:00.000Z',
+        invocations: 12,
+        errors: 0,
+      },
+    });
+
+    expect(payload).toMatchObject({
+      available: true,
+      longCount: 1,
+      shortCount: 1,
+      dataQuality: { status: 'ok', warnings: [] },
+      dataAvailability: {
+        structuralStatus: 'verified',
+        ingestionStatus: 'healthy',
+      },
+      meta: { snapshotDate: '2026-07-17', structurallyAvailable: true },
+    });
+    expect(payload.rows).toHaveLength(2);
+  });
+
+  test('blocks and empties the active book when Gmail polling is unhealthy without corrupting structural quality', () => {
+    const payload = resolveEtfProPayloadFromSources({
+      localPayload: activeBook('2026-07-17', ['SPY'], ['TLT']),
+      hermesPayloads: { actions: [], fullBooks: [] },
+      ingestionHealth: {
+        status: 'auth_required',
+        checkedAt: '2026-07-21T17:00:00.000Z',
+        reason: 'All recent Gmail polls failed.',
+      },
+    });
+
+    expect(payload.available).toBe(false);
+    expect(payload.rows).toEqual([]);
+    expect(payload.actionRows).toEqual([]);
+    expect(payload.changes).toBeNull();
+    expect(payload.longCount).toBeNull();
+    expect(payload.shortCount).toBeNull();
+    expect(payload.dataQuality.status).toBe('ok');
+    expect(payload.dataAvailability).toMatchObject({
+      structuralStatus: 'verified',
+      ingestionStatus: 'unhealthy',
+      reason: 'All recent Gmail polls failed.',
+    });
+    expect(payload.meta).toMatchObject({
+      available: false,
+      structurallyAvailable: true,
+      blockedByIngestion: true,
+      archivedRowCount: 2,
+      rowCount: 0,
+    });
   });
 });

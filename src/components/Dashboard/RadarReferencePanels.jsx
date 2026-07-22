@@ -6,7 +6,6 @@ import DollarLiquidityModels from './DollarLiquidityModels';
 import GlobalQuadsCard from './GlobalQuadsCard';
 import MarketVolumeTable from './MarketVolumeTable';
 import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
-import { CurrenciesCompactRail } from './MultiRegionMarketOverview';
 import DataStatusChip from './DataStatusChip';
 
 const STYLE_STORAGE_KEY = 'styleFactorPerformanceData';
@@ -15,7 +14,6 @@ const ANALYTICS_REFRESH_MS = 15 * 60 * 1000;
 const CONTINUOUS_CRYPTO_SYMBOLS = new Set(['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP']);
 
 const PANEL_TITLES = {
-  currencies: 'Currencies',
   cftc: 'CFTC Positioning',
   factors: 'Style Factors',
   quads: 'Global Quads',
@@ -115,13 +113,23 @@ const aggregateQuoteStatus = (rows, providerStatus) => {
   const statuses = (Array.isArray(rows) ? rows : []).map((row) => getRowQuoteStatus(row, providerStatus));
   const eligible = statuses.filter((status) => status !== 'unavailable');
   if (eligible.length === 0) return 'unavailable';
-  if (eligible.includes('live') && eligible.some((status) => status !== 'live')) return 'mixed';
+  if (eligible.length !== statuses.length) return 'mixed';
+  if (new Set(eligible).size > 1) return 'mixed';
   if (eligible.includes('delayed')) return 'delayed';
   if (eligible.includes('historical')) return 'historical';
   return 'live';
 };
 
-const PreviewCard = ({ id, title, status, statusLabel, statusDetail, onOpen, children }) => (
+const PreviewCard = ({
+  id,
+  title,
+  status,
+  statusLabel,
+  statusDetail,
+  statusIssues,
+  onOpen,
+  children,
+}) => (
   <section className={`efr-reference-card efr-reference-card--${id}`} aria-labelledby={`efr-reference-${id}`}>
     <header className="efr-reference-card__header">
       <button
@@ -132,7 +140,16 @@ const PreviewCard = ({ id, title, status, statusLabel, statusDetail, onOpen, chi
       >
         {title}
       </button>
-      <DataStatusChip status={status} label={statusLabel} detail={statusDetail} compact />
+      <DataStatusChip
+        status={status}
+        label={statusLabel}
+        detail={statusDetail}
+        context={title}
+        issues={statusIssues}
+        className="efr-reference-card__status"
+        compact
+        indicatorOnly
+      />
     </header>
     <div className="efr-reference-card__body">{children}</div>
     <button type="button" className="efr-reference-card__open" onClick={() => onOpen(id)}>
@@ -145,12 +162,17 @@ const EmptyPreview = ({ children = 'No verified data available' }) => (
   <div className="efr-reference-empty">{children}</div>
 );
 
-const CurrenciesPreview = ({ rows, providerStatus }) => {
-  const displayRows = (Array.isArray(rows) ? rows : []).slice(0, 5);
+const CurrenciesPreview = ({
+  rows,
+  providerStatus,
+  ariaLabel = 'Currencies',
+  maxRows = 5,
+}) => {
+  const displayRows = (Array.isArray(rows) ? rows : []).slice(0, maxRows);
   if (displayRows.length === 0) return <EmptyPreview />;
 
   return (
-    <table className="efr-mini-table">
+    <table className="efr-mini-table" aria-label={ariaLabel}>
       <thead>
         <tr><th>Ticker</th><th>Price</th><th>Day</th><th>30D As of</th></tr>
       </thead>
@@ -280,13 +302,11 @@ const LiquidityPreview = ({ data }) => {
   );
 };
 
-const FullReferencePanel = ({ activePanel, onClose, marketData, marketDataLoading }) => {
+const FullReferencePanel = ({ activePanel, onClose }) => {
   const title = PANEL_TITLES[activePanel];
   const dialogRef = useRef(null);
   const panel = useMemo(() => {
     switch (activePanel) {
-      case 'currencies':
-        return <CurrenciesCompactRail data={marketData?.currencies} loading={marketDataLoading} layout="sidebar" />;
       case 'cftc':
         return <CFTCNetLongCard />;
       case 'factors':
@@ -300,7 +320,7 @@ const FullReferencePanel = ({ activePanel, onClose, marketData, marketDataLoadin
       default:
         return null;
     }
-  }, [activePanel, marketData, marketDataLoading]);
+  }, [activePanel]);
 
   useEffect(() => {
     if (!activePanel) return undefined;
@@ -355,7 +375,7 @@ const FullReferencePanel = ({ activePanel, onClose, marketData, marketDataLoadin
   );
 };
 
-const RadarReferencePanels = ({ marketData = {}, marketDataLoading = false, providerStatus = null }) => {
+const RadarReferencePanels = () => {
   const [activePanel, setActivePanel] = useState(null);
   const [cftcState, setCftcState] = useState({ data: null, loading: true, error: null });
   const [liquidityState, setLiquidityState] = useState({ data: null, loading: true, error: null });
@@ -422,9 +442,6 @@ const RadarReferencePanels = ({ marketData = {}, marketDataLoading = false, prov
     window.requestAnimationFrame(() => lastTriggerRef.current?.focus?.());
   }, [refreshManualRecords]);
 
-  const currencyStatus = marketDataLoading
-    ? 'loading'
-    : aggregateQuoteStatus(marketData?.currencies, providerStatus);
   const cftcDate = cftcState.data?.date || cftcState.data?.asOf || null;
   const liquidityDate =
     liquidityState.data?.models?.us?.latest?.date ||
@@ -464,24 +481,25 @@ const RadarReferencePanels = ({ marketData = {}, marketDataLoading = false, prov
       datasetStatus: metadata?.status || null,
     }));
   }, []);
+  const volumeSourceIssues = volumeMeta.sources
+    .filter((source) => ['defective', 'inactive', 'offline', 'missing', 'error'].includes(
+      String(source?.status || '').toLowerCase(),
+    ))
+    .map((source) => (
+      `${source?.label || source?.name || 'Volume source'}: ${source?.detail || source?.status || 'unavailable'}`
+    ));
 
   return (
     <>
-      <section className="efr-reference" aria-labelledby="efr-reference-title">
-        <div className="efr-reference__heading">
-          <h2 id="efr-reference-title">Normal / Reference</h2>
-          <span>Select any panel for the full source view</span>
-        </div>
+      <section className="efr-reference" aria-label="Normal / Reference">
         <div className="efr-reference__grid">
-          <PreviewCard id="currencies" title="Currencies" status={currencyStatus} onOpen={openPanel}>
-            <CurrenciesPreview rows={marketData?.currencies} providerStatus={providerStatus} />
-          </PreviewCard>
           <PreviewCard
             id="cftc"
             title="CFTC Positioning"
             status={cftcState.loading ? 'loading' : cftcStale ? 'delayed' : cftcAvailable ? 'historical' : 'unavailable'}
             statusLabel={cftcStale ? 'STALE' : undefined}
             statusDetail={cftcDate ? `${cftcStale ? 'AS OF ' : ''}${formatDate(cftcDate)}` : undefined}
+            statusIssues={cftcState.error ? [`CFTC request: ${cftcState.error}`] : []}
             onOpen={openPanel}
           >
             <CftcPreview data={cftcState.data} />
@@ -510,6 +528,7 @@ const RadarReferencePanels = ({ marketData = {}, marketDataLoading = false, prov
             status={liquidityState.loading ? 'loading' : liquidityPartial ? 'delayed' : liquidityAvailable ? 'historical' : 'unavailable'}
             statusLabel={liquidityPartial ? 'PARTIAL' : undefined}
             statusDetail={liquidityDate ? `${liquidityPartial ? 'AS OF ' : ''}${formatDate(liquidityDate)}` : undefined}
+            statusIssues={liquidityState.error ? [`Liquidity request: ${liquidityState.error}`] : []}
             onOpen={openPanel}
           >
             <LiquidityPreview data={liquidityState.data} />
@@ -522,6 +541,7 @@ const RadarReferencePanels = ({ marketData = {}, marketDataLoading = false, prov
             statusDetail={volumeMeta.asOf
               ? `${volumeMeta.datasetStatus === 'provisional' ? 'AS OF ' : ''}${formatDate(volumeMeta.asOf) || String(volumeMeta.asOf).toUpperCase()}`
               : undefined}
+            statusIssues={volumeSourceIssues}
             onOpen={openPanel}
           >
             <MarketVolumeTable
@@ -535,12 +555,10 @@ const RadarReferencePanels = ({ marketData = {}, marketDataLoading = false, prov
       <FullReferencePanel
         activePanel={activePanel}
         onClose={closePanel}
-        marketData={marketData}
-        marketDataLoading={marketDataLoading}
       />
     </>
   );
 };
 
-export { aggregateQuoteStatus, getRowQuoteStatus, readManualRecord };
+export { aggregateQuoteStatus, CurrenciesPreview, getRowQuoteStatus, readManualRecord };
 export default RadarReferencePanels;

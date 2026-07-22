@@ -210,7 +210,7 @@ const USDProxies = ({ dxy, currencyPairs, loading, error }) => {
           <Line
             type="monotone"
             dataKey="value"
-            stroke={isPositive ? '#10B981' : '#EF4444'}
+            stroke={isPositive ? '#059669' : '#dc2626'}
             strokeWidth={1.5}
             dot={false}
             activeDot={false}

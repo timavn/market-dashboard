@@ -15,17 +15,106 @@ function classifyEtfProRows(rows = []) {
   return { longs, shorts };
 }
 
+function uniqueValues(values = []) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
+function inspectEtfProRows(rows = []) {
+  const positions = new Map();
+  const duplicatePositions = [];
+  const sideConflicts = [];
+  const invalidTickers = [];
+
+  for (const row of rows || []) {
+    const ticker = normalizeTicker(row?.ticker);
+    if (!ticker) {
+      if (row?.ticker != null && String(row.ticker).trim()) invalidTickers.push(String(row.ticker).trim());
+      continue;
+    }
+    const side = String(row.call || row.side || '').toLowerCase() === 'short' ? 'short' : 'long';
+    const priorSides = positions.get(ticker) || new Set();
+    if (priorSides.has(side)) duplicatePositions.push(`${side}:${ticker}`);
+    if (priorSides.size > 0 && !priorSides.has(side)) sideConflicts.push(ticker);
+    priorSides.add(side);
+    positions.set(ticker, priorSides);
+  }
+
+  return {
+    duplicatePositions: uniqueValues(duplicatePositions),
+    sideConflicts: uniqueValues(sideConflicts),
+    invalidTickers: uniqueValues(invalidTickers),
+  };
+}
+
+function normalizeDataQuality(dataQuality = {}) {
+  const normalized = {
+    removedButMissing: uniqueValues(dataQuality.removedButMissing),
+    duplicateAdds: uniqueValues(dataQuality.duplicateAdds),
+    duplicatePositions: uniqueValues(dataQuality.duplicatePositions),
+    sideConflicts: uniqueValues(dataQuality.sideConflicts),
+    actionConflicts: uniqueValues(dataQuality.actionConflicts),
+    invalidTickers: uniqueValues(dataQuality.invalidTickers),
+    warnings: uniqueValues(dataQuality.warnings),
+  };
+  const hasIssues = dataQuality.status === 'warning' ||
+    dataQuality.status === 'error' ||
+    Object.values(normalized).some((values) => values.length > 0);
+  normalized.status = hasIssues
+    ? (dataQuality.status === 'error' ? 'error' : 'warning')
+    : 'ok';
+  return normalized;
+}
+
 function withResolvedEtfProCounts(payload) {
   if (!payload) return payload;
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const { longs, shorts } = classifyEtfProRows(rows);
+  const rowQuality = inspectEtfProRows(rows);
+  const dataQuality = normalizeDataQuality({
+    ...(payload.dataQuality || {}),
+    duplicatePositions: [
+      ...(payload.dataQuality?.duplicatePositions || []),
+      ...rowQuality.duplicatePositions,
+    ],
+    sideConflicts: [
+      ...(payload.dataQuality?.sideConflicts || []),
+      ...rowQuality.sideConflicts,
+    ],
+    invalidTickers: [
+      ...(payload.dataQuality?.invalidTickers || []),
+      ...rowQuality.invalidTickers,
+    ],
+    warnings: [
+      ...(payload.dataQuality?.warnings || []),
+      ...(rowQuality.duplicatePositions.length > 0
+        ? [`ETF Pro active book contains duplicate positions: ${rowQuality.duplicatePositions.join(', ')}`]
+        : []),
+      ...(rowQuality.sideConflicts.length > 0
+        ? [`ETF Pro tickers appear on both sides of the active book: ${rowQuality.sideConflicts.join(', ')}`]
+        : []),
+      ...(rowQuality.invalidTickers.length > 0
+        ? [`ETF Pro active book contains invalid tickers: ${rowQuality.invalidTickers.join(', ')}`]
+        : []),
+    ],
+  });
+  const available = payload.available !== false &&
+    rows.length > 0 &&
+    Boolean(payload.meta?.snapshotDate) &&
+    dataQuality.status === 'ok';
+  const longCount = available ? longs.size : null;
+  const shortCount = available ? shorts.size : null;
   return {
     ...payload,
+    available,
+    longCount,
+    shortCount,
+    dataQuality,
     meta: {
       ...(payload.meta || {}),
       rowCount: rows.length,
-      longCount: longs.size,
-      shortCount: shorts.size,
+      available,
+      longCount,
+      shortCount,
     },
   };
 }
@@ -40,12 +129,27 @@ function getPayloadTime(payload) {
   return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
 }
 
+function getPayloadSequence(payload) {
+  const sequence = Number(payload?.meta?.sourceSequence);
+  return Number.isInteger(sequence) && sequence >= 0 ? sequence : 0;
+}
+
+function comparePayloadOrder(a, b) {
+  const dateCompare = String(getPayloadDate(a) || '').localeCompare(String(getPayloadDate(b) || ''));
+  if (dateCompare !== 0) return dateCompare;
+  const timeCompare = getPayloadTime(a) - getPayloadTime(b);
+  if (timeCompare !== 0) return timeCompare;
+  const messageCompare = String(a?.meta?.sourceMessageId || '').localeCompare(
+    String(b?.meta?.sourceMessageId || ''),
+  );
+  if (messageCompare !== 0) return messageCompare;
+  const sequenceCompare = getPayloadSequence(a) - getPayloadSequence(b);
+  if (sequenceCompare !== 0) return sequenceCompare;
+  return String(a?.meta?.sourceEventKey || '').localeCompare(String(b?.meta?.sourceEventKey || ''));
+}
+
 function sortPayloadsChronologically(payloads) {
-  return [...(payloads || [])].filter(Boolean).sort((a, b) => {
-    const dateCompare = String(getPayloadDate(a) || '').localeCompare(String(getPayloadDate(b) || ''));
-    if (dateCompare !== 0) return dateCompare;
-    return getPayloadTime(a) - getPayloadTime(b);
-  });
+  return [...(payloads || [])].filter(Boolean).sort(comparePayloadOrder);
 }
 
 function pickNewestPayload(payloads) {
@@ -89,19 +193,7 @@ function isEtfProActionAfterBase(actionPayload, basePayload) {
   const actionDate = getPayloadDate(actionPayload);
   const baseDate = getPayloadDate(basePayload);
   if (!actionDate || !baseDate) return false;
-  if (actionDate.localeCompare(baseDate) > 0) return true;
-  if (actionDate.localeCompare(baseDate) < 0) return false;
-  return getPayloadTime(actionPayload) > getPayloadTime(basePayload);
-}
-
-function isPayloadNewer(candidate, basePayload) {
-  const candidateDate = getPayloadDate(candidate);
-  const baseDate = getPayloadDate(basePayload);
-  if (candidateDate && baseDate) {
-    const dateCompare = candidateDate.localeCompare(baseDate);
-    if (dateCompare !== 0) return dateCompare > 0;
-  }
-  return getPayloadTime(candidate) > getPayloadTime(basePayload);
+  return comparePayloadOrder(actionPayload, basePayload) > 0;
 }
 
 function isActiveEtfProSnapshot(payload) {
@@ -113,7 +205,9 @@ function isActiveEtfProSnapshot(payload) {
     source.includes('current open positions') ||
     source.includes('current-open-positions') ||
     source.includes('manual-current-open-positions') ||
-    source.includes('all-active-tickers')
+    source.includes('all-active-tickers') ||
+    meta.sourceKind === 'gmail-html-full-book' ||
+    source.includes('gmail-html-full-book')
   );
 }
 
@@ -121,17 +215,29 @@ function mergeDataQualityWarnings(...payloads) {
   const warnings = [];
   const removedButMissing = [];
   const duplicateAdds = [];
+  const duplicatePositions = [];
+  const sideConflicts = [];
+  const actionConflicts = [];
+  const invalidTickers = [];
   for (const payload of payloads) {
     const dataQuality = payload?.dataQuality || {};
     warnings.push(...(dataQuality.warnings || []));
     removedButMissing.push(...(dataQuality.removedButMissing || []));
     duplicateAdds.push(...(dataQuality.duplicateAdds || []));
+    duplicatePositions.push(...(dataQuality.duplicatePositions || []));
+    sideConflicts.push(...(dataQuality.sideConflicts || []));
+    actionConflicts.push(...(dataQuality.actionConflicts || []));
+    invalidTickers.push(...(dataQuality.invalidTickers || []));
   }
-  return {
-    warnings: [...new Set(warnings.filter(Boolean))],
-    removedButMissing: [...new Set(removedButMissing.filter(Boolean))],
-    duplicateAdds: [...new Set(duplicateAdds.filter(Boolean))],
-  };
+  return normalizeDataQuality({
+    warnings,
+    removedButMissing,
+    duplicateAdds,
+    duplicatePositions,
+    sideConflicts,
+    actionConflicts,
+    invalidTickers,
+  });
 }
 
 function buildAddedRow(row, ticker, actionPayload, nextRows) {
@@ -162,14 +268,49 @@ function applyEtfProActionUpdate(basePayload, actionPayload, options = {}) {
   const changes = actionPayload.changes || {};
   const removedLongs = new Set((changes.removedLongs || []).map(normalizeTicker).filter(Boolean));
   const removedShorts = new Set((changes.removedShorts || []).map(normalizeTicker).filter(Boolean));
+  const actionRows = Array.isArray(actionPayload.rows) ? actionPayload.rows : [];
+  const addRows = actionRows.filter((row) => String(row.action || '').toUpperCase() === 'ADD');
   const addedByTicker = new Map(
-    (Array.isArray(actionPayload.rows) ? actionPayload.rows : [])
-      .filter((row) => String(row.action || '').toUpperCase() === 'ADD')
-      .map((row) => [normalizeTicker(row.ticker), row])
-      .filter(([ticker]) => ticker),
+    addRows.map((row) => [normalizeTicker(row.ticker), row]).filter(([ticker]) => ticker),
   );
   const removedButMissing = [];
   const duplicateAdds = [];
+  const actionConflicts = [];
+  const invalidTickers = [];
+  const seenAddKeys = new Set();
+  const seenAddSides = new Map();
+
+  for (const row of addRows) {
+    const ticker = normalizeTicker(row.ticker);
+    if (!ticker) {
+      if (row.ticker != null && String(row.ticker).trim()) invalidTickers.push(String(row.ticker).trim());
+      continue;
+    }
+    const side = String(row.call || row.side || '').toLowerCase() === 'short' ? 'short' : 'long';
+    const key = `${side}:${ticker}`;
+    if (seenAddKeys.has(key)) duplicateAdds.push(ticker);
+    const priorSide = seenAddSides.get(ticker);
+    if (priorSide && priorSide !== side) actionConflicts.push(`${ticker}:added-long-and-short`);
+    seenAddKeys.add(key);
+    seenAddSides.set(ticker, side);
+  }
+
+  const declaredAdds = [
+    ...(changes.addedLongs || []).map((ticker) => ({ ticker, side: 'long' })),
+    ...(changes.addedShorts || []).map((ticker) => ({ ticker, side: 'short' })),
+  ];
+  const declaredAddKeys = new Set();
+  for (const declared of declaredAdds) {
+    const ticker = normalizeTicker(declared.ticker);
+    if (!ticker) {
+      if (declared.ticker != null && String(declared.ticker).trim()) invalidTickers.push(String(declared.ticker).trim());
+      continue;
+    }
+    const key = `${declared.side}:${ticker}`;
+    if (declaredAddKeys.has(key)) duplicateAdds.push(ticker);
+    declaredAddKeys.add(key);
+    if (!seenAddKeys.has(key)) actionConflicts.push(`${key}:missing-add-row`);
+  }
   const seenRemoved = new Set();
   const nextRows = baseRows.filter((row) => {
     const ticker = normalizeTicker(row.ticker);
@@ -209,6 +350,12 @@ function applyEtfProActionUpdate(basePayload, actionPayload, options = {}) {
     ...(duplicateAdds.length > 0
       ? [`ETF Pro add actions already present in active base: ${duplicateAdds.join(', ')}`]
       : []),
+    ...(actionConflicts.length > 0
+      ? [`ETF Pro action payload contains conflicting additions: ${actionConflicts.join(', ')}`]
+      : []),
+    ...(invalidTickers.length > 0
+      ? [`ETF Pro action payload contains invalid tickers: ${invalidTickers.join(', ')}`]
+      : []),
   ];
 
   return withResolvedEtfProCounts({
@@ -218,11 +365,14 @@ function applyEtfProActionUpdate(basePayload, actionPayload, options = {}) {
       snapshotDate: actionPayload.meta?.snapshotDate || basePayload.meta?.snapshotDate || null,
       parsedAt: actionPayload.meta?.parsedAt || basePayload.meta?.parsedAt || null,
       sourceFile: actionPayload.meta?.sourceFile || basePayload.meta?.sourceFile || null,
+      sourceMessageId: actionPayload.meta?.sourceMessageId || basePayload.meta?.sourceMessageId || null,
+      sourceSequence: actionPayload.meta?.sourceSequence ?? basePayload.meta?.sourceSequence ?? null,
+      sourceEventKey: actionPayload.meta?.sourceEventKey || basePayload.meta?.sourceEventKey || null,
       source: options.source || 'gmail-html-action-applied-to-active-book',
       sourceKind: isActiveEtfProSnapshot(basePayload) ? 'active-open-positions' : basePayload.meta?.sourceKind,
       headline: actionPayload.meta?.headline || basePayload.meta?.headline || null,
       baseSnapshotDate: basePayload.meta?.baseSnapshotDate || basePayload.meta?.snapshotDate || null,
-      actionCount: Array.isArray(actionPayload.rows) ? actionPayload.rows.length : 0,
+      actionCount: actionRows.length,
       appliedActionDates: [
         ...new Set([
           ...(Array.isArray(basePayload.meta?.appliedActionDates) ? basePayload.meta.appliedActionDates : []),
@@ -235,14 +385,16 @@ function applyEtfProActionUpdate(basePayload, actionPayload, options = {}) {
     changes,
     actionRows: [
       ...(Array.isArray(basePayload.actionRows) ? basePayload.actionRows : []),
-      ...(actionPayload.rows || []),
+      ...actionRows,
     ],
-    dataQuality: {
-      status: warnings.length > 0 ? 'warning' : 'ok',
-      removedButMissing: [...new Set([...existingQuality.removedButMissing, ...removedButMissing])],
-      duplicateAdds: [...new Set([...existingQuality.duplicateAdds, ...duplicateAdds])],
-      warnings: [...new Set(warnings)],
-    },
+    dataQuality: normalizeDataQuality({
+      ...existingQuality,
+      removedButMissing: [...existingQuality.removedButMissing, ...removedButMissing],
+      duplicateAdds: [...existingQuality.duplicateAdds, ...duplicateAdds],
+      actionConflicts: [...existingQuality.actionConflicts, ...actionConflicts],
+      invalidTickers: [...existingQuality.invalidTickers, ...invalidTickers],
+      warnings,
+    }),
   });
 }
 
@@ -260,12 +412,7 @@ function resolveEtfProFromBase({ basePayload, actionPayloads = [], source = 'gma
       rowCount: Array.isArray(basePayload.rows) ? basePayload.rows.length : 0,
     },
     rows: Array.isArray(basePayload.rows) ? basePayload.rows : [],
-    dataQuality: {
-      status: basePayload.dataQuality?.status || 'ok',
-      removedButMissing: basePayload.dataQuality?.removedButMissing || [],
-      duplicateAdds: basePayload.dataQuality?.duplicateAdds || [],
-      warnings: basePayload.dataQuality?.warnings || [],
-    },
+    dataQuality: normalizeDataQuality(basePayload.dataQuality),
   };
 
   for (const actionPayload of actions) {
@@ -281,21 +428,6 @@ function resolveEtfProFromBase({ basePayload, actionPayloads = [], source = 'gma
     },
   });
   return payload;
-}
-
-function buildGmailStaleWarnings({ hermesPayloads, now = new Date(), staleDays = 2 } = {}) {
-  const allPayloads = [
-    ...(Array.isArray(hermesPayloads?.actions) ? hermesPayloads.actions : []),
-    ...(Array.isArray(hermesPayloads?.fullBooks) ? hermesPayloads.fullBooks : []),
-  ];
-  const newest = pickNewestPayload(allPayloads);
-  if (!newest) return ['ETF Pro Gmail ingestion has no stored ETF Pro emails.'];
-  const newestTime = getPayloadTime(newest);
-  if (!newestTime) return [];
-  const ageMs = now.getTime() - newestTime;
-  if (ageMs <= staleDays * 24 * 60 * 60 * 1000) return [];
-  const newestDate = newest.meta?.snapshotDate || new Date(newestTime).toISOString();
-  return [`ETF Pro Gmail ingestion is stale; latest stored ETF Pro email is ${newestDate}.`];
 }
 
 function appendWarnings(payload, warnings = []) {
@@ -315,97 +447,134 @@ function appendWarnings(payload, warnings = []) {
   });
 }
 
+function normalizeIngestionHealth(health) {
+  if (!health) return { status: 'unknown', verified: false, healthy: null, reason: null };
+  const rawStatus = String(health.status || '').trim().toLowerCase();
+  const explicitlyHealthy = health.healthy === true || ['healthy', 'ok', 'success'].includes(rawStatus);
+  const explicitlyUnhealthy = health.healthy === false ||
+    ['auth_required', 'degraded', 'error', 'fail', 'failed', 'stale', 'unhealthy'].includes(rawStatus);
+  return {
+    ...health,
+    status: explicitlyHealthy ? 'healthy' : explicitlyUnhealthy ? 'unhealthy' : 'unknown',
+    verified: explicitlyHealthy || explicitlyUnhealthy,
+    healthy: explicitlyHealthy ? true : explicitlyUnhealthy ? false : null,
+    reason: health.reason || health.error || null,
+  };
+}
+
+function applyIngestionHealth(payload, ingestionHealth) {
+  if (!payload) return payload;
+  const counted = withResolvedEtfProCounts(payload);
+  const health = normalizeIngestionHealth(ingestionHealth);
+  const structurallyAvailable = counted.available === true;
+  const availability = {
+    structuralStatus: structurallyAvailable ? 'verified' : 'invalid',
+    ingestionStatus: health.status,
+    ingestionVerified: health.verified,
+    latestContentAt: counted.meta?.parsedAt || counted.meta?.snapshotDate || null,
+    reason: structurallyAvailable
+      ? (health.healthy === false ? health.reason || 'Gmail ingestion is unhealthy.' : null)
+      : 'ETF Pro active book failed structural validation.',
+  };
+
+  // Unit-level/offline resolvers may not have a poll-health provider. Runtime
+  // callers supply it; when it explicitly reports unhealthy, never expose the
+  // last-known rows on the active endpoint.
+  if (health.healthy !== false) {
+    return {
+      ...counted,
+      dataAvailability: availability,
+      meta: {
+        ...(counted.meta || {}),
+        structurallyAvailable,
+        ingestionStatus: health.status,
+      },
+    };
+  }
+
+  const archivedRowCount = Array.isArray(counted.rows) ? counted.rows.length : 0;
+  return {
+    ...counted,
+    available: false,
+    rows: [],
+    actionRows: [],
+    changes: null,
+    longCount: null,
+    shortCount: null,
+    dataAvailability: availability,
+    meta: {
+      ...(counted.meta || {}),
+      available: false,
+      structurallyAvailable,
+      ingestionStatus: health.status,
+      blockedByIngestion: true,
+      archivedRowCount,
+      rowCount: 0,
+      longCount: null,
+      shortCount: null,
+    },
+  };
+}
+
 function resolveEtfProPayloadFromSources({
   localPayload,
   emailPayload,
   hermesPayloads = {},
-  now = new Date(),
+  ingestionHealth = null,
 } = {}) {
-  const emailFullBookPayload = pickNewestPayload(hermesPayloads.fullBooks || []);
+  const fullBookPayloads = [
+    ...(Array.isArray(hermesPayloads.fullBooks) ? hermesPayloads.fullBooks : []),
+    ...(emailPayload && !isEtfProActionPayload(emailPayload) ? [emailPayload] : []),
+  ].map((payload) => ({
+    ...payload,
+    meta: {
+      ...(payload.meta || {}),
+      source: payload.meta?.source || 'gmail-html-full-book',
+      sourceKind: 'gmail-html-full-book',
+    },
+  }));
   const emailActionPayloads = [
     ...(Array.isArray(hermesPayloads.actions) ? hermesPayloads.actions : []),
     ...(isEtfProActionPayload(emailPayload) ? [emailPayload] : []),
   ];
-  const gmailWarnings = buildGmailStaleWarnings({ hermesPayloads, now });
+  const baseline = pickNewestPayload([
+    ...(isActiveEtfProSnapshot(localPayload) ? [localPayload] : []),
+    ...fullBookPayloads,
+  ]);
 
-  if (isActiveEtfProSnapshot(localPayload)) {
-    if (emailFullBookPayload && isPayloadNewer(emailFullBookPayload, localPayload)) {
-      return appendWarnings(
-        resolveEtfProFromBase({
-          basePayload: {
-            ...emailFullBookPayload,
-            meta: {
-              ...(emailFullBookPayload.meta || {}),
-              sourceKind: 'gmail-html-full-book',
-            },
-          },
-          actionPayloads: emailActionPayloads,
-          source: 'gmail-html-full-book-applied-actions',
-        }),
-        gmailWarnings,
-      );
-    }
-
-    return appendWarnings(
+  if (baseline) {
+    const usesFullBook = baseline.meta?.sourceKind === 'gmail-html-full-book';
+    return applyIngestionHealth(
       resolveEtfProFromBase({
-        basePayload: localPayload,
+        basePayload: baseline,
         actionPayloads: emailActionPayloads,
-        source: 'gmail-html-action-applied-to-active-book',
+        source: usesFullBook
+          ? 'gmail-html-full-book-applied-actions'
+          : 'gmail-html-action-applied-to-active-book',
       }),
-      gmailWarnings,
+      ingestionHealth,
     );
   }
 
-  if (localPayload && !emailPayload && !emailFullBookPayload) {
-    return appendWarnings(localPayload, gmailWarnings);
-  }
-
-  if (emailFullBookPayload) {
-    return appendWarnings(
-      resolveEtfProFromBase({
-        basePayload: {
-          ...emailFullBookPayload,
-          meta: {
-            ...(emailFullBookPayload.meta || {}),
-            sourceKind: 'gmail-html-full-book',
-          },
-        },
-        actionPayloads: emailActionPayloads,
-        source: 'gmail-html-full-book-applied-actions',
-      }),
-      ['ETF Pro lineup email used because no active open-position base exists.', ...gmailWarnings],
-    );
-  }
-
-  if (!localPayload) return appendWarnings(emailPayload || null, gmailWarnings);
-  if (!emailPayload?.meta?.snapshotDate) return appendWarnings(localPayload, gmailWarnings);
-
-  const localDate = localPayload.meta?.snapshotDate || null;
-  const emailDate = emailPayload.meta.snapshotDate;
-  if (localDate && emailDate.localeCompare(localDate) < 0) return appendWarnings(localPayload, gmailWarnings);
-
-  const localRows = Array.isArray(localPayload.rows) ? localPayload.rows : [];
-  const emailRows = Array.isArray(emailPayload.rows) ? emailPayload.rows : [];
-  if (isEtfProActionPayload(emailPayload) && localRows.length > emailRows.length) {
-    return appendWarnings(applyEtfProActionUpdate(localPayload, emailPayload), gmailWarnings);
-  }
-
-  if (!localDate || emailDate.localeCompare(localDate) > 0 || emailRows.length >= Math.max(localRows.length, 1)) {
-    return appendWarnings(emailPayload, gmailWarnings);
-  }
-
-  return appendWarnings(localPayload, gmailWarnings);
+  const incompletePayload = localPayload || pickNewestPayload(emailActionPayloads) || emailPayload || null;
+  return applyIngestionHealth(
+    appendWarnings(incompletePayload, ['ETF Pro has no complete active-position or full-book baseline.']),
+    ingestionHealth,
+  );
 }
 
 module.exports = {
   applyEtfProActionUpdate,
+  applyIngestionHealth,
   classifyEtfProRows,
+  comparePayloadOrder,
   dedupeEtfProActions,
   getPayloadDate,
   isActiveEtfProSnapshot,
   isEtfProActionAfterBase,
   isEtfProActionPayload,
   pickNewestPayload,
+  normalizeIngestionHealth,
   resolveEtfProFromBase,
   resolveEtfProPayloadFromSources,
   sortPayloadsChronologically,

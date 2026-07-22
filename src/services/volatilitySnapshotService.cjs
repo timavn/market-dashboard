@@ -16,9 +16,14 @@ const CBOE_SERIES = [
 const NUMERIC_FIELDS = [
   'lastPx',
   'day1Ago',
+  'day15Ago',
   'week1Ago',
   'week4Ago',
+  'month3Ago',
+  'month6Ago',
+  'priorYearClose',
   'dayChangePct',
+  'fifteenDayChangePct',
   'weekChangePct',
   'monthChangePct',
   'threeMonthChangePct',
@@ -253,6 +258,7 @@ function computeVolatilityMetrics(rows) {
     .find((row) => row.date < `${currentRow.date.slice(0, 4)}-01-01`) || null;
 
   const day = reference(1);
+  const fifteenDay = reference(15);
   const week = reference(5);
   const month = reference(21);
   const threeMonth = reference(63);
@@ -261,9 +267,14 @@ function computeVolatilityMetrics(rows) {
   return {
     lastPx: currentRow.close,
     day1Ago: day?.close ?? null,
+    day15Ago: fifteenDay?.close ?? null,
     week1Ago: week?.close ?? null,
     week4Ago: month?.close ?? null,
+    month3Ago: threeMonth?.close ?? null,
+    month6Ago: sixMonth?.close ?? null,
+    priorYearClose: priorYearClose?.close ?? null,
     dayChangePct: percentageChange(currentRow.close, day?.close),
+    fifteenDayChangePct: percentageChange(currentRow.close, fifteenDay?.close),
     weekChangePct: percentageChange(currentRow.close, week?.close),
     monthChangePct: percentageChange(currentRow.close, month?.close),
     threeMonthChangePct: percentageChange(currentRow.close, threeMonth?.close),
@@ -402,21 +413,55 @@ function createVolatilitySnapshotService({
       const closes = result?.indicators?.quote?.[0]?.close || [];
       const currentPrice = finitePositive(meta.regularMarketPrice);
       const asOf = meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000) : null;
-      if (!result || currentPrice == null || !asOf || Number.isNaN(asOf.getTime())) {
+      if (!result) {
         return ['MOVE', unavailableRow({
           ...sourceMeta,
-          asOf,
           error: 'invalid_quote',
         })];
       }
 
       const currentTime = now();
-      const quoteDate = newYorkParts(asOf).dateKey;
       const expectedCompletedSession = mostRecentCompletedTradingDateKey(currentTime);
-      const history = normalizeRows(timestamps.map((timestamp, index) => ({
-        date: newYorkParts(new Date(timestamp * 1000)).dateKey,
-        close: closes[index],
-      })));
+      const history = normalizeRows(timestamps.map((timestamp, index) => {
+        const timestampDate = new Date(Number(timestamp) * 1000);
+        if (Number.isNaN(timestampDate.getTime())) return null;
+        return {
+          date: newYorkParts(timestampDate).dateKey,
+          close: closes[index],
+        };
+      }));
+
+      const latestVerifiedHistoricalRow = () => {
+        const eligibleHistory = history.filter((row) => row.date <= expectedCompletedSession);
+        const retainedRow = [...eligibleHistory]
+          .reverse()
+          .find((row) => validatePriorSession(eligibleHistory, row.date));
+        if (!retainedRow) return null;
+
+        const retainedTimestampIndex = timestamps.findLastIndex((timestamp, index) => {
+          const timestampDate = new Date(Number(timestamp) * 1000);
+          return !Number.isNaN(timestampDate.getTime())
+            && newYorkParts(timestampDate).dateKey === retainedRow.date
+            && finitePositive(closes[index]) != null;
+        });
+        if (retainedTimestampIndex < 0) return null;
+
+        const retainedAsOf = new Date(Number(timestamps[retainedTimestampIndex]) * 1000);
+        const retainedHistory = eligibleHistory.filter((row) => row.date <= retainedRow.date);
+        const metrics = computeVolatilityMetrics(retainedHistory);
+        if (!metrics) return null;
+        return historicalRow(metrics, { ...sourceMeta, asOf: retainedAsOf });
+      };
+
+      const retainVerifiedOrUnavailable = (options) => (
+        ['MOVE', latestVerifiedHistoricalRow() || unavailableRow({ ...sourceMeta, ...options })]
+      );
+
+      if (currentPrice == null || !asOf || Number.isNaN(asOf.getTime())) {
+        return retainVerifiedOrUnavailable({ asOf, error: 'invalid_quote' });
+      }
+
+      const quoteDate = newYorkParts(asOf).dateKey;
 
       const currentDate = newYorkParts(currentTime).dateKey;
       const carriedRow = history.at(-1);
@@ -443,7 +488,7 @@ function createVolatilitySnapshotService({
         );
         const metrics = computeVolatilityMetrics(carriedHistory);
         if (!metrics) {
-          return ['MOVE', unavailableRow({ ...sourceMeta, asOf: completedAsOf, error: 'insufficient_history' })];
+          return retainVerifiedOrUnavailable({ asOf: completedAsOf, error: 'insufficient_history' });
         }
         return ['MOVE', historicalRow(metrics, { ...sourceMeta, asOf: completedAsOf })];
       }
@@ -461,35 +506,33 @@ function createVolatilitySnapshotService({
         const completedHistory = history.filter((row) => row.date <= expectedCompletedSession);
         if (completedTimestampIndex >= 0 && completedHistory.some((row) => row.date === expectedCompletedSession)) {
           if (!validatePriorSession(completedHistory, expectedCompletedSession)) {
-            return ['MOVE', unavailableRow({ ...sourceMeta, asOf, error: 'incomplete_history' })];
+            return retainVerifiedOrUnavailable({ asOf, error: 'incomplete_history' });
           }
           const completedAsOf = new Date(timestamps[completedTimestampIndex] * 1000);
           const metrics = computeVolatilityMetrics(completedHistory);
           if (!metrics) {
-            return ['MOVE', unavailableRow({ ...sourceMeta, asOf: completedAsOf, error: 'insufficient_history' })];
+            return retainVerifiedOrUnavailable({ asOf: completedAsOf, error: 'insufficient_history' });
           }
           return ['MOVE', historicalRow(metrics, { ...sourceMeta, asOf: completedAsOf })];
         }
 
-        return ['MOVE', unavailableRow({
-          ...sourceMeta,
+        return retainVerifiedOrUnavailable({
           freshness: 'stale',
           asOf,
           error: 'stale_quote',
-        })];
+        });
       }
 
       if (quoteDate !== expectedCompletedSession) {
-        return ['MOVE', unavailableRow({
-          ...sourceMeta,
+        return retainVerifiedOrUnavailable({
           freshness: 'stale',
           asOf,
           error: 'stale_quote',
-        })];
+        });
       }
 
       if (!validatePriorSession(history.filter((row) => row.date !== quoteDate), quoteDate)) {
-        return ['MOVE', unavailableRow({ ...sourceMeta, asOf, error: 'incomplete_history' })];
+        return retainVerifiedOrUnavailable({ asOf, error: 'incomplete_history' });
       }
       const metrics = computeVolatilityMetrics(combineCurrentQuote(history, asOf, currentPrice));
       if (!metrics) return ['MOVE', unavailableRow({ ...sourceMeta, asOf, error: 'insufficient_history' })];

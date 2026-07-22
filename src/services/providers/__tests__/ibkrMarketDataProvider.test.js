@@ -50,6 +50,26 @@ describe('ibkrMarketDataProvider cache integrity', () => {
     expect(sidecarRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('requests bare SPX as the exact CBOE cash-index contract', async () => {
+    getSidecarProviderStatus.mockResolvedValueOnce({ connected: true });
+    sidecarRequest.mockResolvedValueOnce({ ok: true, quotes: [rawQuote('SPX', 7406, 'CBOE')] });
+
+    const result = await ibkr.getQuote('SPX');
+
+    expect(result.canonical).toMatchObject({ symbol: 'SPX', source: 'ibkr', last: 7406 });
+    expect(sidecarRequest).toHaveBeenCalledWith('/quotes', expect.objectContaining({
+      method: 'POST',
+      body: {
+        instruments: [expect.objectContaining({
+          symbol: 'SPX',
+          secType: 'IND',
+          exchange: 'CBOE',
+          currency: 'USD',
+        })],
+      },
+    }));
+  });
+
   it('does not share cache entries across descriptor identities', async () => {
     getSidecarProviderStatus.mockResolvedValue({ connected: true });
     sidecarRequest

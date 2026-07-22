@@ -39,7 +39,7 @@
 }
 
 .refresh-button {
-  background: #00FF00;
+  background: #059669;
   color: #000000;
   border: 6px solid #000000;
   padding: 10px 20px;
@@ -113,7 +113,7 @@
 }
 
 .retry-button {
-  background: #FF0000;
+  background: #dc2626;
   color: #FFFFFF;
   border: 6px solid #000000;
   padding: 12px 24px;
@@ -238,13 +238,13 @@
 }
 
 .dxy-change.positive {
-  background-color: #00FF00;
+  background-color: #059669;
   color: #000000;
   box-shadow: 4px 4px 0px 0px #000000;
 }
 
 .dxy-change.negative {
-  background-color: #FF0000;
+  background-color: #dc2626;
   color: #FFFFFF;
   box-shadow: 4px 4px 0px 0px #000000;
 }
@@ -366,13 +366,13 @@
 }
 
 .pair-change.positive {
-  background-color: #00FF00;
+  background-color: #059669;
   color: #000000;
   box-shadow: 3px 3px 0px 0px #000000;
 }
 
 .pair-change.negative {
-  background-color: #FF0000;
+  background-color: #dc2626;
   color: #FFFFFF;
   box-shadow: 3px 3px 0px 0px #000000;
 }
@@ -407,7 +407,7 @@
 
 .error-state {
   color: #000000;
-  background: #FF0000;
+  background: #dc2626;
 }
 
 /* Responsive design */

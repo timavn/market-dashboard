@@ -5,6 +5,34 @@ const {
 } = require('../instruments/instrumentResolver');
 
 describe('instrumentResolver provider identity', () => {
+  it('qualifies bare SPX as the exact IBKR cash index and keeps it off the stock stream', () => {
+    expect(resolveInstrument('SPX')).toMatchObject({
+      symbol: 'SPX',
+      secType: 'IND',
+      exchange: 'CBOE',
+      currency: 'USD',
+      provider: 'auto',
+      supported: true,
+    });
+    expect(canUseSymbolStream('SPX')).toBe(false);
+  });
+
+  it('allows an explicit IBKR index descriptor without enabling a Yahoo fallback identity', () => {
+    expect(resolveInstrument({
+      symbol: 'SPX',
+      secType: 'IND',
+      exchange: 'CBOE',
+      currency: 'USD',
+      provider: 'ibkr',
+    })).toMatchObject({
+      symbol: 'SPX',
+      secType: 'IND',
+      exchange: 'CBOE',
+      provider: 'ibkr',
+      supported: true,
+    });
+  });
+
   it('keeps a Yahoo cash index out of the IBKR stock route', () => {
     const descriptor = {
       symbol: 'SPX',

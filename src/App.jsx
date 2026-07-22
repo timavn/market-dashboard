@@ -3,20 +3,40 @@ import { ThemeProvider } from './context/ThemeContext';
 import { PortfolioProvider } from './context/PortfolioContext';
 import PortfolioDashboard from './components/Dashboard/PortfolioDashboard';
 import HowItWorksPage from './components/HowItWorks/HowItWorksPage';
+import ProcessPage from './components/Process/ProcessPage';
+import {
+  getProcessDocument,
+  getProcessDocumentByRoute,
+} from './constants/processDocuments';
 
 const HOW_IT_WORKS_HASH = '#/how-it-works';
+const PROCESS_HASH = getProcessDocument('the-process').route;
+const LEGACY_WHITE_PAPER_HASH = '#/white-paper';
 
-const getAppRoute = () => (
-  typeof window !== 'undefined' && window.location.hash === HOW_IT_WORKS_HASH
-    ? 'how-it-works'
-    : 'dashboard'
-);
+const getAppRoute = () => {
+  if (typeof window === 'undefined') return { page: 'dashboard', documentId: null };
+  if (window.location.hash === LEGACY_WHITE_PAPER_HASH) {
+    return { page: 'process', documentId: 'the-process' };
+  }
+  const processDocument = getProcessDocumentByRoute(window.location.hash);
+  if (processDocument?.published) {
+    return { page: 'process', documentId: processDocument.id };
+  }
+  if (window.location.hash === HOW_IT_WORKS_HASH) return { page: 'how-it-works', documentId: null };
+  return { page: 'dashboard', documentId: null };
+};
 
 function App() {
   const [route, setRoute] = useState(getAppRoute);
 
   useEffect(() => {
-    const handleHashChange = () => setRoute(getAppRoute());
+    const handleHashChange = () => {
+      if (window.location.hash === LEGACY_WHITE_PAPER_HASH) {
+        window.history.replaceState(null, '', PROCESS_HASH);
+      }
+      setRoute(getAppRoute());
+    };
+    handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
@@ -108,11 +128,17 @@ function App() {
   return (
     <ThemeProvider>
       <div className="App">
-        {route === 'how-it-works' ? (
+        {route.page === 'process' ? (
+          <ProcessPage
+            key={route.documentId}
+            documentId={route.documentId}
+            onBack={() => { window.location.hash = ''; }}
+          />
+        ) : route.page === 'how-it-works' ? (
           <HowItWorksPage onBack={() => { window.location.hash = ''; }} />
         ) : (
           <PortfolioProvider>
-            <PortfolioDashboard onOpenHowItWorks={() => { window.location.hash = '/how-it-works'; }} />
+            <PortfolioDashboard onOpenProcess={() => { window.location.hash = PROCESS_HASH.slice(1); }} />
           </PortfolioProvider>
         )}
       </div>

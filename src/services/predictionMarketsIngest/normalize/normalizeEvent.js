@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { fromKalshiCents, fromCmeSnapshot, fromForecastEx, deriveNoFromYes, toNum } = require('./priceScaling');
+const { fromKalshiCents, fromCmeSnapshot, fromForecastEx, toNum } = require('./priceScaling');
 
 const CATEGORY_MAP = {
   economics: 'Other Macro',
@@ -45,8 +45,9 @@ function normalizeKalshi(raw, ctx = {}) {
   const series = raw.series || ctx.series || {};
   const yesBid = fromKalshiCents(m.yes_bid ?? m.yes_bid_dollars);
   const yesAsk = fromKalshiCents(m.yes_ask ?? m.yes_ask_dollars);
+  const noBid = fromKalshiCents(m.no_bid ?? m.no_bid_dollars);
+  const noAsk = fromKalshiCents(m.no_ask ?? m.no_ask_dollars);
   const last = fromKalshiCents(m.last_price ?? m.last_price_dollars);
-  const noDerived = deriveNoFromYes(yesBid, yesAsk);
   const title = event.title || series.title || m.title || '';
   const question = m.subtitle || m.yes_sub_title || title || m.ticker;
   const settlementSources = series.settlement_sources || m.settlement_sources || [];
@@ -72,8 +73,8 @@ function normalizeKalshi(raw, ctx = {}) {
     yes_bid: yesBid,
     yes_ask: yesAsk,
     yes_mid: null,
-    no_bid: noDerived.no_bid,
-    no_ask: noDerived.no_ask,
+    no_bid: noBid,
+    no_ask: noAsk,
     no_mid: null,
     last_price: last,
     implied_probability_mid: null,
@@ -101,7 +102,6 @@ function normalizeIbkrForecastEx(raw, ctx = {}) {
   const yesBid = fromForecastEx(snap['84']);
   const yesAsk = fromForecastEx(snap['86']);
   const last = fromForecastEx(snap['31']);
-  const noDerived = deriveNoFromYes(yesBid, yesAsk);
   const question = raw.desc2 || raw.description || ctx.marketName || '';
   const right = raw.right === 'C' ? 'Yes' : 'No';
 
@@ -121,11 +121,11 @@ function normalizeIbkrForecastEx(raw, ctx = {}) {
     close_time: null,
     expiration_time: raw.maturityDate || null,
     status: 'open',
-    yes_bid: right === 'Yes' ? yesBid : noDerived.no_bid,
-    yes_ask: right === 'Yes' ? yesAsk : noDerived.no_ask,
+    yes_bid: right === 'Yes' ? yesBid : null,
+    yes_ask: right === 'Yes' ? yesAsk : null,
     yes_mid: null,
-    no_bid: right === 'No' ? yesBid : noDerived.no_bid,
-    no_ask: right === 'No' ? yesAsk : noDerived.no_ask,
+    no_bid: right === 'No' ? yesBid : null,
+    no_ask: right === 'No' ? yesAsk : null,
     no_mid: null,
     last_price: last,
     implied_probability_mid: null,
@@ -152,8 +152,8 @@ function normalizeIbkrCme(raw, ctx = {}) {
   const yesBid = fromCmeSnapshot(snap['84']);
   const yesAsk = fromCmeSnapshot(snap['86']);
   const last = fromCmeSnapshot(snap['31']);
-  const noDerived = deriveNoFromYes(yesBid, yesAsk);
   const question = raw.desc2 || ctx.question || '';
+  const right = raw.right === 'P' || /^NO$/i.test(raw.right) ? 'No' : 'Yes';
 
   return {
     id: `cme:${raw.conid}`,
@@ -171,11 +171,11 @@ function normalizeIbkrCme(raw, ctx = {}) {
     close_time: null,
     expiration_time: raw.maturityDate || null,
     status: 'open',
-    yes_bid: yesBid,
-    yes_ask: yesAsk,
+    yes_bid: right === 'Yes' ? yesBid : null,
+    yes_ask: right === 'Yes' ? yesAsk : null,
     yes_mid: null,
-    no_bid: noDerived.no_bid,
-    no_ask: noDerived.no_ask,
+    no_bid: right === 'No' ? yesBid : null,
+    no_ask: right === 'No' ? yesAsk : null,
     no_mid: null,
     last_price: last,
     implied_probability_mid: null,

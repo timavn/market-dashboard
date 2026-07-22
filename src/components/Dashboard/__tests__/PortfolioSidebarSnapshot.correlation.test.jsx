@@ -62,8 +62,8 @@ function renderSidebar(props = {}) {
       portfolioData={portfolioData}
       portfolioAccountsData={[]}
       loading={false}
-      rtaPositions={{ available: true, longCount: 0, shortCount: 0 }}
-      etfProSnapshot={{ rows: [] }}
+      rtaPositions={{ available: true, longCount: 0, shortCount: 0, dataQuality: { status: 'ok' } }}
+      etfProSnapshot={{ available: false, rows: [], dataQuality: { status: 'ok' } }}
       hedgeyeChangelog={null}
       hedgeyeChangelogLoading={false}
       hedgeyeChangelogLastSuccessAt="2026-06-18T13:00:00Z"
@@ -123,6 +123,72 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(within(positionTable).queryByText('20')).not.toBeInTheDocument();
     expect(within(positionTable).queryByText('26')).not.toBeInTheDocument();
     expect(within(positionTable).getAllByText('1').length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('renders RTA and ETF Pro counts and net bars only for clean current comparisons', () => {
+    renderSidebar({
+      rtaPositions: {
+        available: true,
+        comparisonAvailable: true,
+        longCount: 1,
+        shortCount: 22,
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+      etfProSnapshot: {
+        available: true,
+        comparisonAvailable: true,
+        longCount: 21,
+        shortCount: 13,
+        rows: makeEtfProRows(1, 1),
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+    });
+
+    expect(screen.getByTestId('rta-long-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('rta-short-count')).toHaveTextContent('22');
+    expect(screen.getByTestId('rta-net-percent')).toHaveTextContent('-91%');
+    expect(screen.getByTestId('rta-net-bar').children).toHaveLength(3);
+    expect(screen.getByTestId('etf-pro-long-count')).toHaveTextContent('21');
+    expect(screen.getByTestId('etf-pro-short-count')).toHaveTextContent('13');
+    expect(screen.getByTestId('etf-pro-net-percent')).toHaveTextContent('+24%');
+    expect(screen.getByTestId('etf-pro-net-bar').children).toHaveLength(3);
+  });
+
+  test.each([
+    ['stale cache', { _cache: { stale: true }, dataQuality: { status: 'ok' } }],
+    ['failed comparison', { comparisonAvailable: false, dataQuality: { status: 'ok' } }],
+    ['unavailable response', { available: false, dataQuality: { status: 'ok' } }],
+    ['data-quality warning', { dataQuality: { status: 'warning' } }],
+  ])('shows no RTA or ETF Pro comparison for a %s', (_label, invalidState) => {
+    renderSidebar({
+      rtaPositions: {
+        available: true,
+        comparisonAvailable: true,
+        longCount: 1,
+        shortCount: 22,
+        ...invalidState,
+      },
+      etfProSnapshot: {
+        available: true,
+        comparisonAvailable: true,
+        longCount: 21,
+        shortCount: 13,
+        rows: makeEtfProRows(21, 13),
+        ...invalidState,
+      },
+    });
+
+    expect(screen.getByTestId('rta-long-count')).toHaveTextContent('—');
+    expect(screen.getByTestId('rta-short-count')).toHaveTextContent('—');
+    expect(screen.getByTestId('rta-net-percent')).toHaveTextContent('—');
+    expect(screen.getByTestId('rta-net-bar').children).toHaveLength(0);
+    expect(screen.getByTestId('rta-net-percent').parentElement).toHaveClass('pf-netbar-wrap--muted');
+
+    expect(screen.getByTestId('etf-pro-long-count')).toHaveTextContent('—');
+    expect(screen.getByTestId('etf-pro-short-count')).toHaveTextContent('—');
+    expect(screen.getByTestId('etf-pro-net-percent')).toHaveTextContent('—');
+    expect(screen.getByTestId('etf-pro-net-bar').children).toHaveLength(0);
+    expect(screen.getByTestId('etf-pro-net-percent').parentElement).toHaveClass('pf-netbar-wrap--muted');
   });
 
   test('shows live dollar amounts and keeps 165% gross exposure within the 200% scale', () => {
@@ -256,7 +322,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     });
 
     expect(screen.getByText('FEED')).toBeInTheDocument();
-    expect(screen.getByLabelText(/show last updated time for latest hedgeye updates/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/show status details for latest hedgeye updates/i)).toBeInTheDocument();
     expect(screen.getByText('ATZAF')).toBeInTheDocument();
     expect(screen.getByText('Added to')).toBeInTheDocument();
     expect(screen.getByText('LONG')).toBeInTheDocument();
@@ -293,7 +359,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
       },
     });
 
-    const ibkrStatusButton = screen.getByLabelText(/show last updated time for ibkr/i);
+    const ibkrStatusButton = screen.getByLabelText(/show status details for ibkr/i);
     expect(ibkrStatusButton).toHaveTextContent('🟡');
 
     fireEvent.click(ibkrStatusButton);
@@ -358,7 +424,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
       },
     });
 
-    const ibkrStatusButton = screen.getByLabelText(/show last updated time for ibkr/i);
+    const ibkrStatusButton = screen.getByLabelText(/show status details for ibkr/i);
     expect(ibkrStatusButton).toHaveTextContent('🟡');
 
     fireEvent.click(ibkrStatusButton);
@@ -408,7 +474,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
       },
     });
 
-    const ibkrStatusButton = screen.getByLabelText(/show last updated time for ibkr/i);
+    const ibkrStatusButton = screen.getByLabelText(/show status details for ibkr/i);
     expect(ibkrStatusButton).toHaveTextContent('🟢');
 
     fireEvent.click(ibkrStatusButton);

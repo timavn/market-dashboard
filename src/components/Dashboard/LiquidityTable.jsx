@@ -13,8 +13,8 @@ const LiquidityTable = ({ data, loading }) => {
   // Helper to get background color based on value
   const getBackgroundColor = (value) => {
     if (value === null || value === undefined) return '#F3F4F6';
-    if (value > 0) return '#D1FAE5'; // Light green
-    if (value < 0) return '#FEE2E2'; // Light red
+    if (value > 0) return '#ecfdf5'; // Light green
+    if (value < 0) return '#fef2f2'; // Light red
     return '#F3F4F6'; // Light gray
   };
 

@@ -1,6 +1,23 @@
 const HERMES_AGENT_RUNS_TABLE = process.env.HERMES_AGENT_RUNS_TABLE || 'HermesAgentRuns';
 const HERMES_ALERTS_TABLE = process.env.HERMES_ALERTS_TABLE || 'HermesAlerts';
 const HERMES_ALERT_EMAIL_TO = process.env.HERMES_ALERT_EMAIL_TO || process.env.ALERT_EMAIL_TO || '';
+const SERVICE_MANIFEST = require('../../ops/services.json');
+const MANIFEST_SERVICES = new Map(
+  (SERVICE_MANIFEST.services || []).map((service) => [String(service.id), service]),
+);
+
+function workerInfrastructure(key) {
+  const service = MANIFEST_SERVICES.get(`hermes.${key}`) || {};
+  return {
+    cadence: service.cadenceMinutes ? `${service.cadenceMinutes} minutes` : 'not configured',
+    cadenceMinutes: Number(service.cadenceMinutes) || null,
+    readinessMaxAgeMinutes: Number(service.readinessMaxAgeMinutes) || null,
+    scheduleWindow: service.scheduleWindow || null,
+    defaultFunctionName: service.aws?.functionName || null,
+    scheduleId: service.aws?.scheduleId || null,
+    heartbeatServiceId: service.aws?.heartbeatServiceId || `hermes:${key}`,
+  };
+}
 
 const WORKERS = [
   {
@@ -8,9 +25,8 @@ const WORKERS = [
     name: 'Quant Analyst',
     description: 'Monitors thresholds, outliers, Hedgeye freshness, and portfolio signals.',
     schedule: 'Every 5-15 minutes during market hours',
-    cadence: '5-15 minutes',
+    ...workerInfrastructure('quant-analyst'),
     lambdaEnv: 'HERMES_QUANT_ANALYST_FUNCTION',
-    defaultFunctionName: 'hermes-quant-analyst',
     triggerType: 'schedule',
   },
   {
@@ -18,9 +34,8 @@ const WORKERS = [
     name: 'Quant Developer',
     description: 'Monitors dashboard, APIs, deployment freshness, and repo/site health.',
     schedule: 'Every 10-15 minutes',
-    cadence: '10-15 minutes',
+    ...workerInfrastructure('quant-developer'),
     lambdaEnv: 'HERMES_QUANT_DEVELOPER_FUNCTION',
-    defaultFunctionName: 'hermes-quant-developer',
     triggerType: 'schedule',
   },
   {
@@ -28,9 +43,8 @@ const WORKERS = [
     name: 'Security',
     description: 'Monitors auth/config drift, protections, and suspicious service failures.',
     schedule: 'Every 15-60 minutes',
-    cadence: '15-60 minutes',
+    ...workerInfrastructure('security'),
     lambdaEnv: 'HERMES_SECURITY_FUNCTION',
-    defaultFunctionName: 'hermes-security',
     triggerType: 'schedule',
   },
 ];
@@ -207,10 +221,10 @@ async function safeQueryRunsForToday(dynamodb, workerKey) {
   try {
     const result = await dynamodb.query({
       TableName: HERMES_AGENT_RUNS_TABLE,
-      KeyConditionExpression: '#worker = :worker',
-      FilterExpression: 'begins_with(startedAt, :today)',
+      KeyConditionExpression: '#worker = :worker AND begins_with(#startedAt, :today)',
       ExpressionAttributeNames: {
         '#worker': 'worker',
+        '#startedAt': 'startedAt',
       },
       ExpressionAttributeValues: {
         ':worker': workerKey,
@@ -527,22 +541,6 @@ function parseCommand(command) {
   return null;
 }
 
-function synthesizeWorkerRun(workerKey, workflowSnapshot) {
-  const worker = getWorkerDefinition(workerKey);
-  const fallback = workerFallback(workerKey, workflowSnapshot, []);
-  const start = nowIso();
-  return buildRunRecord({
-    worker: worker.key,
-    triggerType: 'manual',
-    status: fallback.status === 'idle' ? 'succeeded' : fallback.status,
-    summary: fallback.summary,
-    severity: fallback.severity,
-    command: workerKey,
-    startedAt: start,
-    finishedAt: nowIso(),
-  });
-}
-
 async function invokeWorkerLambda(lambdaClient, workerKey, payload) {
   const worker = getWorkerDefinition(workerKey);
   const functionName = process.env[worker.lambdaEnv] || worker.defaultFunctionName;
@@ -642,6 +640,7 @@ async function executeDirectorCommand({
 
   const dispatch = await invokeWorkerLambda(lambdaClient, parsed.worker, {
     source: 'managing-director',
+    jobType: parsed.worker,
     command,
     requestedAt: nowIso(),
     triggerType: 'manual',
@@ -660,12 +659,19 @@ async function executeDirectorCommand({
       command,
     });
   } else {
-    runRecord = synthesizeWorkerRun(parsed.worker, workflowSnapshot);
-    runRecord.summary = `${runRecord.summary} (Local fallback: ${dispatch.reason})`;
-    if (runRecord.status === 'succeeded' && dispatch.reason !== 'function_not_configured') {
-      runRecord.status = 'warning';
-      runRecord.severity = 'warning';
-    }
+    const startedAt = nowIso();
+    runRecord = buildRunRecord({
+      worker: parsed.worker,
+      triggerType: 'manual',
+      status: 'failed',
+      summary: `Worker dispatch failed: ${dispatch.reason || 'unknown error'}.`,
+      severity: 'warning',
+      command,
+      startedAt,
+      finishedAt: nowIso(),
+      source: 'dashboard-dispatch',
+      metadata: { dispatchFailure: true, functionName: dispatch.functionName || null },
+    });
   }
 
   await persistRunRecord(dynamodb, runRecord);

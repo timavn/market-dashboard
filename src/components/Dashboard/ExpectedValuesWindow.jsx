@@ -203,10 +203,10 @@ const transcribedQuarterlyExpectedValues = quarterlyExpectedValues.map((item, ro
 }));
 
 const QUAD_COLORS = {
-  1: { bg: '#008000', text: '#ffffff' },
+  1: { bg: '#059669', text: '#ffffff' },
   2: { bg: '#7CB342', text: '#ffffff' },
   3: { bg: '#FFC107', text: '#111827' },
-  4: { bg: '#FE0000', text: '#ffffff' },
+  4: { bg: '#dc2626', text: '#ffffff' },
 };
 
 const MONTHLY_QUAD_REFERENCE = [
@@ -674,12 +674,12 @@ const AllEvMatrixPanel = () => (
                     key={`${groupIdx}-${label}`}
                     className={`p-0 border border-gray-400 text-center text-[9px] font-bold ${
                       label === 'Q1'
-                        ? 'bg-[#4ade80] text-black'
+                        ? 'bg-[#059669] text-black'
                         : label === 'Q2'
                           ? 'bg-[#fde047] text-black'
                           : label === 'Q3'
-                            ? 'bg-[#fca5a5] text-black'
-                            : 'bg-[#ef4444] text-white'
+                            ? 'bg-[#dc2626] text-black'
+                            : 'bg-[#dc2626] text-white'
                     }`}
                   >
                     {label.replace('Q', '')}

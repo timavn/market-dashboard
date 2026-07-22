@@ -23,6 +23,7 @@ describe('GlobalMarketDayCycleHeader regional strip', () => {
     expect(screen.getByLabelText('Asia market clocks')).toBeInTheDocument();
     expect(screen.queryByText(/follow the sun/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/global market day-cycle/i)).not.toBeInTheDocument();
+    expect(document.querySelector('.global-session-strip__map')).not.toBeInTheDocument();
   });
 
   test('shows the correct local times from west to east', () => {

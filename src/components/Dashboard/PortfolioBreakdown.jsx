@@ -11,7 +11,7 @@ import LoadingIndicator from '../common/LoadingIndicator';
 import './PortfolioConstructionIdeas.css';
 
 const ASSET_CLASS_COLORS = {
-  'Equities': '#10B981',      // Emerald green
+  'Equities': '#059669',      // Emerald green
   'Fixed Income': '#3B82F6',  // Blue
   'Commodities': '#F97316',   // Orange
   'FX': '#8B5CF6',            // Violet (includes Gold, USD, and other currencies)
@@ -1656,7 +1656,7 @@ const PortfolioBreakdown = ({
                 textAlign: 'center',
                 marginBottom: '16px',
                 padding: '8px',
-                backgroundColor: '#10B981',
+                backgroundColor: '#059669',
                 color: 'white',
                 fontWeight: 700,
                 fontSize: '14px',
@@ -1793,7 +1793,7 @@ const PortfolioBreakdown = ({
                 textAlign: 'center',
                 marginBottom: '16px',
                 padding: '8px',
-                backgroundColor: '#EF4444',
+                backgroundColor: '#dc2626',
                 color: 'white',
                 fontWeight: 700,
                 fontSize: '14px',

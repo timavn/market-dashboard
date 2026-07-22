@@ -10,6 +10,7 @@ export const EMPTY_CORRELATION_DATA = Object.freeze({
   rollingStats: null,
   correlationsTimestamp: null,
   calculationDate: null,
+  fxvlSnapshot: null,
 });
 
 function unavailableMessage(error) {
@@ -33,6 +34,7 @@ function validateCorrelationResponse(data) {
     rollingStats: data.rollingStats,
     correlationsTimestamp: data.timestamp,
     calculationDate: data.calculationDate,
+    fxvlSnapshot: data.fxvlSnapshot || null,
   };
 }
 

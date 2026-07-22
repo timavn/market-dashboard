@@ -255,15 +255,15 @@ describe('MarketChartCard Component', () => {
     test('should use green gradient for positive change', () => {
       const change = parseFloat(mockChartData.current.change);
       const isPositive = change >= 0;
-      const gradientColor = isPositive ? '#16a34a' : '#dc2626';
+      const gradientColor = isPositive ? '#059669' : '#dc2626';
 
-      expect(gradientColor).toBe('#16a34a');
+      expect(gradientColor).toBe('#059669');
     });
 
     test('should use red gradient for negative change', () => {
       const change = parseFloat(mockNegativeChartData.current.change);
       const isPositive = change >= 0;
-      const gradientColor = isPositive ? '#16a34a' : '#dc2626';
+      const gradientColor = isPositive ? '#059669' : '#dc2626';
 
       expect(gradientColor).toBe('#dc2626');
     });

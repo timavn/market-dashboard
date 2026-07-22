@@ -39,6 +39,19 @@ export const formatDateOnly = (updatedAt) => {
   return updated.toLocaleDateString();
 };
 
+export const formatMarketMonthDay = (updatedAt) => {
+  if (!updatedAt) return null;
+
+  const updated = updatedAt instanceof Date ? updatedAt : new Date(updatedAt);
+  if (Number.isNaN(updated.getTime())) return null;
+
+  return updated.toLocaleDateString('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+    timeZone: 'America/New_York',
+  });
+};
+
 /** Default poll intervals (ms) for status-dot freshness. */
 export const SOURCE_POLL_INTERVALS = {
   multiRegionQuotes: 30000,

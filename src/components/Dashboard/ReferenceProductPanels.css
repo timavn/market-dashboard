@@ -73,7 +73,7 @@
 
 .reference-panel__status--live,
 .reference-panel__status--fresh {
-  color: #047857;
+  color: #059669;
   border-color: #a7f3d0;
   background: #ecfdf5;
 }
@@ -86,8 +86,8 @@
 }
 
 .reference-panel__status--error {
-  color: #b91c1c;
-  border-color: #fecaca;
+  color: #dc2626;
+  border-color: #dc2626;
   background: #fef2f2;
 }
 
@@ -240,13 +240,13 @@
 }
 
 .reference-pill--positive {
-  color: #047857;
-  background: #d1fae5;
+  color: #059669;
+  background: #ecfdf5;
 }
 
 .reference-pill--negative {
-  color: #b91c1c;
-  background: #fee2e2;
+  color: #dc2626;
+  background: #fef2f2;
 }
 
 .reference-empty-inline {
@@ -265,8 +265,8 @@
 }
 
 .reference-alert--error {
-  color: #991b1b;
-  border-color: #fecaca;
+  color: #dc2626;
+  border-color: #dc2626;
   background: #fef2f2;
 }
 

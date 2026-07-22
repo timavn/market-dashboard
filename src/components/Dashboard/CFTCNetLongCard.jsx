@@ -88,10 +88,10 @@ const CFTCNetLongCard = () => {
 
   const getZScoreColor = (z) => {
     if (z === null || z === undefined) return isDark ? '#9ca3af' : '#6b7280';
-    if (z > 2) return '#10b981'; // Very positive (green)
-    if (z > 1) return isDark ? '#34d399' : '#059669'; // Positive (light green)
-    if (z < -2) return '#ef4444'; // Very negative (red)
-    if (z < -1) return isDark ? '#f87171' : '#dc2626'; // Negative (light red)
+    if (z > 2) return '#059669'; // Very positive (green)
+    if (z > 1) return isDark ? '#059669' : '#059669'; // Positive (light green)
+    if (z < -2) return '#dc2626'; // Very negative (red)
+    if (z < -1) return isDark ? '#dc2626' : '#dc2626'; // Negative (light red)
     return isDark ? '#d1d5db' : '#374151'; // Neutral
   };
 
@@ -122,7 +122,7 @@ const CFTCNetLongCard = () => {
         borderRadius: 'var(--dashboard-radius, 6px)',
         boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
       }}>
-        <Text style={{ color: '#ef4444' }}>{error}</Text>
+        <Text style={{ color: '#dc2626' }}>{error}</Text>
       </Card>
     );
   }
@@ -208,9 +208,9 @@ const CFTCNetLongCard = () => {
                 <TableBody>
                   {groupedData[category].map((row, idx) => {
                     const wwColor = row.wwChg > 0
-                      ? (isDark ? '#34d399' : '#10b981')
+                      ? (isDark ? '#059669' : '#059669')
                       : row.wwChg < 0
-                        ? (isDark ? '#f87171' : '#ef4444')
+                        ? (isDark ? '#dc2626' : '#dc2626')
                         : (isDark ? '#d1d5db' : '#374151');
                     return (
                       <TableRow key={idx}>

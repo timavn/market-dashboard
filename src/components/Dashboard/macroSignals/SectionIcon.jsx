@@ -3,13 +3,13 @@ import { useId } from 'react';
 const VARIANT_CONFIG = {
   long: {
     path: 'M12 3.25 L18.75 12.25 H14.5 V20.75 H9.5 V12.25 H5.25 Z',
-    stops: ['#14532d', '#16a34a', '#4ade80', '#bbf7d0'],
+    stops: ['#059669', '#059669', '#059669', '#ecfdf5'],
     highlight: 'M12 5.5 L16.2 11.5 H13.8 V12.5 H10.2 V11.5 H7.8 Z',
     glow: 'rgba(34, 197, 94, 0.55)',
   },
   short: {
     path: 'M12 20.75 L5.25 11.75 H9.5 V3.25 H14.5 V11.75 H18.75 Z',
-    stops: ['#7f1d1d', '#dc2626', '#f87171', '#fecaca'],
+    stops: ['#dc2626', '#dc2626', '#dc2626', '#dc2626'],
     highlight: 'M12 18.5 L7.8 12.5 H10.2 V11.5 H13.8 V12.5 H16.2 Z',
     glow: 'rgba(239, 68, 68, 0.55)',
   },

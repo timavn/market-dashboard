@@ -1,4 +1,20 @@
-const CORRELATION_WINDOWS = [15, 30, 90, 120, 180];
+const CORRELATION_WINDOWS = Object.freeze([
+  Object.freeze({ key: '5D', sessions: 5 }),
+  Object.freeze({ key: '15D', sessions: 15 }),
+  Object.freeze({ key: '30D', sessions: 30 }),
+  Object.freeze({ key: '1M', sessions: 21 }),
+  Object.freeze({ key: '3M', sessions: 63 }),
+  Object.freeze({ key: '6M', sessions: 126 }),
+]);
+const LEGACY_CORRELATION_WINDOWS = Object.freeze([
+  Object.freeze({ key: '90D', sessions: 90 }),
+  Object.freeze({ key: '120D', sessions: 120 }),
+  Object.freeze({ key: '180D', sessions: 180 }),
+]);
+const OUTPUT_CORRELATION_WINDOWS = Object.freeze([
+  ...CORRELATION_WINDOWS,
+  ...LEGACY_CORRELATION_WINDOWS,
+]);
 const ROLLING_WINDOW = 30;
 const ROLLING_SAMPLE_COUNT = 252;
 const REQUIRED_ROLLING_RETURNS = ROLLING_WINDOW + ROLLING_SAMPLE_COUNT - 1;
@@ -171,15 +187,15 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
     }
 
     correlations[symbol] = {};
-    for (const window of CORRELATION_WINDOWS) {
-      const value = correlationForExactWindow(aligned, window);
+    for (const { key, sessions } of OUTPUT_CORRELATION_WINDOWS) {
+      const value = correlationForExactWindow(aligned, sessions);
       if (!Number.isFinite(value)) {
         throw new UsdCorrelationDataError(
-          `${symbol} ${window}D correlation could not be calculated`,
+          `${symbol} ${key} correlation could not be calculated`,
           'USD_CORRELATION_CALCULATION_FAILED',
         );
       }
-      correlations[symbol][`${window}D`] = round(value);
+      correlations[symbol][key] = round(value);
     }
 
     const stats = buildRollingStats(aligned);
@@ -204,6 +220,8 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
 
 module.exports = {
   CORRELATION_WINDOWS,
+  LEGACY_CORRELATION_WINDOWS,
+  OUTPUT_CORRELATION_WINDOWS,
   ROLLING_SAMPLE_COUNT,
   ROLLING_WINDOW,
   REQUIRED_ROLLING_RETURNS,

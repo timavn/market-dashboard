@@ -1,7 +1,4 @@
-const {
-  setProviderStatus,
-  setIbkrStaleEvents,
-} = require('../cache');
+const { setProviderStatus } = require('../cache');
 const { sidecarRequest, SIDECAR_BASE } = require('./ibkrHttp');
 
 const CPI_REFRESH_TIMEOUT_MS = Number(process.env.IBKR_CPI_REFRESH_TIMEOUT_MS || 30000);
@@ -25,6 +22,7 @@ function setIbkrFamilyStatus(status, message, lastSuccessAt = null, extra = {}) 
   const payload = {
     status,
     message,
+    errorCode: extra?.errorCode || null,
     ...(lastSuccessAt ? { last_success_at: lastSuccessAt } : {}),
     ...(extra || {}),
   };
@@ -79,7 +77,14 @@ async function fetchIBKREvents(options = {}) {
   }
 
   try {
-    const body = options?.cpi ? { cpi: options.cpi } : undefined;
+    const body = options?.cpi
+      ? {
+          cpi: options.cpi,
+          catalogContracts: Array.isArray(options.catalogContracts)
+            ? options.catalogContracts
+            : [],
+        }
+      : undefined;
     const result = await sidecarRequest('/refresh', {
       method: 'POST',
       body,
@@ -102,6 +107,7 @@ async function fetchIBKREvents(options = {}) {
         contracts_added: result.contracts_added ?? 0,
         contracts_total: result.contracts_total ?? events.length,
         portfolio_seed_count: result.portfolio_seed_count ?? 0,
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
       },
     );
 
@@ -109,7 +115,6 @@ async function fetchIBKREvents(options = {}) {
       return [];
     }
 
-    setIbkrStaleEvents(events);
     return events;
   } catch (err) {
     const reason = err.reason === 'sidecar_offline' ? 'sidecar_offline' : 'error';
@@ -146,6 +151,7 @@ async function discoverIbkrEventContracts(body = {}) {
         contracts_added: result.contracts_added ?? 0,
         contracts_total: result.contracts_total ?? 0,
         portfolio_seed_count: result.portfolio_seed_count ?? 0,
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
       },
     );
     return result;

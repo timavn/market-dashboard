@@ -1,99 +1,5 @@
 const ibkrPortfolio = require('./ibkr/ibkrPortfolioDataProvider');
-const compositeMarketData = require('./compositeMarketDataProvider');
 const { setPortfolioMeta } = require('./providerStatus');
-const ibkrStreamBridge = require('../ibkr/ibkrStreamBridge');
-const { sidecarRequest } = require('./ibkrSidecarClient');
-const { normalizeIbkrRaw } = require('./normalize/normalizeQuote');
-
-const PORTFOLIO_QUOTE_FALLBACK_ENABLED = process.env.PORTFOLIO_QUOTE_FALLBACK_ENABLED !== 'false';
-const PORTFOLIO_QUOTE_FALLBACK_BATCH_SIZE = Number(process.env.PORTFOLIO_QUOTE_FALLBACK_BATCH_SIZE || 4);
-const PORTFOLIO_QUOTE_FALLBACK_DELAY_MS = Number(process.env.PORTFOLIO_QUOTE_FALLBACK_DELAY_MS || 75);
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function getFallbackQuotesForSymbols(symbols) {
-  const map = {};
-  if (!PORTFOLIO_QUOTE_FALLBACK_ENABLED || !Array.isArray(symbols) || symbols.length === 0) {
-    return map;
-  }
-
-  const batchSize = Math.max(1, PORTFOLIO_QUOTE_FALLBACK_BATCH_SIZE);
-  for (let i = 0; i < symbols.length; i += batchSize) {
-    const batch = symbols.slice(i, i + batchSize);
-    const results = await Promise.all(
-      batch.map(async (sym) => {
-        try {
-          const canonical = await compositeMarketData.getCanonicalQuote(sym);
-          if (canonical?.mark != null) {
-            return [sym.toUpperCase(), canonical];
-          }
-        } catch (err) {
-          console.warn(`[Portfolio] fallback quote failed for ${sym}:`, err.message);
-        }
-        return null;
-      }),
-    );
-
-    for (const result of results) {
-      if (result) map[result[0]] = result[1];
-    }
-
-    if (i + batchSize < symbols.length && PORTFOLIO_QUOTE_FALLBACK_DELAY_MS > 0) {
-      await sleep(PORTFOLIO_QUOTE_FALLBACK_DELAY_MS);
-    }
-  }
-
-  return map;
-}
-
-/**
- * Portfolio quote enrichment:
- * 1. Fast cache/stream lookup for most holdings.
- * 2. Bounded full-provider fallback for unmarked holdings so thin/stale-cache
- *    names can still receive display marks.
- */
-async function getCachedQuotesForSymbols(symbols) {
-  const map = {};
-  const missing = [];
-
-  for (const sym of symbols) {
-    const canonical = ibkrStreamBridge.getCachedCanonical(sym);
-    if (canonical?.valid && canonical.mark != null) {
-      map[sym.toUpperCase()] = canonical;
-    } else {
-      missing.push(sym);
-    }
-  }
-
-  if (missing.length === 0) return map;
-
-  try {
-    const res = await sidecarRequest(
-      `/cache/quotes?symbols=${encodeURIComponent(missing.join(','))}`,
-      { timeoutMs: 2000 },
-    );
-    for (const raw of res.quotes || []) {
-      const sym = (raw.symbol || '').toUpperCase();
-      if (!sym) continue;
-      const canonical = normalizeIbkrRaw(raw);
-      if (canonical?.valid && canonical.mark != null) {
-        map[sym] = canonical;
-      }
-    }
-  } catch {
-    // Positions may already carry marketValue from IBKR portfolio cache.
-  }
-
-  const stillMissing = missing.filter((sym) => !map[sym.toUpperCase()]);
-  if (stillMissing.length > 0) {
-    const fallback = await getFallbackQuotesForSymbols(stillMissing);
-    Object.assign(map, fallback);
-  }
-
-  return map;
-}
 
 /**
  * @param {ReturnType<import('./uploadedStatementPortfolioProvider').createUploadedStatementPortfolioProvider>} uploadProvider
@@ -122,6 +28,7 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       positionSource: null,
       priceSource: null,
       empty: true,
+      liveSessionVerified: false,
     };
   }
 
@@ -186,14 +93,16 @@ function createCompositePortfolioDataProvider(uploadProvider) {
             : '0.00',
         })),
       dataSource: 'ibkr_api',
-      positionSource: 'ibkr_api',
-      priceSource: 'ibkr',
+      positionSource: 'ibkr_live_session',
+      priceSource: null,
       reconciliationWarnings: dataQualityWarnings,
       providerStatus: null,
       dataQuality: ibkrSnap.dataQuality || null,
       lastUpdated: formatLastUpdated(ibkrSnap.fetchedAt || new Date().toISOString()),
       accountSummary: ibkrSnap.accountSummary,
       empty: holdings.length === 0 && !ibkrSnap.accountSummary,
+      liveSessionVerified: true,
+      fromCache: false,
     };
   }
 
@@ -209,11 +118,9 @@ function createCompositePortfolioDataProvider(uploadProvider) {
     }
 
     try {
-      const ibkrSnap = await ibkrPortfolio.getPortfolioSnapshot(
-        accountId,
-        getCachedQuotesForSymbols,
-      );
-      if (ibkrSnap.error && !ibkrSnap.accountSummary && !(ibkrSnap.holdings?.length)) {
+      const ibkrSnap = await ibkrPortfolio.getPortfolioSnapshot(accountId);
+      if (ibkrSnap.liveSessionVerified !== true
+          || (ibkrSnap.error && !ibkrSnap.accountSummary && !(ibkrSnap.holdings?.length))) {
         return formatIbkrOfflineEmpty();
       }
       return formatIbkrResponse(ibkrSnap);
@@ -264,6 +171,8 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       lastUpdated: formatLastUpdated(timestamp),
       dataSource: 'uploaded_statement',
       positionSource: 'uploaded_statement',
+      archival: true,
+      liveSessionVerified: false,
       empty: false,
     };
   }

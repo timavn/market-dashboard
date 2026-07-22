@@ -1,5 +1,14 @@
-// Metric Definitions from The Process, The Coach, and The Playbook
-// Quick reference guide for interpreting metrics in the Securities Universe
+import { getProcessRule } from './processDocuments';
+
+// Quick reference for the Securities Universe. Canonical process language is
+// sourced from the shared rule registry; unresolved mechanisms remain labeled.
+
+const tradeDurationRule = getProcessRule('signal.trade.duration');
+const trendDurationRule = getProcessRule('signal.trend.duration');
+const trendBreakRule = getProcessRule('lifecycle.trend_break_trade_holds');
+const tradeBreakRule = getProcessRule('lifecycle.trade_break');
+const longEntryRule = getProcessRule('entry.long.range_half');
+const shortEntryRule = getProcessRule('entry.short.range_half');
 
 export const METRIC_DEFINITIONS = {
   'zScore': {
@@ -34,27 +43,28 @@ export const METRIC_DEFINITIONS = {
     components: [
       {
         name: 'Trade',
-        duration: '3 weeks or less',
-        use: 'Used for entries and exits, immediate-term timing'
+        duration: `${tradeDurationRule.parameters.maximumDurationWeeks} weeks or less`,
+        use: 'Published tracker direction; used for entries and terminal exits'
       },
       {
         name: 'Trend',
-        duration: '3 months or more',
-        use: 'Intermediate-term cycle direction, position management'
+        duration: `${trendDurationRule.parameters.minimumDurationMonths} months or more`,
+        use: 'Published risk-range direction; used for intermediate-cycle position management'
       },
       {
         name: 'Tail',
-        duration: '3 years or less',
-        use: 'Long-term conviction and regime shifts, strategic allocation'
+        duration: '3 years or less (research convention)',
+        use: 'Research-only until its exact measurement and decision authority are approved'
       }
     ],
     interpretation: [
-      'Bullish Trade + Bullish Trend: Ideal setup to buy/add near LRR',
-      'Bearish Trade + Bearish Trend: Exit completely or short',
-      'Trade breaks but Trend holds: Trim position (sell-SOME)',
-      'Both Trade and Trend break: Exit completely'
+      'Aligned bullish Trade and Trend: long eligibility, subject to the bottom-half entry rule',
+      'Aligned bearish Trade and Trend: short eligibility, subject to the top-half entry rule',
+      trendBreakRule.statement,
+      tradeBreakRule.statement,
+      'A missing Trade or Trend remains unknown and prevents executable output'
     ],
-    source: 'The Process, Section 5: Risk Range Signals (The Core)'
+    source: 'The Process v0.1 and Position Sizing v1.1'
   },
 
   'ivolPrem': {
@@ -100,8 +110,8 @@ export const METRIC_DEFINITIONS = {
     format: 'Displayed as "Quad1/Quad2/Quad3/Quad4" showing ranking in each regime',
     interpretation: [
       'Lower numbers in first or second position = better for longs',
-      'Quad 1 ranking: Best assets for Quad 1 regime (Growth Accelerating, Inflation Accelerating)',
-      'Quad 2 ranking: Best assets for Quad 2 regime (Growth Accelerating, Inflation Decelerating)',
+      'Quad 1 ranking: Best assets for Quad 1 regime (Growth Accelerating, Inflation Decelerating)',
+      'Quad 2 ranking: Best assets for Quad 2 regime (Growth Accelerating, Inflation Accelerating)',
       'Quad 3 ranking: Best assets for Quad 3 regime (Growth Decelerating, Inflation Accelerating)',
       'Quad 4 ranking: Best assets for Quad 4 regime (Growth Decelerating, Inflation Decelerating)',
       'Best Quad Counts: Those that actually progress (e.g., 3-2-1 on quarterly basis)'
@@ -114,13 +124,12 @@ export const METRIC_DEFINITIONS = {
     definition: 'The 14-day moving average of True Range. True Range is the greatest of: (1) Current High minus Current Low, (2) |Current High minus Previous Close|, (3) |Current Low minus Previous Close|. The ATR % shows ATR as a percentage of the current price.',
     range: 'ATR % < 2% = low volatility (green), 2-5% = moderate (yellow), > 5% = high volatility (red)',
     interpretation: [
-      'Vol-Adjusted Stop: Industry standard is 2.0x ATR below entry price',
-      'If a stock moves more than 2x ATR against you, the trend has likely changed',
-      'Example: Price $40, ATR $2.00 → Stop at $40 - (2 × $2.00) = $36.00',
-      'As price rises, recalculate and trail the stop up — never move it down',
-      'Higher ATR % = more volatile security, requiring wider stops and smaller position sizes'
+      'Position Sizing v1.1 applies ATR as a maximum-position backstop after the beta-derived band',
+      'The current risk budget is 0.50% of NLV at a two-ATR adverse distance',
+      'If the ATR maximum falls below MIN, the security has no positive sizing target',
+      'Hard-stop placement and trailing behavior remain unresolved pending a canonical technical note'
     ],
-    source: 'Volatility-Adjusted Position Management',
+    source: 'Position Sizing v1.1; hard-stop policy remains research-only',
     calculation: 'ATR = SMA(14, True Range); ATR % = ATR / Close × 100'
   },
 
@@ -130,18 +139,13 @@ export const METRIC_DEFINITIONS = {
     components: [
       {
         name: 'LRR (Low Risk Range)',
-        definition: 'Low-end of the risk range - when you buy/add positions',
-        use: 'Entry zone for building positions'
-      },
-      {
-        name: 'TRR (Top Risk Range)',
-        definition: 'Top-end of the risk range - when you sell/trim positions',
-        use: 'Exit zone for taking profits'
+        definition: 'The published low endpoint of the current risk range',
+        use: 'Defines the lower boundary and contributes to long/short structure'
       },
       {
         name: 'HRR (High Risk Range)',
-        definition: 'Daily high risk range values showing price action',
-        use: 'Track higher highs (green) vs lower highs (red)'
+        definition: 'The published high endpoint of the current risk range',
+        use: 'Defines the upper boundary and contributes to long/short structure'
       },
       {
         name: 'LRR Values',
@@ -155,13 +159,12 @@ export const METRIC_DEFINITIONS = {
       }
     ],
     interpretation: [
-      'Buy/add near LRR when Trade and Trend signals are bullish',
-      'Sell/trim near TRR to lock in gains',
-      'Exit completely when both Trade and Trend signals break',
-      'As volatility rises, risk ranges WIDEN',
-      'Narrowing risk range = higher probability of getting trades right'
+      longEntryRule.statement,
+      shortEntryRule.statement,
+      trendBreakRule.statement,
+      tradeBreakRule.statement,
+      'A wrong-half or out-of-range price remains visible but cannot authorize an open or add'
     ],
-    source: 'The Process, Section 5: Risk Range Signals (The Core)'
+    source: 'The Process v0.1 and Position Sizing v1.1'
   }
 };
-

@@ -26,6 +26,7 @@ jest.mock('../../../services/api/predictionMarketsIngestService', () => ({
   refreshIbkr: jest.fn(),
   discoverIbkr: jest.fn(),
   getProviderStatus: jest.fn(),
+  getCurrentCpiRelease: jest.fn(),
 }));
 
 jest.mock('../../../utils/predictionMarketSignals', () => ({
@@ -54,7 +55,7 @@ const YOY_NOWCAST = {
   publishedAt: '2026-06-03T18:56:00Z',
   data: {
     metric: 'Headline CPI YoY',
-    forecastMonth: 'May 2026',
+    forecastMonth: 'June 2026',
     publishedText: '06/03/2026 02:56 PM EDT',
     releaseDate: { date: '2026-07-14' },
     scenarios: [
@@ -63,6 +64,31 @@ const YOY_NOWCAST = {
       { key: 'downside', label: 'Downside', value: 3.97 },
     ],
   },
+};
+
+const CURRENT_CPI_RELEASE = {
+  ok: true,
+  releaseKey: 'KXCPIYOY#2026-06',
+  reportMonth: '2026-06',
+  forecastMonth: 'June 2026',
+  releaseDate: '2026-07-14',
+  eventTicker: 'KXCPIYOY-26JUN',
+  targetStrikes: [3.8, 3.9, 4, 4.1, 4.2, 4.3, 4.4],
+  request: {
+    cpi: {
+      releaseKey: 'KXCPIYOY#2026-06',
+      metric: 'Headline CPI YoY',
+      forecastMonth: 'June 2026',
+      reportMonth: 'June 2026',
+      reportMonthId: '2026-06',
+      releaseCode: 'Jun 26',
+      releaseDate: '2026-07-14',
+      eventTicker: 'KXCPIYOY-26JUN',
+      targetStrikes: [3.8, 3.9, 4, 4.1, 4.2, 4.3, 4.4],
+    },
+  },
+  events: [],
+  providers: PROVIDERS,
 };
 
 const CPI_POSITIONS = [
@@ -97,9 +123,14 @@ const CPI_DISCOVERY = {
 const LIVE_CPI_EVENTS = [
   {
     id: 'ibkr:3.8',
+    conId: 3801,
     venue: 'IBKR',
     source_api: 'IBKR_TWS_API',
     tradable_in_ibkr: true,
+    exchange: 'FORECASTX',
+    tradingClass: 'KXCPIYOY',
+    catalog_source: 'ibkr_contract_details',
+    quote_side: 'YES',
     category: 'Inflation',
     underlying: 'KXCPIYOY',
     contract_title: 'KXCPIYOY-26JUN-T3.8_YES',
@@ -110,12 +141,21 @@ const LIVE_CPI_EVENTS = [
     no_bid: 0.48,
     no_ask: 0.51,
     max_payout_per_contract: 1,
+    releaseKey: 'KXCPIYOY#2026-06',
+    status: 'open',
+    expiration_time: '20991231',
+    updated_at: new Date().toISOString(),
   },
   {
     id: 'ibkr:3.9',
+    conId: 3901,
     venue: 'IBKR',
     source_api: 'IBKR_TWS_API',
     tradable_in_ibkr: true,
+    exchange: 'FORECASTX',
+    tradingClass: 'KXCPIYOY',
+    catalog_source: 'ibkr_contract_details',
+    quote_side: 'YES',
     category: 'Inflation',
     underlying: 'KXCPIYOY',
     contract_title: 'KXCPIYOY-26JUN-T3.9_YES',
@@ -126,12 +166,21 @@ const LIVE_CPI_EVENTS = [
     no_bid: 0.70,
     no_ask: 0.73,
     max_payout_per_contract: 1,
+    releaseKey: 'KXCPIYOY#2026-06',
+    status: 'open',
+    expiration_time: '20991231',
+    updated_at: new Date().toISOString(),
   },
   {
     id: 'ibkr:4.0',
+    conId: 4001,
     venue: 'IBKR',
     source_api: 'IBKR_TWS_API',
     tradable_in_ibkr: true,
+    exchange: 'FORECASTX',
+    tradingClass: 'KXCPIYOY',
+    catalog_source: 'ibkr_contract_details',
+    quote_side: 'YES',
     category: 'Inflation',
     underlying: 'KXCPIYOY',
     contract_title: 'KXCPIYOY-26JUN-T4.0_YES',
@@ -142,6 +191,10 @@ const LIVE_CPI_EVENTS = [
     no_bid: 0.70,
     no_ask: 0.72,
     max_payout_per_contract: 1,
+    releaseKey: 'KXCPIYOY#2026-06',
+    status: 'open',
+    expiration_time: '20991231',
+    updated_at: new Date().toISOString(),
   },
 ];
 
@@ -201,12 +254,82 @@ beforeEach(() => {
     providers: PROVIDERS_WITH_CPI_DISCOVERY,
     cpi_discovery: CPI_DISCOVERY,
   });
+  predictionMarketsIngestService.getCurrentCpiRelease.mockResolvedValue(CURRENT_CPI_RELEASE);
 });
 
 afterEach(() => {
   jest.clearAllMocks();
   delete global.ResizeObserver;
   delete global.fetch;
+});
+
+test('CPI sizing accepts only fresh socket-verified live IBKR NLV', () => {
+  const now = new Date('2026-07-21T17:00:00Z');
+  const freshSocketVerifiedAt = '2026-07-21T16:59:00Z';
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    dataSource: 'ibkr_api',
+    dataQuality: { status: 'ok' },
+    liveSessionVerified: true,
+    accountSummary: {
+      netLiquidation: 190539,
+      source: 'ibkr_live_session',
+      socketVerifiedAt: freshSocketVerifiedAt,
+    },
+  }, now)).toBe(190539);
+
+  expect(PredictionMarketsModule.getCpiAccountValue(
+    null,
+    { portfolioEquity: 100000 },
+  )).toBeNull();
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    accountSummary: { netLiquidation: 190539 },
+  })).toBeNull();
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    dataSource: 'ibkr_api',
+    accountSummary: { netLiquidation: 190539 },
+  })).toBeNull();
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    dataSource: 'ibkr_api',
+    summary: { totalValue: 190539 },
+  })).toBeNull();
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    dataSource: 'ibkr_api',
+    liveSessionVerified: true,
+    fromCache: true,
+    accountSummary: {
+      netLiquidation: 190539,
+      source: 'ibkr_live_session',
+      socketVerifiedAt: freshSocketVerifiedAt,
+    },
+  }, now)).toBeNull();
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    dataSource: 'ibkr_api',
+    liveSessionVerified: true,
+    dataQuality: { status: 'stale' },
+    accountSummary: {
+      netLiquidation: 190539,
+      source: 'ibkr_live_session',
+      socketVerifiedAt: freshSocketVerifiedAt,
+    },
+  }, now)).toBeNull();
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    dataSource: 'ibkr_api',
+    liveSessionVerified: false,
+    accountSummary: {
+      netLiquidation: 190539,
+      source: 'ibkr_live_session',
+      socketVerifiedAt: freshSocketVerifiedAt,
+    },
+  }, now)).toBeNull();
+  expect(PredictionMarketsModule.getCpiAccountValue({
+    dataSource: 'ibkr_api',
+    liveSessionVerified: true,
+    accountSummary: {
+      netLiquidation: 190539,
+      source: 'ibkr_live_session',
+      socketVerifiedAt: '2026-07-21T16:54:59.999Z',
+    },
+  }, now)).toBeNull();
 });
 
 test('does not render open CPI positions as contract rows when live catalog is missing', async () => {
@@ -228,7 +351,7 @@ test('does not render open CPI positions as contract rows when live catalog is m
   expect(screen.queryByRole('button', { name: /Assumptions/i })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Recalculate/i })).not.toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'CPI Model' })).toBeInTheDocument();
-  expect(calendarHeader).toHaveTextContent('Active: June 2026');
+  await waitFor(() => expect(calendarHeader).toHaveTextContent('Active: June 2026'));
   const settlement = screen.getByText('Settlement Tuesday, July 14, 2026 · 8:30 AM ET');
   expect(settlement).toBeInTheDocument();
   expect(settlement).toHaveClass('cpi-calendar-settlement');
@@ -242,7 +365,7 @@ test('does not render open CPI positions as contract rows when live catalog is m
   expect(jun26Card).toHaveAttribute('aria-pressed', 'true');
   expect(jun26Card).toHaveClass('active');
   expect(jun26Card).toHaveClass('neutral');
-  expect(jun26Card).toHaveClass('nowcast');
+  await waitFor(() => expect(jun26Card).toHaveClass('nowcast'));
   expect(jun26Card).toHaveTextContent('+10%');
   expect(jun26Card).toHaveTextContent('0%');
   expect(jun26Card).toHaveTextContent('-5%');
@@ -297,17 +420,8 @@ test('missing CPI nowcast never renders zero estimates or fake recommendation', 
   render(<PredictionMarkets />);
 
   expect((await screen.findAllByText('Missing Data')).length).toBeGreaterThanOrEqual(1);
-  await waitFor(() => {
-    expect(predictionMarketsIngestService.refreshIbkr).toHaveBeenCalledWith({
-      cpi: expect.objectContaining({
-        metric: 'Headline CPI YoY',
-        forecastMonth: 'June 2026',
-        reportMonth: 'June 2026',
-        releaseCode: 'Jun 26',
-        targetStrikes: [3.6, 3.7, 3.8, 3.9, 4, 4.1, 4.2],
-      }),
-    });
-  });
+  expect(await screen.findByText('No inflation nowcast snapshot is available.')).toBeInTheDocument();
+  expect(predictionMarketsIngestService.refreshIbkr).not.toHaveBeenCalled();
   expect(screen.getAllByText('Live data is unavailable for this section.').length).toBeGreaterThanOrEqual(1);
   expect(screen.queryByText(/0\.00\s+lower/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/0\.00\s+base/i)).not.toBeInTheDocument();
@@ -342,6 +456,7 @@ test('live CPI quotes render contracts while payday stays exposure-only without 
       ...PROVIDERS,
       ibkr: {
         status: 'connected',
+        execution_ready: true,
         gateway: { ok: true },
         last_success_at: '2026-06-20T01:56:17.766Z',
         cpi_discovery: {
@@ -379,6 +494,80 @@ test('live CPI quotes render contracts while payday stays exposure-only without 
   expect(row40).toHaveTextContent('12c');
   expect(row40).toHaveTextContent('+55c');
   expect(screen.queryByText('Best Executable Lines')).not.toBeInTheDocument();
+});
+
+test('active CPI month isolates same-strike contracts and exposure from adjacent months', async () => {
+  const juneEvent = {
+    ...LIVE_CPI_EVENTS[2],
+    id: 'ibkr:june-4.0',
+    contract_title: 'KXCPIYOY-26JUN-T4.0_YES',
+    question: 'KXCPIYOY-26JUN-T4.0_YES',
+    api_raw_symbol: 'KXCPIYOY-26JUN-T4.0_YES',
+    yes_ask: 0.12,
+    no_ask: 0.89,
+  };
+  const julyEvent = {
+    ...juneEvent,
+    id: 'ibkr:july-4.0',
+    contract_title: 'KXCPIYOY-26JUL-T4.0_YES',
+    question: 'KXCPIYOY-26JUL-T4.0_YES',
+    api_raw_symbol: 'KXCPIYOY-26JUL-T4.0_YES',
+    yes_ask: 0.91,
+    no_ask: 0.10,
+  };
+  predictionMarketsIngestService.refreshIbkr.mockResolvedValue({
+    events: [julyEvent, juneEvent],
+    dashboardEvents: [],
+    providers: {
+      ...PROVIDERS,
+      ibkr: {
+        status: 'connected',
+        execution_ready: true,
+        gateway: { ok: true },
+        last_success_at: '2026-06-20T01:56:17.766Z',
+        cpi_discovery: {
+          ...CPI_DISCOVERY,
+          foundStrikes: [4],
+          missingStrikes: [3.8, 3.9, 4.1, 4.2, 4.3, 4.4],
+          contractsTotal: 2,
+        },
+        contracts_total: 2,
+      },
+    },
+  });
+
+  const { container } = render(<PredictionMarkets sharedPositionsState={{
+    status: 'live',
+    positions: [
+      {
+        positionId: 'june-position',
+        symbol: 'KXCPIYOY',
+        description: 'KXCPIYOY-26JUN-T4.0_NO',
+        quantity: 11,
+        avgCost: 0.31,
+      },
+      {
+        positionId: 'july-position',
+        symbol: 'KXCPIYOY',
+        description: 'KXCPIYOY-26JUL-T4.0_NO',
+        quantity: 23,
+        avgCost: 0.47,
+      },
+    ],
+  }} />);
+
+  await waitFor(() => {
+    expect(container.querySelector('.cpi-matrix-card .cpi-matrix-table')).toBeInTheDocument();
+  });
+  const contractsCard = container.querySelector('.cpi-matrix-card');
+  expect(contractsCard).toHaveTextContent('12c');
+  expect(contractsCard).not.toHaveTextContent('91c');
+
+  const exposureRows = [...container.querySelectorAll('.cpi-payday-table tbody tr')];
+  expect(exposureRows).toHaveLength(1);
+  expect(exposureRows[0]).toHaveTextContent('Above 4.0 NO');
+  expect(exposureRows[0]).toHaveTextContent('11');
+  expect(exposureRows[0]).not.toHaveTextContent('23');
 });
 
 test('connected positions-only status explains held CPI exposure without executable quotes', async () => {
@@ -433,15 +622,20 @@ test('connected positions-only status explains held CPI exposure without executa
   expect(screen.queryByText('4 held CPI positions found; no executable live contract catalog quotes available')).not.toBeInTheDocument();
 });
 
-test('one-sided CPI quotes do not fabricate missing ask or mid values', async () => {
+test('one-sided CPI quotes without their native ask are not promoted into the ladder', async () => {
   MarketDataService.getPortfolioPredictionMarketPositions.mockResolvedValue({ positions: [] });
   predictionMarketsIngestService.refreshIbkr.mockResolvedValue({
     events: [
       {
         id: 'ibkr:872435625',
+        conId: 872435625,
         venue: 'IBKR',
         source_api: 'IBKR_TWS_API',
         tradable_in_ibkr: true,
+        exchange: 'FORECASTX',
+        tradingClass: 'KXCPIYOY',
+        catalog_source: 'ibkr_contract_details',
+        quote_side: 'YES',
         category: 'Inflation',
         underlying: 'KXCPIYOY',
         contract_title: 'KXCPIYOY-26JUN-T3.8_YES',
@@ -454,6 +648,10 @@ test('one-sided CPI quotes do not fabricate missing ask or mid values', async ()
         no_ask: 0.37,
         no_mid: 0.35,
         max_payout_per_contract: 1,
+        releaseKey: 'KXCPIYOY#2026-06',
+        status: 'open',
+        expiration_time: '20991231',
+        updated_at: new Date().toISOString(),
       },
     ],
     dashboardEvents: [],
@@ -461,6 +659,7 @@ test('one-sided CPI quotes do not fabricate missing ask or mid values', async ()
       ...PROVIDERS,
       ibkr: {
         status: 'connected',
+        execution_ready: true,
         gateway: { ok: true },
         last_success_at: '2026-06-20T01:56:17.766Z',
         cpi_discovery: {
@@ -479,14 +678,12 @@ test('one-sided CPI quotes do not fabricate missing ask or mid values', async ()
 
   expect(await screen.findByText('CPI Model')).toBeInTheDocument();
   await waitFor(() => {
-    expect(container.querySelector('.cpi-matrix-table')).toBeInTheDocument();
+    expect(screen.getAllByText('Missing Data').length).toBeGreaterThanOrEqual(1);
   });
-  const matrixText = container.querySelector('.cpi-matrix-table').textContent;
-  expect(matrixText).not.toContain('Above 3.8 YES');
-  expect(matrixText).not.toContain('59c');
-  expect(matrixText).not.toContain('61c');
-  expect(matrixText).toContain('Above 3.8 NO');
-  expect(matrixText).toContain('37c');
+  expect(container.querySelector('.cpi-matrix-table')).not.toBeInTheDocument();
+  expect(screen.queryByText('59c')).not.toBeInTheDocument();
+  expect(screen.queryByText('61c')).not.toBeInTheDocument();
+  expect(screen.queryByText('37c')).not.toBeInTheDocument();
 });
 
 test('stale or portfolio-seeded CPI rows do not render as live contract data', async () => {
@@ -515,6 +712,7 @@ test('stale or portfolio-seeded CPI rows do not render as live contract data', a
       ...PROVIDERS,
       ibkr: {
         status: 'connected',
+        execution_ready: true,
         gateway: { ok: true },
         last_success_at: '2026-06-20T01:56:17.766Z',
         cpi_discovery: {
@@ -558,17 +756,25 @@ test('discover sends CPI target context and surfaces diagnostics', async () => {
   fireEvent.click(discoverButton);
 
   await waitFor(() => {
-    expect(predictionMarketsIngestService.discoverIbkr).toHaveBeenCalledWith({
-      cpi: expect.objectContaining({
-        metric: 'Headline CPI YoY',
-        forecastMonth: 'June 2026',
-        reportMonth: 'June 2026',
-        releaseCode: 'Jun 26',
-        targetStrikes: [3.8, 3.9, 4, 4.1, 4.2, 4.3, 4.4],
-      }),
-    });
+    expect(predictionMarketsIngestService.discoverIbkr).toHaveBeenCalledWith({});
   });
   expect(await screen.findByText('Missing strikes: 3.8, 3.9, 4.0, 4.1, 4.2, 4.3, 4.4')).toBeInTheDocument();
+});
+
+test('historical month selection never changes the operational refresh request', async () => {
+  render(<PredictionMarkets />);
+
+  await waitFor(() => expect(predictionMarketsIngestService.refreshIbkr).toHaveBeenCalledWith({}));
+  predictionMarketsIngestService.refreshIbkr.mockClear();
+  fireEvent.click(await screen.findByRole('button', { name: /Oct 25/i }));
+  expect(screen.getByText('Active: October 2025')).toBeInTheDocument();
+
+  const refreshButton = screen.getByRole('button', { name: 'Refresh Quotes' });
+  await waitFor(() => expect(refreshButton).not.toBeDisabled());
+  fireEvent.click(refreshButton);
+
+  await waitFor(() => expect(predictionMarketsIngestService.refreshIbkr).toHaveBeenCalledWith({}));
+  expect(predictionMarketsIngestService.refreshIbkr.mock.calls[0][0]).not.toHaveProperty('cpi');
 });
 
 test('refresh timeout clears spinner and leaves an explicit no-live-data error state', async () => {

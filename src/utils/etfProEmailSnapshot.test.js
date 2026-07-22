@@ -7,6 +7,8 @@ describe('ETF Pro email parsing', () => {
   test('extracts full lineup from June update email text', () => {
     const payload = parseEtfProFullBookEmail(
       {
+        messageId: 'gmail-full-book',
+        attachmentId: 'message-body-html-2',
         subject: 'ETF Pro Plus: June Update (Q2 2026)',
         receivedAt: '2026-06-10T12:30:05+00:00',
         s3Key: 'hedgeye-email/messages/2026-06-10/etf-pro/full.html',
@@ -21,6 +23,11 @@ describe('ETF Pro email parsing', () => {
 
     expect(payload.meta.source).toBe('gmail-html-full-book');
     expect(payload.meta.snapshotDate).toBe('2026-06-10');
+    expect(payload.meta).toMatchObject({
+      sourceMessageId: 'gmail-full-book',
+      sourceSequence: 2,
+      sourceEventKey: '2026-06-10T12:30:05+00:00#gmail-full-book#0002',
+    });
     expect(payload.rows).toHaveLength(42);
     expect(payload.rows.filter((row) => row.call === 'Long')).toHaveLength(27);
     expect(payload.rows.filter((row) => row.call === 'Short')).toHaveLength(15);

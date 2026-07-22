@@ -19,20 +19,27 @@ export const CURRENCY_PAIRS = [
   { pair: 'USDAUD', name: 'USD/AUD', yahooTicker: 'USDAUD=X' }
 ];
 
-export const CORRELATION_PERIODS = [15, 30, 90, 120, 180];
+export const CORRELATION_PERIODS = Object.freeze([
+  Object.freeze({ key: '5D', label: '5D' }),
+  Object.freeze({ key: '15D', label: '15D' }),
+  Object.freeze({ key: '30D', label: '30D' }),
+  Object.freeze({ key: '1M', label: '1M' }),
+  Object.freeze({ key: '3M', label: '3M' }),
+  Object.freeze({ key: '6M', label: '6M' }),
+]);
 
 export const CORRELATION_COLORS = {
-  'positive-strong': '#10B981', // Green-500
-  'positive-weak': '#34D399',   // Green-400
+  'positive-strong': '#059669', // Portfolio benchmark green
+  'positive-weak': '#059669',   // Portfolio benchmark green
   'neutral': '#6B7280',         // Gray-500
   'negative-weak': '#F59E0B',   // Amber-500
-  'negative-medium': '#EF4444', // Red-500
-  'negative-strong': '#DC2626'  // Red-600
+  'negative-medium': '#dc2626', // Portfolio benchmark red
+  'negative-strong': '#DC2626'  // Portfolio benchmark red
 };
 
 export const CHANGE_COLORS = {
-  'positive': '#10B981', // Green-500
-  'negative': '#EF4444', // Red-500
+  'positive': '#059669', // Portfolio benchmark green
+  'negative': '#dc2626', // Portfolio benchmark red
   'neutral': '#6B7280'   // Gray-500
 };
 

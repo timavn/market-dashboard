@@ -1,0 +1,44 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadOwnedServiceHeartbeats",
+      "Effect": "Allow",
+      "Action": "dynamodb:Query",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/MarketDashboardServiceHeartbeats"
+    },
+    {
+      "Sid": "ReconcilePredictionCatalogV2",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:Query",
+        "dynamodb:TransactWriteItems"
+      ],
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketCatalogV2"
+    },
+    {
+      "Sid": "ReadCanonicalResearchEvents",
+      "Effect": "Allow",
+      "Action": "dynamodb:Query",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchEventLedgerV2"
+    },
+    {
+      "Sid": "ReadExpectedRiskRangePublication",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-west-1:915328198276:table/RiskRangePublicationManifestsV2",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeRiskRanges"
+      ]
+    },
+    {
+      "Sid": "ReadLambdaDiagnostics",
+      "Effect": "Allow",
+      "Action": "cloudwatch:GetMetricStatistics",
+      "Resource": "*"
+    }
+  ]
+}

@@ -9,7 +9,12 @@ const S3 = require('aws-sdk/clients/s3');
 const DynamoDB = require('aws-sdk/clients/dynamodb');
 const Lambda = require('aws-sdk/clients/lambda');
 const SES = require('aws-sdk/clients/ses');
+const CloudWatch = require('aws-sdk/clients/cloudwatch');
 const axios = require('axios');
+const SERVICE_MANIFEST = require('./ops/services.json');
+const AWS_RESOURCE_DEFAULTS = SERVICE_MANIFEST.aws?.resources || {};
+const GMAIL_SERVICE_DEFINITION = (SERVICE_MANIFEST.services || [])
+  .find((service) => service.id === 'gmail.ingestion');
 const {
   DEFAULT_CACHE_PATH,
   DEFAULT_CALIBRATION_REPORT_PATH,
@@ -28,6 +33,7 @@ const {
   parseEtfProFullBookEmail,
 } = require('./src/utils/etfProEmailSnapshot.cjs');
 const {
+  comparePayloadOrder: compareEtfPayloadOrder,
   resolveEtfProPayloadFromSources,
 } = require('./src/utils/etfProResolver.cjs');
 const {
@@ -48,6 +54,20 @@ const {
   summarizeRealTimeAlertPositions,
 } = require('./src/utils/rtaPositionReconstruction.cjs');
 const {
+  materializeRtaLedgerItems,
+} = require('./src/utils/rtaLedgerMaterialization.cjs');
+const {
+  buildEtfProPayloadsFromResearchEvents,
+  materializeRtaResearchEvents,
+  mergeRtaMaterializations,
+} = require('./src/utils/researchEventLedger.cjs');
+const { validateRtaCheckpoint } = require('./src/utils/rtaCheckpoint.cjs');
+const {
+  applyPersistedManifestGate,
+  buildRiskRangeEnvelope,
+  expectedRiskRangePublication,
+} = require('./src/utils/riskRangePublication.cjs');
+const {
   buildCorrelationCacheKey,
   computePortfolioCorrelationConcentration,
   DEFAULT_WINDOWS: PORTFOLIO_CORRELATION_WINDOWS,
@@ -56,9 +76,24 @@ const {
 } = require('./src/utils/portfolioCorrelationConcentration');
 const { sidecarRequest } = require('./src/services/providers/ibkrSidecarClient');
 const {
+  createSystemReadinessService,
+  getLambdaActivity,
+  getServiceHeartbeat,
+} = require('./src/services/systemReadinessService.cjs');
+const {
+  resolveGmailPollHealth,
+} = require('./src/utils/gmailPollHealth.cjs');
+const { createSystemReadinessRepairService } = require('./src/services/systemReadinessRepairService.cjs');
+const {
   isPredictionMarketContract,
   normalizeIbkrPosition,
 } = require('./src/services/providers/normalize/normalizePosition');
+const {
+  aggregatePositionSnapshotStatus,
+  classifyPredictionMarketPosition,
+  hasVerifiedAccountCoverage,
+  verifyLivePositionSnapshot,
+} = require('./src/utils/predictionMarketPositions.cjs');
 const {
   buildLiquidityModels,
 } = require('./src/utils/liquidityModel.cjs');
@@ -87,6 +122,24 @@ const {
   createVolatilitySnapshotService,
 } = require('./src/services/volatilitySnapshotService.cjs');
 const { scanAllPages } = require('./src/utils/dynamoScanAllPages.cjs');
+const { createAsyncTtlCache } = require('./src/utils/serverResponseCache.cjs');
+const {
+  DEFAULT_SOURCE: SECURITY_RISK_METRICS_SOURCE,
+  REASONS: SECURITY_RISK_METRICS_REASONS,
+  buildSecurityRiskMetrics,
+  createUnavailableSecurityRiskMetrics,
+  parseYahooChartBars,
+} = require('./src/utils/securityRiskMetrics.cjs');
+const {
+  ANALYTICS_SOURCE_IDS,
+  buildAnalyticsDailyBrief,
+} = require('./src/utils/analyticsDailyBrief.cjs');
+const {
+  PRESIGNED_POST_TTL_SECONDS,
+  buildPortfolioPresignedPostParams,
+  createPortfolioUploadKey,
+  validatePortfolioUploadRequest,
+} = require('./src/utils/portfolioUploadPolicy.cjs');
 
 const volatilitySnapshotService = createVolatilitySnapshotService({ httpClient: axios });
 
@@ -99,6 +152,7 @@ const app = express();
 // In development, use port 3001 so React dev server can use 3000
 // In production, use port 3000 (or PORT env var)
 const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 3000 : 3001);
+const HOST = '127.0.0.1';
 
 // Configure AWS
 AWS.config.update({
@@ -112,23 +166,45 @@ const s3 = new S3();
 const dynamodb = new DynamoDB.DocumentClient();
 const lambda = new Lambda();
 const ses = new SES({ apiVersion: '2010-12-01' });
+const cloudwatch = new CloudWatch();
+
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const PORTFOLIO_UPLOAD_BUCKET = 'market-dashboard-csv-data';
+
+// These caches are deliberately limited to non-live research/status data. Live
+// IBKR, portfolio, and quote routes retain their existing freshness policies.
+const researchResponseCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 100 });
+const hermesLedgerCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
+const researchEventLedgerCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 10 });
+const etfProSnapshotHistoryCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
+const s3ArtifactCache = createAsyncTtlCache({ ttlMs: ONE_DAY_MS, maxEntries: 1_000 });
+const gmailPollHealthCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
+
+function setDataCacheHeaders(res, cacheResult) {
+  const ageSeconds = Math.max(0, Math.floor((cacheResult.ageMs || 0) / 1000));
+  res.setHeader('X-Data-Cache', cacheResult.status);
+  res.setHeader('X-Data-Age', String(ageSeconds));
+  res.setHeader('Age', String(ageSeconds));
+  if (cacheResult.status === 'stale') {
+    res.setHeader('Warning', '110 - "Response is stale"');
+  }
+}
+
+async function sendCachedJson(res, cacheKey, loader) {
+  const cacheResult = await researchResponseCache.get(cacheKey, loader);
+  setDataCacheHeaders(res, cacheResult);
+  return res.json(cacheResult.value);
+}
 
 // Validate AWS credentials at startup
 async function validateAWSCredentials() {
   try {
-    // Test credentials by listing buckets (minimal permission check)
-    const result = await s3.listBuckets().promise();
+    // Validate only the project bucket so the runtime identity does not need
+    // account-wide s3:ListAllMyBuckets permission.
+    await s3.headBucket({ Bucket: PORTFOLIO_UPLOAD_BUCKET }).promise();
     console.log('✅ AWS credentials validated successfully');
-    console.log(`📦 Found ${result.Buckets.length} S3 buckets`);
-
-    // Check if our target bucket exists
-    const targetBucket = 'market-dashboard-csv-data';
-    const bucketExists = result.Buckets.some(bucket => bucket.Name === targetBucket);
-    if (bucketExists) {
-      console.log(`✅ Target bucket '${targetBucket}' found`);
-    } else {
-      console.log(`⚠️  Target bucket '${targetBucket}' not found in account`);
-    }
+    console.log('✅ Project upload storage is accessible');
 
     return true;
   } catch (error) {
@@ -146,7 +222,15 @@ app.use(cors({
     : ['http://localhost:3000', 'http://127.0.0.1:3000'], // React dev server in development
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Readiness-Repair'],
+  exposedHeaders: [
+    'X-Data-Cache',
+    'X-Data-Age',
+    'X-Risk-Range-Status',
+    'X-Risk-Range-Publication-Date',
+    'Age',
+    'Warning',
+  ],
 }));
 app.use(express.json({ limit: '5mb' }));
 
@@ -190,6 +274,11 @@ function etfProEmailSnapshotToPayload(snapshot) {
   };
   changes.added = [...new Set([...changes.addedLongs, ...changes.addedShorts])];
   changes.removed = [...new Set([...changes.removedLongs, ...changes.removedShorts])];
+  const sourceMessageIds = [
+    ...(Array.isArray(snapshot.sourceMessageIds) ? snapshot.sourceMessageIds : []),
+    snapshot.sourceMessageId,
+    snapshot.gmailMessageId,
+  ].filter(Boolean);
 
   return {
     meta: {
@@ -197,6 +286,10 @@ function etfProEmailSnapshotToPayload(snapshot) {
       parsedAt: snapshot.scrapedAt || null,
       sourceFile: snapshot.htmlSource || null,
       source: 'gmail-html',
+      sourceMessageId: [...new Set(sourceMessageIds)].length === 1
+        ? sourceMessageIds[0]
+        : null,
+      sourceMessageIds: [...new Set(sourceMessageIds)].sort(),
       headline: snapshot.article?.headline || data.headline || null,
       rowCount: rows.length,
     },
@@ -293,6 +386,9 @@ function applyEtfProActionUpdate(basePayload, actionPayload, options = {}) {
       snapshotDate: actionPayload.meta?.snapshotDate || basePayload.meta?.snapshotDate || null,
       parsedAt: actionPayload.meta?.parsedAt || basePayload.meta?.parsedAt || null,
       sourceFile: actionPayload.meta?.sourceFile || basePayload.meta?.sourceFile || null,
+      sourceMessageId: actionPayload.meta?.sourceMessageId || basePayload.meta?.sourceMessageId || null,
+      sourceSequence: actionPayload.meta?.sourceSequence ?? basePayload.meta?.sourceSequence ?? null,
+      sourceEventKey: actionPayload.meta?.sourceEventKey || basePayload.meta?.sourceEventKey || null,
       source: options.source || 'gmail-html-applied-to-local-book',
       headline: actionPayload.meta?.headline || null,
       baseSnapshotDate: basePayload.meta?.snapshotDate || null,
@@ -336,18 +432,8 @@ function getPayloadDate(payload) {
   return payload?.meta?.snapshotDate || null;
 }
 
-function getPayloadTime(payload) {
-  const raw = payload?.meta?.parsedAt || payload?.meta?.sourceFileMtime || null;
-  const date = raw ? new Date(raw) : null;
-  return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
-}
-
 function sortPayloadsChronologically(payloads) {
-  return [...payloads].sort((a, b) => {
-    const dateCompare = String(getPayloadDate(a) || '').localeCompare(String(getPayloadDate(b) || ''));
-    if (dateCompare !== 0) return dateCompare;
-    return getPayloadTime(a) - getPayloadTime(b);
-  });
+  return [...payloads].sort(compareEtfPayloadOrder);
 }
 
 function pickNewestPayload(payloads) {
@@ -379,59 +465,126 @@ function isEtfProActionAfterBase(actionPayload, basePayload) {
   const actionDate = getPayloadDate(actionPayload);
   const baseDate = getPayloadDate(basePayload);
   if (!actionDate || !baseDate) return false;
-  return actionDate.localeCompare(baseDate) > 0;
+  return compareEtfPayloadOrder(actionPayload, basePayload) > 0;
+}
+
+async function getCachedHermesLedgerItems() {
+  const cacheResult = await hermesLedgerCache.get('all', () => scanAllPages(dynamodb, {
+    TableName: HERMES_EMAIL_LEDGER_TABLE,
+  }));
+  return cacheResult.value;
+}
+
+async function getResearchEventLedgerItems(productKey) {
+  try {
+    const cacheResult = await researchEventLedgerCache.get(productKey, async () => {
+      const items = [];
+      let exclusiveStartKey;
+      do {
+        const result = await dynamodb.query({
+          TableName: RESEARCH_EVENT_LEDGER_TABLE,
+          KeyConditionExpression: '#productKey = :productKey',
+          ExpressionAttributeNames: { '#productKey': 'productKey' },
+          ExpressionAttributeValues: { ':productKey': productKey },
+          ScanIndexForward: true,
+          ConsistentRead: true,
+          ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+        }).promise();
+        items.push(...(result.Items || []));
+        exclusiveStartKey = result.LastEvaluatedKey;
+      } while (exclusiveStartKey);
+      return items;
+    });
+    return { items: cacheResult.value || [], error: null };
+  } catch (error) {
+    // During migration the retained Gmail ledger/S3 archive remains a complete,
+    // immutable fallback. Surface the V2 read failure in diagnostics; do not
+    // silently substitute daily projections.
+    return {
+      items: [],
+      error: error.code || error.message || 'research-event-ledger-unavailable',
+    };
+  }
+}
+
+function getHermesArtifactVersion(item) {
+  return item.dataVersion ||
+    item.contentHash ||
+    item.s3VersionId ||
+    item.versionId ||
+    item.etag ||
+    item.updatedAt ||
+    item.createdAt ||
+    item.receivedAt ||
+    'unversioned';
+}
+
+async function getCachedHermesArtifactText(item) {
+  const bucket = item.s3Bucket || HEDGEYE_BUCKET;
+  const key = item.s3Key;
+  const version = getHermesArtifactVersion(item);
+  const cacheKey = JSON.stringify([bucket, key, version]);
+  const cacheResult = await s3ArtifactCache.get(cacheKey, async () => {
+    const params = { Bucket: bucket, Key: key };
+    if (item.s3VersionId) params.VersionId = item.s3VersionId;
+    const obj = await s3.getObject(params).promise();
+    return obj.Body?.toString('utf8') || '';
+  });
+  return cacheResult.value;
 }
 
 async function getHermesEtfProEmailPayloads() {
   const fullBooks = [];
   const actions = [];
-  let ExclusiveStartKey;
+  const rejected = [];
+  const items = await getCachedHermesLedgerItems();
 
-  do {
-    const result = await dynamodb.scan({
-      TableName: HERMES_EMAIL_LEDGER_TABLE,
-      ProjectionExpression: 'messageId, subject, reportType, snapshotType, snapshotDate, s3Bucket, s3Key, createdAt, updatedAt, receivedAt, #status',
-      ExpressionAttributeNames: { '#status': 'status' },
-      ExclusiveStartKey,
-    }).promise();
+  for (const item of items) {
+    if (item.status !== 'STORED') continue;
+    const subject = item.subject || '';
+    const isEtfPro =
+      item.reportType === 'etf-pro' ||
+      item.snapshotType === 'etf-pro' ||
+      /ETF Pro|New ETF Pro Changes?/i.test(subject);
+    const isHtmlBody = String(item.mimeType || '').toLowerCase() === 'text/html' &&
+      String(item.attachmentId || '').startsWith('message-body-');
+    if (!isEtfPro || !isHtmlBody || !item.s3Key) continue;
 
-    for (const item of result.Items || []) {
-      if (item.status !== 'STORED') continue;
-      const subject = item.subject || '';
-      const isEtfPro =
-        item.reportType === 'etf-pro' ||
-        item.snapshotType === 'etf-pro' ||
-        /ETF Pro|New ETF Pro Changes?/i.test(subject);
-      if (!isEtfPro || !item.s3Key) continue;
-
-      let htmlBody = '';
-      try {
-        const obj = await s3.getObject({
-          Bucket: item.s3Bucket || HEDGEYE_BUCKET,
-          Key: item.s3Key,
-        }).promise();
-        htmlBody = obj.Body?.toString('utf8') || '';
-      } catch (err) {
-        console.warn('[ETF Pro] Failed to read Hermes email artifact:', item.s3Key, err.message);
-        continue;
-      }
-
-      const fullBook = parseEtfProFullBookEmail(item, htmlBody);
-      if (fullBook) {
-        fullBooks.push(fullBook);
-        continue;
-      }
-
-      const action = parseEtfProActionEmail(item, htmlBody);
-      if (action) {
-        actions.push(action);
-      }
+    let htmlBody = '';
+    try {
+      htmlBody = await getCachedHermesArtifactText(item);
+    } catch (err) {
+      console.warn('[ETF Pro] Failed to read Hermes email artifact:', item.s3Key, err.message);
+      rejected.push({
+        code: 'legacy-artifact-read-failed',
+        sourceMessageId: item.messageId || null,
+        sourceArtifact: item.s3Key,
+        message: err.message,
+      });
+      continue;
     }
 
-    ExclusiveStartKey = result.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
+    const fullBook = parseEtfProFullBookEmail(item, htmlBody);
+    if (fullBook) {
+      fullBooks.push(fullBook);
+      continue;
+    }
 
-  return { fullBooks, actions };
+    const action = parseEtfProActionEmail(item, htmlBody);
+    if (action) {
+      actions.push(action);
+      continue;
+    }
+    if (item.reportType === 'etf-pro' || item.snapshotType === 'etf-pro') {
+      rejected.push({
+        code: 'legacy-etf-email-unparsed',
+        sourceMessageId: item.messageId || null,
+        sourceArtifact: item.s3Key,
+      });
+    }
+  }
+
+  return { fullBooks, actions, rejected };
 }
 
 function resolveEtfProFromEmailFullBook({ fullBookPayload, actionPayloads }) {
@@ -467,16 +620,134 @@ function resolveEtfProFromEmailFullBook({ fullBookPayload, actionPayloads }) {
   return payload;
 }
 
-async function getResolvedEtfProPayload() {
-  const emailSnapshot = await getLatestEtfProEmailSnapshot();
-  const emailPayload = etfProEmailSnapshotToPayload(emailSnapshot);
-  const hermesPayloads = await getHermesEtfProEmailPayloads();
-  const { etfproDir, latestPath, payload: localPayload } = loadLocalEtfProPayload();
-  const resolvedPayload = resolveEtfProPayloadFromSources({
-    localPayload,
-    emailPayload,
-    hermesPayloads,
+async function getGmailPollHealth() {
+  const cacheResult = await gmailPollHealthCache.get('gmail-poll-health', async () => {
+    const now = new Date();
+    const account = String(
+      process.env.HERMES_GMAIL_ACCOUNT || 'timsmithaviation@gmail.com',
+    ).trim().toLowerCase();
+    const serviceId = `gmail:${account}`;
+    const functionName = process.env.HERMES_GMAIL_INGESTOR_FUNCTION
+      || GMAIL_SERVICE_DEFINITION?.aws?.functionName
+      || 'market-dashboard-gmail-ingestor-v2';
+    const [heartbeatStore, metrics] = await Promise.all([
+      getServiceHeartbeat(dynamodb, serviceId),
+      getLambdaActivity(cloudwatch, functionName, now, 45),
+    ]);
+    return resolveGmailPollHealth({
+      heartbeatStore,
+      metrics,
+      account,
+      now,
+      maxAgeMinutes: Number(
+        process.env.GMAIL_HEARTBEAT_MAX_AGE_MINUTES
+          || GMAIL_SERVICE_DEFINITION?.readinessMaxAgeMinutes
+          || 45,
+      ),
+      expectedScheduleId: process.env.HERMES_GMAIL_SCHEDULE_ID
+        || GMAIL_SERVICE_DEFINITION?.aws?.scheduleId
+        || 'market-dashboard-gmail-v2-every-15m',
+    });
   });
+  return cacheResult.value;
+}
+
+async function getResolvedEtfProPayload() {
+  const [emailSnapshots, ingestionHealth, eventLedgerResult, legacyPayloads] = await Promise.all([
+    getEtfProEmailSnapshots(),
+    getGmailPollHealth(),
+    getResearchEventLedgerItems('etf-pro'),
+    getHermesEtfProEmailPayloads(),
+  ]);
+  const materializedPayloads = emailSnapshots
+    .map(etfProEmailSnapshotToPayload)
+    .filter((payload) => Array.isArray(payload?.rows) && payload.rows.length > 0);
+  const emailPayload = pickNewestPayload(materializedPayloads);
+  const v2Payloads = buildEtfProPayloadsFromResearchEvents(eventLedgerResult.items);
+  const v2SourceIds = new Set(v2Payloads.sourceMessageIds);
+  const isCoveredByV2 = (payload) => {
+    const sourceId = payload?.meta?.sourceMessageId;
+    return Boolean(sourceId && v2SourceIds.has(sourceId));
+  };
+  const migratedFullBooks = legacyPayloads.fullBooks.filter((payload) => !isCoveredByV2(payload));
+  const migratedActions = legacyPayloads.actions.filter((payload) => !isCoveredByV2(payload));
+  const canonicalPayloadCount = v2Payloads.fullBooks.length + v2Payloads.actions.length +
+    migratedFullBooks.length + migratedActions.length;
+  // V2 is canonical per source message. The immutable Gmail/S3 archive fills
+  // only migration gaps; daily materializations are a final compatibility
+  // fallback when neither immutable event source has a usable payload.
+  const hermesPayloads = canonicalPayloadCount > 0
+    ? {
+      fullBooks: [...v2Payloads.fullBooks, ...migratedFullBooks],
+      actions: [...v2Payloads.actions, ...migratedActions],
+    }
+    : {
+      fullBooks: materializedPayloads.filter((payload) => !isEtfProActionPayload(payload)),
+      actions: materializedPayloads.filter(isEtfProActionPayload),
+    };
+  const { etfproDir, latestPath, payload: localPayload } = loadLocalEtfProPayload();
+  let resolvedPayload = resolveEtfProPayloadFromSources({
+    localPayload,
+    emailPayload: canonicalPayloadCount > 0 ? null : emailPayload,
+    hermesPayloads,
+    ingestionHealth,
+  });
+  const migrationRejections = legacyPayloads.rejected.filter((item) =>
+    !item.sourceMessageId || !v2SourceIds.has(item.sourceMessageId));
+  const eventRejections = [...v2Payloads.rejected, ...migrationRejections];
+  if (resolvedPayload) {
+    resolvedPayload = {
+      ...resolvedPayload,
+      meta: {
+        ...(resolvedPayload.meta || {}),
+        researchEventSource: v2Payloads.selectedEventCount > 0
+          ? (migratedFullBooks.length + migratedActions.length > 0
+            ? 'research-event-ledger-v2-with-legacy-migration'
+            : 'research-event-ledger-v2')
+          : 'gmail-ledger-s3-legacy-migration',
+        researchEventCount: v2Payloads.selectedEventCount,
+        legacyMigrationPayloadCount: migratedFullBooks.length + migratedActions.length,
+        researchEventLedgerError: eventLedgerResult.error,
+      },
+    };
+  }
+  if (resolvedPayload && eventRejections.length > 0) {
+    const archivedRowCount = Number(
+      resolvedPayload.meta?.archivedRowCount || resolvedPayload.rows?.length || 0,
+    );
+    const warnings = eventRejections.map((item) =>
+      `ETF Pro source ${item.sourceMessageId || item.eventKey || 'unknown'} failed canonical replay (${item.code}).`);
+    resolvedPayload = {
+      ...resolvedPayload,
+      available: false,
+      rows: [],
+      actionRows: [],
+      changes: null,
+      longCount: null,
+      shortCount: null,
+      dataQuality: {
+        ...(resolvedPayload.dataQuality || {}),
+        status: 'error',
+        warnings: [...new Set([...(resolvedPayload.dataQuality?.warnings || []), ...warnings])],
+        researchEventFailures: eventRejections,
+      },
+      dataAvailability: {
+        ...(resolvedPayload.dataAvailability || {}),
+        structuralStatus: 'invalid',
+        reason: 'One or more canonical ETF Pro research events could not be replayed.',
+      },
+      meta: {
+        ...(resolvedPayload.meta || {}),
+        available: false,
+        structurallyAvailable: false,
+        blockedByResearchEventReplay: true,
+        archivedRowCount,
+        rowCount: 0,
+        longCount: null,
+        shortCount: null,
+      },
+    };
+  }
 
   return {
     payload: resolvedPayload,
@@ -485,258 +756,31 @@ async function getResolvedEtfProPayload() {
     localPayload,
     emailPayload,
     hermesPayloads,
+    ingestionHealth,
+    eventLedgerResult,
+    eventRejections,
   };
-}
-
-function stripHtmlToText(value = '') {
-  return String(value)
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|tr|td|li|h1|h2|h3|h4|h5|h6)>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function extractHtmlHeadline(html = '') {
-  const match = String(html).match(/<(?:div|td)[^>]+class="[^"]*headline[^"]*"[^>]*>([\s\S]*?)<\/(?:div|td)>/i);
-  if (!match) return null;
-  const text = stripHtmlToText(match[1]);
-  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  return lines.join(' ');
-}
-
-function extractLogoName(html = '') {
-  const logos = [...String(html).matchAll(/<img[^>]+class="[^"]*logo[^"]*"[^>]+(?:alt|title)="([^"]+)"/gi)];
-  const match = logos[0] || String(html).match(/<img[^>]+(?:alt|title)="([^"]+)"[^>]*>/i);
-  return match?.[1]?.replace(/&amp;/g, '&').trim() || null;
-}
-
-function parseRealTimeAlertFromLedgerItem(item, htmlBody = '') {
-  const subject = item?.subject || '';
-  const headline = extractHtmlHeadline(htmlBody) || subject;
-  const text = stripHtmlToText(htmlBody);
-  const candidates = [subject, headline, text].filter(Boolean);
-
-  const inferAlertIntent = (action, ticker) => {
-    const escapedTicker = String(ticker || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const haystack = [subject, headline, text].filter(Boolean).join(' ');
-    const shortingPattern = new RegExp(`\\bSELL\\s+SIGNAL\\s*-\\s*SHORTING(?:\\s+SHORT)?\\s+${escapedTicker}\\b`, 'i');
-    const coveringPattern = new RegExp(`\\b(?:BUY|COVER(?:-SOME)?)\\s+SIGNAL\\s*-\\s*COVERING(?:\\s+SHORT)?\\s+${escapedTicker}\\b`, 'i');
-    const buyingPattern = new RegExp(`\\bBUY\\s+SIGNAL\\s*-\\s*BUYING\\s+${escapedTicker}\\b`, 'i');
-
-    if (shortingPattern.test(haystack)) {
-      return { action: 'SELL', intent: 'open-short', side: 'short' };
-    }
-    if (coveringPattern.test(haystack)) {
-      return { action: 'COVER', intent: 'close-short', side: 'short' };
-    }
-    if (action === 'BUY' && buyingPattern.test(haystack)) {
-      return { action: 'BUY', intent: 'open-long', side: 'long' };
-    }
-    return { action, intent: null, side: null };
-  };
-
-  for (const candidate of candidates) {
-    const rtaSubjectMatch = candidate.match(/Real-Time Alert:\s*(.+?)\s+Signal(?:\s*\(([^)]*)\))?\s*:\s*(.+?)(?:\s*-\s*([A-Z]{1,4}))?\s*$/i);
-    if (rtaSubjectMatch) {
-      const signalPhrase = rtaSubjectMatch[1].trim();
-      const target = rtaSubjectMatch[3].trim();
-      const actionMatch = signalPhrase.match(/\b(SELL-SOME|COVER-SOME|BUY|SELL|COVER)\b/i);
-      const parenMatch = target.match(/(.+?)\s+\(([A-Z][A-Z0-9./-]{1,9})\)$/);
-      const tickerMatch = target.match(/^([A-Z][A-Z0-9./-]{1,9})$/);
-      const ticker = (parenMatch?.[2] || tickerMatch?.[1] || '').toUpperCase();
-      if (actionMatch && ticker) {
-        const inferred = inferAlertIntent(actionMatch[1].toUpperCase(), ticker);
-        return {
-          ticker,
-          action: inferred.action,
-          intent: inferred.intent,
-          side: inferred.side,
-          name: parenMatch?.[1]?.trim() || extractLogoName(htmlBody) || ticker,
-          headline: subject,
-          signalPhrase,
-          eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
-          source: 'hermes-email',
-        };
-      }
-    }
-
-    const signalMatch = candidate.match(/\b(BUY|SELL-SOME|COVER-SOME|SELL|COVER)\s+SIGNAL(?:\s*-\s*(SHORTING|COVERING|BUYING|SELLING))?(?:\s+SHORT)?\s+([A-Z][A-Z0-9./-]{1,9})\b/i);
-    if (signalMatch) {
-      const rawAction = signalMatch[1].toUpperCase();
-      const modifier = (signalMatch[2] || '').toUpperCase();
-      const ticker = signalMatch[3].toUpperCase();
-      const action = modifier === 'COVERING' || rawAction === 'COVER-SOME' ? 'COVER' : rawAction;
-      return {
-        ticker,
-        action,
-        intent: modifier === 'SHORTING'
-          ? 'open-short'
-          : modifier === 'BUYING'
-            ? 'open-long'
-            : modifier === 'COVERING'
-              ? 'close-short'
-            : null,
-        side: modifier === 'SHORTING' || modifier === 'COVERING' ? 'short' : modifier === 'BUYING' ? 'long' : null,
-        name: extractLogoName(htmlBody) || ticker,
-        headline: headline || subject,
-        signalPhrase: signalMatch[0],
-        eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
-        source: 'hermes-email',
-      };
-    }
-
-    const subjectMatch = candidate.match(/Real-Time Alert:\s*.*?\b(BUY|SELL-SOME|COVER-SOME|SELL|COVER)\s+Signal\b.*?:\s*(.+?)\s+\(([A-Z][A-Z0-9./-]{1,9})\)/i);
-    if (subjectMatch) {
-      return {
-        ticker: subjectMatch[3].toUpperCase(),
-        action: subjectMatch[1].toUpperCase(),
-        intent: null,
-        side: null,
-        name: subjectMatch[2].trim(),
-        headline: subject,
-        signalPhrase: subjectMatch[0],
-        eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
-        source: 'hermes-email',
-      };
-    }
-  }
-
-  return null;
-}
-
-function parsePositionChangeAlertsFromLedgerItem(item, htmlBody = '') {
-  const subject = item?.subject || '';
-  const alerts = [];
-  const changeMatch = subject.match(/\b\d+\s+Changes?:\s*(.+)$/i);
-  if (changeMatch) {
-    const clauses = changeMatch[1].split(/\s*,\s*/);
-    let currentAction = null;
-    for (const clause of clauses) {
-      const match = clause.match(/\b(?:(Add|Remove)\s+)?(?:(Long|Short)\s+)?([A-Z][A-Z0-9./-]{1,9})\b/i);
-      if (!match) continue;
-      currentAction = match[1]?.toUpperCase() || currentAction;
-      if (!currentAction) continue;
-      const side = match[2] ? match[2].toLowerCase() : currentAction === 'ADD' ? 'long' : null;
-      const ticker = match[3].toUpperCase();
-      alerts.push({
-        ticker,
-        action: currentAction === 'ADD' ? 'ADD' : 'REMOVE',
-        side,
-        name: ticker,
-        headline: subject,
-        signalPhrase: clause,
-        eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
-        source: 'hermes-email-position-change',
-      });
-    }
-  }
-
-  if (alerts.length > 0) return alerts;
-
-  const text = stripHtmlToText(htmlBody);
-  const addMatch = text.match(/ADDING[\s\S]{0,400}?\b(Long|Short):\s*([A-Z][A-Z0-9./-]{1,9})/i);
-  const removeMatch = text.match(/REMOVED[\s\S]{0,400}?\b(?:(Long|Short):\s*)?([A-Z][A-Z0-9./-]{1,9})/i);
-  if (addMatch) {
-    alerts.push({
-      ticker: addMatch[2].toUpperCase(),
-      action: 'ADD',
-      side: addMatch[1].toLowerCase(),
-      name: addMatch[2].toUpperCase(),
-      headline: subject,
-      eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
-      source: 'hermes-email-position-change',
-    });
-  }
-  if (removeMatch) {
-    alerts.push({
-      ticker: removeMatch[2].toUpperCase(),
-      action: 'REMOVE',
-      side: removeMatch[1] ? removeMatch[1].toLowerCase() : null,
-      name: removeMatch[2].toUpperCase(),
-      headline: subject,
-      eventTime: item?.receivedAt || item?.createdAt || item?.updatedAt || null,
-      source: 'hermes-email-position-change',
-    });
-  }
-  return alerts;
 }
 
 async function fetchHermesRtaSnapshots(windowDays) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - windowDays);
-  const snapshots = [];
-  let ExclusiveStartKey;
-
-  do {
-    const result = await dynamodb.scan({
-      TableName: HERMES_EMAIL_LEDGER_TABLE,
-      ProjectionExpression: 'messageId, attachmentId, subject, reportType, snapshotType, snapshotDate, s3Bucket, s3Key, createdAt, updatedAt, receivedAt, #status',
-      ExpressionAttributeNames: { '#status': 'status' },
-      ExclusiveStartKey,
-    }).promise();
-
-    for (const item of result.Items || []) {
-      if (item.status !== 'STORED') continue;
-      const itemTime = new Date(item.receivedAt || item.createdAt || item.updatedAt || 0);
-      if (Number.isFinite(itemTime.getTime()) && itemTime < cutoff) continue;
-
-      const subject = item.subject || '';
-      const isRta = item.reportType === 'real-time-alert' ||
-        item.snapshotType === 'real-time-alert' ||
-        /real-time alert/i.test(subject);
-      const isPositionChange = /\b\d+\s+Changes?:/i.test(subject);
-      if (!isRta && !isPositionChange) continue;
-
-      let htmlBody = '';
-      if (item.s3Key) {
-        try {
-          const obj = await s3.getObject({
-            Bucket: item.s3Bucket || HEDGEYE_BUCKET,
-            Key: item.s3Key,
-          }).promise();
-          htmlBody = obj.Body?.toString('utf8') || '';
-        } catch (err) {
-          console.warn('[RTA] Failed to read Hermes email artifact:', item.s3Key, err.message);
-        }
-      }
-
-      const alerts = [];
-      if (isRta) {
-        const alert = parseRealTimeAlertFromLedgerItem(item, htmlBody);
-        if (alert) alerts.push(alert);
-      }
-      if (isPositionChange) {
-        alerts.push(...parsePositionChangeAlertsFromLedgerItem(item, htmlBody));
-      }
-      if (alerts.length === 0) continue;
-
-      const date = item.snapshotDate ||
-        (Number.isFinite(itemTime.getTime())
-          ? itemTime.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-          : null);
-      if (!date) continue;
-
-      snapshots.push({
-        date,
-        scrapedAt: item.receivedAt || item.createdAt || item.updatedAt || null,
-        data: { alerts },
-      });
-    }
-
-    ExclusiveStartKey = result.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-
-  return snapshots;
+  const [items, eventLedgerResult] = await Promise.all([
+    getCachedHermesLedgerItems(),
+    getResearchEventLedgerItems('real-time-alert'),
+  ]);
+  const legacy = await materializeRtaLedgerItems(items, {
+    cutoff,
+    getArtifactText: getCachedHermesArtifactText,
+  });
+  const v2 = materializeRtaResearchEvents(eventLedgerResult.items.filter((item) => {
+    const eventTime = new Date(item?.eventTime || '').getTime();
+    return !Number.isFinite(eventTime) || eventTime >= cutoff.getTime();
+  }));
+  return {
+    ...mergeRtaMaterializations(v2, legacy),
+    eventLedgerError: eventLedgerResult.error,
+  };
 }
 
 function loadLocalRtaBenchmark() {
@@ -747,9 +791,11 @@ function loadLocalRtaBenchmark() {
     if (!benchmark || (!Array.isArray(benchmark.longs) && !Array.isArray(benchmark.shorts) && !Array.isArray(benchmark.holdings))) {
       return null;
     }
+    const checkpointValidation = validateRtaCheckpoint(benchmark);
     return {
       ...benchmark,
       sourceFile: benchmarkPath,
+      checkpointValidation,
     };
   } catch (error) {
     console.warn('[RTA] Failed to read local benchmark:', error.message);
@@ -757,28 +803,18 @@ function loadLocalRtaBenchmark() {
   }
 }
 
-async function getLatestEtfProEmailSnapshot() {
-  let latest = null;
-  let ExclusiveStartKey;
-  do {
-    const result = await dynamodb.scan({
+async function getEtfProEmailSnapshots() {
+  const cacheResult = await etfProSnapshotHistoryCache.get('all', () => scanAllPages(dynamodb, {
       TableName: 'HedgeyeDailySnapshot',
       FilterExpression: 'snapshotType = :type',
       ExpressionAttributeValues: {
         ':type': 'etf-pro',
       },
-      ExclusiveStartKey,
-    }).promise();
-
-    for (const item of result.Items || []) {
-      if (!item || !item.date) continue;
-      if (!latest || item.date.localeCompare(latest.date) > 0) {
-        latest = item;
-      }
-    }
-    ExclusiveStartKey = result.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-  return latest;
+    }));
+  return (cacheResult.value || [])
+    .filter((item) => item?.snapshotType === 'etf-pro' && item?.date)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) ||
+      String(a.scrapedAt || '').localeCompare(String(b.scrapedAt || '')));
 }
 
 async function getHermesInboxStatus() {
@@ -793,29 +829,15 @@ async function getHermesInboxStatus() {
     latestFilename: null,
     latestS3Key: null,
     latestStatus: null,
+    errorCode: null,
+    lastSuccessAt: null,
     nextRun: 'Every 15 minutes',
     source: HERMES_EMAIL_LEDGER_TABLE,
     gmailAccount: HERMES_GMAIL_ACCOUNT,
     gmailQuery: HERMES_GMAIL_QUERY,
   };
 
-  const items = [];
-  let ExclusiveStartKey;
-
-  do {
-    const result = await dynamodb.scan({
-      TableName: HERMES_EMAIL_LEDGER_TABLE,
-      ExclusiveStartKey,
-      ProjectionExpression: '#status, filename, s3Key, updatedAt, createdAt, receivedAt, #query, accountEmail, gmailAccount',
-      ExpressionAttributeNames: {
-        '#status': 'status',
-        '#query': 'query',
-      },
-    }).promise();
-
-    items.push(...(result.Items || []));
-    ExclusiveStartKey = result.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
+  const items = await getCachedHermesLedgerItems();
 
   if (items.length === 0) {
     return defaultStatus;
@@ -827,16 +849,28 @@ async function getHermesInboxStatus() {
     return d && !Number.isNaN(d.getTime()) ? d.getTime() : 0;
   };
 
-  const latest = items.reduce((best, item) => (getItemTime(item) > getItemTime(best) ? item : best), items[0]);
+  const runtimeState = items
+    .filter((item) => item?.attachmentId === 'history-cursor' && String(item?.messageId || '').startsWith('runtime#gmail#'))
+    .sort((a, b) => getItemTime(b) - getItemTime(a))[0] || null;
+  const artifactItems = items.filter((item) => !String(item?.messageId || '').startsWith('runtime#gmail#'));
+  const latest = (artifactItems.length > 0 ? artifactItems : items)
+    .reduce((best, item) => (getItemTime(item) > getItemTime(best) ? item : best));
   const latestTime = latest.updatedAt || latest.receivedAt || latest.createdAt || null;
   const storedCount = items.filter((item) => item.status === 'STORED').length;
   const errorCount = items.filter((item) => item.status === 'ERROR').length;
   const pendingCount = items.filter((item) => item.status === 'IN_PROGRESS').length;
 
   let status = 'success';
-  if (latest.status === 'ERROR' || errorCount > 0) {
+  // Historical failures remain useful evidence, but they must not permanently
+  // poison the current status after a later poll succeeds. Scheduler/auth
+  // heartbeat health is evaluated independently by /api/system-readiness.
+  if (runtimeState?.status === 'AUTH_REQUIRED') {
     status = 'error';
-  } else if (pendingCount > 0) {
+  } else if (runtimeState?.status === 'ERROR') {
+    status = 'error';
+  } else if (latest.status === 'ERROR') {
+    status = 'error';
+  } else if (latest.status === 'IN_PROGRESS') {
     status = 'warning';
   } else if (storedCount === 0) {
     status = 'missing';
@@ -859,6 +893,8 @@ async function getHermesInboxStatus() {
     latestFilename: latest.filename || null,
     latestS3Key: latest.s3Key || null,
     latestStatus: latest.status || null,
+    errorCode: runtimeState?.errorCode || null,
+    lastSuccessAt: runtimeState?.lastSuccessAt || null,
     gmailAccount: latest.accountEmail || latest.gmailAccount || defaultStatus.gmailAccount,
     gmailQuery: latest.query || defaultStatus.gmailQuery,
   };
@@ -870,6 +906,10 @@ app.use('/api/performance', performanceRoutes);
 
 // Prediction markets venue ingestion (aggregated events, IBKR refresh)
 const predictionMarketsIngestRoutes = require('./src/routes/predictionMarketsIngest');
+const {
+  startCpiCatalogReconciler,
+  stopCpiCatalogReconciler,
+} = require('./src/services/predictionMarketsIngest/reconciliationService');
 app.use('/api/prediction-markets', predictionMarketsIngestRoutes);
 
 // Market / portfolio data providers (IBKR-first, Yahoo fallback)
@@ -914,12 +954,94 @@ function runInFlight(key, producer) {
 const historicalCache = new Map();
 const HISTORICAL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
+// Maximum-history bars are research inputs only. Cache only successful Yahoo
+// responses and never serve an expired entry when refresh fails.
+const securityRiskMetricsHistoryCache = new Map();
+const securityRiskMetricsHistoryInFlight = new Map();
+const parsedSecurityRiskMetricsCacheTtl = parseInt(
+  process.env.SECURITY_RISK_METRICS_CACHE_TTL_MS || '3600000',
+  10,
+);
+const SECURITY_RISK_METRICS_CACHE_TTL = Number.isFinite(parsedSecurityRiskMetricsCacheTtl)
+  ? Math.max(60_000, parsedSecurityRiskMetricsCacheTtl)
+  : 60 * 60 * 1000;
+const parsedSecurityRiskMetricsCacheMaxEntries = parseInt(
+  process.env.SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES || '100',
+  10,
+);
+const SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES = Number.isFinite(parsedSecurityRiskMetricsCacheMaxEntries)
+  ? Math.max(10, parsedSecurityRiskMetricsCacheMaxEntries)
+  : 100;
+
 // Cache for risk ranges (1 hour TTL - changes daily)
 const riskRangesCache = new Map();
 const RISK_RANGES_CACHE_TTL = 60 * 60 * 1000; // 1 hour
-const HERMES_EMAIL_LEDGER_TABLE = process.env.HERMES_LEDGER_TABLE || 'HermesEmailIngestLedger';
+const RISK_RANGES_UNAVAILABLE_CACHE_TTL = 60 * 1000; // retry quickly while a publication is pending/stale/invalid
+const RISK_RANGE_MANIFEST_TABLE = process.env.RISK_RANGE_MANIFEST_TABLE
+  || AWS_RESOURCE_DEFAULTS.riskRangeManifestTable
+  || 'RiskRangePublicationManifestsV2';
+const RISK_RANGE_DATA_TABLE = process.env.HEDGEYE_RISK_RANGES_TABLE
+  || AWS_RESOURCE_DEFAULTS.riskRangeDataTable
+  || 'HedgeyeRiskRanges';
+const RESEARCH_EVENT_LEDGER_TABLE = process.env.RESEARCH_EVENT_LEDGER_TABLE
+  || AWS_RESOURCE_DEFAULTS.researchEventLedgerTable
+  || 'ResearchEventLedgerV2';
+const HERMES_EMAIL_LEDGER_TABLE = process.env.HERMES_LEDGER_TABLE
+  || AWS_RESOURCE_DEFAULTS.gmailLedgerTable
+  || 'HermesEmailIngestLedger';
 const HERMES_GMAIL_QUERY = process.env.HERMES_GMAIL_QUERY || 'label:Hedgeye newer_than:30d';
 const HERMES_GMAIL_ACCOUNT = process.env.HERMES_GMAIL_ACCOUNT || process.env.HERMES_ACCOUNT_EMAIL || 'timsmithaviation@gmail.com';
+
+async function queryRiskRangePublicationRows(publicationDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(publicationDate || ''))) return [];
+  const items = [];
+  let exclusiveStartKey;
+  do {
+    const response = await dynamodb.query({
+      TableName: RISK_RANGE_DATA_TABLE,
+      KeyConditionExpression: '#date = :date',
+      ExpressionAttributeNames: { '#date': 'date' },
+      ExpressionAttributeValues: { ':date': publicationDate },
+      ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+    }).promise();
+    items.push(...(response.Items || []));
+    exclusiveStartKey = response.LastEvaluatedKey;
+  } while (exclusiveStartKey);
+  return items;
+}
+
+async function loadRiskRangePublicationEnvelope({ requestedDate = null, now = new Date() } = {}) {
+  const options = {
+    deadlineHour: Number(process.env.RISK_RANGE_DEADLINE_HOUR_ET || 8),
+    deadlineMinute: Number(process.env.RISK_RANGE_DEADLINE_MINUTE_ET || 15),
+  };
+  const expectation = expectedRiskRangePublication(now, options);
+  const publicationDate = requestedDate || expectation.expectedDate;
+  const items = await queryRiskRangePublicationRows(publicationDate);
+  const envelope = buildRiskRangeEnvelope(items, {
+    now,
+    requestedDate,
+    minPrimaryCount: Number(process.env.RISK_RANGE_MIN_PRIMARY_COUNT || 30),
+    ...options,
+  });
+  if (requestedDate) return envelope;
+
+  let persistedManifest = null;
+  let manifestError = null;
+  try {
+    persistedManifest = (await dynamodb.get({
+      TableName: RISK_RANGE_MANIFEST_TABLE,
+      Key: { publicationDate, manifestType: 'primary' },
+      ConsistentRead: true,
+    }).promise()).Item || null;
+  } catch (error) {
+    manifestError = error.code || error.message;
+  }
+  return applyPersistedManifestGate(envelope, items, persistedManifest, {
+    ...expectation,
+    manifestError,
+  });
+}
 
 async function buildWorkflowStatusSnapshot() {
   const today = new Date().toISOString().split('T')[0];
@@ -928,7 +1050,7 @@ async function buildWorkflowStatusSnapshot() {
       status: 'unknown',
       lastRun: null,
       count: 0,
-      nextRun: '8:00 AM EST (market days)'
+      nextRun: '8:15 AM ET (market days)'
     },
     csvUpload: {
       status: 'unknown',
@@ -951,85 +1073,44 @@ async function buildWorkflowStatusSnapshot() {
   };
 
   try {
-    const snapshotResult = await dynamodb.get({
-      TableName: 'HedgeyeDailySnapshot',
-      Key: {
-        date: today,
-        snapshotType: 'risk-ranges'
-      }
-    }).promise();
-
-    if (snapshotResult.Item) {
-      workflowStatus.hedgeye = {
-        status: 'success',
-        lastRun: snapshotResult.Item.date,
-        scrapedAt: snapshotResult.Item.scrapedAt,
-        count: snapshotResult.Item.riskRangeCount || 0,
-        nextRun: '8:00 AM EST (market days)'
-      };
-    } else {
-      let latest = null;
-
-      for (let i = 0; i < 7; i++) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split('T')[0];
-
-        try {
-          const queryResult = await dynamodb.query({
-            TableName: 'HedgeyeDailySnapshot',
-            KeyConditionExpression: 'date = :date AND snapshotType = :type',
-            ExpressionAttributeValues: {
-              ':date': dateStr,
-              ':type': 'risk-ranges'
-            }
-          }).promise();
-
-          if (queryResult.Items && queryResult.Items.length > 0) {
-            latest = queryResult.Items[0];
-            break;
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-
-      if (!latest) {
-        const recentSnapshot = await dynamodb.scan({
-          TableName: 'HedgeyeDailySnapshot',
-          FilterExpression: 'snapshotType = :type',
-          ExpressionAttributeValues: {
-            ':type': 'risk-ranges'
-          },
-          Limit: 10
-        }).promise();
-
-        if (recentSnapshot.Items && recentSnapshot.Items.length > 0) {
-          latest = recentSnapshot.Items.sort((a, b) => {
-            const dateA = new Date(a.date || 0);
-            const dateB = new Date(b.date || 0);
-            return dateB - dateA;
-          })[0];
-        }
-      }
-
-      if (latest) {
-        const latestDate = latest.date;
-        const isToday = latestDate === today;
-        const isRecent = latestDate && new Date(latestDate) >= new Date(new Date(today).getTime() - 2 * 24 * 60 * 60 * 1000);
-
-        workflowStatus.hedgeye = {
-          status: isToday ? 'success' : (isRecent ? 'stale' : 'error'),
-          lastRun: latest.date,
-          scrapedAt: latest.scrapedAt,
-          count: latest.riskRangeCount || 0,
-          nextRun: '8:00 AM EST (market days)'
-        };
-      }
-    }
+    const envelope = await loadRiskRangePublicationEnvelope({ now: new Date() });
+    const manifestAccessDenied = /access.?denied|not authorized/i.test(
+      String(envelope.diagnostics?.manifestError || ''),
+    );
+    workflowStatus.hedgeye = {
+      status: envelope.status === 'current'
+        ? 'success'
+        : envelope.status === 'pending'
+          ? 'pending'
+          : envelope.status === 'stale'
+            ? 'error'
+            : envelope.status,
+      lastRun: envelope.manifest.publicationDate,
+      scrapedAt: envelope.manifest.latestUpdatedAt,
+      count: envelope.manifest.decisionRangeCount,
+      primaryCount: envelope.manifest.primaryCount,
+      supplementalCount: envelope.manifest.supplementalCount,
+      expectedDate: envelope.manifest.expectedDate,
+      pendingDate: envelope.manifest.pendingDate,
+      available: envelope.available,
+      errorCode: envelope.diagnostics?.manifestReasons?.includes('manifest-unavailable')
+        ? (manifestAccessDenied
+          ? 'RISK_RANGE_MANIFEST_ACCESS_DENIED'
+          : 'RISK_RANGE_MANIFEST_UNAVAILABLE')
+        : envelope.diagnostics?.manifestReasons?.includes('manifest-missing')
+          ? 'RISK_RANGE_MANIFEST_MISSING'
+          : envelope.diagnostics?.manifestReasons?.length
+            ? 'RISK_RANGE_MANIFEST_INVALID'
+            : null,
+      diagnostics: envelope.diagnostics,
+      error: envelope.diagnostics?.manifestError || null,
+      nextRun: '8:15 AM ET (market days)',
+    };
   } catch (hedgeyeError) {
     console.error('[API] Error fetching Hedgeye status:', hedgeyeError);
     workflowStatus.hedgeye.status = 'error';
+    workflowStatus.hedgeye.errorCode = hedgeyeError.code || 'RISK_RANGE_PUBLICATION_CHECK_FAILED';
+    workflowStatus.hedgeye.error = hedgeyeError.message;
   }
 
   try {
@@ -1397,6 +1478,82 @@ function getTickerMapping(symbol) {
 
   // Default: use ticker as-is for Yahoo Finance
   return { source: 'yahoo', ticker: upperSymbol };
+}
+
+function enforceSecurityRiskMetricsCacheCapacity() {
+  while (securityRiskMetricsHistoryCache.size > SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES) {
+    const oldestKey = securityRiskMetricsHistoryCache.keys().next().value;
+    securityRiskMetricsHistoryCache.delete(oldestKey);
+  }
+}
+
+async function fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh = false } = {}) {
+  const mapping = getTickerMapping(symbol);
+  if (mapping.source !== 'yahoo') {
+    const error = new Error(`Yahoo maximum history is unsupported for ${symbol}`);
+    error.code = SECURITY_RISK_METRICS_REASONS.UNSUPPORTED_SOURCE;
+    throw error;
+  }
+
+  const yahooSymbol = mapping.ticker;
+  const cacheKey = yahooSymbol.toUpperCase();
+  const now = Date.now();
+  const cached = securityRiskMetricsHistoryCache.get(cacheKey);
+  if (!forceRefresh && cached && now - cached.timestamp < SECURITY_RISK_METRICS_CACHE_TTL) {
+    securityRiskMetricsHistoryCache.delete(cacheKey);
+    securityRiskMetricsHistoryCache.set(cacheKey, cached);
+    return {
+      ...cached.data,
+      cacheStatus: 'hit',
+      cacheAgeSeconds: Math.max(0, Math.floor((now - cached.timestamp) / 1000)),
+    };
+  }
+  if (!forceRefresh && cached) securityRiskMetricsHistoryCache.delete(cacheKey);
+
+  const pending = securityRiskMetricsHistoryInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`;
+    const response = await axios.get(url, {
+      params: {
+        // Yahoo can silently coarsen `range=max` responses to monthly bars.
+        // An explicit epoch window preserves daily granularity while still
+        // requesting all history the provider can return.
+        period1: '-2208988800',
+        period2: String(Math.floor(Date.now() / 1000)),
+        interval: '1d',
+        includePrePost: 'false',
+        includeAdjustedClose: 'true',
+        events: 'div,splits',
+      },
+      timeout: 20000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    const chart = response.data?.chart;
+    if (chart?.error) {
+      throw new Error(chart.error.description || chart.error.code || 'Yahoo chart error');
+    }
+    const chartResult = chart?.result?.[0];
+    if (chartResult?.meta?.dataGranularity !== '1d') {
+      throw new Error(`Yahoo returned ${chartResult?.meta?.dataGranularity || 'unknown'} granularity instead of daily bars`);
+    }
+    const bars = parseYahooChartBars(chartResult);
+    if (bars.length === 0) {
+      throw new Error('Yahoo returned no explicit adjusted daily bars');
+    }
+
+    const fetchedAt = new Date().toISOString();
+    const data = { bars, yahooSymbol, fetchedAt };
+    securityRiskMetricsHistoryCache.set(cacheKey, { data, timestamp: Date.now() });
+    enforceSecurityRiskMetricsCacheCapacity();
+    return { ...data, cacheStatus: 'miss', cacheAgeSeconds: 0 };
+  })().finally(() => {
+    securityRiskMetricsHistoryInFlight.delete(cacheKey);
+  });
+
+  securityRiskMetricsHistoryInFlight.set(cacheKey, request);
+  return request;
 }
 
 // Fetch from Yahoo Finance
@@ -2648,107 +2805,240 @@ function lookupRiskRangeData(allData, ticker) {
   return null;
 }
 
+function validSecurityRiskMetricsSymbol(symbol) {
+  return /^[A-Z0-9][A-Z0-9.^=/_-]{0,31}$/.test(symbol);
+}
+
+function summarizeSecurityRiskMetricsCache(statuses) {
+  const usable = statuses.filter(Boolean);
+  if (usable.length === 0) return 'unavailable';
+  if (usable.every((status) => status === 'hit')) return 'hit';
+  if (usable.every((status) => status === 'miss')) return 'miss';
+  return 'mixed';
+}
+
+// Read-only historical research metrics, including completed daily price
+// structure. This route deliberately contains no spot, NLV, position, action,
+// or order data and can never be executable.
+app.get('/api/security-risk-metrics', async (req, res) => {
+  const rawSymbols = Array.isArray(req.query.symbols)
+    ? req.query.symbols.join(',')
+    : String(req.query.symbols || '');
+  const symbols = Array.from(new Set(
+    rawSymbols.split(',').map((symbol) => symbol.trim().toUpperCase()).filter(Boolean),
+  ));
+  const forceRefresh = ['1', 'true'].includes(
+    String(req.query.forceRefresh || '').trim().toLowerCase(),
+  );
+
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Data-Use', 'historical-research-only');
+
+  if (symbols.length === 0) {
+    return res.status(400).json({
+      status: 'unavailable',
+      error: 'At least one symbol is required',
+      rows: {},
+      historicalOnly: true,
+      executable: false,
+    });
+  }
+  if (symbols.length > 50) {
+    return res.status(400).json({
+      status: 'unavailable',
+      error: 'A maximum of 50 symbols may be requested',
+      rows: {},
+      historicalOnly: true,
+      executable: false,
+    });
+  }
+
+  const cacheStatuses = [];
+  let benchmarkHistory = null;
+  try {
+    benchmarkHistory = await fetchYahooMaximumAdjustedHistory('SPY', { forceRefresh });
+    cacheStatuses.push(benchmarkHistory.cacheStatus);
+  } catch (error) {
+    console.warn('[SecurityRiskMetrics] SPY maximum-history fetch unavailable:', error.message);
+  }
+
+  const rowEntries = await mapWithConcurrency(symbols, 6, async (symbol) => {
+    if (!validSecurityRiskMetricsSymbol(symbol)) {
+      return [symbol, createUnavailableSecurityRiskMetrics({
+        symbol,
+        reason: SECURITY_RISK_METRICS_REASONS.INVALID_SYMBOL,
+        source: SECURITY_RISK_METRICS_SOURCE,
+        provenance: { provider: 'Yahoo Finance', requestedSymbol: symbol },
+      })];
+    }
+
+    let securityHistory;
+    try {
+      if (symbol === 'SPY' && benchmarkHistory) {
+        securityHistory = benchmarkHistory;
+      } else if (symbol === 'SPY') {
+        throw new Error('SPY benchmark history is unavailable');
+      } else {
+        securityHistory = await fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh });
+        cacheStatuses.push(securityHistory.cacheStatus);
+      }
+    } catch (error) {
+      const reason = error.code === SECURITY_RISK_METRICS_REASONS.UNSUPPORTED_SOURCE
+        ? SECURITY_RISK_METRICS_REASONS.UNSUPPORTED_SOURCE
+        : SECURITY_RISK_METRICS_REASONS.HISTORY_UNAVAILABLE;
+      console.warn(`[SecurityRiskMetrics] ${symbol} maximum-history fetch unavailable:`, error.message);
+      return [symbol, createUnavailableSecurityRiskMetrics({
+        symbol,
+        reason,
+        source: SECURITY_RISK_METRICS_SOURCE,
+        provenance: { provider: 'Yahoo Finance', requestedSymbol: symbol },
+      })];
+    }
+
+    const provenance = {
+      provider: 'Yahoo Finance',
+      dataset: 'chart',
+      range: null,
+      requestWindow: '1900-01-01 through request time (maximum returned provider history)',
+      interval: '1d',
+      adjustedCloseRequired: true,
+      security: {
+        requestedSymbol: symbol,
+        yahooSymbol: securityHistory.yahooSymbol,
+        fetchedAt: securityHistory.fetchedAt,
+        cacheStatus: securityHistory.cacheStatus,
+        cacheAgeSeconds: securityHistory.cacheAgeSeconds,
+      },
+      benchmark: benchmarkHistory ? {
+        symbol: 'SPY',
+        yahooSymbol: benchmarkHistory.yahooSymbol,
+        fetchedAt: benchmarkHistory.fetchedAt,
+        cacheStatus: benchmarkHistory.cacheStatus,
+        cacheAgeSeconds: benchmarkHistory.cacheAgeSeconds,
+      } : {
+        symbol: 'SPY',
+        status: 'unavailable',
+      },
+    };
+
+    let row = buildSecurityRiskMetrics({
+      symbol,
+      securityBars: securityHistory.bars,
+      benchmarkBars: benchmarkHistory?.bars || [],
+      source: SECURITY_RISK_METRICS_SOURCE,
+      provenance,
+    });
+
+    if (!benchmarkHistory) {
+      const unavailableBeta = createUnavailableSecurityRiskMetrics({
+        symbol,
+        reason: SECURITY_RISK_METRICS_REASONS.BENCHMARK_UNAVAILABLE,
+        source: SECURITY_RISK_METRICS_SOURCE,
+      }).beta;
+      const availableNonBetaMetrics = [row.atr14, row.records, row.priceStructure]
+        .filter((metric) => metric.status === 'available').length;
+      row = {
+        ...row,
+        status: availableNonBetaMetrics > 0 ? 'partial' : 'unavailable',
+        beta: unavailableBeta,
+      };
+    }
+
+    return [symbol, row];
+  });
+
+  const rows = Object.fromEntries(rowEntries);
+  const rowValues = Object.values(rows);
+  const availableRows = rowValues.filter((row) => row.status === 'available').length;
+  const usableRows = rowValues.filter((row) => row.status !== 'unavailable').length;
+  const status = availableRows === rowValues.length
+    ? 'available'
+    : (usableRows > 0 ? 'partial' : 'unavailable');
+  const asOf = rowValues
+    .map((row) => row.asOf)
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
+  const cacheStatus = summarizeSecurityRiskMetricsCache(cacheStatuses);
+  const cacheAgeSeconds = Math.max(
+    0,
+    ...rowValues.map((row) => Number(row.provenance?.security?.cacheAgeSeconds) || 0),
+  );
+
+  res.set('X-Data-Cache', cacheStatus);
+  res.set('X-Data-Age', String(cacheAgeSeconds));
+  return res.json({
+    status,
+    source: SECURITY_RISK_METRICS_SOURCE,
+    benchmark: 'SPY',
+    asOf,
+    generatedAt: new Date().toISOString(),
+    requestedSymbols: symbols,
+    rows,
+    cache: {
+      status: cacheStatus,
+      ageSeconds: cacheAgeSeconds,
+      ttlSeconds: Math.floor(SECURITY_RISK_METRICS_CACHE_TTL / 1000),
+    },
+    historicalOnly: true,
+    executable: false,
+  });
+});
+
 // Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
 app.get('/api/risk-ranges', async (req, res) => {
   const startTime = Date.now();
   try {
     const { tickers, date } = req.query;
+    const wantsEnvelope = String(req.query.envelope || '') === '1';
     const tickerList = tickers ? tickers.split(',').map(t => t.trim().toUpperCase()) : null;
+    const expectation = date ? null : expectedRiskRangePublication(new Date(), {
+      deadlineHour: Number(process.env.RISK_RANGE_DEADLINE_HOUR_ET || 8),
+      deadlineMinute: Number(process.env.RISK_RANGE_DEADLINE_MINUTE_ET || 15),
+    });
 
-    // Create cache key
-    const cacheKey = tickerList ? tickerList.sort().join(',') : 'all';
+    const cacheKey = JSON.stringify({
+      tickers: tickerList ? [...tickerList].sort() : null,
+      date: date || null,
+      envelope: wantsEnvelope,
+      publicationPhase: expectation
+        ? {
+          expectedDate: expectation.expectedDate,
+          pendingDate: expectation.pendingDate,
+          afterDeadline: expectation.afterDeadline,
+        }
+        : null,
+    });
     const now = Date.now();
 
-    // Check cache (5 minute TTL)
     const cached = riskRangesCache.get(cacheKey);
-    if (cached && (now - cached.timestamp) < RISK_RANGES_CACHE_TTL) {
+    const cacheTtl = cached?.envelope?.available
+      ? RISK_RANGES_CACHE_TTL
+      : RISK_RANGES_UNAVAILABLE_CACHE_TTL;
+    if (cached && (now - cached.timestamp) < cacheTtl) {
       const totalTime = Date.now() - startTime;
       console.log(`[API] /api/risk-ranges cache hit for ${cacheKey} (${totalTime}ms)`);
+      res.setHeader('X-Risk-Range-Status', cached.envelope.status);
+      if (cached.envelope.manifest.publicationDate) {
+        res.setHeader('X-Risk-Range-Publication-Date', cached.envelope.manifest.publicationDate);
+      }
       return res.json(cached.data);
     }
 
     console.log(`[API] /api/risk-ranges called${tickerList ? ` for ${tickerList.length} tickers` : ' for all tickers'}`);
-
-    // Query HedgeyeRiskRanges table - scan for latest date
     const dbStartTime = Date.now();
-
-    // Scan to find all items and group by date to find the most recent with good data
-    let targetDate = date;
-    let allItems = [];
-
-    // Full scan to get all items (table should be small - just risk ranges)
-    const scanParams = {
-      TableName: 'HedgeyeRiskRanges'
-    };
-
-    let lastKey = null;
-    let fullScan = [];
-    do {
-      if (lastKey) scanParams.ExclusiveStartKey = lastKey;
-      const scanResult = await dynamodb.scan(scanParams).promise();
-      fullScan = fullScan.concat(scanResult.Items || []);
-      lastKey = scanResult.LastEvaluatedKey;
-    } while (lastKey);
-
-    console.log(`[API] Full scan returned ${fullScan.length} total items`);
-
-    // Group by date
-    const byDate = {};
-    fullScan.forEach(item => {
-      const d = item.date;
-      if (!byDate[d]) byDate[d] = [];
-      byDate[d].push(item);
+    const envelope = await loadRiskRangePublicationEnvelope({
+      requestedDate: date || null,
+      now: new Date(),
     });
-
-    // Find the date with the most items (best coverage) or use specified date
-    const dates = Object.keys(byDate).sort().reverse(); // Most recent first
-    console.log(`[API] Found dates: ${dates.join(', ')}`);
-
-    if (targetDate && byDate[targetDate]) {
-      allItems = byDate[targetDate];
-    } else {
-      // Prefer latest publication date; fall back to best coverage if latest is empty
-      targetDate = dates[0] || null;
-      allItems = targetDate ? byDate[targetDate] || [] : [];
-      if (allItems.length === 0 && dates.length > 1) {
-        let bestDate = dates[0];
-        let bestCount = 0;
-        dates.forEach(d => {
-          if (byDate[d].length > bestCount) {
-            bestCount = byDate[d].length;
-            bestDate = d;
-          }
-        });
-        targetDate = bestDate;
-        allItems = byDate[targetDate] || [];
-        console.log(`[API] Latest date empty; using ${targetDate} with ${allItems.length} items (best coverage)`);
-      } else {
-        console.log(`[API] Selected latest date ${targetDate} with ${allItems.length} items`);
-      }
-    }
-
     const dbTime = Date.now() - dbStartTime;
-    console.log(`[API] DynamoDB scan completed in ${dbTime}ms, found ${allItems.length} items for date ${targetDate}`);
+    console.log(
+      `[API] DynamoDB release query completed in ${dbTime}ms; risk-range publication ` +
+      `${envelope.status} for ${envelope.manifest.publicationDate || 'none'} ` +
+      `(${envelope.manifest.primaryCount} primary, ${envelope.manifest.supplementalCount} supplemental)`,
+    );
 
-    if (allItems.length === 0) {
-      const totalTime = Date.now() - startTime;
-      console.log(`[API] No risk range data found in DynamoDB (${totalTime}ms)`);
-      return res.json({});
-    }
-
-    // Transform to expected format: { ticker: { lrr, hrr, trend, timestamp } }
-    const allData = {};
-    allItems.forEach(item => {
-      allData[item.ticker] = {
-        lrr: parseFloat(item.lrr) || 0,
-        hrr: parseFloat(item.hrr) || 0,
-        trend: item.trend || 'N/A',
-        timestamp: item.updatedAt || null,
-        date: item.date
-      };
-    });
-
-    // Filter by tickers if provided
+    const allData = envelope.ranges;
     const riskRanges = tickerList
       ? Object.fromEntries(
         tickerList
@@ -2760,16 +3050,21 @@ app.get('/api/risk-ranges', async (req, res) => {
           .filter(Boolean)
       )
       : allData;
-
-    // Store in cache
+    const responseData = wantsEnvelope
+      ? { ...envelope, ranges: riskRanges }
+      : riskRanges;
     riskRangesCache.set(cacheKey, {
-      data: riskRanges,
-      timestamp: now
+      data: responseData,
+      envelope,
+      timestamp: now,
     });
-
+    res.setHeader('X-Risk-Range-Status', envelope.status);
+    if (envelope.manifest.publicationDate) {
+      res.setHeader('X-Risk-Range-Publication-Date', envelope.manifest.publicationDate);
+    }
     const totalTime = Date.now() - startTime;
     console.log(`[API] Returning risk ranges for ${Object.keys(riskRanges).length} securities (total: ${totalTime}ms, DB: ${dbTime}ms)`);
-    res.json(riskRanges);
+    res.json(responseData);
 
   } catch (error) {
     const totalTime = Date.now() - startTime;
@@ -2827,8 +3122,7 @@ app.get('/api/risk-ranges/history-all', async (req, res) => {
     console.log('[API] /api/risk-ranges/history-all called');
 
     const params = { TableName: 'RiskRangeData' };
-    const result = await dynamodb.scan(params).promise();
-    const items = result.Items || [];
+    const items = await scanAllPages(dynamodb, params);
 
     const grouped = {};
     items.forEach(item => {
@@ -2877,32 +3171,25 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
     const alerts = [];
 
     // 1. Processing Risk Ranges (HedgeyeRiskRanges Table)
-    // Risk Ranges are stored as individual items per ticker per date
     try {
-      const rrParams = { TableName: 'HedgeyeRiskRanges' };
-      const rrResult = await dynamodb.scan(rrParams).promise();
-      const items = rrResult.Items || [];
-
-      if (items.length > 0) {
-        // Sort by date descending to find the latest batch
-        // Assumption: date format is YYYY-MM-DD so string sort works
-        const latestItem = items.sort((a, b) => b.date.localeCompare(a.date))[0];
-        const latestDate = latestItem.date;
-
-        // Count items for this latest date
-        const itemsOnDate = items.filter(i => i.date === latestDate);
-
-        results['risk-ranges'] = {
-          status: getFreshnessStatus(latestDate),
-          lastUpdated: latestDate, // Use content date as primary source for freshness
-          scrapedAt: latestItem.updatedAt, // Keep technical timestamp available
-          itemCount: itemsOnDate.length,
-          date: latestDate,
-          source: 'HedgeyeRiskRanges'
-        };
-      } else {
-        results['risk-ranges'] = { status: 'missing', itemCount: 0, date: null, source: 'HedgeyeRiskRanges' };
-      }
+      const envelope = await loadRiskRangePublicationEnvelope({ now });
+      results['risk-ranges'] = {
+        status: envelope.status === 'current'
+          ? 'fresh'
+          : envelope.status === 'pending'
+            ? 'pending'
+            : envelope.status,
+        lastUpdated: envelope.manifest.publicationDate,
+        scrapedAt: envelope.manifest.latestUpdatedAt,
+        itemCount: envelope.manifest.decisionRangeCount,
+        primaryCount: envelope.manifest.primaryCount,
+        supplementalCount: envelope.manifest.supplementalCount,
+        expectedDate: envelope.manifest.expectedDate,
+        pendingDate: envelope.manifest.pendingDate,
+        available: envelope.available,
+        date: envelope.manifest.publicationDate,
+        source: 'HedgeyeRiskRangesManifest',
+      };
     } catch (err) {
       console.error('[API] Error querying HedgeyeRiskRanges:', err.message);
       results['risk-ranges'] = { status: 'error', error: err.message };
@@ -2910,7 +3197,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'volume', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
+    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'volume', 'market-structure', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
 
     // Single scan of HedgeyeDailySnapshot, then pick the latest item per snapshotType.
     // This reports the true most recent upload regardless of age, matching how
@@ -3108,29 +3395,44 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
   }
 });
 
+async function buildWorkflowStatusResponse() {
+  const workflowStatus = await buildWorkflowStatusSnapshot();
+  const hermesSnapshot = await getDirectorSnapshot({
+    dynamodb,
+    workflowSnapshot: workflowStatus,
+  });
+  workflowStatus.hermesDirector = hermesSnapshot.director;
+  workflowStatus.hermesWorkers = hermesSnapshot.workers;
+  workflowStatus.hermesAlerts = hermesSnapshot.alerts;
+  workflowStatus.hermesTables = hermesSnapshot.tables;
+  return workflowStatus;
+}
+
+async function buildHermesDirectorStatusResponse() {
+  const workflowSnapshot = await buildWorkflowStatusSnapshot();
+  const snapshot = await getDirectorSnapshot({
+    dynamodb,
+    workflowSnapshot,
+  });
+  return {
+    ...snapshot,
+    workflowSnapshot,
+    workersCatalog: listWorkerDefinitions(),
+  };
+}
+
 // Workflow Status endpoint - returns status of automated workflows
 app.get('/api/workflow-status', async (req, res) => {
   const startTime = Date.now();
   try {
     console.log('[API] /api/workflow-status called');
-    const workflowStatus = await buildWorkflowStatusSnapshot();
-    const hermesSnapshot = await getDirectorSnapshot({
-      dynamodb,
-      workflowSnapshot: workflowStatus,
-    });
-    workflowStatus.hermesDirector = hermesSnapshot.director;
-    workflowStatus.hermesWorkers = hermesSnapshot.workers;
-    workflowStatus.hermesAlerts = hermesSnapshot.alerts;
-    workflowStatus.hermesTables = hermesSnapshot.tables;
-
-    const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/workflow-status completed in ${totalTime}ms`);
-    res.json(workflowStatus);
-
+    const response = await sendCachedJson(res, 'workflow-status', buildWorkflowStatusResponse);
+    console.log(`[API] /api/workflow-status completed in ${Date.now() - startTime}ms`);
+    return response;
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/workflow-status after ${totalTime}ms:`, error);
-    res.status(500).json({ error: 'Failed to fetch workflow status', details: error.message });
+    return res.status(500).json({ error: 'Failed to fetch workflow status', details: error.message });
   }
 });
 
@@ -3138,22 +3440,13 @@ app.get('/api/hermes/director/status', async (req, res) => {
   const startTime = Date.now();
   try {
     console.log('[API] /api/hermes/director/status called');
-    const workflowSnapshot = await buildWorkflowStatusSnapshot();
-    const snapshot = await getDirectorSnapshot({
-      dynamodb,
-      workflowSnapshot,
-    });
-    const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/hermes/director/status completed in ${totalTime}ms`);
-    res.json({
-      ...snapshot,
-      workflowSnapshot,
-      workersCatalog: listWorkerDefinitions(),
-    });
+    const response = await sendCachedJson(res, 'hermes-director-status', buildHermesDirectorStatusResponse);
+    console.log(`[API] /api/hermes/director/status completed in ${Date.now() - startTime}ms`);
+    return response;
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/hermes/director/status after ${totalTime}ms:`, error);
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Failed to fetch Hermes director status',
       details: error.message,
       tables: {
@@ -3185,6 +3478,8 @@ app.post('/api/hermes/director/command', async (req, res) => {
 
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/hermes/director/command completed in ${totalTime}ms`);
+    researchResponseCache.delete('workflow-status');
+    researchResponseCache.delete('hermes-director-status');
     res.json(result);
   } catch (error) {
     const totalTime = Date.now() - startTime;
@@ -3230,6 +3525,8 @@ app.post('/api/hermes/alerts/:alertId/action', async (req, res) => {
       workflowSnapshot,
     });
 
+    researchResponseCache.delete('workflow-status');
+    researchResponseCache.delete('hermes-director-status');
     res.json({ alert, snapshot });
   } catch (error) {
     console.error('[API] Error updating Hermes alert:', error);
@@ -3447,72 +3744,85 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
 
 // Hedgeye ETF Pro endpoint - serves the latest Gmail action snapshot or local workbook snapshot.
 // Also computes day-over-day changes (adds/removes) for Longs and Shorts when local rows are available.
+async function buildEtfProResponse() {
+  const { payload: parsed, etfproDir, latestPath, localPayload, emailPayload } = await getResolvedEtfProPayload();
+  if (!parsed) {
+    const error = new Error('ETF Pro snapshot not found');
+    error.statusCode = 404;
+    error.responseBody = {
+      error: 'ETF Pro snapshot not found',
+      hint: 'Run: npm run collect:etfpro',
+      path: latestPath,
+    };
+    throw error;
+  }
+  if (parsed.available === false && parsed.meta?.blockedByIngestion) {
+    return parsed;
+  }
+
+  // Find previous day's snapshot for diffing
+  let changes = null;
+  try {
+    const todayDate = parsed.meta?.snapshotDate || null;
+    const dated = fs.readdirSync(etfproDir)
+      .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+      .map(f => f.replace('.json', ''))
+      .filter(d => d !== todayDate)
+      .sort()
+      .reverse();
+
+    if (dated.length > 0) {
+      const prevPath = path.join(etfproDir, `${dated[0]}.json`);
+      const prevParsed = JSON.parse(fs.readFileSync(prevPath, 'utf-8'));
+
+      const classify = (rows) => {
+        const longs = new Set();
+        const shorts = new Set();
+        for (const r of rows) {
+          const ticker = String(r.ticker || '').trim().toUpperCase();
+          if (!ticker) continue;
+          if (String(r.call).toLowerCase() === 'short') {
+            shorts.add(ticker);
+          } else {
+            longs.add(ticker);
+          }
+        }
+        return { longs, shorts };
+      };
+
+      const today = classify(parsed.rows || []);
+      const prev = classify(prevParsed.rows || []);
+
+      changes = {
+        previousDate: dated[0],
+        addedLongs: [...today.longs].filter(t => !prev.longs.has(t)),
+        removedLongs: [...prev.longs].filter(t => !today.longs.has(t)),
+        addedShorts: [...today.shorts].filter(t => !prev.shorts.has(t)),
+        removedShorts: [...prev.shorts].filter(t => !today.shorts.has(t)),
+      };
+    }
+  } catch (diffErr) {
+    console.warn('[API] Could not compute ETF Pro day-over-day diff:', diffErr.message);
+  }
+
+  parsed.changes = parsed.changes || changes;
+  if (emailPayload?.changes && parsed.meta?.source === 'gmail-html-applied-to-local-book') {
+    parsed.changes = emailPayload.changes;
+  }
+  if (localPayload?.meta?.snapshotDate && parsed.meta?.source === 'gmail-html-applied-to-local-book') {
+    parsed.meta.previousFullBookDate = localPayload.meta.snapshotDate;
+  }
+  return parsed;
+}
+
 app.get('/api/hedgeye/etfpro', async (req, res) => {
   try {
-    const { payload: parsed, etfproDir, latestPath, localPayload, emailPayload } = await getResolvedEtfProPayload();
-    if (!parsed) {
-      return res.status(404).json({
-        error: 'ETF Pro snapshot not found',
-        hint: 'Run: npm run collect:etfpro',
-        path: latestPath
-      });
-    }
-
-    // Find previous day's snapshot for diffing
-    let changes = null;
-    try {
-      const todayDate = parsed.meta?.snapshotDate || null;
-      const dated = fs.readdirSync(etfproDir)
-        .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
-        .map(f => f.replace('.json', ''))
-        .filter(d => d !== todayDate)
-        .sort()
-        .reverse();
-
-      if (dated.length > 0) {
-        const prevPath = path.join(etfproDir, `${dated[0]}.json`);
-        const prevParsed = JSON.parse(fs.readFileSync(prevPath, 'utf-8'));
-
-        const classify = (rows) => {
-          const longs = new Set();
-          const shorts = new Set();
-          for (const r of rows) {
-            const ticker = String(r.ticker || '').trim().toUpperCase();
-            if (!ticker) continue;
-            if (String(r.call).toLowerCase() === 'short') {
-              shorts.add(ticker);
-            } else {
-              longs.add(ticker);
-            }
-          }
-          return { longs, shorts };
-        };
-
-        const today = classify(parsed.rows || []);
-        const prev = classify(prevParsed.rows || []);
-
-        changes = {
-          previousDate: dated[0],
-          addedLongs: [...today.longs].filter(t => !prev.longs.has(t)),
-          removedLongs: [...prev.longs].filter(t => !today.longs.has(t)),
-          addedShorts: [...today.shorts].filter(t => !prev.shorts.has(t)),
-          removedShorts: [...prev.shorts].filter(t => !today.shorts.has(t)),
-        };
-      }
-    } catch (diffErr) {
-      console.warn('[API] Could not compute ETF Pro day-over-day diff:', diffErr.message);
-    }
-
-    parsed.changes = parsed.changes || changes;
-    if (emailPayload?.changes && parsed.meta?.source === 'gmail-html-applied-to-local-book') {
-      parsed.changes = emailPayload.changes;
-    }
-    if (localPayload?.meta?.snapshotDate && parsed.meta?.source === 'gmail-html-applied-to-local-book') {
-      parsed.meta.previousFullBookDate = localPayload.meta.snapshotDate;
-    }
-    return res.json(parsed);
+    return await sendCachedJson(res, 'etf-pro', buildEtfProResponse);
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/etfpro:', error);
+    if (error.statusCode === 404) {
+      return res.status(404).json(error.responseBody);
+    }
     return res.status(500).json({ error: 'Failed to load ETF Pro snapshot', details: error.message });
   }
 });
@@ -3560,6 +3870,11 @@ app.post('/api/hedgeye/etfpro', (req, res) => {
     fs.writeFileSync(latestPath, json);
     console.log(`[API] POST /api/hedgeye/etfpro wrote ${datedPath} (${rows.length} rows, snapshotDate=${snapshotDate})`);
 
+    researchResponseCache.delete('etf-pro');
+    researchResponseCache.delete('changelog');
+    researchResponseCache.delete('analytics-daily-brief');
+    researchResponseCache.delete('workflow-status');
+    researchResponseCache.delete('hermes-director-status');
     return res.json({ ok: true, meta: payload.meta });
   } catch (error) {
     console.error('[API] Error in POST /api/hedgeye/etfpro:', error);
@@ -3662,56 +3977,97 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
   }
 });
 
+async function buildRealTimeAlertPositionsResponse() {
+  const windowDays = 90;
+  // ResearchEventLedgerV2 is canonical for migrated messages. The immutable
+  // Gmail/S3 archive fills only uncovered source-message gaps; daily snapshots
+  // remain rebuildable projections and never replace either event source.
+  const materialized = await fetchHermesRtaSnapshots(windowDays);
+  const rtaBenchmark = loadLocalRtaBenchmark();
+
+  const summary = summarizeRealTimeAlertPositions(materialized.snapshots, {
+    windowDays,
+    baseline: rtaBenchmark,
+  });
+  if (!rtaBenchmark?.checkpointValidation?.valid) {
+    const reasons = rtaBenchmark?.checkpointValidation?.reasons || ['checkpoint-missing'];
+    const warning = `RTA authoritative checkpoint is required (${reasons.join(', ')}).`;
+    summary.available = false;
+    summary.longCount = null;
+    summary.shortCount = null;
+    summary.ratioText = null;
+    summary.netBias = null;
+    summary.holdings = [];
+    summary.positionSourceConfidence = 'low';
+    summary.dataQuality = {
+      ...(summary.dataQuality || {}),
+      status: 'error',
+      warnings: [...new Set([...(summary.dataQuality?.warnings || []), warning])],
+      invalidEvents: [
+        ...(summary.dataQuality?.invalidEvents || []),
+        {
+          code: 'RTA_CHECKPOINT_REQUIRED',
+          sourceMessageId: null,
+          message: warning,
+        },
+      ],
+    };
+  }
+  if (materialized.rejected.length > 0) {
+    const rejectionWarnings = materialized.rejected.map((rejection) => {
+      const sourceMessageId = rejection.sourceMessageId || rejection.messageId || 'unknown';
+      return `RTA source message ${sourceMessageId} could not be materialized (${rejection.code}).`;
+    });
+    summary.available = false;
+    summary.longCount = null;
+    summary.shortCount = null;
+    summary.ratioText = null;
+    summary.netBias = null;
+    summary.holdings = [];
+    summary.positionSourceConfidence = 'low';
+    summary.dataQuality = {
+      ...(summary.dataQuality || {}),
+      status: 'error',
+      warnings: [...new Set([...(summary.dataQuality?.warnings || []), ...rejectionWarnings])],
+      invalidEvents: [
+        ...(summary.dataQuality?.invalidEvents || []),
+        ...materialized.rejected.map((rejection) => ({
+          code: rejection.code,
+          sourceMessageId: rejection.sourceMessageId || rejection.messageId || null,
+          message: rejectionWarnings.find((warning) =>
+            warning.includes(rejection.sourceMessageId || rejection.messageId || 'unknown')),
+        })),
+      ],
+    };
+  }
+  summary.sourceDiagnostics = {
+    dailySnapshotCount: 0,
+    hermesEventSnapshotCount: materialized.snapshots.length,
+    selectedMessageCount: materialized.selectedMessageCount,
+    materializedEventCount: materialized.materializedEventCount,
+    v2EventCount: materialized.v2EventCount,
+    legacyMigrationEventCount: materialized.legacyEventCount,
+    researchEventLedgerError: materialized.eventLedgerError,
+    rejectedMessageCount: materialized.rejected.length,
+    reconstructionInput: materialized.v2EventCount > 0
+      ? 'research-event-ledger-v2-with-legacy-migration'
+      : 'gmail-ledger-s3-legacy-migration',
+    positionSource: summary.positionSource,
+    positionSourceConfidence: summary.positionSourceConfidence,
+    benchmark: summary.baseline,
+    checkpointValidation: rtaBenchmark?.checkpointValidation || { valid: false, reasons: ['checkpoint-missing'] },
+    reconstructionWarnings: summary.reconstructionWarnings || [],
+  };
+  return summary;
+}
+
 app.get('/api/hedgeye/real-time-alert/positions', async (req, res) => {
   const startTime = Date.now();
-  const windowDays = 90;
-
   try {
     console.log('[API] /api/hedgeye/real-time-alert/positions called');
-
-    const snapshots = [];
-    for (let i = 0; i < windowDays; i += 1) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-      const result = await dynamodb.get({
-        TableName: 'HedgeyeDailySnapshot',
-        Key: { date: dateStr, snapshotType: 'real-time-alert' },
-      }).promise();
-
-      if (result.Item) {
-        snapshots.push({
-          date: result.Item.date,
-          data: result.Item.data,
-          scrapedAt: result.Item.scrapedAt || null,
-        });
-      }
-    }
-
-    const hermesSnapshots = await fetchHermesRtaSnapshots(windowDays);
-    const reconstructionSnapshots = hermesSnapshots.length > 0
-      ? hermesSnapshots
-      : snapshots;
-    const rtaBenchmark = loadLocalRtaBenchmark();
-
-    const summary = summarizeRealTimeAlertPositions(reconstructionSnapshots, {
-      windowDays,
-      baseline: rtaBenchmark,
-    });
-    summary.sourceDiagnostics = {
-      dailySnapshotCount: snapshots.length,
-      hermesEventSnapshotCount: hermesSnapshots.length,
-      reconstructionInput: hermesSnapshots.length > 0 ? 'hermes-email-ledger' : 'daily-snapshots',
-      positionSource: summary.positionSource,
-      positionSourceConfidence: summary.positionSourceConfidence,
-      benchmark: summary.baseline,
-      reconstructionWarnings: summary.reconstructionWarnings || [],
-    };
-    const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/hedgeye/real-time-alert/positions completed in ${totalTime}ms`);
-
-    return res.json(summary);
+    const response = await sendCachedJson(res, 'rta-positions:90', buildRealTimeAlertPositionsResponse);
+    console.log(`[API] /api/hedgeye/real-time-alert/positions completed in ${Date.now() - startTime}ms`);
+    return response;
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/hedgeye/real-time-alert/positions after ${totalTime}ms:`, error);
@@ -3723,40 +4079,10 @@ app.get('/api/hedgeye/real-time-alert/positions', async (req, res) => {
 });
 
 // Hedgeye Changelog endpoint - returns added/removed items for each data type
-app.get('/api/hedgeye/changelog', async (req, res) => {
+async function buildHedgeyeChangelogResponse() {
   const startTime = Date.now();
   try {
     console.log('[API] /api/hedgeye/changelog called');
-
-    // First, fetch Risk Ranges for today (or latest) to use for cross-referencing
-    // Users often view "Early Look" and "Risk Ranges" as shared data, so if a ticker
-    // is missing from Early Look but present in Risk Ranges, we shouldn't mark it as "Removed".
-    let activeTickers = [];
-    try {
-      const rrParams = {
-        TableName: 'HedgeyeDailySnapshot',
-        KeyConditionExpression: 'snapshotType = :type',
-        ExpressionAttributeValues: { ':type': 'risk-ranges' },
-        Limit: 1,
-        ScanIndexForward: false
-      };
-      // We can't query by snapshotType easily without index, so we'll just rely on the main loop 
-      // to populate this if we process risk-ranges first, or just do a quick scan for today's RR.
-      const todayStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-');
-      // Format YYYY-MM-DD
-      const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-      const rrItem = await dynamodb.get({
-        TableName: 'HedgeyeDailySnapshot',
-        Key: { date: todayISO, snapshotType: 'risk-ranges' }
-      }).promise();
-
-      if (rrItem.Item && rrItem.Item.data) {
-        activeTickers = Object.keys(rrItem.Item.data);
-      }
-    } catch (e) {
-      console.warn('Failed to pre-fetch risk ranges for changelog xref:', e);
-    }
 
     const snapshotTypes = [
       'risk-ranges',
@@ -3769,10 +4095,28 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
       'the-call',
       'real-time-alert',
       'volume',
+      'market-structure',
       'cftc-positioning'
     ];
 
     const results = {};
+
+    // Use the two most recent actual publications for every product. The old
+    // seven-calendar-day lookup treated weekly/irregular products as if they
+    // had no comparison history and generated false "no change" states.
+    const snapshotHistoryByType = {};
+    const allSnapshots = await scanAllPages(dynamodb, { TableName: 'HedgeyeDailySnapshot' });
+    for (const snapshot of allSnapshots) {
+      if (!snapshotTypes.includes(snapshot?.snapshotType) || !snapshot?.date) continue;
+      if (!snapshotHistoryByType[snapshot.snapshotType]) snapshotHistoryByType[snapshot.snapshotType] = [];
+      snapshotHistoryByType[snapshot.snapshotType].push(snapshot);
+    }
+    for (const type of snapshotTypes) {
+      snapshotHistoryByType[type] = (snapshotHistoryByType[type] || [])
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+        .filter((snapshot, index, rows) => index === rows.findIndex((row) => row.date === snapshot.date))
+        .slice(0, 2);
+    }
 
     const normalizeRealTimeAlerts = (snapshot) => {
       const data = snapshot?.data || {};
@@ -3800,50 +4144,7 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
     // Process each type in parallel
     await Promise.all(snapshotTypes.map(async (type) => {
       try {
-        // 1. Get recent snapshots for this type (last 7 days)
-        const recentSnapshots = [];
-        for (let i = 0; i < 7; i++) {
-          if (recentSnapshots.length >= 2) break;
-
-          const date = new Date();
-          date.setDate(date.getDate() - i);
-          const dateStr = date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD in EST
-
-          const item = await dynamodb.get({
-            TableName: 'HedgeyeDailySnapshot',
-            Key: { date: dateStr, snapshotType: type }
-          }).promise();
-
-          if (item.Item) {
-            recentSnapshots.push(item.Item);
-          }
-        }
-
-        // Sort snapshots: 
-        // 1. Newest Date first
-        // 2. If same date, prefer 'risk-ranges' over 'early-look' (as it's more complete)
-        recentSnapshots.sort((a, b) => {
-          const dateA = new Date(a.date);
-          const dateB = new Date(b.date);
-          if (dateB - dateA !== 0) return dateB - dateA;
-
-          // Same date: prefer risk-ranges (priority 1) over early-look (priority 0)
-          const priorityA = a.snapshotType === 'risk-ranges' ? 1 : 0;
-          const priorityB = b.snapshotType === 'risk-ranges' ? 1 : 0;
-          return priorityB - priorityA;
-        });
-
-        // De-duplicate dates - keep only the highest priority snapshot for each date
-        const uniqueSnapshots = [];
-        const seenDates = new Set();
-
-        for (const snap of recentSnapshots) {
-          if (!seenDates.has(snap.date)) {
-            uniqueSnapshots.push(snap);
-            seenDates.add(snap.date);
-          }
-          if (uniqueSnapshots.length >= 2) break;
-        }
+        const recentSnapshots = snapshotHistoryByType[type] || [];
 
         if (recentSnapshots.length < 2) {
           // Real-time alerts are event snapshots, so one current alert is enough.
@@ -3855,6 +4156,7 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
               removed: [],
               alerts,
               available: alerts.length > 0,
+              comparisonStatus: 'insufficient_history',
               currentDate: current.date,
               ...getSnapshotMeta(current),
             };
@@ -3870,6 +4172,7 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             added: explicitAdded,
             removed: explicitRemoved,
             available: true,
+            comparisonStatus: 'insufficient_history',
             currentDate: current.date,
             ...getSnapshotMeta(current),
           };
@@ -3923,6 +4226,7 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
 
             results[type] = {
               available: true,
+              comparisonStatus: 'insufficient_history',
               currentDate: current.date,
               ...getSnapshotMeta(current),
               significantPositive,
@@ -3936,6 +4240,7 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
             added: [],
             removed: [],
             available: recentSnapshots.length > 0,
+            comparisonStatus: recentSnapshots.length > 0 ? 'insufficient_history' : 'missing',
             currentDate: recentSnapshots.length > 0 ? recentSnapshots[0].date : null,
             ...(recentSnapshots.length > 0 ? getSnapshotMeta(recentSnapshots[0]) : {}),
           };
@@ -4064,13 +4369,6 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
               current.data.removed.forEach(t => { if (t) removed.push(t) });
             }
           }
-        }
-
-        // SPECIAL LOGIC: For 'early-look', if a removed item exists in today's 'risk-ranges', 
-        // ignore the removal. This handles cases where a partial file (like Geopolitical Risk) 
-        // was uploaded instead of the full Early Look, but the data exists elsewhere.
-        if (type === 'early-look' && activeTickers.length > 0) {
-          removed = removed.filter(item => !activeTickers.includes(item));
         }
 
         results[type] = {
@@ -4272,6 +4570,22 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           }
         }
 
+        const completed = results[type];
+        if (completed?.available && !completed.comparisonStatus) {
+          const hasChanges = [
+            completed.added,
+            completed.removed,
+            completed.updates,
+            completed.trendChanges,
+            completed.cryptoTrendChanges,
+            completed.etfTrendChanges,
+            completed.alerts,
+            completed.outbucketDiff?.added,
+            completed.outbucketDiff?.removed,
+          ].some((items) => Array.isArray(items) && items.length > 0);
+          completed.comparisonStatus = hasChanges ? 'changed' : 'no_change';
+        }
+
       } catch (err) {
         console.error(`Error processing changelog for ${type}:`, err);
         results[type] = { error: err.message, available: false };
@@ -4321,6 +4635,9 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           available: !!todayDate,
           currentDate: todayDate,
           previousDate,
+          comparisonStatus: previousDate
+            ? ([...addedLongs, ...removedLongs, ...addedShorts, ...removedShorts].length > 0 ? 'changed' : 'no_change')
+            : 'insufficient_history',
           scrapedAt: parsed.meta?.parsedAt || parsed.meta?.scrapedAt || null,
           publishedAt: parsed.meta?.publishedAt || null,
           eventTime: parsed.meta?.actionParsedAt || parsed.meta?.parsedAt || parsed.meta?.scrapedAt || todayDate || null,
@@ -4331,6 +4648,8 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
           addedShorts,
           removedShorts,
           source: parsed.meta?.source || 'EtfProLocal',
+          baseSnapshotDate: parsed.meta?.previousFullBookDate || parsed.meta?.baseSnapshotDate || todayDate,
+          actionThroughDate: parsed.meta?.actionThroughDate || parsed.meta?.actionParsedAt || null,
           actionCount: parsed.meta?.actionCount,
           rowCount: Array.isArray(parsed.rows) ? parsed.rows.length : 0,
           dataQuality: parsed.dataQuality,
@@ -4346,11 +4665,128 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
 
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/hedgeye/changelog completed in ${totalTime}ms`);
-    res.json(results);
+    return results;
 
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/changelog:', error);
-    res.status(500).json({ error: 'Failed to fetch changelog', details: error.message });
+    throw error;
+  }
+}
+
+app.get('/api/hedgeye/changelog', async (req, res) => {
+  try {
+    return await sendCachedJson(res, 'changelog', buildHedgeyeChangelogResponse);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch changelog', details: error.message });
+  }
+});
+
+app.get('/api/analytics/daily-brief', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    if (req.query.refresh === '1') {
+      researchResponseCache.delete('analytics-daily-brief');
+      researchResponseCache.delete('changelog');
+    }
+    const cacheResult = await researchResponseCache.get(
+      'analytics-daily-brief',
+      buildHedgeyeChangelogResponse,
+    );
+    setDataCacheHeaders(res, cacheResult);
+    const brief = buildAnalyticsDailyBrief({
+      changelog: cacheResult.value,
+      cacheState: cacheResult.status,
+    });
+    console.log(`[API] /api/analytics/daily-brief completed in ${Date.now() - startTime}ms`);
+    return res.json(brief);
+  } catch (error) {
+    console.error('[API] Error in /api/analytics/daily-brief:', error);
+    return res.status(500).json({
+      error: 'Failed to build analytics daily brief',
+      details: error.message,
+      events: [],
+    });
+  }
+});
+
+async function getAnalyticsSourceSnapshot(sourceId, snapshotId) {
+  if (sourceId === 'etf-pro') {
+    const { payload: latest, etfproDir } = await getResolvedEtfProPayload();
+    let payload = latest;
+    const latestDate = latest?.meta?.snapshotDate || null;
+    if (snapshotId !== latestDate) {
+      const datedPath = path.join(etfproDir, `${snapshotId}.json`);
+      payload = fs.existsSync(datedPath)
+        ? JSON.parse(fs.readFileSync(datedPath, 'utf-8'))
+        : null;
+    }
+    if (!payload) return null;
+    return {
+      sourceId,
+      snapshotId,
+      contentDate: payload.meta?.snapshotDate || snapshotId,
+      publishedAt: payload.meta?.publishedAt || null,
+      ingestedAt: payload.meta?.parsedAt || payload.meta?.scrapedAt || null,
+      source: payload.meta?.source || 'EtfProLocal',
+      quality: payload.dataQuality || null,
+      parsed: {
+        rows: Array.isArray(payload.rows) ? payload.rows : [],
+        changes: payload.changes || null,
+        meta: payload.meta || {},
+      },
+      artifactUrl: null,
+    };
+  }
+
+  const result = await dynamodb.get({
+    TableName: 'HedgeyeDailySnapshot',
+    Key: { date: snapshotId, snapshotType: sourceId },
+  }).promise();
+  const item = result.Item;
+  if (!item) return null;
+  const hasArtifact = Boolean(item.screenshotS3Key || item.pdfSource || item.htmlSource);
+  return {
+    sourceId,
+    snapshotId,
+    contentDate: item.date || snapshotId,
+    publishedAt: item.publishedAt || null,
+    ingestedAt: item.scrapedAt || item.receivedAt || item.createdAt || item.updatedAt || null,
+    source: item.sourceProduct || item.source || 'HedgeyeDailySnapshot',
+    quality: {
+      warnings: Array.isArray(item.warnings) ? item.warnings : [],
+      reportType: item.reportType || null,
+    },
+    parsed: {
+      data: item.data,
+      trendChanges: item.trendChanges || [],
+      outbucket: item.outbucket || [],
+    },
+    artifactUrl: hasArtifact
+      ? `/api/hedgeye/screenshot/${encodeURIComponent(snapshotId)}/content?type=${encodeURIComponent(sourceId)}`
+      : null,
+  };
+}
+
+app.get('/api/analytics/sources/:sourceId/snapshots/:snapshotId', async (req, res) => {
+  const { sourceId, snapshotId } = req.params;
+  if (!ANALYTICS_SOURCE_IDS.has(sourceId)) {
+    return res.status(400).json({ error: 'Unsupported analytics source', sourceId });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotId)) {
+    return res.status(400).json({ error: 'snapshotId must be YYYY-MM-DD', snapshotId });
+  }
+  try {
+    const snapshot = await getAnalyticsSourceSnapshot(sourceId, snapshotId);
+    if (!snapshot) {
+      return res.status(404).json({ error: 'Analytics source snapshot not found', sourceId, snapshotId });
+    }
+    return res.json(snapshot);
+  } catch (error) {
+    console.error('[API] Error loading analytics source snapshot:', error);
+    return res.status(500).json({
+      error: 'Failed to load analytics source snapshot',
+      details: error.message,
+    });
   }
 });
 
@@ -4995,6 +5431,7 @@ app.get('/api/securities/signal-strength', async (req, res) => {
 // Portfolio: IBKR API live snapshot (read-only)
 app.get('/api/portfolio', async (req, res) => {
   const startTime = Date.now();
+  res.setHeader('Cache-Control', 'no-store');
   try {
     const accountId = req.query.account || process.env.IBKR_ACCOUNT_ID || undefined;
     const source = req.query.source;
@@ -5005,34 +5442,9 @@ app.get('/api/portfolio', async (req, res) => {
       return res.json(portfolioData);
     }
 
-    // IBKR snapshots are already priced in compositePortfolioDataProvider; skip
-    // per-holding quote enrichment to keep sidebar refreshes fast.
-    if (portfolioData.dataSource !== 'ibkr_api') {
-      const symbols = (portfolioData.holdings || []).map((h) => h.symbol).filter(Boolean);
-      if (symbols.length > 0) {
-        const BATCH_SIZE = 5;
-        const DELAY_MS = 200;
-        const quoteResults = await batchProcess(symbols, BATCH_SIZE, DELAY_MS, async (symbol) => {
-          try {
-            return await getQuote(symbol);
-          } catch (error) {
-            console.error(`[API] Error fetching quote for ${symbol}:`, error.message);
-            return null;
-          }
-        });
-
-        portfolioData.holdings = portfolioData.holdings.map((holding, index) => {
-          const quote = quoteResults[index];
-          const dayChangePercent = quote?.changePercent ? parseFloat(quote.changePercent) : null;
-          return {
-            ...holding,
-            dayChangePercent,
-            priceSource: quote?.source || holding.priceSource,
-            warning: holding.warning || quote?.warning || null,
-          };
-        });
-      }
-    }
+    // The active default is socket-verified IBKR only. Explicit uploaded
+    // statements remain archival and retain their original dated prices; this
+    // route never blends Yahoo/current quotes into either source.
 
     if (typeof portfolioData.lastUpdated === 'string' && portfolioData.lastUpdated.includes('T')) {
       portfolioData.lastUpdated = portfolioData.lastUpdated;
@@ -5183,6 +5595,7 @@ app.post('/api/portfolio/correlation-concentration', async (req, res) => {
 
 app.get('/api/portfolio/prediction-market-positions', async (req, res) => {
   const startTime = Date.now();
+  res.set('Cache-Control', 'no-store');
   try {
     let gatewayStatus = null;
     try {
@@ -5202,78 +5615,110 @@ app.get('/api/portfolio/prediction-market-positions', async (req, res) => {
         positions: [],
         meta: {
           source: 'ibkr_live_unavailable',
+          status: 'unavailable',
           durationMs: totalTime,
           managedAccounts: [],
           gateway: gatewayStatus,
+          fetchedAt: null,
           message: 'IB Gateway/TWS is not connected; prediction market positions require live data.',
         },
       });
     }
 
     let managedAccounts = [];
+    let accountLookupSucceeded = false;
     try {
       const accountsRes = await sidecarRequest('/accounts', { timeoutMs: 3000 });
-      managedAccounts = Array.isArray(accountsRes.accounts) ? accountsRes.accounts : [];
+      accountLookupSucceeded = hasVerifiedAccountCoverage(accountsRes);
+      managedAccounts = accountLookupSucceeded ? accountsRes.accounts : [];
+      if (!accountLookupSucceeded) {
+        console.warn(
+          '[API] Prediction market account lookup did not return verified coverage:',
+          accountsRes?.message || accountsRes?.status || 'account discovery unavailable',
+        );
+      }
     } catch (error) {
-      console.warn('[API] Prediction market account lookup fell back to cache-only mode:', error.message);
+      console.warn('[API] Prediction market account lookup failed:', error.message);
     }
+
+    const gatewayAccountLookupSucceeded = hasVerifiedAccountCoverage(gatewayStatus);
+    const gatewayAccounts = gatewayAccountLookupSucceeded ? gatewayStatus.accounts : [];
+    const discoveredAccounts = [...new Set([...managedAccounts, ...gatewayAccounts].filter(Boolean))];
+    const accountCoverageKnown = accountLookupSucceeded || gatewayAccountLookupSucceeded;
 
     const preferredAccounts = [
       req.query.primaryAccount,
       process.env.IBKR_ACCOUNT_ID,
-      'U25779973',
-      ...managedAccounts,
+      ...discoveredAccounts,
     ].filter(Boolean);
     const accountsToCheck = [...new Set(preferredAccounts)];
 
     const snapshots = await Promise.all(
       accountsToCheck.map(async (accountId) => {
         try {
-          const cache = await sidecarRequest(`/cache/portfolio?account=${encodeURIComponent(accountId)}`, {
-            timeoutMs: 2500,
+          let snapshot = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(accountId)}`, {
+            timeoutMs: 12000,
           });
-          let rawPositions = Array.isArray(cache.positions) ? cache.positions : [];
-          let source = 'ibkr_sidecar_cache';
-          let fetchedAt = cache.fetched_at || null;
-          if (rawPositions.length === 0) {
-            try {
-              const snapshot = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(accountId)}`, {
-                timeoutMs: 6000,
-              });
-              if (Array.isArray(snapshot.positions) && snapshot.positions.length > 0) {
-                rawPositions = snapshot.positions;
-                source = snapshot.source || 'ibkr_positions';
-                fetchedAt = snapshot.fetched_at || fetchedAt;
-              }
-            } catch (error) {
-              console.warn(`[API] Prediction market positions live fallback failed for ${accountId}:`, error.message);
+          let verification = verifyLivePositionSnapshot(snapshot);
+          if (!verification.live) {
+            const firstFailure = verification.reason;
+            snapshot = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(accountId)}&direct=true`, {
+              timeoutMs: 12000,
+            });
+            verification = verifyLivePositionSnapshot(snapshot);
+            if (!verification.live && firstFailure && !verification.reason) {
+              verification.reason = firstFailure;
             }
           }
+          if (!verification.live) {
+            return {
+              accountId,
+              positions: [],
+              fetchedAt: verification.fetchedAt,
+              source: verification.source,
+              status: 'unavailable',
+              message: verification.reason,
+            };
+          }
+          const rawPositions = Array.isArray(snapshot.positions) ? snapshot.positions : [];
           const positions = rawPositions
             .filter((position) => Number(position.position || 0) !== 0 && isPredictionMarketContract(position))
-            .map((position) => ({
-              ...normalizeIbkrPosition(position),
-              accountId: position.account || accountId,
-              positionSource: source,
-            }));
+            .map((position) => {
+              const normalized = normalizeIbkrPosition({
+                ...position,
+                fetched_at: position.fetched_at || verification.fetchedAt,
+              });
+              return {
+                ...normalized,
+                ...classifyPredictionMarketPosition(position),
+                accountId: position.account || accountId,
+                positionSource: verification.source,
+              };
+            });
           return {
             accountId,
             positions,
-            fetchedAt,
-            source,
+            fetchedAt: verification.fetchedAt,
+            source: verification.source,
+            status: 'live',
           };
         } catch (error) {
           return {
             accountId,
             positions: [],
-            error: error.message,
-            source: 'ibkr_sidecar_cache',
+            message: error.message,
+            source: 'ibkr_positions',
+            status: 'unavailable',
           };
         }
       }),
     );
 
-    const positions = snapshots.flatMap((snapshot) => snapshot.positions || []);
+    const snapshotStatus = aggregatePositionSnapshotStatus(snapshots);
+    const status = snapshotStatus === 'live' && !accountCoverageKnown ? 'partial' : snapshotStatus;
+    const positions = snapshots
+      .filter((snapshot) => snapshot.status === 'live')
+      .flatMap((snapshot) => snapshot.positions || []);
     const totalTime = Date.now() - startTime;
     console.log(
       `[API] /api/portfolio/prediction-market-positions completed in ${totalTime}ms accounts=${snapshots.length} positions=${positions.length}`,
@@ -5282,10 +5727,27 @@ app.get('/api/portfolio/prediction-market-positions', async (req, res) => {
       accounts: snapshots,
       positions,
       meta: {
-        source: 'ibkr_live',
+        source: status === 'live'
+          ? 'ibkr_live'
+          : status === 'partial'
+            ? 'ibkr_live_partial'
+            : 'ibkr_live_unavailable',
+        status,
         durationMs: totalTime,
-        managedAccounts,
+        managedAccounts: discoveredAccounts,
         gateway: gatewayStatus,
+        fetchedAt: snapshots
+          .map((snapshot) => snapshot.fetchedAt)
+          .filter(Boolean)
+          .sort()
+          .at(-1) || null,
+        message: status === 'partial'
+          ? (accountCoverageKnown
+            ? 'Some IBKR accounts are unavailable; only verified live accounts are shown.'
+            : 'The managed-account list could not be verified; only explicitly requested live accounts are shown.')
+          : status === 'unavailable'
+            ? 'Verified live IBKR prediction-market positions are unavailable.'
+            : null,
       },
     });
   } catch (error) {
@@ -5960,6 +6422,90 @@ app.get('/api/usd/historical', async (req, res) => {
   }
 });
 
+const systemReadinessService = createSystemReadinessService({
+  sidecarRequest,
+  getDirectorSnapshot,
+  buildWorkflowStatusSnapshot: async () => {
+    const cache = await researchResponseCache.get('workflow-snapshot:readiness', buildWorkflowStatusSnapshot);
+    return {
+      ...cache.value,
+      _readinessCache: { status: cache.status, ageMs: cache.ageMs || 0 },
+    };
+  },
+  getHermesInboxStatus,
+  buildRtaResponse: async () => {
+    const cache = await researchResponseCache.get('rta-positions:90', buildRealTimeAlertPositionsResponse);
+    return {
+      ...cache.value,
+      _readinessCache: { status: cache.status, ageMs: cache.ageMs || 0 },
+    };
+  },
+  buildEtfResponse: async () => {
+    const cache = await researchResponseCache.get('etf-pro', buildEtfProResponse);
+    return {
+      ...cache.value,
+      _readinessCache: { status: cache.status, ageMs: cache.ageMs || 0 },
+    };
+  },
+  dynamodb,
+  cloudwatch,
+  listWorkerDefinitions,
+});
+const systemReadinessRepairService = createSystemReadinessRepairService({ lambdaClient: lambda });
+
+// Full operational readiness. Unlike /api/health, this verifies the live
+// dependencies required for a trustworthy dashboard and never serves stale
+// success after a collector failure.
+app.get('/api/system-readiness', async (req, res) => {
+  const startedAt = Date.now();
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const report = await systemReadinessService.collect({ refresh: req.query.refresh === '1' });
+    return res.json({
+      ...report,
+      durationMs: Date.now() - startedAt,
+    });
+  } catch (error) {
+    console.error('[API] System readiness failed:', error);
+    return res.status(500).json({
+      version: 1,
+      status: 'blocked',
+      ready: false,
+      checkedAt: new Date().toISOString(),
+      error: 'System readiness check failed',
+      detail: error.message,
+    });
+  }
+});
+
+// Repair requests select a fixed, repository-owned executor. Request values
+// never become command arguments, and socket provenance is used instead of
+// spoofable proxy headers.
+app.post('/api/system-readiness/actions/:actionId', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.get('X-Readiness-Repair') !== '1') {
+    return res.status(400).json({
+      accepted: false,
+      code: 'READINESS_REPAIR_CONFIRMATION_REQUIRED',
+      error: 'The readiness repair confirmation header is required.',
+    });
+  }
+  try {
+    const result = await systemReadinessRepairService.run(req.params.actionId, {
+      remoteAddress: req.socket?.remoteAddress,
+    });
+    return res.status(202).json(result);
+  } catch (error) {
+    const statusCode = Number(error.statusCode) || 500;
+    if (statusCode >= 500) console.error('[API] System readiness repair failed:', error);
+    return res.status(statusCode).json({
+      accepted: false,
+      code: error.code || 'READINESS_REPAIR_FAILED',
+      error: error.message,
+    });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -6169,88 +6715,78 @@ app.get('/api/notes/calendar/:date', async (req, res) => {
   }
 });
 
-// AWS Status debugging endpoint (temporary)
-app.get('/api/aws-status', async (req, res) => {
-  try {
-    const credentials = AWS.config.credentials;
-    const region = AWS.config.region;
-
-    // Test S3 access
-    let s3Status = 'unknown';
-    let bucketStatus = 'unknown';
-    let bucketList = [];
-
+// Development-only diagnostics. Production does not register this route, and
+// the response never discloses account bucket names.
+if (process.env.NODE_ENV === 'development') {
+  app.get('/api/aws-status', async (req, res) => {
     try {
-      const result = await s3.listBuckets().promise();
-      s3Status = 'accessible';
-      bucketList = result.Buckets.map(b => b.Name);
+      const credentials = AWS.config.credentials;
+      const region = AWS.config.region;
+      let storageStatus = 'unknown';
 
-      // Check if target bucket exists
-      const targetBucket = 'market-dashboard-csv-data';
-      bucketStatus = bucketList.includes(targetBucket) ? 'exists' : 'missing';
+      try {
+        await s3.headBucket({ Bucket: PORTFOLIO_UPLOAD_BUCKET }).promise();
+        storageStatus = 'accessible';
+      } catch (error) {
+        storageStatus = 'error';
+      }
+
+      res.json({
+        aws: {
+          region,
+          credentialsConfigured: !!credentials,
+          credentialsType: credentials ? credentials.constructor.name : 'none',
+          storageStatus,
+        },
+        timestamp: new Date().toISOString(),
+      });
     } catch (error) {
-      s3Status = 'error';
-      bucketStatus = 'error';
+      res.status(500).json({
+        error: 'Failed to check AWS status',
+        details: error.message,
+        timestamp: new Date().toISOString(),
+      });
     }
+  });
+}
 
-    res.json({
-      aws: {
-        region: region,
-        credentialsConfigured: !!credentials,
-        credentialsType: credentials ? credentials.constructor.name : 'none',
-        s3Status: s3Status,
-        bucketStatus: bucketStatus,
-        availableBuckets: bucketList,
-        targetBucket: 'market-dashboard-csv-data'
-      },
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to check AWS status',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// Presigned URL endpoint for CSV uploads
+// Presigned POST endpoint for bounded CSV uploads.
 app.post('/api/presigned-url', async (req, res) => {
   try {
-    const { filename, contentType } = req.body;
-
-    if (!filename) {
-      return res.status(400).json({ error: 'Filename is required' });
+    const { filename, contentType, sizeBytes } = req.body || {};
+    const validation = validatePortfolioUploadRequest({ filename, contentType, sizeBytes });
+    if (!validation.ok) {
+      return res.status(validation.statusCode).json({ error: validation.error });
     }
 
-    console.log(`🔗 Generating presigned URL for: ${filename}`);
+    const { cleanFilename, normalizedContentType } = validation;
+    const key = createPortfolioUploadKey(cleanFilename);
+    const expiresAt = new Date(Date.now() + PRESIGNED_POST_TTL_SECONDS * 1000).toISOString();
 
-    const params = {
-      Bucket: 'market-dashboard-csv-data',
-      Key: filename,
-      ContentType: contentType || 'text/csv',
-      Expires: 300 // 5 minutes
-      // Removed ServerSideEncryption as it can cause signing issues
-    };
+    console.log(`🔗 Generating bounded presigned POST for: ${cleanFilename}`);
 
-    // Use promise-based approach for better error handling
-    const presignedUrl = await new Promise((resolve, reject) => {
-      s3.getSignedUrl('putObject', params, (err, url) => {
+    const params = buildPortfolioPresignedPostParams({
+      bucket: PORTFOLIO_UPLOAD_BUCKET,
+      key,
+      contentType: normalizedContentType,
+    });
+
+    const post = await new Promise((resolve, reject) => {
+      s3.createPresignedPost(params, (err, data) => {
         if (err) {
-          console.error('❌ S3 getSignedUrl error:', err);
+          console.error('❌ S3 createPresignedPost error:', err);
           reject(err);
         } else {
-          console.log(`✅ Generated presigned URL: ${url.substring(0, 100)}...`);
-          resolve(url);
+          resolve(data);
         }
       });
     });
 
     res.json({
-      presignedUrl,
-      key: filename,
-      bucket: 'market-dashboard-csv-data'
+      url: post.url,
+      fields: post.fields,
+      key,
+      expiresAt,
     });
 
   } catch (error) {
@@ -6392,7 +6928,7 @@ app.get('/api/prediction-markets/settings', async (req, res) => {
     }).promise();
     const defaults = {
       settingKey: PM_SETTINGS_KEY,
-      portfolioEquity: 100000,
+      portfolioEquity: null,
       minNetEdge: 0.02,
       defaultFeePerContract: 0.02,
       defaultSlippageBuffer: 0.005,
@@ -6536,14 +7072,23 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Start HTTP server first so we can attach WebSocket server to it
-const server = app.listen(PORT, async () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📊 Market data API available at http://localhost:${PORT}/api`);
-  console.log(`💼 Portfolio data available at http://localhost:${PORT}/api/portfolio`);
+const server = app.listen(PORT, HOST, async () => {
+  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+  console.log(`📊 Market data API available at http://${HOST}:${PORT}/api`);
+  console.log(`💼 Portfolio data available at http://${HOST}:${PORT}/api/portfolio`);
 
   if (ibkrStreamBridge.STREAM_ENABLED) {
     ibkrStreamBridge.startIbkrStreamBridge();
     console.log('📡 IBKR stream bridge enabled (SSE → quotes state cache)');
+  }
+
+  if (process.env.NODE_ENV !== 'test') {
+    startCpiCatalogReconciler().then((outcome) => {
+      const release = outcome.releaseKey ? ` ${outcome.releaseKey}` : '';
+      console.log(`[PM Reconciler] startup ${outcome.status}${release} (${outcome.code})`);
+    }).catch((err) => {
+      console.warn('[PM Reconciler] startup failed:', err.message);
+    });
   }
 
   // Validate AWS credentials after server starts
@@ -6787,6 +7332,11 @@ setInterval(() => {
   try {
     sweepTtlCache(quotesCache, CACHE_TTL, 'quotesCache');
     sweepTtlCache(historicalCache, HISTORICAL_CACHE_TTL, 'historicalCache');
+    sweepTtlCache(
+      securityRiskMetricsHistoryCache,
+      SECURITY_RISK_METRICS_CACHE_TTL,
+      'securityRiskMetricsHistoryCache',
+    );
     sweepTtlCache(riskRangesCache, RISK_RANGES_CACHE_TTL, 'riskRangesCache');
     // chartDataCache uses per-range TTL; use the longest (1h) as upper bound
     sweepTtlCache(chartDataCache, 60 * 60 * 1000, 'chartDataCache');
@@ -6827,6 +7377,7 @@ const shutdown = (signal) => {
   console.log(`\n[shutdown] Received ${signal}, closing server...`);
   const done = () => process.exit(0);
   try {
+    stopCpiCatalogReconciler();
     ibkrStreamBridge.stopIbkrStreamBridge();
     wss.clients.forEach((c) => { try { c.terminate(); } catch (_) {} });
     server.close(done);

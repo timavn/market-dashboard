@@ -221,7 +221,7 @@ const MetricBox = ({ label, value, loading }) => {
             width: '8px',
             height: '8px',
             borderRadius: '50%',
-            backgroundColor: '#22c55e',
+            backgroundColor: '#059669',
             flexShrink: 0,
           }}
         />
@@ -322,7 +322,7 @@ const YieldCurveTable = () => {
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1w Ago</th>
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1M Ago</th>
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">4M Ago</th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#ecfdf5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
               <div>DoD</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
@@ -353,8 +353,8 @@ const YieldCurveTable = () => {
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1w']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1m']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['4m']}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.value}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.percent}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FED7AA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-orange-900/20">{row.mom.value}</td>
@@ -380,7 +380,7 @@ const CreditSpreadTable = () => {
     className="dark:border-gray-600">
       {/* Title Ribbon */}
       <div style={{
-        backgroundColor: '#047857',
+        backgroundColor: '#059669',
         color: '#FFFFFF',
         padding: '4px 8px',
         fontSize: '10px',
@@ -397,22 +397,22 @@ const CreditSpreadTable = () => {
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">Last Px</th>
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1D Ago</th>
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1W Ago</th>
-            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">4W Ago</th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
+            <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1M Ago</th>
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#ecfdf5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
               <div>DoD</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
                 <span>%Δ</span>
               </div>
             </th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#ecfdf5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
               <div>VoV</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
                 <span>%Δ</span>
               </div>
             </th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#FECACA', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-red-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#dc2626', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-red-900/20 dark:border-gray-600">
               <div>MoM</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
@@ -429,12 +429,12 @@ const CreditSpreadTable = () => {
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1d']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1w']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['4w']}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.vov.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.vov.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.vov.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.vov.percent}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FECACA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-red-900/20">{row.mom.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FECACA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-red-900/20">{row.mom.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.vov.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.vov.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.vov.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.vov.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#dc2626', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-red-900/20">{row.mom.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#dc2626', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-red-900/20">{row.mom.percent}</td>
             </tr>
           ))}
         </tbody>
@@ -474,7 +474,7 @@ const VolatilityTable = () => {
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1w Ago</th>
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">1M Ago</th>
             <th style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #E5E7EB', width: '10%' }} className="dark:text-gray-200 dark:border-gray-600">4M Ago</th>
-            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#D1FAE5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
+            <th colSpan="2" style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, backgroundColor: '#ecfdf5', borderBottom: '1px solid #E5E7EB', width: '18%' }} className="dark:bg-green-900/20 dark:border-gray-600">
               <div>DoD</div>
               <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '2px' }}>
                 <span>Δ</span>
@@ -505,8 +505,8 @@ const VolatilityTable = () => {
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1w']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['1m']}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center' }} className="dark:text-gray-300">{row['4m']}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
-              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#D1FAE5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.value}</td>
+              <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#ecfdf5', fontWeight: 600, color: row.dod.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-green-900/20">{row.dod.percent}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.value}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#DBEAFE', fontWeight: 600, color: row.yoy.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-blue-900/20">{row.yoy.percent}</td>
               <td style={{ padding: '4px 6px', textAlign: 'center', backgroundColor: '#FED7AA', fontWeight: 600, color: row.mom.isPositive ? '#059669' : '#DC2626', width: '9%' }} className="dark:bg-orange-900/20">{row.mom.value}</td>
@@ -654,4 +654,3 @@ const StaticMetricBar = () => {
 };
 
 export default StaticMetricBar;
-

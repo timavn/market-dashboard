@@ -46,17 +46,13 @@ export function normalizeTail(raw) {
 
 export function mapNormalizedRowToMacroSignal(row) {
   const assetClass = GROUP_TO_ASSET_CLASS[row.group] || 'EQ';
-  const trendForSide = row.riskTrend || row.trend;
+  const trendForSide = row.riskTrend;
   const side = isLongTrend(trendForSide) ? 'long' : isShortTrend(trendForSide) ? 'short' : null;
 
-  let trade = trackerToTrade(row.trackerTrend);
-  if (!trade && side === 'long') trade = 'Buy';
-  if (!trade && side === 'short') trade = 'Sell';
-
-  let trend = riskToUiTrend(row.riskTrend);
-  if (!trend) trend = riskToUiTrend(row.trackerTrend);
-  if (!trend && side === 'long') trend = 'bull';
-  if (!trend && side === 'short') trend = 'bear';
+  // Trade and Trend are independent published inputs. Missing tracker or
+  // risk-range directions remain missing and are never copied from one another.
+  const trade = trackerToTrade(row.trackerTrend);
+  const trend = riskToUiTrend(row.riskTrend);
 
   const tailRaw = normalizeTail(row.macroSide || row.callSide);
 

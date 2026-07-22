@@ -1,0 +1,508 @@
+{
+  "version": 1,
+  "owners": [
+    {
+      "id": "local-operations",
+      "label": "Local dashboard operations"
+    },
+    {
+      "id": "brokerage-operations",
+      "label": "Brokerage connectivity"
+    },
+    {
+      "id": "automation-operations",
+      "label": "Automation and ingestion"
+    },
+    {
+      "id": "research-operations",
+      "label": "Research data"
+    }
+  ],
+  "aws": {
+    "region": "us-west-1",
+    "resources": {
+      "serviceHeartbeatTable": "MarketDashboardServiceHeartbeats",
+      "hermesInputSnapshotTable": "HermesInputSnapshots",
+      "predictionCatalogTable": "PredictionMarketCatalogV2",
+      "researchEventLedgerTable": "ResearchEventLedgerV2",
+      "riskRangeManifestTable": "RiskRangePublicationManifestsV2",
+      "riskRangeDataTable": "HedgeyeRiskRanges",
+      "riskRangeHistoryTable": "RiskRangeData",
+      "gmailLedgerTable": "HermesEmailIngestLedger",
+      "hedgeyeDailySnapshotTable": "HedgeyeDailySnapshot",
+      "rawArtifactBucket": "market-dashboard-csv-data",
+      "gmailOAuthSecret": "hermes/gmail/oauth",
+      "gmailFunction": "market-dashboard-gmail-ingestor-v2",
+      "hermesFunction": "market-dashboard-hermes-worker-v2",
+      "gmailSchedule": "market-dashboard-gmail-v2-every-15m",
+      "quantAnalystSchedule": "market-dashboard-hermes-quant-analyst-v2",
+      "quantDeveloperSchedule": "market-dashboard-hermes-quant-developer-v2",
+      "securitySchedule": "market-dashboard-hermes-security-v2"
+    }
+  },
+  "runbooks": [
+    {
+      "id": "local-stack",
+      "label": "Local stack supervision",
+      "text": "Use the repo-owned supervisor and LaunchAgent. Restart only verified repository processes; inspect unknown listeners manually."
+    },
+    {
+      "id": "ibkr-connectivity",
+      "label": "IBKR connectivity",
+      "text": "Rebuild or restart the repo-owned sidecar automatically. IB Gateway login and API socket authorization remain manual security actions."
+    },
+    {
+      "id": "automation-schedules",
+      "label": "Hermes schedules",
+      "text": "Verify the named AWS Scheduler job and typed service heartbeat. Manual invocations and shared Lambda metrics do not prove schedule health."
+    },
+    {
+      "id": "gmail-ingestion",
+      "label": "Gmail ingestion",
+      "text": "Require a fresh typed poll heartbeat. OAuth grants are manual; incremental poll retries are safe only after authorization is valid."
+    },
+    {
+      "id": "prediction-catalog",
+      "label": "Prediction catalog",
+      "text": "Reconcile only the server-owned current release with venue-native discovery; never promote guessed identifiers or persisted quotes as live."
+    },
+    {
+      "id": "research-projections",
+      "label": "Research projections",
+      "text": "Replay immutable artifacts and events into deterministic projections, reconcile against authoritative checkpoints, and fail closed on conflicts."
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "dashboard.core",
+      "label": "Dashboard core",
+      "description": "The local UI and API are reachable and running from the expected repository.",
+      "blocking": true
+    },
+    {
+      "id": "portfolio.live",
+      "label": "Live portfolio",
+      "description": "IB Gateway, the sidecar, managed accounts, and the live portfolio stream are usable.",
+      "blocking": true
+    },
+    {
+      "id": "automation.hermes",
+      "label": "Hermes and Gmail automation",
+      "description": "Scheduled agents and email ingestion are completing on cadence.",
+      "blocking": false
+    },
+    {
+      "id": "prediction.display",
+      "label": "Prediction display",
+      "description": "Current prediction-market events are available for display with explicit provenance and freshness.",
+      "blocking": false
+    },
+    {
+      "id": "prediction.ibkrExecution",
+      "label": "Prediction IBKR execution",
+      "description": "Current native IBKR contracts have verified live executable quotes.",
+      "blocking": false
+    },
+    {
+      "id": "research.current",
+      "label": "Research data",
+      "description": "RTA, ETF Pro, and risk-range inputs are current and internally consistent.",
+      "blocking": false
+    }
+  ],
+  "services": [
+    {
+      "id": "dashboard.ui",
+      "label": "Dashboard UI",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": ["local-ui"],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "dashboard.api",
+      "label": "Dashboard API server",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": ["local-api"],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "dashboard.supervisor",
+      "label": "Dashboard supervisor",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": [],
+      "blocking": false,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "dashboard.runtime",
+      "label": "API runtime provenance",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": ["dashboard.api"],
+      "blocking": true,
+      "automatic": false
+    },
+    {
+      "id": "dashboard.launchagent",
+      "label": "Dashboard LaunchAgent",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": ["dashboard.supervisor"],
+      "blocking": false,
+      "automatic": false
+    },
+    {
+      "id": "local-ui",
+      "label": "Dashboard UI",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": [],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "local-api",
+      "label": "Express API",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": [],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "local-sidecar",
+      "label": "IBKR sidecar",
+      "owner": "brokerage-operations",
+      "runbookId": "ibkr-connectivity",
+      "capabilityIds": ["portfolio.live"],
+      "dependsOn": [],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "local-bridge",
+      "label": "Hermes snapshot bridge",
+      "owner": "automation-operations",
+      "runbookId": "automation-schedules",
+      "cadenceMinutes": 1,
+      "readinessMaxAgeMinutes": 3,
+      "aws": {
+        "snapshotTable": "HermesInputSnapshots",
+        "heartbeatTable": "MarketDashboardServiceHeartbeats"
+      },
+      "capabilityIds": ["automation.hermes"],
+      "dependsOn": ["local-api", "local-sidecar"],
+      "blocking": false,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "ibkr.sidecar",
+      "label": "IBKR sidecar",
+      "owner": "brokerage-operations",
+      "runbookId": "ibkr-connectivity",
+      "capabilityIds": ["portfolio.live"],
+      "dependsOn": ["local-sidecar"],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "restart-local-stack"
+    },
+    {
+      "id": "ibkr.runtime",
+      "label": "IBKR sidecar Python runtime",
+      "owner": "local-operations",
+      "runbookId": "ibkr-connectivity",
+      "capabilityIds": ["portfolio.live"],
+      "dependsOn": ["ibkr.sidecar"],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "rebuild-sidecar-runtime"
+    },
+    {
+      "id": "ibkr.gateway",
+      "label": "IB Gateway authentication",
+      "owner": "brokerage-operations",
+      "runbookId": "ibkr-connectivity",
+      "capabilityIds": ["portfolio.live"],
+      "dependsOn": ["ibkr.sidecar", "ibkr.runtime"],
+      "blocking": true,
+      "automatic": false
+    },
+    {
+      "id": "ibkr.accounts",
+      "label": "Managed IBKR accounts",
+      "owner": "brokerage-operations",
+      "runbookId": "ibkr-connectivity",
+      "capabilityIds": ["portfolio.live"],
+      "dependsOn": ["ibkr.gateway"],
+      "blocking": true,
+      "automatic": false
+    },
+    {
+      "id": "ibkr.portfolio",
+      "label": "Live portfolio session",
+      "owner": "brokerage-operations",
+      "runbookId": "ibkr-connectivity",
+      "capabilityIds": ["portfolio.live"],
+      "dependsOn": ["ibkr.sidecar", "ibkr.gateway", "ibkr.accounts"],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "restart-local-stack"
+    },
+    {
+      "id": "hermes.quant-analyst",
+      "label": "Hermes Quant Analyst",
+      "owner": "automation-operations",
+      "runbookId": "automation-schedules",
+      "cadenceMinutes": 15,
+      "readinessMaxAgeMinutes": 45,
+      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": true, "startHour": 9, "endHour": 17 },
+      "aws": {
+        "functionName": "market-dashboard-hermes-worker-v2",
+        "scheduleId": "market-dashboard-hermes-quant-analyst-v2",
+        "scheduleExpression": "cron(0/15 9-16 ? * MON-FRI *)",
+        "scheduleTimeZone": "America/New_York",
+        "heartbeatServiceId": "hermes:quant-analyst"
+      },
+      "capabilityIds": ["automation.hermes"],
+      "dependsOn": [],
+      "blocking": false,
+      "automatic": false
+    },
+    {
+      "id": "dashboard.hermes-bridge",
+      "label": "Hermes snapshot bridge",
+      "owner": "automation-operations",
+      "runbookId": "automation-schedules",
+      "cadenceMinutes": 1,
+      "readinessMaxAgeMinutes": 3,
+      "capabilityIds": ["automation.hermes"],
+      "dependsOn": ["dashboard.supervisor", "dashboard.api", "ibkr.portfolio"],
+      "blocking": false,
+      "automatic": false
+    },
+    {
+      "id": "hermes.quant-developer",
+      "label": "Hermes Quant Developer",
+      "owner": "automation-operations",
+      "runbookId": "automation-schedules",
+      "cadenceMinutes": 15,
+      "readinessMaxAgeMinutes": 45,
+      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": true, "startHour": 8, "endHour": 19 },
+      "aws": {
+        "functionName": "market-dashboard-hermes-worker-v2",
+        "scheduleId": "market-dashboard-hermes-quant-developer-v2",
+        "scheduleExpression": "cron(5/15 8-18 ? * MON-FRI *)",
+        "scheduleTimeZone": "America/New_York",
+        "heartbeatServiceId": "hermes:quant-developer"
+      },
+      "capabilityIds": ["automation.hermes"],
+      "dependsOn": [],
+      "blocking": false,
+      "automatic": false
+    },
+    {
+      "id": "hermes.security",
+      "label": "Hermes Security",
+      "owner": "automation-operations",
+      "runbookId": "automation-schedules",
+      "cadenceMinutes": 60,
+      "readinessMaxAgeMinutes": 120,
+      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": true, "startHour": 0, "endHour": 24 },
+      "aws": {
+        "functionName": "market-dashboard-hermes-worker-v2",
+        "scheduleId": "market-dashboard-hermes-security-v2",
+        "scheduleExpression": "cron(10 * ? * MON-FRI *)",
+        "scheduleTimeZone": "America/New_York",
+        "heartbeatServiceId": "hermes:security"
+      },
+      "capabilityIds": ["automation.hermes"],
+      "dependsOn": [],
+      "blocking": false,
+      "automatic": false
+    },
+    {
+      "id": "hermes.status",
+      "label": "Hermes worker status",
+      "owner": "automation-operations",
+      "runbookId": "automation-schedules",
+      "capabilityIds": ["automation.hermes"],
+      "dependsOn": [],
+      "blocking": false,
+      "automatic": false
+    },
+    {
+      "id": "gmail.ingestion",
+      "label": "Gmail authentication and ingestion",
+      "owner": "automation-operations",
+      "runbookId": "gmail-ingestion",
+      "cadenceMinutes": 15,
+      "readinessMaxAgeMinutes": 45,
+      "aws": {
+        "functionName": "market-dashboard-gmail-ingestor-v2",
+        "scheduleId": "market-dashboard-gmail-v2-every-15m",
+        "scheduleExpression": "rate(15 minutes)",
+        "heartbeatServiceId": "gmail:timsmithaviation@gmail.com"
+      },
+      "capabilityIds": ["automation.hermes"],
+      "dependsOn": [],
+      "blocking": false,
+      "automatic": true,
+      "recoveryActionId": "retry-gmail-poll"
+    },
+    {
+      "id": "prediction.display",
+      "label": "Prediction-market live display",
+      "owner": "research-operations",
+      "runbookId": "prediction-catalog",
+      "capabilityIds": ["prediction.display"],
+      "dependsOn": ["dashboard.api"],
+      "blocking": false,
+      "automatic": true,
+      "aws": {
+        "catalogTable": "PredictionMarketCatalogV2"
+      },
+      "recoveryActionId": "reconcile-prediction-catalog"
+    },
+    {
+      "id": "prediction.ibkrExecution",
+      "label": "Prediction-market IBKR execution catalog",
+      "owner": "brokerage-operations",
+      "runbookId": "prediction-catalog",
+      "capabilityIds": ["prediction.ibkrExecution"],
+      "dependsOn": ["ibkr.sidecar", "ibkr.gateway"],
+      "blocking": false,
+      "automatic": true,
+      "aws": {
+        "catalogTable": "PredictionMarketCatalogV2"
+      },
+      "recoveryActionId": "reconcile-prediction-catalog"
+    },
+    {
+      "id": "research.rta",
+      "label": "RTA positions",
+      "owner": "research-operations",
+      "runbookId": "research-projections",
+      "capabilityIds": ["research.current"],
+      "dependsOn": ["gmail.ingestion"],
+      "blocking": false,
+      "automatic": true,
+      "aws": {
+        "eventLedgerTable": "ResearchEventLedgerV2"
+      },
+      "recoveryActionId": "rebuild-research-projections"
+    },
+    {
+      "id": "research.etf-pro",
+      "label": "ETF Pro",
+      "owner": "research-operations",
+      "runbookId": "research-projections",
+      "capabilityIds": ["research.current"],
+      "dependsOn": ["gmail.ingestion"],
+      "blocking": false,
+      "automatic": false,
+      "aws": {
+        "eventLedgerTable": "ResearchEventLedgerV2"
+      }
+    },
+    {
+      "id": "research.risk-ranges",
+      "label": "Hedgeye risk ranges",
+      "owner": "research-operations",
+      "runbookId": "research-projections",
+      "capabilityIds": ["research.current"],
+      "dependsOn": ["gmail.ingestion"],
+      "blocking": false,
+      "automatic": false,
+      "aws": {
+        "manifestTable": "RiskRangePublicationManifestsV2",
+        "dataTable": "HedgeyeRiskRanges"
+      }
+    },
+    {
+      "id": "system-readiness-report",
+      "label": "System readiness report",
+      "owner": "local-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": ["dashboard.core"],
+      "dependsOn": ["local-api"],
+      "blocking": true,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    }
+  ],
+  "repairActions": [
+    {
+      "id": "start-local-stack",
+      "label": "Start missing repo-owned dashboard services",
+      "description": "Starts the local supervisor, which adopts only recognized repository processes and refuses unknown port owners.",
+      "executor": "dev-stack-start",
+      "command": "npm start",
+      "automatic": true,
+      "loopbackOnly": true
+    },
+    {
+      "id": "restart-local-stack",
+      "label": "Restart the repo-owned dashboard stack",
+      "description": "Restarts only processes whose command and working directory match this repository.",
+      "executor": "dev-stack-restart",
+      "command": "npm run dev:restart -- --detach",
+      "automatic": true,
+      "loopbackOnly": true
+    },
+    {
+      "id": "rebuild-sidecar-runtime",
+      "label": "Rebuild the repo-owned sidecar runtime",
+      "description": "Recreates the sidecar virtual environment from the active workspace, then restarts only the repo-owned local stack.",
+      "executor": "sidecar-runtime-rebuild",
+      "command": "npm run dev:sidecar:rebuild && npm run dev:restart -- --detach",
+      "automatic": true,
+      "loopbackOnly": true
+    },
+    {
+      "id": "retry-gmail-poll",
+      "label": "Retry the configured Gmail poll",
+      "description": "Asynchronously invokes the configured Gmail ingestion Lambda with the fixed incremental-poll event. It does not modify OAuth credentials.",
+      "executor": "gmail-poll-retry",
+      "command": "Retry the configured Gmail incremental poll",
+      "automatic": true,
+      "loopbackOnly": true
+    },
+    {
+      "id": "rebuild-research-projections",
+      "label": "Rebuild deterministic RTA projections",
+      "description": "Replays the immutable Gmail ledger into the rebuildable RTA projection table for the fixed 90-day window.",
+      "executor": "research-projections-rebuild",
+      "command": "npm run rebuild:rta -- --apply --window-days=90 --json",
+      "automatic": true,
+      "loopbackOnly": true
+    },
+    {
+      "id": "reconcile-prediction-catalog",
+      "label": "Reconcile the current CPI contract catalog",
+      "description": "Runs the fixed server-owned current-release reconciliation. Historical UI selections and caller-supplied contract identifiers are ignored.",
+      "executor": "prediction-catalog-reconcile",
+      "command": "Reconcile the server-owned current CPI release",
+      "automatic": true,
+      "loopbackOnly": true
+    }
+  ]
+}

@@ -36,8 +36,8 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
                       </td>
                       <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #e5e7eb' }} className="dark:text-gray-300">
                         <span style={{
-                          color: security.bias === 'BULLISH' ? '#10b981' :
-                            security.bias === 'BEARISH' ? '#ef4444' : '#6b7280'
+                          color: security.bias === 'BULLISH' ? '#059669' :
+                            security.bias === 'BEARISH' ? '#dc2626' : '#6b7280'
                         }}>
                           {security.bias}
                         </span>
@@ -144,8 +144,8 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', fontSize: '7px', alignItems: 'center' }}>
                           <span
                             style={{
-                              color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#10b981' :
-                                getPriceChangeColor(priceChange1D) === 'red' ? '#ef4444' : '#6b7280'
+                              color: getPriceChangeColor(priceChange1D) === 'emerald' ? '#059669' :
+                                getPriceChangeColor(priceChange1D) === 'red' ? '#dc2626' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
@@ -153,8 +153,8 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
                           </span>
                           <span
                             style={{
-                              color: getPriceChangeColor(priceChange1W) === 'emerald' ? '#10b981' :
-                                getPriceChangeColor(priceChange1W) === 'red' ? '#ef4444' : '#6b7280'
+                              color: getPriceChangeColor(priceChange1W) === 'emerald' ? '#059669' :
+                                getPriceChangeColor(priceChange1W) === 'red' ? '#dc2626' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
@@ -162,8 +162,8 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
                           </span>
                           <span
                             style={{
-                              color: getPriceChangeColor(priceChange1M) === 'emerald' ? '#10b981' :
-                                getPriceChangeColor(priceChange1M) === 'red' ? '#ef4444' : '#6b7280'
+                              color: getPriceChangeColor(priceChange1M) === 'emerald' ? '#059669' :
+                                getPriceChangeColor(priceChange1M) === 'red' ? '#dc2626' : '#6b7280'
                             }}
                             className="dark:text-gray-300"
                           >
@@ -200,8 +200,8 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
                             <span style={{ color: '#374151', textAlign: 'left' }}>{security.atr.toFixed(2)}</span>
                             <span style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right' }}>%:</span>
                             <span style={{
-                              color: security.atrPercent > 5 ? '#ef4444' :
-                                security.atrPercent > 2 ? '#f59e0b' : '#10b981',
+                              color: security.atrPercent > 5 ? '#dc2626' :
+                                security.atrPercent > 2 ? '#f59e0b' : '#059669',
                               textAlign: 'left'
                             }}>
                               {security.atrPercent.toFixed(1)}%

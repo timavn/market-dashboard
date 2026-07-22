@@ -328,9 +328,9 @@ const VolatilityPanel = () => {
   // Determine line color based on volatility level
   const getVolatilityColor = (value) => {
     const num = parseFloat(value);
-    if (num <= 19) return '#10b981'; // Green for low volatility
+    if (num <= 19) return '#059669'; // Green for low volatility
     if (num <= 29) return '#f59e0b'; // Amber for medium volatility
-    return '#ef4444'; // Red for high volatility
+    return '#dc2626'; // Red for high volatility
   };
 
   // Lightweight Popover component (no external deps)
@@ -586,7 +586,7 @@ const VolatilityPanel = () => {
           <Text className="dark:text-gray-300">{metrics.lrr.toFixed(2)}</Text>
         </div>
         <div className="flex items-center gap-1">
-          <Text className="font-semibold dark:text-white">TRR:</Text>
+          <Text className="font-semibold dark:text-white">HRR:</Text>
           <Text className="dark:text-gray-300">{metrics.trr.toFixed(2)}</Text>
         </div>
         <div className="flex items-center gap-1">

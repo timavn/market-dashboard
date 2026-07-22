@@ -596,7 +596,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       closing: parseFloat(closing.toFixed(2)),
       current: parseFloat(current.toFixed(2)),
       lrr: riskRangesData.lrr || 0.00,
-      trr: riskRangesData.hrr || 0.00, // TRR is HRR (higher risk range)
+      trr: riskRangesData.hrr || 0.00, // Legacy field name; displayed as canonical HRR.
       dayOverDay,
       fiveDayChange,
       weekOverWeek,
@@ -908,30 +908,30 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
               />
               {/* Risk Range Overlays - Conditionally rendered based on configuration */}
               {CHART_INDICATORS.showRiskRanges && riskRanges.lrr !== null && (
-                <ReferenceLine 
-                  y={riskRanges.lrr} 
-                  stroke="#ef4444" 
+                <ReferenceLine
+                  y={riskRanges.lrr}
+                  stroke="#dc2626"
                   strokeDasharray="5 5"
                   strokeWidth={2}
                   label={{ 
                     value: `LRR: ${riskRanges.lrr.toFixed(2)}`, 
                     position: "insideTopLeft", 
-                    fill: "#ef4444", 
+                    fill: "#dc2626",
                     fontSize: 11,
                     fontWeight: 600
                   }}
                 />
               )}
               {CHART_INDICATORS.showRiskRanges && riskRanges.hrr !== null && (
-                <ReferenceLine 
-                  y={riskRanges.hrr} 
-                  stroke="#10b981" 
+                <ReferenceLine
+                  y={riskRanges.hrr}
+                  stroke="#059669"
                   strokeDasharray="5 5"
                   strokeWidth={2}
                   label={{ 
                     value: `HRR: ${riskRanges.hrr.toFixed(2)}`, 
                     position: "insideTopRight", 
-                    fill: "#10b981", 
+                    fill: "#059669",
                     fontSize: 11,
                     fontWeight: 600
                   }}
@@ -939,16 +939,16 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
               )}
               {/* Future: Add more indicators here based on CHART_INDICATORS config */}
               {/* Example: Moving averages, support/resistance, trend lines */}
-              <Bar 
-                dataKey="volume" 
-                fill="#3b82f6" 
+              <Bar
+                dataKey="volume"
+                fill="#3b82f6"
                 opacity={0.6}
                 name="Volume"
               />
-              <Line 
-                type="monotone" 
-                dataKey="price" 
-                stroke="#10b981" 
+              <Line
+                type="monotone"
+                dataKey="price"
+                stroke="#059669"
                 strokeWidth={2}
                 dot={false}
                 name="Price"
@@ -979,7 +979,7 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
           </Text>
         </div>
         <div className="flex items-center gap-1">
-          <Text className="font-semibold dark:text-white">TRR:</Text>
+          <Text className="font-semibold dark:text-white">HRR:</Text>
           <Text className="dark:text-gray-300">
             {metrics.trr && metrics.trr > 0 ? metrics.trr.toFixed(2) : '--'}
           </Text>

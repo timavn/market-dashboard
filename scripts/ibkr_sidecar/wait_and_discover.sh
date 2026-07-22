@@ -4,7 +4,6 @@ set -euo pipefail
 
 HOST="${IB_GATEWAY_HOST:-127.0.0.1}"
 PORTS="${IB_GATEWAY_PORTS:-4002 4001 7497 7496}"
-SIDECAR="${IBKR_SIDECAR_URL:-http://localhost:8765}"
 BACKEND="${REACT_APP_BACKEND_URL:-http://localhost:3001}"
 MAX_WAIT_SEC="${MAX_WAIT_SEC:-600}"
 
@@ -15,13 +14,11 @@ while true; do
     if nc -z "$HOST" "$p" 2>/dev/null; then
       export IB_GATEWAY_PORT="$p"
       echo "IB API up on ${HOST}:${p}"
-      echo "POST ${SIDECAR}/discover"
-      curl -sf -X POST "${SIDECAR%/}/discover" | python3 -m json.tool
-      echo "POST ${SIDECAR}/refresh"
-      curl -sf -X POST "${SIDECAR%/}/refresh" | python3 -m json.tool
-      if curl -sf "${BACKEND%/}/api/prediction-markets/refresh/ibkr" -X POST -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool; then
-        echo "Dashboard IBKR refresh complete."
-      fi
+      echo "POST ${BACKEND%/}/api/prediction-markets/discover/ibkr"
+      curl -sf "${BACKEND%/}/api/prediction-markets/discover/ibkr" -X POST -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
+      echo "POST ${BACKEND%/}/api/prediction-markets/refresh/ibkr"
+      curl -sf "${BACKEND%/}/api/prediction-markets/refresh/ibkr" -X POST -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
+      echo "Dashboard current-release discovery and refresh complete."
       exit 0
     fi
   done

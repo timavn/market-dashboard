@@ -19,6 +19,9 @@ describe('HowItWorksPage', () => {
   test('documents every configured surface with the standard explanation fields', () => {
     render(<HowItWorksPage onBack={jest.fn()} />);
 
+    expect(document.title).toBe('Dashboard System Guide | Market Dashboard');
+    expect(screen.getByRole('heading', { name: 'Dashboard System Guide' })).toBeInTheDocument();
+
     const expectedCount = HOW_IT_WORKS_SECTIONS.reduce(
       (sum, section) => sum + section.features.length,
       0,

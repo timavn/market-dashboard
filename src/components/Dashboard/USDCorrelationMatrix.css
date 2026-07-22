@@ -35,6 +35,187 @@
   min-height: 0;
 }
 
+.usd-correlation-panel--radar {
+  --usd-card-section-header-height: 30px;
+  display: grid;
+  grid-template-rows:
+    minmax(90px, .75fr)
+    minmax(180px, 1fr)
+    var(--usd-card-section-header-height)
+    minmax(140px, 1.75fr);
+  height: 100%;
+}
+
+.usd-card-section {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-bottom: 1px solid #e8eef3;
+  background: #fff;
+}
+
+.usd-card-section--fxvl {
+  display: grid;
+  grid-row: 1;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.usd-card-section--currencies {
+  display: grid;
+  grid-row: 2;
+  grid-template-rows: var(--usd-card-section-header-height) minmax(0, 1fr);
+}
+
+.usd-card-section__header {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-bottom: 1px solid #e8eef3;
+  background: #fbfcfd;
+}
+
+.usd-card-section__header h3 {
+  margin: 0;
+  color: #35445a;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.usd-card-section__body {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.usd-card-section--fxvl > .usd-corr-fxvl-summary {
+  min-height: 0;
+  border-bottom: 0;
+}
+
+.usd-card-section--fxvl .efr-vol-sparkline svg {
+  height: clamp(58px, 7vh, 72px);
+}
+
+.usd-card-section--fxvl .efr-vol-sparkline__empty {
+  min-height: 48px;
+}
+
+.usd-card-currencies__body .efr-mini-table th,
+.usd-card-currencies__body .efr-mini-table td {
+  height: auto;
+  padding: 2px;
+}
+
+.usd-card-currencies__body {
+  padding: 0;
+  background: #fff;
+}
+
+.usd-currency-spreadsheet {
+  width: 100%;
+  height: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.usd-currency-spreadsheet__ticker-col {
+  width: 12%;
+}
+
+.usd-currency-spreadsheet__price-col {
+  width: 7.5%;
+}
+
+.usd-currency-spreadsheet__return-col {
+  width: 6.1%;
+}
+
+.usd-currency-spreadsheet thead tr:not(.usd-currency-spreadsheet__groups) th:nth-child(1),
+.usd-currency-spreadsheet tbody td:nth-child(1),
+.usd-currency-spreadsheet thead tr:not(.usd-currency-spreadsheet__groups) th:nth-child(8),
+.usd-currency-spreadsheet tbody td:nth-child(8) {
+  text-align: left;
+  padding-left: 7px;
+}
+
+.usd-currency-spreadsheet thead tr:not(.usd-currency-spreadsheet__groups) th:nth-child(8),
+.usd-currency-spreadsheet tbody td:nth-child(8) {
+  border-left: 1px solid #dde5ec;
+}
+
+.usd-currency-spreadsheet thead tr:not(.usd-currency-spreadsheet__groups) th:nth-child(n + 3):not(:nth-child(n + 8)),
+.usd-currency-spreadsheet tbody td:nth-child(n + 3):not(:nth-child(n + 8)),
+.usd-currency-spreadsheet thead tr:not(.usd-currency-spreadsheet__groups) th:nth-child(n + 10),
+.usd-currency-spreadsheet tbody td:nth-child(n + 10) {
+  font-size: clamp(7px, .42vw, 8px);
+  font-variant-numeric: tabular-nums;
+}
+
+.usd-currency-spreadsheet__groups th {
+  height: 21px;
+  padding: 0 7px;
+  border-bottom: 1px solid #e8eef3;
+  background: #fbfcfd;
+  color: #5c697b;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  line-height: 1;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.usd-currency-spreadsheet__groups th + th {
+  border-left: 1px solid #dde5ec;
+}
+
+.usd-card-currencies__empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #98a2b3;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.usd-card-correlations__header {
+  grid-row: 3;
+  border-bottom: 1px solid #e8eef3;
+}
+
+.usd-card-correlations__header .usd-correlation-header-note {
+  margin-left: auto;
+}
+
+.usd-card-correlations__status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.usd-correlation-panel--radar > .usd-corr-body {
+  grid-row: 4;
+  min-height: 0;
+}
+
+.usd-correlation-panel--radar .usd-corr-table {
+  height: 100%;
+}
+
+@media (min-width: 1600px) and (max-height: 1050px) {
+  .usd-correlation-panel--radar {
+    --usd-card-section-header-height: 27px;
+  }
+}
+
 .usd-corr-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
@@ -82,7 +263,7 @@
 
 .usd-corr-table .region-mw-td-heat.usd-corr-heat--neg-light {
   background: transparent !important;
-  color: #c43e49 !important;
+  color: #dc2626 !important;
   font-weight: 700;
 }
 
@@ -94,13 +275,13 @@
 
 .usd-corr-table .region-mw-td-heat.usd-corr-heat--pos-light {
   background: transparent !important;
-  color: #237a43 !important;
+  color: #059669 !important;
   font-weight: 700;
 }
 
 .usd-corr-table .region-mw-td-heat.usd-corr-heat--pos-strong {
   background: #a9d8b7 !important;
-  color: #174d2b !important;
+  color: #059669 !important;
   font-weight: 700;
 }
 

@@ -1,3322 +1,585 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Card, Title, Text, Badge, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell, Button, Metric } from '@tremor/react';
-import { MarketDataService } from '../../services/api/marketDataService';
-import { ENDPOINTS } from '../../constants/apiEndpoints';
-import { useTheme } from '../../context/ThemeContext';
-import { SERVICE_CONFIG, calculateTotals } from '../../constants/serviceTracking';
-import { SECURITIES_LIST } from '../../constants/securitiesList';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
+import { MarketDataService } from '../../services/api/marketDataService';
+import { useTheme } from '../../context/ThemeContext';
+import { getIbkrPortfolioStatusDot } from '../../utils/ibkrConnectionStatus';
+import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 import LoadingIndicator from '../common/LoadingIndicator';
-import { buildHedgeyeContentUrl, appendCacheBust } from '../../utils/hedgeyePreviewUrl';
+import './AnalyticsDailyBrief.css';
 
-// Helper to format dates consistently (M/D)
-const formatDate = (dateStr) => {
-  // Fallback to today's date if dateStr is empty/null
-  if (!dateStr) {
-    return new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
-  }
-  // Append T12:00:00 to force local time interpretation in mid-day (avoiding timezone shifts)
-  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+const EVENT_PRIORITY = {
+  action_signal: 0,
+  trend_change: 1,
+  added_long: 2,
+  added_short: 2,
+  closed_long: 3,
+  closed_short: 3,
+  added: 4,
+  removed: 4,
+  rank_change: 5,
 };
 
-const WorkflowStatus = () => {
-  const { theme } = useTheme();
-  const [loading, setLoading] = useState(true);
-  const [loadingStatus, setLoadingStatus] = useState('Initializing...');
-  const [workflowStatus, setWorkflowStatus] = useState(null);
-  const [riskRanges, setRiskRanges] = useState({});
-  const [freshnessData, setFreshnessData] = useState(null);
-  const [changelogData, setChangelogData] = useState(null);
-  const [hermesDirectorData, setHermesDirectorData] = useState(null);
-  const [hermesCommandLoading, setHermesCommandLoading] = useState('');
-  const [hermesCommandMessage, setHermesCommandMessage] = useState('');
-  const [changelogLoading, setChangelogLoading] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState(new Date());
-  const [activeTab, setActiveTab] = useState('freshness'); // 'freshness', 'preview', 'services', 'hermes'
-  const [serviceTotals, setServiceTotals] = useState(null);
-  const [csvUrl, setCsvUrl] = useState(null);
-  const [previewViewMode, setPreviewViewMode] = useState('table'); // 'table' or 'json'
-  const [selectedPreviewDate, setSelectedPreviewDate] = useState(() => {
-    // Default to today in YYYY-MM-DD format (EST timezone)
-    const today = new Date();
-    return today.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+const STATUS_LABELS = {
+  current: 'Current',
+  not_due: 'Not due',
+  late: 'Late',
+  missing: 'Missing',
+  error: 'Error',
+  quality_warning: 'Quality warning',
+};
+
+const TRUST_LABELS = {
+  trusted: 'Verified',
+  degraded: 'Degraded',
+  unavailable: 'Unavailable',
+};
+
+function formatDate(value) {
+  if (!value) return '—';
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return formatDate(value);
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   });
-  const [snapshotCache, setSnapshotCache] = useState({}); // Cache: {"type-date": {data, pdfUrl}}
+}
 
-  // Hedgeye workbook types for Data Preview (plus ETF Pro from local workbook API)
-  const DATA_TYPES = [
-    { key: 'risk-ranges', label: 'Risk Ranges' },
-    { key: 'early-look', label: 'Early Look' },
-    { key: 'bitcoin-trend-tracker', label: 'Bitcoin Tracker' },
-    { key: 'momo-tracker', label: 'Momo Tracker' },
-    { key: 'signal-strength', label: 'Signal Strength' },
-    { key: 'portfolio-solutions', label: 'Portfolio Solutions' },
-    { key: 'the-macro-show', label: 'Macro Show' },
-    { key: 'the-call', label: 'The Call' },
-    { key: 'real-time-alert', label: 'Real-Time Alerts' },
-    { key: 'etf-pro', label: 'ETF Pro' },
-    { key: 'cftc-positioning', label: 'CFTC Net Long' },
-  ];
+function holdingSymbol(holding) {
+  return String(
+    holding?.symbol || holding?.ticker || holding?.contract?.symbol || '',
+  ).trim().toUpperCase();
+}
 
-  // Track PDF URLs and loading states for each data type
-  const [allPdfData, setAllPdfData] = useState({});
-  // Track snapshot data for each data type (for table views)
-  const [allSnapshotData, setAllSnapshotData] = useState({});
+function holdingSide(holding) {
+  const signedPosition = Number(
+    holding?.position ?? holding?.quantity ?? holding?.shares ?? holding?.marketValue,
+  );
+  const explicit = String(holding?.side || holding?.type || '').toUpperCase();
+  if (explicit.includes('SHORT') || (Number.isFinite(signedPosition) && signedPosition < 0)) return 'short';
+  return 'long';
+}
 
-  // Track last fetched run date to prevent re-fetching on tab switch
-  const lastFetchedRunDate = useRef(null);
+function relationForGroup(side, events) {
+  const directions = new Set(events.map((event) => event.direction).filter(Boolean));
+  if ((side === 'long' && directions.has('bearish')) || (side === 'short' && directions.has('bullish'))) {
+    return 'conflict';
+  }
+  if ((side === 'long' && directions.has('bullish')) || (side === 'short' && directions.has('bearish'))) {
+    return 'aligned';
+  }
+  return 'affected';
+}
 
-  const isDark = theme === 'dark';
+const PREVIEW_FIELD_PRIORITY = [
+  'action',
+  'call',
+  'direction',
+  'trend',
+  'description',
+  'message',
+  'etf',
+  'assetClass',
+  'rank',
+  'previousRank',
+  'newRank',
+  'value',
+  'dateAdded',
+];
 
-  // Get hedgeyeStatus and csvStatus from workflowStatus (with safe defaults)
-  const hedgeyeStatus = workflowStatus?.hedgeye || {};
-  /** When Hedgeye has not scraped yet, Data Preview lists ETF Pro alone (workbook-driven). */
-  const previewCardTypes = hedgeyeStatus.lastRun ? DATA_TYPES : DATA_TYPES.filter((t) => t.key === 'etf-pro');
-  const csvStatus = workflowStatus?.csvUpload || {};
-  const hermesInboxStatus = workflowStatus?.hermesInbox || {};
-  const hermesDirector = hermesDirectorData?.director || workflowStatus?.hermesDirector || null;
-  const hermesWorkers = hermesDirectorData?.workers || workflowStatus?.hermesWorkers || [];
-  const hermesAlerts = hermesDirectorData?.alerts || workflowStatus?.hermesAlerts || [];
-  const hermesRecentRuns = hermesDirectorData?.recentRuns || [];
+function humanizeKey(value) {
+  return String(value || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
 
-  // Fetch workflow status and data
-  const fetchData = async () => {
-    console.log('[WorkflowStatus] fetchData called');
-    try {
-      setLoading(true);
-      setLoadingStatus('Loading data...');
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-      console.log('[WorkflowStatus] Backend URL:', backendUrl);
+function compactValue(value) {
+  if (value == null) return '—';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const primitives = value.filter((item) => ['string', 'number', 'boolean'].includes(typeof item));
+    if (primitives.length === value.length) return primitives.slice(0, 6).join(' · ');
+    return `${value.length} structured record${value.length === 1 ? '' : 's'}`;
+  }
 
-      // Helper for individual timeouts
-      const withTimeout = (promise, ms) => Promise.race([
-        promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out - server may be busy')), ms))
-      ]);
+  const identifiers = new Set(['id', 'ticker', 'symbol']);
+  const fields = Object.entries(value)
+    .filter(([key, fieldValue]) => !identifiers.has(key) && (
+      fieldValue == null || ['string', 'number', 'boolean'].includes(typeof fieldValue)
+    ))
+    .sort(([left], [right]) => {
+      const leftPriority = PREVIEW_FIELD_PRIORITY.indexOf(left);
+      const rightPriority = PREVIEW_FIELD_PRIORITY.indexOf(right);
+      return (leftPriority === -1 ? 99 : leftPriority) - (rightPriority === -1 ? 99 : rightPriority);
+    })
+    .slice(0, 4);
 
-      const TIMEOUT_MS = 15000; // 15s timeout to match axios client config
+  if (fields.length === 0) return 'Structured record · open Developer JSON for details';
+  return fields.map(([key, fieldValue]) => `${humanizeKey(key)}: ${fieldValue ?? '—'}`).join(' · ');
+}
 
-      // Execute all fetches in parallel using Promise.allSettled
-      // This ensures that if one request fails/hangs, others are still processed
-      const results = await Promise.allSettled([
-        withTimeout(axios.get(`${backendUrl}${ENDPOINTS.WORKFLOW_STATUS || '/api/workflow-status'}`), TIMEOUT_MS),
-        withTimeout(MarketDataService.getRiskRanges(), TIMEOUT_MS),
-        withTimeout(MarketDataService.getHedgeyeFreshness(), TIMEOUT_MS),
-        withTimeout(axios.get(`${backendUrl}/api/hedgeye/changelog`), TIMEOUT_MS),
-        withTimeout(MarketDataService.getHermesDirectorStatus(), TIMEOUT_MS),
-      ]);
+function previewEntries(parsed) {
+  if (!parsed || typeof parsed !== 'object') return [];
+  if (Array.isArray(parsed.rows)) {
+    return parsed.rows.slice(0, 20).map((row, index) => ({
+      key: row?.ticker || row?.symbol || `Row ${index + 1}`,
+      value: row,
+    }));
+  }
+  const data = parsed.data ?? parsed;
+  if (Array.isArray(data)) {
+    return data.slice(0, 20).map((row, index) => ({
+      key: row?.ticker || row?.symbol || row?.metric || `Row ${index + 1}`,
+      value: row,
+    }));
+  }
+  if (data && typeof data === 'object') {
+    return Object.entries(data).slice(0, 20).map(([key, value]) => ({ key, value }));
+  }
+  return [{ key: 'Value', value: data }];
+}
 
-      console.log('[WorkflowStatus] All promises settled, processing results...');
-      console.log('[WorkflowStatus] Results:', results.map(r => r.status));
-
-      // Process workflow status
-      if (results[0].status === 'fulfilled') {
-        console.log('[WorkflowStatus] Workflow status fulfilled:', results[0].value.data?.hedgeye?.lastRun);
-        setWorkflowStatus(results[0].value.data);
-      } else {
-        console.error('Error fetching workflow status:', results[0].reason);
-        setWorkflowStatus({
-          hedgeye: {
-            status: 'unknown',
-            lastRun: null,
-            count: 0,
-            nextRun: '8:00 AM EST (market days)'
-          },
-          csvUpload: {
-            status: 'unknown',
-            lastUpload: null,
-            records: 0,
-            fileName: null
-          },
-          hermesInbox: {
-            status: 'unknown',
-            lastRun: null,
-            attachmentCount: 0,
-            storedCount: 0,
-            errorCount: 0,
-            pendingCount: 0,
-            latestFilename: null
-          }
-        });
-      }
-
-      // Process risk ranges
-      if (results[1].status === 'fulfilled') {
-        setRiskRanges(results[1].value || {});
-      } else {
-        console.error('Error fetching risk ranges:', results[1].reason);
-        setRiskRanges({});
-      }
-
-      // Process freshness data — merge ETF Pro from the same GET /api/hedgeye/etfpro the card uses
-      if (results[2].status === 'fulfilled') {
-        let fr = results[2].value;
-        try {
-          const etf = await withTimeout(MarketDataService.getHedgeyeEtfPro(), 20000);
-          if (etf && (etf.meta || (Array.isArray(etf.rows) && etf.rows.length > 0))) {
-            const rowCount = Array.isArray(etf.rows) ? etf.rows.length : (etf.meta?.rowCount ?? 0);
-            const nyToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-            let d = etf.meta?.snapshotDate;
-            if (!d && etf.meta?.parsedAt) {
-              const t = new Date(etf.meta.parsedAt);
-              if (!Number.isNaN(t.getTime())) {
-                d = t.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-              }
-            }
-            const status = d && d === nyToday ? 'fresh' : d ? 'stale' : 'missing';
-            fr = {
-              ...fr,
-              dataTypes: {
-                ...(fr.dataTypes || {}),
-                'etf-pro': {
-                  status,
-                  lastUpdated: d,
-                  date: d,
-                  scrapedAt: etf.meta?.parsedAt,
-                  itemCount: rowCount,
-                  source: etf.meta?.source || 'EtfProLocal',
-                },
-              },
-            };
-          }
-        } catch (mergeErr) {
-          console.warn('[WorkflowStatus] ETF Pro freshness merge:', mergeErr?.message);
-        }
-        console.log('[WorkflowStatus] Freshness fulfilled, etf-pro date:', fr?.dataTypes?.['etf-pro']?.date);
-        setFreshnessData(fr);
-      } else {
-        console.error('Error fetching Hedgeye freshness:', results[2].reason);
-        setFreshnessData(null);
-      }
-
-      // Process changelog data
-      if (results[3].status === 'fulfilled') {
-        setChangelogData(results[3].value.data);
-      } else {
-        console.error('Error fetching Hedgeye changelog:', results[3].reason);
-        setChangelogData(null);
-      }
-
-      if (results[4].status === 'fulfilled') {
-        setHermesDirectorData(results[4].value);
-      } else {
-        console.error('Error fetching Hermes director status:', results[4].reason);
-        setHermesDirectorData(null);
-      }
-
-      setLastRefresh(new Date());
-    } catch (error) {
-      console.error('Error in fetchData:', error);
-    } finally {
-      setLoading(false);
-      setLoadingStatus('');
-    }
-  };
+function SourceInspector({ selection, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showJson, setShowJson] = useState(false);
 
   useEffect(() => {
-    fetchData();
-
-    // Calculate service totals
-    const totals = calculateTotals();
-    setServiceTotals(totals);
-
-    // Auto-refresh every 5 minutes
-    const interval = setInterval(fetchData, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const mediaRetryRef = useRef({});
-
-  const handlePreviewMediaError = (key) => {
-    const retries = mediaRetryRef.current[key] || 0;
-    if (retries >= 1) return;
-    mediaRetryRef.current[key] = retries + 1;
-    setAllPdfData((prev) => {
-      const current = prev[key];
-      if (!current?.url) return prev;
-      return {
-        ...prev,
-        [key]: { ...current, url: appendCacheBust(current.url) },
-      };
+    let cancelled = false;
+    setDetail(null);
+    setError('');
+    setShowJson(false);
+    setLoading(true);
+    axios.get(
+      `${BACKEND_URL}/api/analytics/sources/${encodeURIComponent(selection.sourceId)}/snapshots/${encodeURIComponent(selection.snapshotId)}`,
+    ).then((response) => {
+      if (!cancelled) setDetail(response.data);
+    }).catch((requestError) => {
+      if (!cancelled) {
+        setError(requestError?.response?.data?.error || requestError.message || 'Unable to load source snapshot.');
+      }
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
     });
-  };
+    return () => { cancelled = true; };
+  }, [selection.snapshotId, selection.sourceId]);
 
-  // Improved parallel fetcher (Data Preview). ETF Pro always uses /api/hedgeye/etfpro (workbook-driven).
-  const fetchAllPdfs = async () => {
-    const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
-    const hedgeyeScheduled = !!currentHedgeyeStatus.lastRun;
-
-    const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-    const date = hedgeyeScheduled
-      ? (selectedPreviewDate || new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0])
-      : selectedPreviewDate;
-
-    const fetchItem = async (key) => {
-      // ETF Pro: no Hedgeye screenshot; latest workbook JSON only.
-      if (key === 'etf-pro') {
-        setAllPdfData((prev) => ({
-          ...prev,
-          [key]: { ...prev[key], loading: true, error: null },
-        }));
-        try {
-          const snapshotResponse = await axios.get(`${backendUrl}/api/hedgeye/etfpro`);
-          const payload = snapshotResponse.data || {};
-          const snap = {
-            key: 'etf-pro',
-            data: {
-              rows: Array.isArray(payload.rows) ? payload.rows : [],
-              meta: payload.meta || {},
-              changes:
-                payload.changes && typeof payload.changes === 'object' ? payload.changes : {},
-            },
-            trendChanges: [],
-          };
-          const etfCacheKey = 'etf-pro-latest';
-          setSnapshotCache((prev) => ({
-            ...prev,
-            [etfCacheKey]: snap,
-          }));
-          setAllPdfData((prev) => ({
-            ...prev,
-            [key]: {
-              loading: false,
-              url: null,
-              type: null,
-              error: null,
-              workbookOnly: true,
-            },
-          }));
-          setAllSnapshotData((prev) => ({
-            ...prev,
-            [key]: snap,
-          }));
-        } catch (err) {
-          console.warn('[Preview] ETF Pro fetch failed:', err?.message || err);
-          setAllPdfData((prev) => ({
-            ...prev,
-            [key]: {
-              loading: false,
-              url: null,
-              type: null,
-              error:
-                err?.response?.status === 404
-                  ? 'No workbook on server (upload or npm run collect:etfpro)'
-                  : 'Unable to load ETF Pro',
-              workbookOnly: true,
-            },
-          }));
-          setAllSnapshotData((prev) => ({
-            ...prev,
-            [key]: null,
-          }));
-        }
-        return;
-      }
-
-      if (key === 'real-time-alert') {
-        setAllPdfData((prev) => ({
-          ...prev,
-          [key]: { ...prev[key], loading: true, error: null },
-        }));
-        try {
-          const cacheKey = `${key}-${date}`;
-          const snapshotResponse = await axios.get(
-            `${backendUrl}/api/hedgeye/snapshot/${key}?date=${date}`
-          );
-          const snapshotData = snapshotResponse.data;
-
-          setSnapshotCache((prev) => ({
-            ...prev,
-            [cacheKey]: snapshotData,
-          }));
-          setAllSnapshotData((prev) => ({
-            ...prev,
-            [key]: snapshotData,
-          }));
-          setAllPdfData((prev) => ({
-            ...prev,
-            [key]: {
-              loading: false,
-              url: null,
-              type: null,
-              error: null,
-              workbookOnly: true,
-              actionOnly: true,
-            },
-          }));
-        } catch (err) {
-          console.warn('[Preview] Real-Time Alerts fetch failed:', err?.message || err);
-          setAllSnapshotData((prev) => ({
-            ...prev,
-            [key]: null,
-          }));
-          setAllPdfData((prev) => ({
-            ...prev,
-            [key]: {
-              loading: false,
-              url: null,
-              type: null,
-              error: 'No real-time alert snapshot for this date',
-              workbookOnly: true,
-              actionOnly: true,
-            },
-          }));
-        }
-        return;
-      }
-
-      setAllPdfData((prev) => ({
-        ...prev,
-        [key]: { ...prev[key], loading: true, error: null },
-      }));
-
-      try {
-        mediaRetryRef.current[key] = 0;
-        const contentUrl = buildHedgeyeContentUrl(backendUrl, date, key);
-        const metaResponse = await axios.get(
-          `${backendUrl}/api/hedgeye/screenshot/${date}?type=${key}`
-        );
-        const pdfResult = {
-          url: contentUrl,
-          type: metaResponse.data.type || 'screenshot',
-          error: null,
-        };
-
-        setAllPdfData((prev) => ({
-          ...prev,
-          [key]: { loading: false, ...pdfResult },
-        }));
-
-        const cacheKey = `${key}-${date}`;
-
-        if (snapshotCache[cacheKey]) {
-          console.log(`✓ Using cached snapshot for ${key} on ${date}`);
-          setAllSnapshotData((prev) => ({
-            ...prev,
-            [key]: snapshotCache[cacheKey],
-          }));
-        } else {
-          try {
-            const snapshotResponse = await axios.get(
-              `${backendUrl}/api/hedgeye/snapshot/${key}?date=${date}`
-            );
-            const snapshotData = snapshotResponse.data;
-
-            setSnapshotCache((prev) => ({
-              ...prev,
-              [cacheKey]: snapshotData,
-            }));
-
-            setAllSnapshotData((prev) => ({
-              ...prev,
-              [key]: snapshotData,
-            }));
-          } catch (err) {
-            console.warn(`Snapshot failed for ${key} on ${date}`, err);
-            setAllSnapshotData((prev) => ({
-              ...prev,
-              [key]: null,
-            }));
-          }
-        }
-      } catch (error) {
-        console.error(`Error fetching PDF for ${key}:`, error);
-        setAllPdfData((prev) => ({
-          ...prev,
-          [key]: {
-            loading: false,
-            url: null,
-            type: null,
-            error: 'Not available',
-          },
-        }));
-      }
-    };
-
-    const keysToFetch = hedgeyeScheduled ? DATA_TYPES.map((item) => item.key) : ['etf-pro'];
-    await Promise.all(keysToFetch.map((k) => fetchItem(k)));
-  };
-
-  // Fetch CSV presigned URL
-  const fetchCsvUrl = async () => {
-    const currentHedgeyeStatus = workflowStatus?.hedgeye || {};
-    if (!currentHedgeyeStatus.lastRun) return;
-
-    try {
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-      const date = new Date(currentHedgeyeStatus.lastRun).toISOString().split('T')[0];
-      const response = await axios.get(`${backendUrl}/api/hedgeye/csv/${date}`);
-      setCsvUrl(response.data.url);
-    } catch (error) {
-      console.error('Error fetching CSV URL:', error);
-      setCsvUrl(null);
-    }
-  };
-
-  // Data Preview loads Hedgeye scrape rows when scraper ran; ETF Pro workbook always loads from /api/hedgeye/etfpro.
-  useEffect(() => {
-    const h = workflowStatus?.hedgeye || {};
-    if (activeTab !== 'preview') return;
-
-    const sig = `${h.lastRun ?? 'norun'}-${selectedPreviewDate}`;
-    if (lastFetchedRunDate.current !== sig) {
-      lastFetchedRunDate.current = sig;
-      fetchAllPdfs();
-      if (h.lastRun) {
-        fetchCsvUrl();
-      }
-    }
-  }, [activeTab, workflowStatus?.hedgeye?.lastRun, selectedPreviewDate]);
-
-  // Calculate data freshness
-  const getDataFreshness = (contentDate, uploadTimestamp, dataType) => {
-    // If backend omitted content date but we have a technical timestamp, use that calendar day (NY) — e.g. ETF Pro local file edge cases
-    let effectiveDate = contentDate;
-    if (!effectiveDate && uploadTimestamp) {
-      const t = new Date(uploadTimestamp);
-      if (!Number.isNaN(t.getTime())) {
-        effectiveDate = t.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-      }
-    }
-    if (!effectiveDate) return { status: 'error', hours: null, label: 'No data', dateStr: 'Never', timestampStr: 'Never' };
-
-    // Current date in YYYY-MM-DD format (EST)
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-    let dataDate;
-    // Check if effectiveDate is already YYYY-MM-DD (Content Date from backend)
-    const isSimpleContentDate = typeof effectiveDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate);
-
-    if (isSimpleContentDate) {
-      dataDate = effectiveDate;
-    } else {
-      const co = new Date(effectiveDate);
-      if (isNaN(co.getTime())) return { status: 'error', hours: null, label: 'Invalid Date', dateStr: 'Invalid', timestampStr: 'Invalid' };
-      dataDate = co.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    }
-
-    // Determine the display timestamp string
-    // Use uploadTimestamp if provided, otherwise fallback to effectiveDate
-    const displayTime = uploadTimestamp || effectiveDate;
-    const isSimpleDisplayDate = typeof displayTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(displayTime);
-
-    let dateObj;
-    if (isSimpleDisplayDate) {
-      dateObj = new Date(displayTime + 'T12:00:00');
-    } else {
-      dateObj = new Date(displayTime);
-    }
-
-    if (isNaN(dateObj.getTime())) {
-      return { status: 'error', hours: null, label: 'Invalid Display Date', dateStr: 'Invalid', timestampStr: 'Invalid' };
-    }
-
-    // Professional timestamp format (e.g. "2026-01-21 14:30:45")
-    const timestampStr = isSimpleDisplayDate
-      ? displayTime // Just show the date if we don't have time
-      : dateObj.toLocaleString('en-CA', {
-        timeZone: 'America/New_York',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      }).replace(',', '');
-
-    // Display string (e.g. "Jan 21")
-    const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-    // Calculate age in hours (approximation for simple dates)
-    const daysDiff = (new Date(today) - new Date(dataDate)) / (1000 * 60 * 60 * 24);
-    const hoursAgo = daysDiff * 24;
-
-    // Green only if SAME DAY
-    if (dataDate === today) {
-      return { status: 'success', hours: hoursAgo, label: dateStr, dateStr, timestampStr };
-    }
-
-    // Custom threshold for bi-weekly products (Signal Strength, Portfolio Solutions)
-    // Allow up to 4 days (96 hours) to be "Yellow" instead of "Red"
-    const isBiWeekly = dataType === 'signal-strength' || dataType === 'portfolio-solutions';
-    const warningThreshold = isBiWeekly ? 96 : 48;
-
-    if (hoursAgo < warningThreshold) {
-      // Yellow (Warning) - valid but not today
-      const daysAgo = Math.round(hoursAgo / 24);
-      return { status: 'warning', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr, timestampStr };
-    } else {
-      // Red (Error) - too old
-      const daysAgo = Math.round(hoursAgo / 24);
-      return { status: 'error', hours: hoursAgo, label: `${dateStr} ${daysAgo > 0 ? `(${daysAgo}d ago)` : ''}`, dateStr, timestampStr };
-    }
-  };
-
-  // Format timestamp - professional format like "January 21, 2026"
-  const formatTimestamp = (timestamp) => {
-    if (!timestamp) return 'Never';
-    const isSimpleDate = typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(timestamp);
-    const date = isSimpleDate ? new Date(timestamp + 'T12:00:00') : new Date(timestamp);
-
-    return date.toLocaleString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
-  // Get status badge color
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'success':
-      case 'healthy':
-      case 'succeeded':
-        return 'emerald';
-      case 'warning':
-      case 'stale':
-      case 'running':
-        return 'yellow';
-      case 'error':
-      case 'failed':
-      case 'critical':
-        return 'red';
-      case 'acknowledged':
-      case 'snoozed':
-        return 'yellow';
-      default:
-        return 'gray';
-    }
-  };
-
-  const formatShortTimestamp = (timestamp) => {
-    if (!timestamp) return 'Never';
-    return new Date(timestamp).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit'
-    });
-  };
-
-  const runHermesCommand = async (command, payload = {}) => {
-    try {
-      setHermesCommandLoading(command);
-      const result = await MarketDataService.runHermesDirectorCommand(command, payload);
-      if (result?.snapshot) {
-        setHermesDirectorData(result.snapshot);
-      }
-      setHermesCommandMessage(result?.message || `${command} completed.`);
-      setLastRefresh(new Date());
-    } catch (error) {
-      console.error(`Error running Hermes command ${command}:`, error);
-      setHermesCommandMessage(error.message || `Failed to run ${command}`);
-    } finally {
-      setHermesCommandLoading('');
-    }
-  };
-
-  const handleHermesAlertAction = async (alertId, action, payload = {}) => {
-    try {
-      setHermesCommandLoading(`${action}:${alertId}`);
-      const result = await MarketDataService.updateHermesAlert(alertId, action, payload);
-      if (result?.snapshot) {
-        setHermesDirectorData(result.snapshot);
-      }
-      setHermesCommandMessage(`Alert ${action}d.`);
-    } catch (error) {
-      console.error(`Error updating Hermes alert ${alertId}:`, error);
-      setHermesCommandMessage(error.message || `Failed to ${action} alert`);
-    } finally {
-      setHermesCommandLoading('');
-    }
-  };
-
-  const hedgeyeFreshness = getDataFreshness(hedgeyeStatus.lastRun, hedgeyeStatus.scrapedAt);
-  const csvFreshness = getDataFreshness(csvStatus.lastUpload, csvStatus.scrapedAt);
-
-  // Validation helper: check if a row has valid data
-  const getRowStatus = (ticker, lrr, hrr) => {
-    if (lrr >= hrr) return { status: 'error', icon: '❌', message: 'LRR >= HRR' };
-    if (lrr < 0 || hrr < 0) return { status: 'error', icon: '❌', message: 'Negative value' };
-    if (lrr === 0 && hrr === 0) return { status: 'error', icon: '❌', message: 'Missing data' };
-    return { status: 'valid', icon: '✓', message: '' };
-  };
-
-  // Convert risk ranges to table data with validation status
-  // Preserves original extraction order for easy side-by-side comparison with PDF
-  const riskRangesTableData = Object.entries(riskRanges).map(([ticker, data]) => {
-    const lrr = data.lrr || 0;
-    const hrr = data.hrr || 0;
-    const validation = getRowStatus(ticker, lrr, hrr);
-    return {
-      ticker,
-      lrr,
-      hrr,
-      trend: data.trend || 'N/A',
-      timestamp: data.timestamp || null,
-      status: validation.status,
-      statusIcon: validation.icon,
-      statusMessage: validation.message
-    };
-  }); // No sorting - preserves extraction order to match PDF
-
-  // Calculate health metrics for the health bar
-  const extractedCount = riskRangesTableData.length;
-  const expectedCount = SECURITIES_LIST.length;
-  const errorCount = riskRangesTableData.filter(r => r.status === 'error').length;
-  const validCount = riskRangesTableData.filter(r => r.status === 'valid').length;
-
-  // Calculate coverage - which securities from SECURITIES_LIST have Hedgeye data
-  const hedgeyeTickers = new Set(riskRangesTableData.map(r => r.ticker));
-  const missingTickers = SECURITIES_LIST
-    .filter(s => !hedgeyeTickers.has(s.ticker))
-    .map(s => s.ticker)
-    .sort();
-  const coveragePercent = expectedCount > 0 ? Math.round((extractedCount / expectedCount) * 100) : 0;
-
-  // Determine overall health status
-  const getHealthStatus = () => {
-    if (extractedCount === 0) return { status: 'error', label: 'NO DATA', color: 'red' };
-    if (errorCount > 0) return { status: 'warning', label: 'WARNINGS', color: 'yellow' };
-    if (hedgeyeFreshness.status === 'error') return { status: 'stale', label: 'STALE', color: 'yellow' };
-    if (hedgeyeFreshness.status === 'warning') return { status: 'warning', label: 'AGING', color: 'yellow' };
-    return { status: 'healthy', label: 'HEALTHY', color: 'emerald' };
-  };
-  const healthStatus = getHealthStatus();
+  const entries = useMemo(() => previewEntries(detail?.parsed), [detail?.parsed]);
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-
-      {/* Tabs */}
-      <div
-        style={{
-          display: 'flex',
-          borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-          backgroundColor: isDark ? '#1f2937' : '#ffffff',
-          overflowX: 'auto',
-          backdropFilter: 'blur(4px)',
-        }}
-        className="dark:border-gray-700"
-      >
-        {['freshness', 'hermes', 'preview', 'services'].map((tab) => {
-          const tabLabels = {
-            freshness: 'Data Upload',
-            hermes: 'Hermes Command',
-            preview: 'Data Preview',
-            services: 'Services & Costs'
-          };
-
-          return (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{
-                flex: '0 0 auto',
-                padding: '8px 12px',
-                border: 'none',
-                backgroundColor: 'transparent',
-                color: activeTab === tab
-                  ? (isDark ? '#60a5fa' : '#2563eb')
-                  : (isDark ? '#9ca3af' : '#6b7280'),
-                cursor: 'pointer',
-                fontWeight: activeTab === tab ? 600 : 400,
-                fontSize: '12px',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {tabLabels[tab]}
-            </button>
-          );
-        })}
+    <div className="adb-inspector" role="dialog" aria-modal="true" aria-label="Source inspector">
+      <div className="adb-inspector__header">
+        <div>
+          <span className="adb-eyebrow">Source inspector</span>
+          <h2>{selection.label}</h2>
+        </div>
+        <button type="button" className="adb-icon-button" onClick={onClose} aria-label="Close source inspector">×</button>
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '6px' }}>
-        {loading && !workflowStatus && !freshnessData ? (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '400px',
-            gap: '16px'
-          }}>
-            <LoadingIndicator label={loadingStatus} size="md" centered />
+      {loading ? (
+        <LoadingIndicator label="Loading source snapshot…" size="sm" centered />
+      ) : error ? (
+        <div className="adb-state adb-state--error">{error}</div>
+      ) : (
+        <div className="adb-inspector__body">
+          <div className="adb-inspector__meta">
+            <div><span>Content date</span><strong>{formatDate(detail?.contentDate)}</strong></div>
+            <div><span>Published</span><strong>{formatDateTime(detail?.publishedAt)}</strong></div>
+            <div><span>Ingested</span><strong>{formatDateTime(detail?.ingestedAt)}</strong></div>
+            <div><span>Source</span><strong>{detail?.source || '—'}</strong></div>
           </div>
-        ) : activeTab === 'freshness' ? (
-          /* Daily Freshness - New Primary View */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div>
-              <Title style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827' }}>
-                Data Upload
-              </Title>
-            </div>
 
-            {/* Data Upload Table */}
-            <Card
-              className={isDark ? 'dark:bg-gray-800' : ''}
-              style={{
-                border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                borderRadius: '0.5rem',
-                padding: '0',
-                overflow: 'hidden'
-              }}
-            >
-              <div style={{
-                backgroundColor: isDark ? '#374151' : '#f9fafb',
-                borderBottom: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`,
-                padding: '3px 5px'
-              }}>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1fr 2fr',
-                  gap: '4px'
-                }}>
-                  <Text style={{
-                    fontSize: '5px',
-                    fontWeight: 600,
-                    color: isDark ? '#9ca3af' : '#6b7280'
-                  }}>
-                    Source
-                  </Text>
-                  <Text style={{
-                    fontSize: '5px',
-                    fontWeight: 600,
-                    color: isDark ? '#9ca3af' : '#6b7280'
-                  }}>
-                    Items
-                  </Text>
-                  <Text style={{
-                    fontSize: '5px',
-                    fontWeight: 600,
-                    color: isDark ? '#9ca3af' : '#6b7280'
-                  }}>
-                    Last Upload
-                  </Text>
-                </div>
-              </div>
+          {Array.isArray(detail?.quality?.warnings) && detail.quality.warnings.length > 0 && (
+            <div className="adb-state adb-state--warning">{detail.quality.warnings.join(' · ')}</div>
+          )}
 
-              <div>
-                {(() => {
-                  // All Hedgeye data sources for the Data Upload table
-                  const dataTypeConfig = {
-                    'risk-ranges': { name: 'Risk Ranges', unit: 'items' },
-                    'early-look': { name: 'Early Look', unit: 'items' },
-                    'bitcoin-trend-tracker': { name: 'Bitcoin Tracker', unit: 'items' },
-                    'momo-tracker': { name: 'MOMO Tracker', unit: 'items' },
-                    'signal-strength': { name: 'Signal Strength', unit: 'items' },
-                    'portfolio-solutions': { name: 'Portfolio Solutions', unit: 'items' },
-                    'the-macro-show': { name: 'Macro Show', unit: 'positions' },
-                    'the-call': { name: 'The Call', unit: 'positions' },
-                    'real-time-alert': { name: 'Real-Time Alerts', unit: 'alerts' },
-                    'etf-pro': { name: 'ETF Pro', unit: 'items' },
-                    'cftc-positioning': { name: 'CFTC Net Long', unit: 'metrics' },
-                    'hermes-inbox': { name: 'Hermes Inbox', unit: 'files' }
-                  };
-
-                  const dataTypeRows = Object.entries(dataTypeConfig);
-                  return dataTypeRows.map(([key, config], index) => {
-                    const data = key === 'hermes-inbox'
-                      ? (freshnessData?.dataTypes?.[key] || {
-                        status: hermesInboxStatus.status === 'success' ? 'fresh' : (hermesInboxStatus.status || 'missing'),
-                        itemCount: hermesInboxStatus.attachmentCount || 0,
-                        lastUpdated: hermesInboxStatus.lastUpdated || hermesInboxStatus.lastRun,
-                        scrapedAt: hermesInboxStatus.lastUpdated || hermesInboxStatus.lastRun,
-                        latestFilename: hermesInboxStatus.latestFilename,
-                        gmailAccount: hermesInboxStatus.gmailAccount,
-                        gmailQuery: hermesInboxStatus.gmailQuery,
-                      })
-                      : (freshnessData?.dataTypes?.[key] || { status: 'missing', itemCount: 0 });
-                    const hermesSourceTitle = key === 'hermes-inbox'
-                      ? [
-                        data.gmailAccount ? `Account: ${data.gmailAccount}` : null,
-                        data.gmailQuery ? `Query: ${data.gmailQuery}` : null,
-                        data.latestFilename ? `Latest: ${data.latestFilename}` : null,
-                      ].filter(Boolean).join(' | ')
-                      : undefined;
-
-                    // Get background color based on status
-                    const getBackgroundColor = (status) => {
-                      if (status === 'fresh') return isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)'; // light green
-                      if (status === 'stale') return isDark ? 'rgba(234, 179, 8, 0.15)' : 'rgba(234, 179, 8, 0.1)'; // light yellow
-                      return isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)'; // light red
-                    };
-
-                    // Get hover background color based on status
-                    const getHoverBackgroundColor = (status) => {
-                      if (status === 'fresh') return isDark ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.15)';
-                      if (status === 'stale') return isDark ? 'rgba(234, 179, 8, 0.25)' : 'rgba(234, 179, 8, 0.15)';
-                      return isDark ? 'rgba(239, 68, 68, 0.25)' : 'rgba(239, 68, 68, 0.15)';
-                    };
-
-                    // Frontend freshness is still used for the timestamp
-                    const freshness = getDataFreshness(data.lastUpdated || data.date, data.scrapedAt, key);
-
-                    return (
-                      <div
-                        key={key}
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: '2fr 1fr 2fr',
-                          gap: '4px',
-                          padding: '4px 5px',
-                          borderBottom: index < dataTypeRows.length - 1 ? `1px solid ${isDark ? '#374151' : '#e5e7eb'}` : 'none',
-                          cursor: 'pointer',
-                          transition: 'background-color 0.15s ease',
-                          backgroundColor: getBackgroundColor(data.status)
-                        }}
-                        onClick={() => {
-                          setActiveTab('preview');
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = getHoverBackgroundColor(data.status);
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = getBackgroundColor(data.status);
-                        }}
-                      >
-                        {/* Source Column */}
-                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1px' }}>
-                          <Text style={{
-                            fontSize: '5px',
-                            fontWeight: 500,
-                            color: isDark ? '#f9fafb' : '#111827'
-                          }}
-                          title={hermesSourceTitle || undefined}
-                          >
-                            {config.name}
-                          </Text>
-                          {key === 'hermes-inbox' && (data.gmailAccount || data.gmailQuery) && (
-                            <Text style={{
-                              fontSize: '4.5px',
-                              color: isDark ? '#9ca3af' : '#6b7280',
-                              lineHeight: 1,
-                            }}
-                            title={hermesSourceTitle || undefined}
-                            >
-                              {data.gmailAccount || data.gmailQuery}
-                            </Text>
-                          )}
-                        </div>
-
-                        {/* Items Column */}
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <Text style={{
-                            fontSize: '5px',
-                            color: isDark ? '#e5e7eb' : '#374151',
-                            fontWeight: 500
-                          }}>
-                            {data.itemCount}
-                          </Text>
-                        </div>
-
-                        {/* Last Upload Column */}
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <Text style={{
-                            fontSize: '5px',
-                            color: isDark ? '#9ca3af' : '#6b7280',
-                            fontFamily: 'monospace'
-                          }}>
-                            {freshness.timestampStr}
-                          </Text>
-                        </div>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            </Card>
-
-            {/* Alerts Section */}
-            {freshnessData?.alerts && freshnessData.alerts.length > 0 && (
-              <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                <Title style={{ fontSize: '14px', marginBottom: '12px', color: isDark ? '#f9fafb' : '#111827' }}>
-                  Alerts ({freshnessData.alerts.length})
-                </Title>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {freshnessData.alerts.map((alert, index) => (
-                    <div
-                      key={index}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 12px',
-                        backgroundColor: alert.severity === 'error'
-                          ? (isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)')
-                          : (isDark ? 'rgba(234, 179, 8, 0.1)' : 'rgba(234, 179, 8, 0.05)'),
-                        borderRadius: '6px',
-                        border: `1px solid ${alert.severity === 'error' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(234, 179, 8, 0.3)'}`
-                      }}
-                    >
-                      <span style={{ fontSize: '14px' }}>{alert.severity === 'error' ? '🔴' : '⚠️'}</span>
-                      <Text style={{ fontSize: '13px', color: isDark ? '#f9fafb' : '#111827' }}>
-                        <strong style={{ textTransform: 'capitalize' }}>{alert.type.replace('-', ' ')}:</strong> {alert.message}
-                      </Text>
-                    </div>
-                  ))}
-                </div>
-              </Card>
+          <div className="adb-inspector__actions">
+            {detail?.artifactUrl && (
+              <a href={`${BACKEND_URL}${detail.artifactUrl}`} target="_blank" rel="noreferrer">Open original artifact</a>
             )}
+            <button type="button" className="adb-text-button" onClick={() => setShowJson((value) => !value)}>
+              {showJson ? 'Hide developer JSON' : 'Developer JSON'}
+            </button>
+          </div>
 
-            {/* No Alerts - All Good - Section removed per user request */}
-
-            {/* Changelog Section */}
-            <div style={{ marginTop: '12px' }}>
-              <Title style={{ fontSize: '14px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '8px' }}>
-                Changes
-              </Title>
-              {changelogLoading ? (
-                <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>Loading changelog...</Text>
-              ) : !changelogData || Object.keys(changelogData).length === 0 ? (
-                <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>No changelog data available.</Text>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
-                  {[
-                    { key: 'risk-ranges', label: 'Risk Ranges' },
-                    { key: 'early-look', label: 'Early Look' },
-                    { key: 'bitcoin-trend-tracker', label: 'Bitcoin Tracker' },
-                    { key: 'portfolio-solutions', label: 'Portfolio Solutions' },
-                    { key: 'signal-strength', label: 'Signal Strength' },
-                    { key: 'momo-tracker', label: 'MOMO Tracker' },
-                    { key: 'the-call', label: 'The Call' },
-                    { key: 'the-macro-show', label: 'The Macro Show' },
-                    { key: 'real-time-alert', label: 'Real-Time Alerts' },
-                    { key: 'etf-pro', label: 'ETF Pro' },
-                    { key: 'cftc-positioning', label: 'CFTC Net Long' }
-                  ].map(({ key, label }) => {
-                    const diff = changelogData?.[key];
-
-                    // Always show these cards (including placeholders with no data)
-                    const alwaysShow = [
-                      'risk-ranges', 'early-look', 'bitcoin-trend-tracker', 'portfolio-solutions',
-                      'momo-tracker', 'signal-strength', 'the-call', 'the-macro-show', 'real-time-alert', 'etf-pro', 'cftc-positioning'
-                    ].includes(key);
-
-                    if (!alwaysShow) {
-                      if (!diff || !diff.available) return null;
-                      if ((diff.added?.length || 0) === 0 && (diff.removed?.length || 0) === 0 && (!diff.updates || diff.updates.length === 0) && (!diff.trendChanges || diff.trendChanges.length === 0)) return null;
-                    }
-
-                    // Check if there's any data to display
-                    const hasData = diff && diff.available && (
-                      (diff.added && diff.added.length > 0) ||
-                      (diff.removed && diff.removed.length > 0) ||
-                      (diff.addedLongs && diff.addedLongs.length > 0) ||
-                      (diff.removedLongs && diff.removedLongs.length > 0) ||
-                      (diff.addedShorts && diff.addedShorts.length > 0) ||
-                      (diff.removedShorts && diff.removedShorts.length > 0) ||
-                      (diff.updates && diff.updates.length > 0) ||
-                      (diff.trendChanges && diff.trendChanges.length > 0) ||
-                      (diff.cryptoTrendChanges && diff.cryptoTrendChanges.length > 0) ||
-                      (diff.etfTrendChanges && diff.etfTrendChanges.length > 0) ||
-                      (diff.alerts && diff.alerts.length > 0)
-                    );
-
-                    return (
-                      <Card key={key} className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem', padding: 0, backgroundColor: isDark ? undefined : '#ffffff' }}>
-                        {/* Card Title - Centered for all cards */}
-                        <div style={{ textAlign: 'center', padding: '8px 10px', backgroundColor: isDark ? undefined : '#f9fafb', borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem 0.5rem 0 0' }}>
-                          <Text style={{ fontSize: '10px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                            {key === 'risk-ranges' ? 'Risk Ranges (TREND)' : label}
-                          </Text>
-                        </div>
-                        <div style={{ padding: '10px' }}>
-
-                        {/* Removed 'No changes detected' text per user request */}
-
-
-                        {key === 'risk-ranges' && diff && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* 1. Trend Changes */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
-                                Trend Changes <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
-                              </div>
-                              {diff.trendChanges && diff.trendChanges.length > 0 ? (
-                                <div style={{ display: 'grid', gap: '4px' }}>
-                                  {/* Header */}
-                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>
-                                    <span>Asset</span>
-                                    <span>Previous ({formatDate(diff.previousDate)})</span>
-                                    <span>Current ({formatDate(diff.currentDate)})</span>
-                                  </div>
-                                  {/* Rows */}
-                                  {diff.trendChanges.map((change, idx) => (
-                                    <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '10px' }}>
-                                      <span style={{ fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>{change.ticker}</span>
-                                      <span style={{ color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
-                                        {change.oldTrend === 'BULLISH' ? 'BULLISH' : change.oldTrend === 'BEARISH' ? 'BEARISH' : 'NEUTRAL'}
-                                      </span>
-                                      <span style={{ color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
-                                        {change.newTrend === 'BULLISH' ? 'BULLISH' : change.newTrend === 'BEARISH' ? 'BEARISH' : 'NEUTRAL'}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
-                                  N/A
-                                </div>
-                              )}
-                            </div>
-
-                            {/* 2. Risk Ranges (Constituents) */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
-                                Risk Ranges <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
-                              </div>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                <div>
-                                  <span style={{ fontSize: '9px', color: '#10b981' }}>Added</span>
-                                  {(diff.added?.length > 0) ? (
-                                    diff.added.map(t => (
-                                      <div key={t} style={{ fontSize: '10px', color: '#10b981' }}>{t}</div>
-                                    ))
-                                  ) : (
-                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
-                                      N/A
-                                    </div>
-                                  )}
-                                </div>
-                                <div>
-                                  <span style={{ fontSize: '9px', color: '#ef4444' }}>Removed</span>
-                                  {(diff.removed?.length > 0) ? (
-                                    diff.removed.map(t => (
-                                      <div key={t} style={{ fontSize: '10px', color: '#ef4444' }}>{t}</div>
-                                    ))
-                                  ) : (
-                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
-                                      N/A
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* 3. OutBucket */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
-                                OutBucket <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
-                              </div>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                <div>
-                                  <span style={{ fontSize: '9px', color: '#10b981' }}>Added</span>
-                                  {(diff.outbucketDiff?.added?.length > 0) ? (
-                                    (diff.outbucketDiff.added || []).map(t => {
-                                      const text = typeof t === 'string' ? t : (t?.ticker || t?.symbol || JSON.stringify(t));
-                                      // Parse: "Name (TICKER) - TREND" -> ticker and trend
-                                      const tickerMatch = text.match(/\(([^)]+)\)/);
-                                      const ticker = tickerMatch ? tickerMatch[1] : text.split(' ')[0];
-                                      const trendMatch = text.match(/-\s*(BULLISH|BEARISH|NEUTRAL)\s*$/i);
-                                      const trend = trendMatch ? trendMatch[1].toUpperCase() : '';
-                                      const trendColor = trend === 'BULLISH' ? '#10b981' : trend === 'BEARISH' ? '#ef4444' : (isDark ? '#9ca3af' : '#6b7280');
-                                      return (
-                                        <div key={text} style={{ fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={text}>
-                                          <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>{ticker} - </span>
-                                          <span style={{ color: trendColor }}>{trend || 'N/A'}</span>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
-                                      N/A
-                                    </div>
-                                  )}
-                                </div>
-                                <div>
-                                  <span style={{ fontSize: '9px', color: '#ef4444' }}>Removed</span>
-                                  {(diff.outbucketDiff?.removed?.length > 0) ? (
-                                    (diff.outbucketDiff.removed || []).map(t => {
-                                      const text = typeof t === 'string' ? t : (t?.ticker || t?.symbol || JSON.stringify(t));
-                                      // Parse: "Name (TICKER) - TREND" -> ticker and trend
-                                      const tickerMatch = text.match(/\(([^)]+)\)/);
-                                      const ticker = tickerMatch ? tickerMatch[1] : text.split(' ')[0];
-                                      const trendMatch = text.match(/-\s*(BULLISH|BEARISH|NEUTRAL)\s*$/i);
-                                      const trend = trendMatch ? trendMatch[1].toUpperCase() : '';
-                                      const trendColor = trend === 'BULLISH' ? '#10b981' : trend === 'BEARISH' ? '#ef4444' : (isDark ? '#9ca3af' : '#6b7280');
-                                      return (
-                                        <div key={text} style={{ fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={text}>
-                                          <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>{ticker} - </span>
-                                          <span style={{ color: trendColor }}>{trend || 'N/A'}</span>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
-                                      N/A
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* BITCOIN TRACKER: Crypto + Crypto ETFs Trend Changes */}
-                        {key === 'bitcoin-trend-tracker' && diff && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* 1. Crypto Trend Changes */}
-                            <div style={{ marginBottom: '8px' }}>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Cryptocurrencies</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {diff.cryptoTrendChanges && diff.cryptoTrendChanges.length > 0 ? (
-                                <div style={{ display: 'grid', gap: '4px' }}>
-                                  {/* Header */}
-                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>
-                                    <span>Asset</span>
-                                    <span>Previous ({formatDate(diff.previousDate)})</span>
-                                    <span>Current ({formatDate(diff.currentDate)})</span>
-                                  </div>
-                                  {/* Rows */}
-                                  {diff.cryptoTrendChanges.map((change, idx) => (
-                                    <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '10px' }}>
-                                      <span style={{ fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>{change.ticker}</span>
-                                      <span style={{ color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
-                                        {change.oldTrend}
-                                      </span>
-                                      <span style={{ color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
-                                        {change.newTrend}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-
-                            {/* 2. Crypto ETFs Trend Changes */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Crypto ETFs</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {diff.etfTrendChanges && diff.etfTrendChanges.length > 0 ? (
-                                <div style={{ display: 'grid', gap: '4px' }}>
-                                  {/* Header */}
-                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>
-                                    <span>Asset</span>
-                                    <span>Previous ({formatDate(diff.previousDate)})</span>
-                                    <span>Current ({formatDate(diff.currentDate)})</span>
-                                  </div>
-                                  {/* Rows */}
-                                  {diff.etfTrendChanges.map((change, idx) => (
-                                    <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '10px' }}>
-                                      <span style={{ fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>{change.ticker}</span>
-                                      <span style={{ color: change.oldTrend === 'BULLISH' ? '#10b981' : change.oldTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
-                                        {change.oldTrend}
-                                      </span>
-                                      <span style={{ color: change.newTrend === 'BULLISH' ? '#10b981' : change.newTrend === 'BEARISH' ? '#ef4444' : (isDark ? '#f9fafb' : '#111827') }}>
-                                        {change.newTrend}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* PORTFOLIO SOLUTIONS: Added/Removed with Blue Headers */}
-                        {key === 'portfolio-solutions' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* Added Section */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff?.added && diff.added.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.added.map(t => {
-                                    const match = t.match(/\(([^)]+)\)/);
-                                    const ticker = match ? match[1] : t;
-                                    return (
-                                      <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-
-                            {/* Removed Section */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff?.removed && diff.removed.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.removed.map(t => {
-                                    const match = t.match(/\(([^)]+)\)/);
-                                    const ticker = match ? match[1] : t;
-                                    return (
-                                      <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* SIGNAL STRENGTH: Added/Removed with Blue Headers */}
-                        {key === 'signal-strength' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* Added Section */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff.added && diff.added.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.added.map(t => (
-                                    <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-
-                            {/* Removed Section */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff.removed && diff.removed.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.removed.map(t => (
-                                    <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* EARLY LOOK: Added/Removed with Blue Headers (same style as Portfolio Solutions) */}
-                        {key === 'early-look' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff?.added && diff.added.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.added.map(t => {
-                                    const match = t.match(/\(([^)]+)\)/);
-                                    const ticker = match ? match[1] : t;
-                                    return (
-                                      <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff?.removed && diff.removed.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.removed.map(t => {
-                                    const match = t.match(/\(([^)]+)\)/);
-                                    const ticker = match ? match[1] : t;
-                                    return (
-                                      <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{ticker}</span>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* MOMO TRACKER: Added/Removed with Blue Headers */}
-                        {key === 'momo-tracker' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* Added Section */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Added</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff?.added && diff.added.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.added.map(t => (
-                                    <span key={t} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-
-                            {/* Removed Section */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Removed</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff?.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                              </div>
-                              {(diff?.removed && diff.removed.length > 0) ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                  {diff.removed.map(t => (
-                                    <span key={t} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* REAL-TIME ALERTS: intraday action signals from Hedgeye email */}
-                        {key === 'real-time-alert' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            {diff && diff.available && diff.alerts?.length > 0 ? (
-                              diff.alerts.map((alert, idx) => {
-                                const action = String(alert.action || '').toUpperCase();
-                                const actionColor = action === 'BUY' ? '#10b981' : action === 'SELL' ? '#ef4444' : '#2563eb';
-                                return (
-                                  <div
-                                    key={`${alert.ticker || alert.headline || idx}-${idx}`}
-                                    style={{
-                                      border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                                      borderRadius: '6px',
-                                      padding: '8px',
-                                      backgroundColor: isDark ? 'rgba(15, 23, 42, 0.45)' : '#ffffff',
-                                    }}
-                                  >
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
-                                      <span
-                                        style={{
-                                          fontSize: '11px',
-                                          fontWeight: 800,
-                                          color: actionColor,
-                                          backgroundColor: action === 'BUY'
-                                            ? (isDark ? 'rgba(16, 185, 129, 0.16)' : '#dcfce7')
-                                            : action === 'SELL'
-                                              ? (isDark ? 'rgba(239, 68, 68, 0.16)' : '#fee2e2')
-                                              : (isDark ? 'rgba(37, 99, 235, 0.16)' : '#dbeafe'),
-                                          padding: '3px 7px',
-                                          borderRadius: '999px',
-                                          letterSpacing: '0.05em',
-                                        }}
-                                      >
-                                        {action || 'ALERT'}
-                                      </span>
-                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                                        {diff.currentDate ? formatDate(diff.currentDate) : ''}
-                                      </span>
-                                    </div>
-                                    <div style={{ fontSize: '16px', fontWeight: 800, color: isDark ? '#f9fafb' : '#111827', lineHeight: 1.1 }}>
-                                      {alert.ticker || 'Ticker pending'}
-                                    </div>
-                                    <div style={{ fontSize: '10px', color: isDark ? '#d1d5db' : '#374151', marginTop: '4px' }}>
-                                      {alert.signalPhrase || alert.headline || 'Real-time Hedgeye alert'}
-                                      {alert.analyst ? ` - ${alert.analyst}` : ''}
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            ) : (
-                              <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                                No real-time alert captured for the latest snapshot.
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* ETF PRO: Added/Removed blue bars (same hierarchy as Signal Strength), then LONGS / SHORTS */}
-                        {key === 'etf-pro' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {diff && diff.available ? (
-                              <>
-                                {/* Added */}
-                                <div>
-                                  <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span>Added</span>
-                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                                  </div>
-                                  <div style={{ marginTop: '6px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
-                                    {(diff.addedLongs && diff.addedLongs.length > 0) ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {diff.addedLongs.map((t) => (
-                                          <span key={`al-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                  <div style={{ marginTop: '8px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
-                                    {(diff.addedShorts && diff.addedShorts.length > 0) ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {diff.addedShorts.map((t) => (
-                                          <span key={`as-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                </div>
-                                {/* Removed */}
-                                <div>
-                                  <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span>Removed</span>
-                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>({diff.currentDate ? formatDate(diff.currentDate) : ''})</span>
-                                  </div>
-                                  <div style={{ marginTop: '6px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
-                                    {(diff.removedLongs && diff.removedLongs.length > 0) ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {diff.removedLongs.map((t) => (
-                                          <span key={`rl-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                  <div style={{ marginTop: '8px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
-                                    {(diff.removedShorts && diff.removedShorts.length > 0) ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {diff.removedShorts.map((t) => (
-                                          <span key={`rs-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                </div>
-                              </>
-                            ) : (
-                              <div style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                                {diff?.error ? `Error: ${diff.error}` : 'No ETF Pro snapshot on server (upload from the ETF Pro card or run collect:etfpro).'}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* THE CALL & THE MACRO SHOW: Longs/Shorts/Neutrals display */}
-                        {(key === 'the-call' || key === 'the-macro-show') && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {diff && diff.available ? (
-                              <>
-                                <div>
-                                  <div style={{ fontSize: '10px', fontWeight: 600, color: '#16a34a', marginBottom: '4px' }}>
-                                    LONGS
-                                  </div>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                    {diff.currentLongs?.length > 0 ? (
-                                      diff.currentLongs.map(t => (
-                                        <span key={t} style={{ fontSize: '10px', color: '#16a34a', backgroundColor: isDark ? 'rgba(22, 163, 74, 0.1)' : 'rgba(22, 163, 74, 0.08)', padding: '2px 5px', borderRadius: '3px', fontWeight: 500 }}>{t}</span>
-                                      ))
-                                    ) : (
-                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div style={{ fontSize: '10px', fontWeight: 600, color: '#dc2626', marginBottom: '4px' }}>
-                                    SHORTS
-                                  </div>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                    {diff.currentShorts?.length > 0 ? (
-                                      diff.currentShorts.map(t => (
-                                        <span key={t} style={{ fontSize: '10px', color: '#dc2626', backgroundColor: isDark ? 'rgba(220, 38, 38, 0.1)' : 'rgba(220, 38, 38, 0.08)', padding: '2px 5px', borderRadius: '3px', fontWeight: 500 }}>{t}</span>
-                                      ))
-                                    ) : (
-                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
-                                    NEUTRALS
-                                  </div>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                    {diff.currentNeutrals?.length > 0 ? (
-                                      diff.currentNeutrals.map(t => (
-                                        <span
-                                          key={t}
-                                          style={{
-                                            fontSize: '10px',
-                                            color: isDark ? '#e5e7eb' : '#111827',
-                                            backgroundColor: isDark ? 'rgba(249, 250, 251, 0.06)' : 'rgba(17, 24, 39, 0.03)',
-                                            padding: '2px 5px',
-                                            borderRadius: '3px',
-                                            fontWeight: 500
-                                          }}
-                                        >
-                                          {t}
-                                        </span>
-                                      ))
-                                    ) : (
-                                      <span style={{ fontSize: '10px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>None</span>
-                                    )}
-                                  </div>
-                                </div>
-                                {(diff.added?.length > 0 || diff.removed?.length > 0) && (
-                                  <div style={{ borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, paddingTop: '6px', marginTop: '2px' }}>
-                                    <div style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af', marginBottom: '4px' }}>Changes from previous day</div>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                      {diff.added?.length > 0 && (
-                                        <div style={{ fontSize: '10px' }}>
-                                          <span style={{ color: '#10b981' }}>+{diff.added.join(', ')}</span>
-                                        </div>
-                                      )}
-                                      {diff.removed?.length > 0 && (
-                                        <div style={{ fontSize: '10px' }}>
-                                          <span style={{ color: '#ef4444' }}>-{diff.removed.join(', ')}</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </>
-                            ) : (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center', justifyContent: 'center', minHeight: '60px' }}>
-                                <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                                  No data uploaded yet
-                                </Text>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* CFTC POSITIONING: Significant Z-Score Changes (> 2.0 or < -2.0) */}
-                        {key === 'cftc-positioning' && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* Positive Z-Scores (> 2.0) */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#34d399' : '#059669', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.15)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Significant Positive Z-Scores</span>
-                                <span style={{ fontWeight: 400, fontSize: '10px' }}>(Z &gt; 2.0)</span>
-                              </div>
-                              {(diff?.significantPositive && diff.significantPositive.length > 0) ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  {diff.significantPositive.map((item, idx) => (
-                                    <div key={idx} style={{ fontSize: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 4px', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', borderRadius: '3px' }}>
-                                      <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                                        {item.metric} <span style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '9px' }}>({item.category})</span>
-                                      </span>
-                                      <span style={{ color: '#10b981', fontWeight: 600 }}>
-                                        {item.zScore1Y > item.zScore3Y ? item.zScore1Y.toFixed(2) : item.zScore3Y.toFixed(2)}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-
-                            {/* Negative Z-Scores (< -2.0) */}
-                            <div>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#f87171' : '#dc2626', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.15)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>Significant Negative Z-Scores</span>
-                                <span style={{ fontWeight: 400, fontSize: '10px' }}>(Z &lt; -2.0)</span>
-                              </div>
-                              {(diff?.significantNegative && diff.significantNegative.length > 0) ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  {diff.significantNegative.map((item, idx) => (
-                                    <div key={idx} style={{ fontSize: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '2px 4px', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', borderRadius: '3px' }}>
-                                      <span style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                                        {item.metric} <span style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '9px' }}>({item.category})</span>
-                                      </span>
-                                      <span style={{ color: '#ef4444', fontWeight: 600 }}>
-                                        {item.zScore1Y < item.zScore3Y ? item.zScore1Y.toFixed(2) : item.zScore3Y.toFixed(2)}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* GENERIC FALLBACK: Added/Removed Table for any others */}
-                        {key !== 'risk-ranges' && key !== 'early-look' && key !== 'bitcoin-trend-tracker' && key !== 'portfolio-solutions' && key !== 'signal-strength' && key !== 'momo-tracker' && key !== 'the-call' && key !== 'the-macro-show' && key !== 'real-time-alert' && key !== 'etf-pro' && key !== 'cftc-positioning' && hasData && (
-                          <div>
-                            {/* Section Header - match Risk Ranges style */}
-                            <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'block' }}>
-                              {label} <span style={{ fontWeight: 400, fontSize: '10px' }}>({formatDate(diff.currentDate)})</span>
-                            </div>
-
-                            {/* Added/Removed Grid - match Risk Ranges style */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                              <div>
-                                <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Added</span>
-                                {(diff.added?.length > 0) ? (
-                                  diff.added.map(t => {
-                                    // Extract ticker from strings like "Consumer Discretionary (XLY)" -> "XLY"
-                                    const match = t.match(/\(([^)]+)\)/);
-                                    const ticker = match ? match[1] : t;
-                                    return (
-                                      <div key={t} style={{ fontSize: '10px', color: '#10b981' }}>{ticker}</div>
-                                    );
-                                  })
-                                ) : (
-                                  <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
-                                    N/A
-                                  </div>
-                                )}
-                              </div>
-                              <div>
-                                <span style={{ fontSize: '9px', color: isDark ? '#6b7280' : '#9ca3af' }}>Removed</span>
-                                {(diff.removed?.length > 0) ? (
-                                  diff.removed.map(t => {
-                                    // Extract ticker from strings like "Consumer Discretionary (XLY)" -> "XLY"
-                                    const match = t.match(/\(([^)]+)\)/);
-                                    const ticker = match ? match[1] : t;
-                                    return (
-                                      <div key={t} style={{ fontSize: '10px', color: '#ef4444' }}>{ticker}</div>
-                                    );
-                                  })
-                                ) : (
-                                  <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>
-                                    N/A
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        </div>
-                      </Card>
-                    );
-                  })}
+          {showJson ? (
+            <pre className="adb-json">{JSON.stringify(detail?.parsed, null, 2)}</pre>
+          ) : entries.length > 0 ? (
+            <div className="adb-preview-table" role="table" aria-label="Parsed source preview">
+              {entries.map((entry, index) => (
+                <div className="adb-preview-row" role="row" key={`${entry.key}-${index}`}>
+                  <strong role="cell">{entry.key}</strong>
+                  <span role="cell">{compactValue(entry.value)}</span>
                 </div>
-              )}
+              ))}
+              {entries.length === 20 && <div className="adb-preview-more">Showing the first 20 parsed rows.</div>}
+            </div>
+          ) : (
+            <div className="adb-state">No parsed rows are available for this snapshot.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function dedupeHermesAlerts(alerts) {
+  const groups = new Map();
+  for (const alert of Array.isArray(alerts) ? alerts : []) {
+    const fingerprint = [alert?.title, alert?.category, alert?.message, alert?.recommendedAction].filter(Boolean).join('|');
+    const key = fingerprint || alert?.alertId || alert?.id || 'unknown-alert';
+    const existing = groups.get(key);
+    const timestamp = alert?.updatedAt || alert?.createdAt || alert?.timestamp || null;
+    if (!existing) {
+      groups.set(key, { ...alert, occurrences: 1, firstSeen: timestamp, lastSeen: timestamp });
+    } else {
+      existing.occurrences += 1;
+      if (timestamp && (!existing.lastSeen || timestamp > existing.lastSeen)) {
+        existing.lastSeen = timestamp;
+        existing.alertId = alert.alertId || alert.id || existing.alertId;
+        existing.id = alert.id || existing.id;
+      }
+      if (timestamp && (!existing.firstSeen || timestamp < existing.firstSeen)) existing.firstSeen = timestamp;
+    }
+  }
+  return [...groups.values()].sort((a, b) => String(b.lastSeen || '').localeCompare(String(a.lastSeen || '')));
+}
+
+function OperationsView({ onBack }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setData(await MarketDataService.getHermesDirectorStatus());
+    } catch (loadError) {
+      setData(null);
+      setError(loadError.message || 'Unable to load operations.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const runCommand = async (command) => {
+    setBusy(command);
+    setMessage('');
+    try {
+      const result = await MarketDataService.runHermesDirectorCommand(command);
+      if (result?.snapshot) setData(result.snapshot);
+      setMessage(result?.message || `${command} completed.`);
+    } catch (commandError) {
+      setMessage(commandError.message || `Failed to run ${command}.`);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const alerts = dedupeHermesAlerts(data?.alerts);
+  const workers = Array.isArray(data?.workers) ? data.workers : [];
+
+  return (
+    <div className="adb-operations">
+      <div className="adb-section-header">
+        <div>
+          <span className="adb-eyebrow">Separate control plane</span>
+          <h2>Operations</h2>
+        </div>
+        <button type="button" className="adb-text-button" onClick={onBack}>Back to analytics</button>
+      </div>
+
+      {loading ? <LoadingIndicator label="Loading operations…" size="sm" centered /> : error ? (
+        <div className="adb-state adb-state--error">{error}</div>
+      ) : (
+        <>
+          <div className="adb-ops-summary">
+            <div><span>Status</span><strong>{data?.director?.status || 'Unknown'}</strong></div>
+            <div><span>Open alerts</span><strong>{alerts.length}</strong></div>
+            <div><span>Last event</span><strong>{formatDateTime(data?.director?.lastUpdated)}</strong></div>
+          </div>
+
+          <div className="adb-command-bar">
+            {['status', 'run analyst now', 'run dev now', 'run security now', 'summarize today', 'what changed'].map((command) => (
+              <button type="button" key={command} disabled={Boolean(busy)} onClick={() => runCommand(command)}>
+                {busy === command ? 'Running…' : command}
+              </button>
+            ))}
+          </div>
+          {message && <div className="adb-state">{message}</div>}
+
+          <section className="adb-ops-section">
+            <h3>Worker health</h3>
+            <div className="adb-worker-grid">
+              {workers.map((worker) => (
+                <article key={worker.id || worker.name}>
+                  <div><strong>{worker.name || worker.label}</strong><span className={`adb-status adb-status--${worker.status || 'unknown'}`}>{worker.status || 'unknown'}</span></div>
+                  <p>{worker.latestSummary || worker.summary || 'No verified run summary.'}</p>
+                  <time>{formatDateTime(worker.lastRunAt || worker.lastRun)}</time>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="adb-ops-section">
+            <h3>Current alert groups</h3>
+            {alerts.length === 0 ? <div className="adb-state">No current Hermes alerts.</div> : alerts.slice(0, 12).map((alert) => (
+              <article className="adb-ops-alert" key={`${alert.title || alert.category}-${alert.firstSeen}`}>
+                <div>
+                  <strong>{alert.title || alert.category || 'Operations alert'}</strong>
+                  <span>{alert.occurrences} occurrence{alert.occurrences === 1 ? '' : 's'}</span>
+                </div>
+                <p>{alert.message || alert.summary || 'No detail supplied.'}</p>
+                <time>First {formatDateTime(alert.firstSeen)} · Last {formatDateTime(alert.lastSeen)}</time>
+              </article>
+            ))}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+const WorkflowStatus = ({ portfolioData = null, connection = null, forceRefresh = false }) => {
+  const { theme } = useTheme();
+  const [brief, setBrief] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [selection, setSelection] = useState(null);
+  const [showOperations, setShowOperations] = useState(false);
+  const forceRefreshRef = useRef(forceRefresh);
+
+  const fetchBrief = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const refresh = forceRefreshRef.current;
+      forceRefreshRef.current = false;
+      const response = await axios.get(
+        `${BACKEND_URL}/api/analytics/daily-brief${refresh ? '?refresh=1' : ''}`,
+      );
+      const cacheState = response.headers?.['x-data-cache'] || response.data?.cacheState;
+      if (cacheState === 'stale' && Array.isArray(response.data?.events) && response.data.events.length > 0) {
+        throw new Error('Stale analytics response contained actionable events.');
+      }
+      setBrief(response.data);
+      setLastUpdated(new Date());
+    } catch (requestError) {
+      setBrief(null);
+      setError(requestError?.response?.data?.error || requestError.message || 'Unable to load verified analytics.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => startVisibilityAwarePolling({
+    poll: fetchBrief,
+    intervalMs: REFRESH_INTERVAL_MS,
+    pollOnStart: true,
+  }), [fetchBrief]);
+
+  const portfolioStatus = useMemo(() => getIbkrPortfolioStatusDot({
+    connection,
+    portfolioData,
+    loading: false,
+  }), [connection, portfolioData]);
+  const portfolioMatchingAvailable = portfolioStatus.status === 'active';
+
+  const liveHoldings = useMemo(() => {
+    if (!portfolioMatchingAvailable) return new Map();
+    return new Map((Array.isArray(portfolioData?.holdings) ? portfolioData.holdings : [])
+      .map((holding) => [holdingSymbol(holding), { holding, side: holdingSide(holding) }])
+      .filter(([symbol]) => Boolean(symbol)));
+  }, [portfolioData?.holdings, portfolioMatchingAvailable]);
+
+  const groups = useMemo(() => {
+    const grouped = new Map();
+    for (const event of Array.isArray(brief?.events) ? brief.events : []) {
+      if (!grouped.has(event.ticker)) grouped.set(event.ticker, { ticker: event.ticker, events: [] });
+      grouped.get(event.ticker).events.push(event);
+    }
+    return [...grouped.values()].map((group) => {
+      group.events.sort((a, b) => (EVENT_PRIORITY[a.kind] ?? 99) - (EVENT_PRIORITY[b.kind] ?? 99));
+      const liveMatch = liveHoldings.get(group.ticker) || null;
+      return {
+        ...group,
+        liveMatch,
+        relation: liveMatch ? relationForGroup(liveMatch.side, group.events) : null,
+        priority: liveMatch ? 0 : Math.min(...group.events.map((event) => EVENT_PRIORITY[event.kind] ?? 99)),
+      };
+    }).sort((a, b) => a.priority - b.priority || a.ticker.localeCompare(b.ticker));
+  }, [brief?.events, liveHoldings]);
+
+  if (showOperations) return <OperationsView onBack={() => setShowOperations(false)} />;
+
+  return (
+    <div className={`adb-shell ${theme === 'dark' ? 'adb-shell--dark' : ''}`}>
+      <div className="adb-brief-header">
+        <div>
+          <span className="adb-eyebrow">Daily decision brief</span>
+          <h1>Today’s verified changes</h1>
+          <p>Source-attributed research changes, not dashboard trade recommendations.</p>
+        </div>
+        {brief?.trust && (
+          <span className={`adb-trust adb-trust--${brief.trust.status}`} title={brief.trust.reason}>
+            {TRUST_LABELS[brief.trust.status] || brief.trust.status}
+          </span>
+        )}
+      </div>
+
+      {loading && !brief ? (
+        <LoadingIndicator label="Loading verified changes…" size="sm" centered />
+      ) : error ? (
+        <div className="adb-state adb-state--error">
+          <strong>Verified analytics unavailable</strong>
+          <span>{error}</span>
+        </div>
+      ) : brief ? (
+        <>
+          <div className="adb-trust-strip">
+            <div>
+              <span>Research</span>
+              <strong>{brief.trust?.reason || '—'}</strong>
+            </div>
+            <div>
+              <span>Portfolio matching</span>
+              <strong className={portfolioMatchingAvailable ? 'is-current' : 'is-unavailable'}>
+                {portfolioMatchingAvailable ? 'Verified live IBKR' : 'Unavailable'}
+              </strong>
+            </div>
+            <div>
+              <span>Refreshed</span>
+              <strong>{formatDateTime(lastUpdated)}</strong>
             </div>
           </div>
-        ) : activeTab === 'hermes' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <Card
-              className={isDark ? 'dark:bg-gray-800' : ''}
-              style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '12px', flexWrap: 'wrap' }}>
-                <div>
-                  <Title style={{ fontSize: '16px', marginBottom: '4px', color: isDark ? '#f9fafb' : '#111827' }}>
-                    The Managing Director
-                  </Title>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Single chat front door for Hermes worker orchestration, summaries, and alerts.
-                  </Text>
-                </div>
-                <Badge color={getStatusColor(hermesDirector?.status)} size="sm">
-                  {hermesDirector?.status || 'idle'}
-                </Badge>
-              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginTop: '16px' }}>
-                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Summary</Text>
-                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
-                    {hermesDirector?.summary || 'Hermes orchestration status will appear here once loaded.'}
-                  </Text>
-                </div>
-                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Open Alerts</Text>
-                  <Metric style={{ color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
-                    {hermesDirector?.openAlertCount ?? hermesAlerts.length}
-                  </Metric>
-                </div>
-                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Last Updated</Text>
-                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
-                    {formatShortTimestamp(hermesDirector?.lastUpdated || lastRefresh)}
-                  </Text>
-                </div>
-                <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: isDark ? '#111827' : '#f9fafb' }}>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Today</Text>
-                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginTop: '4px' }}>
-                    {hermesDirector?.latestSummary || 'No runs recorded yet today.'}
-                  </Text>
-                </div>
-              </div>
+          {!portfolioMatchingAvailable && (
+            <div className="adb-state adb-state--muted">
+              Portfolio matching is hidden until IBKR portfolio data is connected, current, and complete.
+            </div>
+          )}
 
-              <div style={{ marginTop: '16px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {[
-                  'status',
-                  'run analyst now',
-                  'run dev now',
-                  'run security now',
-                  'summarize today',
-                  'what changed',
-                  'morning setup',
-                  'close review',
-                  'snooze alerts',
-                ].map((command) => (
-                  <Button
-                    key={command}
-                    size="xs"
-                    loading={hermesCommandLoading === command}
-                    onClick={() => runHermesCommand(command)}
-                    variant={command.startsWith('run ') ? 'primary' : 'secondary'}
+          {Array.isArray(brief.issues) && brief.issues.length > 0 && (
+            <section className="adb-section adb-section--issues">
+              <div className="adb-section-header">
+                <div><span className="adb-eyebrow">Exceptions only</span><h2>Needs attention</h2></div>
+                <span>{brief.issues.length}</span>
+              </div>
+              <div className="adb-issue-list">
+                {brief.issues.map((issue) => (
+                  <button
+                    type="button"
+                    key={`${issue.sourceId}-${issue.status}`}
+                    disabled={!issue.snapshotId || issue.sourceId === 'analytics-cache'}
+                    onClick={() => setSelection({ sourceId: issue.sourceId, snapshotId: issue.snapshotId, label: issue.label })}
                   >
-                    {command}
-                  </Button>
+                    <span className={`adb-status adb-status--${issue.status}`}>{STATUS_LABELS[issue.status] || issue.status}</span>
+                    <strong>{issue.label}</strong>
+                    <span>{issue.reason}</span>
+                    <time>{formatDate(issue.contentDate)}</time>
+                  </button>
                 ))}
               </div>
+            </section>
+          )}
 
-              {hermesCommandMessage && (
-                <div style={{
-                  marginTop: '16px',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  backgroundColor: isDark ? '#111827' : '#f9fafb',
-                  border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`
-                }}>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#d1d5db' : '#374151' }}>
-                    {hermesCommandMessage}
-                  </Text>
-                </div>
-              )}
-            </Card>
-
-            <Card
-              className={isDark ? 'dark:bg-gray-800' : ''}
-              style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
-            >
-              <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                Worker Health
-              </Title>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-                {hermesWorkers.length > 0 ? hermesWorkers.map((worker) => (
-                  <div
-                    key={worker.key}
-                    style={{
-                      border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                      borderRadius: '8px',
-                      padding: '12px',
-                      backgroundColor: isDark ? '#111827' : '#f9fafb'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
-                      <Text style={{ fontSize: '13px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827' }}>
-                        {worker.name}
-                      </Text>
-                      <Badge color={getStatusColor(worker.status)} size="xs">
-                        {worker.status}
-                      </Badge>
-                    </div>
-                    <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
-                      {worker.description}
-                    </Text>
-                    <div style={{ marginTop: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      <div>
-                        <Text style={{ fontSize: '10px', color: isDark ? '#6b7280' : '#9ca3af' }}>Schedule</Text>
-                        <Text style={{ fontSize: '11px', color: isDark ? '#e5e7eb' : '#111827', marginTop: '2px' }}>{worker.schedule}</Text>
-                      </div>
-                      <div>
-                        <Text style={{ fontSize: '10px', color: isDark ? '#6b7280' : '#9ca3af' }}>Last Run</Text>
-                        <Text style={{ fontSize: '11px', color: isDark ? '#e5e7eb' : '#111827', marginTop: '2px' }}>{formatShortTimestamp(worker.lastRun)}</Text>
-                      </div>
-                    </div>
-                    <Text style={{ fontSize: '11px', color: isDark ? '#d1d5db' : '#374151', marginTop: '10px' }}>
-                      {worker.summary}
-                    </Text>
-                    <Text style={{ fontSize: '10px', color: isDark ? '#6b7280' : '#9ca3af', marginTop: '8px' }}>
-                      Open alerts: {worker.openAlertCount ?? 0}
-                    </Text>
-                  </div>
-                )) : (
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Worker state will populate after the first Hermes status load.
-                  </Text>
-                )}
-              </div>
-            </Card>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-              <Card
-                className={isDark ? 'dark:bg-gray-800' : ''}
-                style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
-              >
-                <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                  Alerts
-                </Title>
-                {hermesAlerts.length === 0 ? (
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    No unresolved alerts.
-                  </Text>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {hermesAlerts.map((alert) => (
-                      <div
-                        key={alert.alertId}
-                        style={{
-                          border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                          borderRadius: '8px',
-                          padding: '12px',
-                          backgroundColor: isDark ? '#111827' : '#f9fafb'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'start' }}>
-                          <div>
-                            <Text style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827' }}>
-                              {alert.title}
-                            </Text>
-                            <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
-                              {alert.worker} • {formatShortTimestamp(alert.createdAt)}
-                            </Text>
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                            {alert.priority && <Badge color={alert.priority === 'P0' ? 'red' : 'amber'} size="xs">{alert.priority}</Badge>}
-                            {alert.type && <Badge color={alert.type === 'backlog' ? 'blue' : 'gray'} size="xs">{alert.type}</Badge>}
-                            <Badge color={getStatusColor(alert.status)} size="xs">{alert.status}</Badge>
-                            <Badge color={getStatusColor(alert.severity)} size="xs">{alert.severity}</Badge>
-                          </div>
-                        </div>
-                        <Text style={{ fontSize: '12px', color: isDark ? '#d1d5db' : '#374151', marginTop: '8px' }}>
-                          {alert.message}
-                        </Text>
-                        {alert.recommendedAction && (
-                          <Text style={{ fontSize: '12px', color: isDark ? '#bfdbfe' : '#1d4ed8', marginTop: '8px', fontWeight: 600 }}>
-                            Action: {alert.recommendedAction}
-                          </Text>
-                        )}
-                        {alert.type === 'backlog' && alert.details?.recommendedPatch && (
-                          <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '6px' }}>
-                            Patch: {alert.details.recommendedPatch}
-                          </Text>
-                        )}
-                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            loading={hermesCommandLoading === `acknowledge:${alert.alertId}`}
-                            onClick={() => handleHermesAlertAction(alert.alertId, 'acknowledge')}
-                          >
-                            Acknowledge
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            loading={hermesCommandLoading === `snooze:${alert.alertId}`}
-                            onClick={() => handleHermesAlertAction(alert.alertId, 'snooze', { hours: 2 })}
-                          >
-                            Snooze 2h
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            loading={hermesCommandLoading === `resolve:${alert.alertId}`}
-                            onClick={() => handleHermesAlertAction(alert.alertId, 'resolve')}
-                          >
-                            Resolve
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
-
-              <Card
-                className={isDark ? 'dark:bg-gray-800' : ''}
-                style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}
-              >
-                <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                  Recent Runs
-                </Title>
-                {hermesRecentRuns.length === 0 ? (
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    No worker runs recorded today yet.
-                  </Text>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {hermesRecentRuns.map((run) => (
-                      <div
-                        key={run.runId}
-                        style={{
-                          border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                          borderRadius: '8px',
-                          padding: '12px',
-                          backgroundColor: isDark ? '#111827' : '#f9fafb'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
-                          <Text style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#f9fafb' : '#111827' }}>
-                            {run.worker}
-                          </Text>
-                          <Badge color={getStatusColor(run.status)} size="xs">{run.status}</Badge>
-                        </div>
-                        <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>
-                          {formatShortTimestamp(run.startedAt)} • {run.triggerType}
-                        </Text>
-                        <Text style={{ fontSize: '12px', color: isDark ? '#d1d5db' : '#374151', marginTop: '8px' }}>
-                          {run.summary}
-                        </Text>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
+          <section className="adb-section">
+            <div className="adb-section-header">
+              <div><span className="adb-eyebrow">Material deltas</span><h2>Changes that matter</h2></div>
+              <span>{groups.length}</span>
             </div>
-          </div>
-        ) : activeTab === 'preview_old_status' ? (
-          /* OLD Status Overview - keeping for reference but removed from tabs */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Hedgeye Scraper Status */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
-                <div>
-                  <Title style={{ fontSize: '16px', marginBottom: '4px', color: isDark ? '#f9fafb' : '#111827' }}>
-                    Hedgeye Risk Range Scraper
-                  </Title>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Automated daily scraper
-                  </Text>
-                </div>
-                <Badge color={getStatusColor(hedgeyeFreshness.status)}>
-                  {hedgeyeStatus.status || hedgeyeFreshness.status}
-                </Badge>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    Last Run
-                  </Text>
-                  <Text style={{ fontSize: '14px', fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>
-                    {formatTimestamp(hedgeyeStatus.lastRun)}
-                  </Text>
-                  {!hedgeyeStatus.lastRun && (
-                    <Text style={{ fontSize: '11px', color: isDark ? '#6b7280' : '#9ca3af', fontStyle: 'italic', marginTop: '2px' }}>
-                      Not run yet
-                    </Text>
-                  )}
-                </div>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    Securities Scraped
-                  </Text>
-                  <Text style={{ fontSize: '14px', fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>
-                    {hedgeyeStatus.count || Object.keys(riskRanges).length || 0}
-                  </Text>
-                </div>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    Data Freshness
-                  </Text>
-                  <Badge color={getStatusColor(hedgeyeFreshness.status)} size="sm">
-                    {hedgeyeFreshness.label}
-                  </Badge>
-                </div>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    Next Run
-                  </Text>
-                  <Text style={{ fontSize: '14px', fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>
-                    {hedgeyeStatus.nextRun || '8:00 AM EST (market days)'}
-                  </Text>
-                </div>
-              </div>
-
-              {(!hedgeyeStatus.lastRun || hedgeyeStatus.status === 'unknown') && (
-                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f7f7f7', borderRadius: '6px', border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}` }}>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    <strong>Status:</strong> Scraper is configured and scheduled. It will run automatically at 8:00 AM EST on market days.
-                    {!hedgeyeStatus.lastRun && ' No data has been collected yet.'}
-                  </Text>
-                </div>
-              )}
-            </Card>
-
-            {/* CSV Upload Status */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
-                <div>
-                  <Title style={{ fontSize: '16px', marginBottom: '4px', color: isDark ? '#f9fafb' : '#111827' }}>
-                    CSV Portfolio Upload
-                  </Title>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Manual portfolio uploads
-                  </Text>
-                </div>
-                <Badge color={getStatusColor(csvFreshness.status)}>
-                  {csvStatus.status || csvFreshness.status}
-                </Badge>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    Last Upload
-                  </Text>
-                  <Text style={{ fontSize: '14px', fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>
-                    {formatTimestamp(csvStatus.lastUpload)}
-                  </Text>
-                </div>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    Records Processed
-                  </Text>
-                  <Text style={{ fontSize: '14px', fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>
-                    {csvStatus.records || 0}
-                  </Text>
-                </div>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    File Name
-                  </Text>
-                  <Text style={{ fontSize: '14px', fontWeight: 500, color: isDark ? '#f9fafb' : '#111827' }}>
-                    {csvStatus.fileName || 'N/A'}
-                  </Text>
-                </div>
-                <div>
-                  <Text style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>
-                    Data Freshness
-                  </Text>
-                  <Badge color={getStatusColor(csvFreshness.status)} size="sm">
-                    {csvFreshness.label}
-                  </Badge>
-                </div>
-              </div>
-            </Card>
-          </div>
-        ) : activeTab === 'services' ? (
-          /* API Usage */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Summary Metrics */}
-            {serviceTotals && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
-                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Total API Calls/Day</Text>
-                  <Metric style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                    {(serviceTotals.internal.callsPerDay + serviceTotals.external.callsPerDay).toLocaleString()}
-                  </Metric>
-                </Card>
-                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Total API Calls/Month</Text>
-                  <Metric style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                    {(serviceTotals.internal.callsPerMonth + serviceTotals.external.callsPerMonth).toLocaleString()}
-                  </Metric>
-                </Card>
-                <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: '4px' }}>Estimated Monthly Cost</Text>
-                  <Metric style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                    ${serviceTotals.grandTotal.toFixed(2)}
-                  </Metric>
-                </Card>
-              </div>
-            )}
-
-            {/* Internal APIs */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                Internal API Endpoints
-              </Title>
-              <div style={{ overflowX: 'auto' }}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Service</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Update Frequency</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Calls/Day</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Calls/Month</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Data Source</TableHeaderCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {Object.entries(SERVICE_CONFIG.internal).map(([key, service]) => (
-                      <TableRow key={key}>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827', fontWeight: 500 }}>
-                          {service.name}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {service.updateFrequency}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          {service.estimatedCallsPerDay.toLocaleString()}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          {service.estimatedCallsPerMonth.toLocaleString()}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {service.dataSource}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
-
-            {/* External APIs */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                External API Services
-              </Title>
-              <div style={{ overflowX: 'auto' }}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Service</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Status</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Rate Limit</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Calls/Day</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Calls/Month</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Cost/Month</TableHeaderCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {Object.entries(SERVICE_CONFIG.external).map(([key, service]) => (
-                      <TableRow key={key}>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827', fontWeight: 500 }}>
-                          {service.name}
-                        </TableCell>
-                        <TableCell>
-                          <Badge color={service.status === 'active' ? 'emerald' : 'gray'} size="sm">
-                            {service.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {service.rateLimit}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          {service.estimatedCallsPerDay.toLocaleString()}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          {service.estimatedCallsPerMonth.toLocaleString()}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          ${service.costPerMonth.toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
-
-            {/* Automated Workflows */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                Automated Workflows
-              </Title>
-              <div style={{ overflowX: 'auto' }}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Workflow</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Schedule</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Runs/Day</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Runs/Month</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Method</TableHeaderCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {Object.entries(SERVICE_CONFIG.workflows).map(([key, workflow]) => (
-                      <TableRow key={key}>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827', fontWeight: 500 }}>
-                          {workflow.name}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {workflow.schedule}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          {workflow.estimatedRunsPerDay}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          {workflow.estimatedRunsPerMonth}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {workflow.method}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
-
-            {/* AWS Services */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <Title style={{ fontSize: '16px', marginBottom: '16px', color: isDark ? '#f9fafb' : '#111827' }}>
-                AWS Services
-              </Title>
-              <div style={{ overflowX: 'auto' }}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Service</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Description</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Usage</TableHeaderCell>
-                      <TableHeaderCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>Cost/Month</TableHeaderCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {Object.entries(SERVICE_CONFIG.aws).map(([key, service]) => (
-                      <TableRow key={key}>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827', fontWeight: 500 }}>
-                          {service.name}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {service.description}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>
-                          {service.tables ? `${service.tables.length} tables` :
-                            service.estimatedInvocationsPerMonth ? `${service.estimatedInvocationsPerMonth} invocations` :
-                              service.estimatedStorageGB ? `${service.estimatedStorageGB} GB` : 'N/A'}
-                        </TableCell>
-                        <TableCell style={{ color: isDark ? '#f9fafb' : '#111827' }}>
-                          ${service.estimatedCostPerMonth.toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
-
-            {/* Service Parameters Example */}
-            <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{ border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: '0.5rem' }}>
-              <Title style={{ fontSize: '16px', marginBottom: '12px', color: isDark ? '#f9fafb' : '#111827' }}>
-                Key Service Parameters
-              </Title>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
-                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
-                    Signal Strength Spot Quotes
-                  </Text>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Updates every <strong>30 seconds</strong> • ~1,440 calls/day • ~43,200 calls/month
-                  </Text>
-                </div>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
-                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
-                    Multi-Region Markets & Currencies
-                  </Text>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Refreshes every <strong>30 seconds</strong> • Sparklines disabled on recurring polls to cut API usage
-                  </Text>
-                </div>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
-                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
-                    USD Macro Dashboard
-                  </Text>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Dashboard refreshes every <strong>15 minutes</strong> • DXY/currency/correlation feeds are aggregated server-side
-                  </Text>
-                </div>
-                <div style={{ padding: '12px', backgroundColor: isDark ? '#1f2937' : '#f9fafb', borderRadius: '6px' }}>
-                  <Text style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px' }}>
-                    Hedgeye Risk Range Scraper
-                  </Text>
-                  <Text style={{ fontSize: '12px', color: isDark ? '#9ca3af' : '#6b7280' }}>
-                    Runs daily at <strong>8:00 AM EST (market days)</strong> • ~22 runs/month
-                  </Text>
-                </div>
-              </div>
-            </Card>
-          </div>
-        ) : activeTab === 'preview' ? (
-          /* Preview - Vertical Scrolling List of All Data Types */
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            height: 'calc(100vh - 180px)',
-            overflow: 'auto',
-            gap: '16px',
-            padding: '4px'
-          }}>
-            {previewCardTypes.map(({ key, label }) => {
-              const pdfData = allPdfData[key] || {};
-              // Determine data for this type
-              const hasData = key === 'risk-ranges' && riskRangesTableData.length > 0;
-              const jsonData = key === 'risk-ranges' ? riskRanges : (freshnessData?.dataTypes?.[key] || {});
-
-              return (
-                <div
-                  key={key}
-                  style={{
-                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                    backgroundColor: isDark ? '#1f2937' : '#ffffff',
-                    flexShrink: 0,
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}
-                >
-                  {/* Card Header */}
-                  <div style={{
-                    padding: '8px 12px',
-                    borderBottom: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                    backgroundColor: isDark ? '#111827' : '#f9fafb',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <Text style={{
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: isDark ? '#f9fafb' : '#111827'
-                    }}>
-                      {label}
-                    </Text>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      {/* Date Picker */}
-                      <input
-                        type="date"
-                        value={selectedPreviewDate}
-                        onChange={(e) => setSelectedPreviewDate(e.target.value)}
-                        max={new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })}
-                        style={{
-                          padding: '3px 8px',
-                          fontSize: '11px',
-                          fontWeight: 500,
-                          borderRadius: '4px',
-                          border: `1px solid ${isDark ? '#4b5563' : '#d1d5db'}`,
-                          backgroundColor: isDark ? '#1f2937' : 'white',
-                          color: isDark ? '#f9fafb' : '#111827',
-                          cursor: 'pointer'
-                        }}
-                      />
-
-                      {/* View Toggle for Data */}
-                      <div style={{ display: 'flex', backgroundColor: isDark ? '#374151' : '#e5e7eb', borderRadius: '4px', padding: '2px' }}>
-                        <button
-                          onClick={() => setPreviewViewMode('table')}
-                          style={{
-                            padding: '2px 8px',
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            borderRadius: '3px',
-                            border: 'none',
-                            cursor: 'pointer',
-                            backgroundColor: previewViewMode === 'table' ? (isDark ? '#1f2937' : 'white') : 'transparent',
-                            color: previewViewMode === 'table' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
-                            boxShadow: previewViewMode === 'table' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
-                          }}
-                        >
-                          Table
-                        </button>
-                        <button
-                          onClick={() => setPreviewViewMode('json')}
-                          style={{
-                            padding: '2px 8px',
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            borderRadius: '3px',
-                            border: 'none',
-                            cursor: 'pointer',
-                            backgroundColor: previewViewMode === 'json' ? (isDark ? '#1f2937' : 'white') : 'transparent',
-                            color: previewViewMode === 'json' ? (isDark ? '#f9fafb' : '#111827') : (isDark ? '#9ca3af' : '#6b7280'),
-                            boxShadow: previewViewMode === 'json' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
-                          }}
-                        >
-                          JSON
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Split Content */}
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 1fr',
-                    height: '600px',
-                    backgroundColor: isDark ? '#111827' : '#f9fafb'
-                  }}>
-                    {/* Left Side: PDF/Screenshot */}
-                    <div style={{
-                      borderRight: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-                      overflow: 'auto',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      position: 'relative'
-                    }}>
-                      {pdfData.loading ? (
-                        <div style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: '8px',
-                          height: '100%',
-                          justifyContent: 'center'
-                        }}>
-                          <LoadingIndicator label={`Loading ${label}...`} size="sm" centered />
-                        </div>
-                      ) : pdfData.workbookOnly ? (
-                        <div style={{
-                          padding: '16px',
-                          height: '100%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexDirection: 'column',
-                          gap: '10px'
-                        }}>
-                          <Text style={{
-                            color: isDark ? '#9ca3af' : '#6b7280',
-                            fontSize: '12px',
-                            textAlign: 'center',
-                            lineHeight: 1.45,
-                          }}>
-                            {pdfData.actionOnly
-                              ? 'Real-time alerts are email action events. No paired screenshot is stored for this source.'
-                              : 'ETF Pro positions come from workbook upload or collect:etfpro - no Hedgeye screenshot is paired with this source.'}
-                          </Text>
-                          {pdfData.error && (
-                            <Text style={{ fontSize: '11px', color: '#ef4444', textAlign: 'center' }}>
-                              {pdfData.error}
-                            </Text>
-                          )}
-                        </div>
-                      ) : pdfData.url && pdfData.type === 'pdf' ? (
-                        <iframe
-                          src={`${pdfData.url}#toolbar=0&navpanes=0&scrollbar=1`}
-                          title={label}
-                          onError={() => handlePreviewMediaError(key)}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            border: 'none'
-                          }}
-                        />
-                      ) : pdfData.url ? (
-                        <img
-                          src={pdfData.url}
-                          alt={label}
-                          onError={() => handlePreviewMediaError(key)}
-                          style={{
-                            width: '100%',
-                            height: 'auto',
-                            objectFit: 'contain'
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          height: '100%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}>
-                          <Text style={{
-                            color: isDark ? '#6b7280' : '#9ca3af',
-                            fontSize: '12px'
-                          }}>
-                            {pdfData.error || 'Waiting...'}
-                          </Text>
-                        </div>
+            {groups.length === 0 ? (
+              <div className="adb-state adb-state--clean">No verified changes today.</div>
+            ) : (
+              <div className="adb-event-list">
+                {groups.map((group) => (
+                  <article className={`adb-event-group ${group.liveMatch ? 'adb-event-group--held' : ''}`} key={group.ticker}>
+                    <div className="adb-event-group__head">
+                      <strong>{group.ticker}</strong>
+                      {group.liveMatch && (
+                        <span className={`adb-holding adb-holding--${group.relation}`}>
+                          Held {group.liveMatch.side} · {group.relation}
+                        </span>
                       )}
                     </div>
-
-                    {/* Right Side: Extracted Data */}
-                    <div style={{
-                      overflow: 'auto',
-                      backgroundColor: isDark ? '#1f2937' : '#ffffff',
-                      display: 'flex',
-                      flexDirection: 'column'
-                    }}>
-                      {(() => {
-                        const snapshotData = allSnapshotData[key];
-                        const data = snapshotData?.data;
-
-                        // JSON view
-                        if (previewViewMode === 'json') {
-                          return (
-                            <div style={{ padding: '12px' }}>
-                              <pre style={{
-                                fontSize: '10px',
-                                fontFamily: 'monospace',
-                                margin: 0,
-                                whiteSpace: 'pre-wrap',
-                                color: isDark ? '#d1d5db' : '#374151'
-                              }}>
-                                {JSON.stringify(snapshotData || {}, null, 2)}
-                              </pre>
-                            </div>
-                          );
-                        }
-
-                        // No data yet (avoid infinite loading on ETF fetch error / empty)
-                        if (!data) {
-                          if (
-                            (key === 'etf-pro' || key === 'real-time-alert')
-                            && snapshotData === null
-                            && !(allPdfData[key] || {}).loading
-                          ) {
-                            return (
-                              <div style={{
-                                flex: 1,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                padding: '20px',
-                                color: isDark ? '#9ca3af' : '#6b7280',
-                                fontSize: '12px',
-                                textAlign: 'center'
-                              }}>
-                                {(allPdfData[key] || {}).error || `Unable to load ${label}`}
-                              </div>
-                            );
-                          }
-                          return (
-                            <div style={{
-                              flex: 1,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              padding: '20px',
-                              color: isDark ? '#9ca3af' : '#6b7280',
-                              fontSize: '12px'
-                            }}>
-                              Loading data...
-                            </div>
-                          );
-                        }
-
-                        // ETF Pro — same Added/Removed hierarchy as changelog (Analytics Data Upload cards)
-                        if (key === 'etf-pro') {
-                          const ch = data.changes && typeof data.changes === 'object' ? data.changes : {};
-                          const addedLongs = ch.addedLongs || [];
-                          const removedLongs = ch.removedLongs || [];
-                          const addedShorts = ch.addedShorts || [];
-                          const removedShorts = ch.removedShorts || [];
-                          const bracket = data.meta?.snapshotDate ? formatDate(data.meta.snapshotDate) : '';
-
-                          const rows = Array.isArray(data.rows) ? data.rows : [];
-                          const fmtRel = (v) => {
-                            if (v === null || v === undefined || !Number.isFinite(Number(v))) return '--';
-                            const n = Number(v);
-                            const sign = n > 0 ? '+' : '';
-                            return `${sign}${n.toFixed(2)}%`;
-                          };
-                          const splitPos = () => ({
-                            longs: rows.filter((r) => String(r.call).toLowerCase() !== 'short'),
-                            shorts: rows.filter((r) => String(r.call).toLowerCase() === 'short'),
-                          });
-                          const { longs: longPos, shorts: shortPos } = splitPos();
-
-                          const tickerTable = (list) => (
-                            <Table>
-                              <TableHead>
-                                <TableRow>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Rel</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Days</TableHeaderCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {list.length === 0 ? (
-                                  <TableRow>
-                                    <TableCell colSpan={3} style={{ fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic', padding: '8px' }}>None</TableCell>
-                                  </TableRow>
-                                ) : (
-                                  list.map((r) => (
-                                    <TableRow key={`${String(r.id || '')}-${r.ticker}`}>
-                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{r.ticker}</TableCell>
-                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{fmtRel(r.relativePerformance)}</TableCell>
-                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{
-                                        Number.isFinite(r.daysHeld) ? r.daysHeld : '--'}</TableCell>
-                                    </TableRow>
-                                  ))
-                                )}
-                              </TableBody>
-                            </Table>
-                          );
-
-                          const blueBarSx = {
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            color: isDark ? '#93c5fd' : '#1d4ed8',
-                            marginBottom: '4px',
-                            padding: '4px 6px',
-                            backgroundColor: isDark ? '#1e3a5f' : '#dbeafe',
-                            borderRadius: '4px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
-                          };
-
-                          return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '12px' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                <div>
-                                  <div style={blueBarSx}>
-                                    <span>Added</span>
-                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>
-                                      ({bracket})
-                                    </span>
-                                  </div>
-                                  <div style={{ marginTop: '6px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
-                                    {addedLongs.length > 0 ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {addedLongs.map((t) => (
-                                          <span key={`al-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                  <div style={{ marginTop: '8px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
-                                    {addedShorts.length > 0 ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {addedShorts.map((t) => (
-                                          <span key={`as-${t}`} style={{ fontSize: '10px', color: '#10b981', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : 'rgba(16, 185, 129, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div style={blueBarSx}>
-                                    <span>Removed</span>
-                                    <span style={{ fontWeight: 400, fontSize: '10px' }}>
-                                      ({bracket})
-                                    </span>
-                                  </div>
-                                  <div style={{ marginTop: '6px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', marginBottom: '4px' }}>LONGS</div>
-                                    {removedLongs.length > 0 ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {removedLongs.map((t) => (
-                                          <span key={`rl-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                  <div style={{ marginTop: '8px' }}>
-                                    <div style={{ fontSize: '10px', fontWeight: 700, color: '#dc2626', marginBottom: '4px' }}>SHORTS</div>
-                                    {removedShorts.length > 0 ? (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                        {removedShorts.map((t) => (
-                                          <span key={`rs-${t}`} style={{ fontSize: '10px', color: '#ef4444', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)', padding: '2px 4px', borderRadius: '3px' }}>{t}</span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10px', color: isDark ? '#f9fafb' : '#111827', fontStyle: 'italic' }}>N/A</div>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              <div>
-                                <Text style={{
-                                  fontSize: '11px',
-                                  fontWeight: 700,
-                                  color: isDark ? '#f3f4f6' : '#111827',
-                                  marginBottom: '6px',
-                                  display: 'block',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.04em',
-                                }}>
-                                  Long positions ({longPos.length})
-                                </Text>
-                                {tickerTable(longPos)}
-                              </div>
-                              <div style={{ paddingTop: '4px', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}` }}>
-                                <Text style={{
-                                  fontSize: '11px',
-                                  fontWeight: 700,
-                                  color: isDark ? '#f3f4f6' : '#111827',
-                                  marginBottom: '6px',
-                                  display: 'block',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.04em',
-                                }}>
-                                  Short positions ({shortPos.length})
-                                </Text>
-                                {tickerTable(shortPos)}
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        // Real-Time Alerts - intraday action events from Gmail.
-                        if (key === 'real-time-alert') {
-                          const alerts = Array.isArray(data.alerts)
-                            ? data.alerts
-                            : (data.alert ? [data.alert] : []);
-
-                          return (
-                            <div style={{ padding: '12px' }}>
-                              <Text style={{
-                                fontSize: '11px',
-                                fontWeight: 700,
-                                color: isDark ? '#f3f4f6' : '#111827',
-                                marginBottom: '8px',
-                                display: 'block',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.04em',
-                              }}>
-                                Action alerts ({alerts.length})
-                              </Text>
-                              <Table>
-                                <TableHead>
-                                  <TableRow>
-                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Action</TableHeaderCell>
-                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Signal</TableHeaderCell>
-                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Analyst</TableHeaderCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {alerts.length === 0 ? (
-                                    <TableRow>
-                                      <TableCell colSpan={4} style={{ padding: '8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280', fontStyle: 'italic' }}>
-                                        No alerts captured for this date.
-                                      </TableCell>
-                                    </TableRow>
-                                  ) : (
-                                    alerts.map((alert, idx) => {
-                                      const action = String(alert.action || '').toUpperCase();
-                                      const actionColor = action === 'BUY' ? '#10b981' : action === 'SELL' ? '#ef4444' : 'inherit';
-                                      return (
-                                        <TableRow key={`${alert.ticker || alert.headline || idx}-${idx}`}>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 800, color: actionColor }}>{action || 'ALERT'}</TableCell>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 800 }}>{alert.ticker || '--'}</TableCell>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px' }}>{alert.signalPhrase || alert.headline || '--'}</TableCell>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>{alert.analyst || '--'}</TableCell>
-                                        </TableRow>
-                                      );
-                                    })
-                                  )}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          );
-                        }
-
-
-                        // Risk Ranges - Special format with 3 sections
-                        if (key === 'risk-ranges') {
-                          const items = Object.entries(data)
-                            .map(([ticker, info]) => ({
-                              ticker,
-                              lrr: info.lrr || 0,
-                              close: info.prevClose || 0,
-                              hrr: info.hrr || 0,
-                              trend: info.trend || 'N/A',
-                              index: info.index ?? 9999
-                            }))
-                            .sort((a, b) => a.index - b.index);
-
-                          const trendChanges = snapshotData.trendChanges || [];
-                          const outbucket = snapshotData.outbucket || [];
-
-                          return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', padding: '16px 4px' }}>
-
-                              {/* 1. Trend Changes Section */}
-                              {trendChanges.length > 0 && (
-                                <div>
-                                  <Text style={{
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    color: isDark ? '#f3f4f6' : '#111827',
-                                    paddingLeft: '8px',
-                                    marginBottom: '8px',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.05em'
-                                  }}>
-                                    Trend Changes ({trendChanges.length})
-                                  </Text>
-                                  <Table>
-                                    <TableHead>
-                                      <TableRow>
-                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Change</TableHeaderCell>
-                                      </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                      {trendChanges.map((tc, idx) => (
-                                        <TableRow key={idx}>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{tc.ticker}</TableCell>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                              <span style={{ color: tc.oldTrend === 'BULLISH' ? '#10b981' : tc.oldTrend === 'BEARISH' ? '#ef4444' : '#6b7280' }}>{tc.oldTrend}</span>
-                                              <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>→</span>
-                                              <span style={{ fontWeight: 600, color: tc.newTrend === 'BULLISH' ? '#10b981' : tc.newTrend === 'BEARISH' ? '#ef4444' : '#6b7280' }}>{tc.newTrend}</span>
-                                            </div>
-                                          </TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                </div>
-                              )}
-
-                              {/* 2. Risk Ranges Table (The standard one) */}
-                              <div>
-                                <Text style={{
-                                  fontSize: '12px',
-                                  fontWeight: 700,
-                                  color: isDark ? '#f3f4f6' : '#111827',
-                                  paddingLeft: '8px',
-                                  marginBottom: '8px',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.05em'
-                                }}>
-                                  Risk Ranges ({items.length})
-                                </Text>
-                                <Table>
-                                  <TableHead>
-                                    <TableRow>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Close</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
-                                    </TableRow>
-                                  </TableHead>
-                                  <TableBody>
-                                    {items.map((row) => (
-                                      <TableRow key={row.ticker}>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.lrr).toFixed(2)}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 600 }}>{Number(row.close).toFixed(2)}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.hrr).toFixed(2)}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px' }}>
-                                          <span style={{
-                                            fontSize: '10px',
-                                            padding: '2px 6px',
-                                            borderRadius: '4px',
-                                            backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
-                                              row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
-                                            color: row.trend === 'BULLISH' ? '#10b981' :
-                                              row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                          }}>
-                                            {row.trend}
-                                          </span>
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-
-                              {/* 3. OutBucket Section */}
-                              {outbucket.length > 0 && (
-                                <div>
-                                  <Text style={{
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    color: isDark ? '#f3f4f6' : '#111827',
-                                    paddingLeft: '8px',
-                                    marginBottom: '8px',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.05em'
-                                  }}>
-                                    #OutBucket ({outbucket.length})
-                                  </Text>
-                                  <Table>
-                                    <TableHead>
-                                      <TableRow>
-                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Removed At</TableHeaderCell>
-                                        <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Final Trend</TableHeaderCell>
-                                      </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                      {outbucket.map((item, idx) => (
-                                        <TableRow key={idx}>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.ticker}</TableCell>
-                                          <TableCell style={{ padding: '4px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>{item.dateRemoved}</TableCell>
-                                          <TableCell style={{ padding: '4px 8px' }}>
-                                            <span style={{
-                                              fontSize: '10px',
-                                              color: item.trend === 'BULLISH' ? '#10b981' :
-                                                item.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                            }}>
-                                              {item.trend}
-                                            </span>
-                                          </TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                </div>
-                              )}
-
-                            </div>
-                          );
-                        }
-
-                        // Early Look - simple format with LRR/HRR
-                        if (key === 'early-look') {
-                          const items = Object.entries(data)
-                            .map(([ticker, info]) => ({
-                              ticker,
-                              lrr: info.lrr || 0,
-                              hrr: info.hrr || 0,
-                              trend: info.trend || 'N/A',
-                              index: info.index ?? 9999
-                            }))
-                            .sort((a, b) => a.index - b.index);
-
-                          return (
-                            <Table>
-                              <TableHead>
-                                <TableRow>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {items.map((row) => (
-                                  <TableRow key={row.ticker}>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.lrr).toFixed(2)}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.hrr).toFixed(2)}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px' }}>
-                                      <span style={{
-                                        fontSize: '10px',
-                                        padding: '2px 6px',
-                                        borderRadius: '4px',
-                                        backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
-                                          row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
-                                        color: row.trend === 'BULLISH' ? '#10b981' :
-                                          row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                      }}>
-                                        {row.trend}
-                                      </span>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          );
-                        }
-
-                        // Momo Tracker - Buy/Sell columns
-                        if (key === 'momo-tracker') {
-                          const items = Object.entries(data)
-                            .map(([ticker, info]) => ({
-                              ticker,
-                              buyTrade: info.buyTrade || 0,
-                              sellTrade: info.sellTrade || 0,
-                              upside: info.upside || 0,
-                              downside: info.downside || 0,
-                              trend: info.trend || 'N/A',
-                              index: (typeof info.index === 'number') ? info.index : 9999
-                            }))
-                            .sort((a, b) => a.index - b.index);
-
-                          return (
-                            <Table>
-                              <TableHead>
-                                <TableRow>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Upside</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Downside</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {items.map((row) => (
-                                  <TableRow key={row.ticker}>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.buyTrade).toFixed(0)}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.sellTrade).toFixed(0)}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: '#10b981' }}>{Number(row.upside).toFixed(2)}%</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: '#ef4444' }}>{Number(row.downside).toFixed(2)}%</TableCell>
-                                    <TableCell style={{ padding: '4px 8px' }}>
-                                      <span style={{
-                                        fontSize: '10px',
-                                        padding: '2px 6px',
-                                        borderRadius: '4px',
-                                        backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
-                                          row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
-                                        color: row.trend === 'BULLISH' ? '#10b981' :
-                                          row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                      }}>
-                                        {row.trend}
-                                      </span>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          );
-                        }
-                        // CFTC Positioning
-                        if (key === 'cftc-positioning') {
-                          const metrics = data || [];
-                          return (
-                            <Table>
-                              <TableHead>
-                                <TableRow>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Metric</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Latest</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>W/W Chg</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>1Y Z-Score</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>3Y Z-Score</TableHeaderCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {metrics.map((row, i) => (
-                                  <TableRow key={i}>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.metric}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{row.latest !== null ? Number(row.latest).toLocaleString() : '--'}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: row.wwChg > 0 ? '#10b981' : row.wwChg < 0 ? '#ef4444' : 'inherit' }}>
-                                      {row.wwChg !== null ? `${row.wwChg > 0 ? '+' : ''}${Number(row.wwChg).toLocaleString()}` : '--'}
-                                    </TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: row.zScore1Y > 0 ? '#10b981' : row.zScore1Y < 0 ? '#ef4444' : 'inherit' }}>
-                                      {row.zScore1Y !== null ? Number(row.zScore1Y).toFixed(2) : '--'}
-                                    </TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', color: row.zScore3Y > 0 ? '#10b981' : row.zScore3Y < 0 ? '#ef4444' : 'inherit' }}>
-                                      {row.zScore3Y !== null ? Number(row.zScore3Y).toFixed(2) : '--'}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          );
-                        }
-                        // Bitcoin Tracker - has cryptos and stocks
-                        if (key === 'bitcoin-trend-tracker') {
-                          const cryptos = data.cryptos ? Object.entries(data.cryptos) : [];
-                          const stocks = data.stocks ? Object.entries(data.stocks) : [];
-                          const allItems = [...cryptos, ...stocks]
-                            .map(([ticker, info]) => ({
-                              ticker,
-                              buyTrade: info.buyTrade || 0,
-                              sellTrade: info.sellTrade || 0,
-                              trend: info.trend || 'N/A',
-                              index: info.index ?? 9999
-                            }))
-                            .sort((a, b) => a.index - b.index);
-
-                          return (
-                            <Table>
-                              <TableHead>
-                                <TableRow>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>LRR</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>HRR</TableHeaderCell>
-                                  <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Trend</TableHeaderCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {allItems.map((row) => (
-                                  <TableRow key={row.ticker}>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{row.ticker}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.buyTrade).toLocaleString()}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{Number(row.sellTrade).toLocaleString()}</TableCell>
-                                    <TableCell style={{ padding: '4px 8px' }}>
-                                      <span style={{
-                                        fontSize: '10px',
-                                        padding: '2px 6px',
-                                        borderRadius: '4px',
-                                        backgroundColor: row.trend === 'BULLISH' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7') :
-                                          row.trend === 'BEARISH' ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2') : 'rgba(107, 114, 128, 0.2)',
-                                        color: row.trend === 'BULLISH' ? '#10b981' :
-                                          row.trend === 'BEARISH' ? '#ef4444' : '#6b7280'
-                                      }}>
-                                        {row.trend}
-                                      </span>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          );
-                        }
-
-                        // Signal Strength - has stocks array + added/removed
-                        if (key === 'signal-strength') {
-                          const stocks = data.stocks || [];
-                          const added = data.added || [];
-                          const removed = data.removed || [];
-
-                          return (
-                            <div style={{ padding: '12px' }}>
-                              {added.length > 0 && (
-                                <div style={{ marginBottom: '12px' }}>
-                                  <Text style={{ fontSize: '11px', fontWeight: 600, color: '#10b981', marginBottom: '4px', display: 'block' }}>
-                                    Added ({added.length})
-                                  </Text>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                    {added.map(ticker => (
-                                      <span key={ticker} style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7', borderRadius: '4px', color: '#10b981' }}>{ticker}</span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {removed.length > 0 && (
-                                <div style={{ marginBottom: '12px' }}>
-                                  <Text style={{ fontSize: '11px', fontWeight: 600, color: '#ef4444', marginBottom: '4px', display: 'block' }}>
-                                    Removed ({removed.length})
-                                  </Text>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                    {removed.map(ticker => (
-                                      <span key={ticker} style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2', borderRadius: '4px', color: '#ef4444' }}>{ticker}</span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              <Text style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#f9fafb' : '#111827', marginBottom: '4px', display: 'block' }}>
-                                Stocks ({stocks.length})
-                              </Text>
-                              <Table>
-                                <TableHead>
-                                  <TableRow>
-                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                    <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Strength</TableHeaderCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {stocks.map((stock, idx) => (
-                                    <TableRow key={stock.ticker || idx}>
-                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{stock.ticker || stock}</TableCell>
-                                      <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{stock.strength || '-'}</TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          );
-                        }
-
-                        // Portfolio Solutions - has rankings
-                        if (key === 'portfolio-solutions') {
-                          const rankings = data.rankings || [];
-                          const topMovers = data.topMovers || { weekly: [], monthly: [] };
-                          const bottomMovers = data.bottomMovers || { weekly: [], monthly: [] };
-
-                          // Try to get date from data or fallback to freshness
-                          const dataDate = data.date || data.timestamp || freshnessData?.dataTypes?.['portfolio-solutions']?.date;
-                          const formattedDate = dataDate ? formatDate(dataDate) : '';
-
-                          const renderMoverSection = (title, top, bottom) => (
-                            <div style={{ marginBottom: '16px' }}>
-                              <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '4px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>{title}</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({formattedDate})</span>
-                              </div>
-
-                              {/* Top Movers */}
-                              <div style={{ marginBottom: '6px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                  <span style={{ fontSize: '10px', fontWeight: 600, color: '#10b981' }}>Top Movers:</span>
-                                  {top && top.length > 0 ? top.map((mover, i) => (
-                                    <span key={i} style={{ fontSize: '10px', color: isDark ? '#d1d5db' : '#374151' }}>
-                                      <span style={{ fontWeight: 600 }}>{mover.ticker}</span>
-                                      <span style={{ color: '#10b981', marginLeft: '1px' }}>(+{mover.change})</span>
-                                      {i < top.length - 1 && ','}
-                                    </span>
-                                  )) : <span style={{ fontSize: '10px', fontStyle: 'italic', color: '#9ca3af' }}>None</span>}
-                                </div>
-                              </div>
-
-                              {/* Bottom Movers */}
-                              <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                  <span style={{ fontSize: '10px', fontWeight: 600, color: '#ef4444' }}>Bottom Movers:</span>
-                                  {bottom && bottom.length > 0 ? bottom.map((mover, i) => (
-                                    <span key={i} style={{ fontSize: '10px', color: isDark ? '#d1d5db' : '#374151' }}>
-                                      <span style={{ fontWeight: 600 }}>{mover.ticker}</span>
-                                      <span style={{ color: '#ef4444', marginLeft: '1px' }}>({mover.change})</span>
-                                      {i < bottom.length - 1 && ','}
-                                    </span>
-                                  )) : <span style={{ fontSize: '10px', fontStyle: 'italic', color: '#9ca3af' }}>None</span>}
-                                </div>
-                              </div>
-                            </div>
-                          );
-
-                          return (
-                            <div style={{ padding: '12px' }}>
-                              {/* 1-WEEK RE-RANK HISTORY */}
-                              {renderMoverSection('1-Week Re-Rank History', topMovers.weekly, bottomMovers.weekly)}
-
-                              {/* 1-MONTH RE-RANK HISTORY */}
-                              {renderMoverSection('1-Month Re-Rank History', topMovers.monthly, bottomMovers.monthly)}
-
-                              <div style={{ marginTop: '12px', borderTop: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, paddingTop: '12px' }}>
-                                <div style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#93c5fd' : '#1d4ed8', marginBottom: '8px', padding: '4px 6px', backgroundColor: isDark ? '#1e3a5f' : '#dbeafe', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <span>RANKED LIST ({rankings.length})</span> <span style={{ fontWeight: 400, fontSize: '10px' }}>({formattedDate})</span>
-                                </div>
-                                <Table>
-                                  <TableHead>
-                                    <TableRow>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Rank</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Ticker</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>1 Week Ago</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>1 Month Ago</TableHeaderCell>
-                                      <TableHeaderCell style={{ padding: '6px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>Asset Class</TableHeaderCell>
-                                    </TableRow>
-                                  </TableHead>
-                                  <TableBody>
-                                    {rankings.map((item, idx) => (
-                                      <TableRow key={item.ticker || idx}>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.rank || idx + 1}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 600 }}>{item.ticker}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{item.weekAgo || '-'}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace' }}>{item.monthAgo || '-'}</TableCell>
-                                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', color: isDark ? '#9ca3af' : '#6b7280' }}>{item.assetClass || '-'}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        // Fallback
-                        return (
-                          <div style={{
-                            flex: 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '20px',
-                            color: isDark ? '#9ca3af' : '#6b7280',
-                            fontSize: '12px'
-                          }}>
-                            No table view defined for {label}
-                          </div>
-                        );
-                      })()}
+                    <div className="adb-event-group__body">
+                      {group.events.map((event) => (
+                        <button
+                          type="button"
+                          key={event.id}
+                          onClick={() => setSelection({
+                            sourceId: event.sourceId,
+                            snapshotId: event.snapshotId,
+                            label: event.sourceLabel,
+                          })}
+                        >
+                          <span className={`adb-direction adb-direction--${event.direction || 'none'}`}>{event.direction || 'update'}</span>
+                          <span className="adb-event-description">{event.description}</span>
+                          <span className="adb-event-source">{event.sourceLabel}</span>
+                          <time>{formatDateTime(event.eventAt)}</time>
+                        </button>
+                      ))}
                     </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div >
-        ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
-      </div >
-    </div >
+          <details className="adb-health">
+            <summary>
+              <span>Data health</span>
+              <strong>{brief.summary?.current || 0} current · {brief.summary?.issues || 0} issues</strong>
+            </summary>
+            <div className="adb-health__rows">
+              {(brief.sourceHealth || []).map((source) => (
+                <button
+                  type="button"
+                  key={source.sourceId}
+                  disabled={!source.snapshotId}
+                  onClick={() => setSelection({ sourceId: source.sourceId, snapshotId: source.snapshotId, label: source.label })}
+                >
+                  <strong>{source.label}</strong>
+                  <span className={`adb-status adb-status--${source.status}`}>{STATUS_LABELS[source.status] || source.status}</span>
+                  <time>{formatDate(source.contentDate)}</time>
+                </button>
+              ))}
+            </div>
+          </details>
+
+          <div className="adb-footer">
+            <span>Research snapshots are dated references; no prices or executions are inferred here.</span>
+            <button type="button" className="adb-text-button" onClick={() => setShowOperations(true)}>Open operations</button>
+          </div>
+        </>
+      ) : null}
+
+      {selection && <SourceInspector selection={selection} onClose={() => setSelection(null)} />}
+    </div>
   );
 };
 

@@ -1,6 +1,70 @@
 // Service Tracking Configuration
 // Defines all services, APIs, and their usage parameters
 
+/**
+ * Billing inventory intentionally avoids a synthetic "grand total". AWS and
+ * expected subscriptions are metered or account-specific, so adding guessed
+ * values would make the dashboard look more precise than the bills are.
+ */
+export const COST_INVENTORY = [
+  {
+    id: 'nous-plus',
+    category: 'Fixed',
+    service: 'Nous Plus (Hermes)',
+    status: 'active',
+    billing: '$20/month',
+    notes: 'Separate Nous subscription; no auto-reload or payment card is configured.',
+  },
+  {
+    id: 'aws',
+    category: 'Metered',
+    service: 'AWS',
+    status: 'metered',
+    billing: 'Usage based · $10 monthly budget',
+    notes: 'S3, DynamoDB, Lambda, Secrets Manager, Textract, and CloudWatch are reviewed in AWS billing.',
+  },
+  {
+    id: 'ibkr',
+    category: 'Expected',
+    service: 'IBKR market data',
+    status: 'expected',
+    billing: 'Existing subscription · amount varies',
+    notes: 'Expected trading-data expense; not estimated or marked for cancellation here.',
+  },
+  {
+    id: 'hedgeye',
+    category: 'Expected',
+    service: 'Hedgeye products',
+    status: 'expected',
+    billing: 'Existing subscriptions · amount unknown',
+    notes: 'Expected research subscriptions; dashboard ingestion does not determine the account bill.',
+  },
+  {
+    id: 'openai-api',
+    category: 'Dormant',
+    service: 'OpenAI API',
+    status: 'dormant',
+    billing: 'No dashboard key configured',
+    notes: 'No direct API calls found. API and ChatGPT billing must still be checked separately in each signed-in organization.',
+  },
+  {
+    id: 'anthropic',
+    category: 'Dormant',
+    service: 'Anthropic API',
+    status: 'dormant',
+    billing: 'No dashboard key configured',
+    notes: 'No direct Anthropic integration or billing path found in this project.',
+  },
+  {
+    id: 'dormant-market-data',
+    category: 'Dormant',
+    service: 'Alpha Vantage / Finnhub / Polygon',
+    status: 'dormant',
+    billing: 'No project keys configured',
+    notes: 'Provider adapters are dormant and make no requests without credentials.',
+  },
+];
+
 export const SERVICE_CONFIG = {
   // Internal API Endpoints
   internal: {
@@ -188,8 +252,8 @@ export const SERVICE_CONFIG = {
       estimatedCallsPerMonth: 0,
       costPerCall: 0,
       costPerMonth: 0,
-      status: 'configured',
-      notes: 'API key configured, not currently in use'
+      status: 'dormant',
+      notes: 'No project API key configured; adapter is not in use'
     },
     finnhub: {
       name: 'Finnhub',
@@ -201,8 +265,8 @@ export const SERVICE_CONFIG = {
       estimatedCallsPerMonth: 0,
       costPerCall: 0,
       costPerMonth: 0,
-      status: 'configured',
-      notes: 'API key configured, not currently in use'
+      status: 'dormant',
+      notes: 'No project API key configured; adapter is not in use'
     },
     polygon: {
       name: 'Polygon.io',
@@ -214,8 +278,8 @@ export const SERVICE_CONFIG = {
       estimatedCallsPerMonth: 0,
       costPerCall: 0,
       costPerMonth: 0,
-      status: 'configured',
-      notes: 'API key configured, not currently in use'
+      status: 'dormant',
+      notes: 'No project API key configured; adapter is not in use'
     }
   },
 
@@ -252,7 +316,7 @@ export const SERVICE_CONFIG = {
     hermesGmailIngestor: {
       name: 'Hermes Gmail Ingestor',
       type: 'lambda',
-      description: 'Polls hedgeyehermes@gmail.com and archives Hedgeye product attachments',
+      description: 'Polls the configured HERMES_GMAIL_ACCOUNT and archives Hedgeye product attachments',
       schedule: 'Every 15 minutes',
       updateFrequency: '96 times per day',
       estimatedRunsPerDay: 96,
@@ -260,7 +324,7 @@ export const SERVICE_CONFIG = {
       costPerRun: 0.0002,
       costPerMonth: 0.58,
       dataSource: 'Gmail API → S3 → Lambda → DynamoDB',
-      status: 'configured',
+      status: 'active',
       method: 'AWS Lambda + Gmail OAuth'
     },
     hermesManagingDirector: {
@@ -281,42 +345,42 @@ export const SERVICE_CONFIG = {
       name: 'Hermes Quant Analyst',
       type: 'lambda',
       description: 'Threshold, outlier, Hedgeye freshness, and anomaly scans',
-      schedule: 'Every 5-15 minutes (market hours)',
-      updateFrequency: '48-96 times per day',
-      estimatedRunsPerDay: 64,
-      estimatedRunsPerMonth: 1920,
+      schedule: 'Disabled until a secure dashboard target exists',
+      updateFrequency: 'Disabled',
+      estimatedRunsPerDay: 0,
+      estimatedRunsPerMonth: 0,
       costPerRun: 0.0002,
-      costPerMonth: 0.38,
+      costPerMonth: 0,
       dataSource: 'Portfolio/Hedgeye data → DynamoDB alerts',
-      status: 'configured',
+      status: 'disabled',
       method: 'AWS Lambda + EventBridge'
     },
     hermesQuantDeveloper: {
       name: 'Hermes Quant Developer',
       type: 'lambda',
       description: 'Dashboard/API/workflow regression monitor',
-      schedule: 'Every 10-15 minutes',
-      updateFrequency: '96 times per day',
-      estimatedRunsPerDay: 96,
-      estimatedRunsPerMonth: 2880,
+      schedule: 'Disabled until a secure dashboard target exists',
+      updateFrequency: 'Disabled',
+      estimatedRunsPerDay: 0,
+      estimatedRunsPerMonth: 0,
       costPerRun: 0.0002,
-      costPerMonth: 0.58,
+      costPerMonth: 0,
       dataSource: 'HTTP health checks → DynamoDB alerts',
-      status: 'configured',
+      status: 'disabled',
       method: 'AWS Lambda + EventBridge'
     },
     hermesSecurity: {
       name: 'Hermes Security',
       type: 'lambda',
       description: 'Auth/config drift and suspicious failure monitor',
-      schedule: 'Every 15-60 minutes',
-      updateFrequency: '24-96 times per day',
-      estimatedRunsPerDay: 48,
-      estimatedRunsPerMonth: 1440,
+      schedule: 'Disabled until a secure dashboard target exists',
+      updateFrequency: 'Disabled',
+      estimatedRunsPerDay: 0,
+      estimatedRunsPerMonth: 0,
       costPerRun: 0.0002,
-      costPerMonth: 0.29,
+      costPerMonth: 0,
       dataSource: 'Infrastructure checks → DynamoDB alerts',
-      status: 'configured',
+      status: 'disabled',
       method: 'AWS Lambda + EventBridge'
     },
     marketDataCollector: {
@@ -359,7 +423,8 @@ export const SERVICE_CONFIG = {
       estimatedWritesPerMonth: 30000,
       costPerRead: 0.00000025, // $0.25 per million reads
       costPerWrite: 0.00000125, // $1.25 per million writes
-      estimatedCostPerMonth: 0.04, // ~$0.04/month
+      billingModel: 'Metered usage',
+      usageLabel: 'On-demand reads/writes · TTL enabled',
       status: 'active'
     },
     s3: {
@@ -371,7 +436,8 @@ export const SERVICE_CONFIG = {
       estimatedStorageGB: 0.1,
       costPerRequest: 0.000005,
       costPerGB: 0.023,
-      estimatedCostPerMonth: 0.01,
+      billingModel: 'Metered requests, transfer, and storage',
+      usageLabel: 'Private artifacts and portfolio CSV uploads',
       status: 'active'
     },
     lambda: {
@@ -381,7 +447,32 @@ export const SERVICE_CONFIG = {
       estimatedInvocationsPerDay: 306,
       estimatedInvocationsPerMonth: 9180,
       costPerInvocation: 0.0000002,
-      estimatedCostPerMonth: 0.001836,
+      billingModel: 'Metered invocations and duration',
+      usageLabel: 'Gmail schedule and event-driven processors',
+      status: 'active'
+    },
+    secretsManager: {
+      name: 'Secrets Manager',
+      provider: 'AWS',
+      description: 'Stores Gmail OAuth credentials for Hermes ingestion',
+      billingModel: 'Metered secret storage and API calls',
+      usageLabel: 'One warm-cached OAuth secret',
+      status: 'active'
+    },
+    textract: {
+      name: 'Textract',
+      provider: 'AWS',
+      description: 'OCR fallback for supported Hedgeye PDF artifacts',
+      billingModel: 'Metered processed pages',
+      usageLabel: 'Content-hash deduplicated PDF OCR',
+      status: 'active'
+    },
+    cloudwatch: {
+      name: 'CloudWatch Logs',
+      provider: 'AWS',
+      description: 'Lambda execution logs and operational diagnostics',
+      billingModel: 'Metered log ingestion and storage',
+      usageLabel: '30-day log retention',
       status: 'active'
     }
   }
@@ -405,9 +496,7 @@ export const calculateTotals = () => {
       runsPerMonth: 0,
       costPerMonth: 0
     },
-    aws: {
-      costPerMonth: 0
-    }
+    aws: {}
   };
 
   // Sum internal APIs
@@ -430,18 +519,6 @@ export const calculateTotals = () => {
     totals.workflows.runsPerMonth += workflow.estimatedRunsPerMonth || 0;
     totals.workflows.costPerMonth += workflow.costPerMonth || 0;
   });
-
-  // Sum AWS costs
-  Object.values(SERVICE_CONFIG.aws).forEach(service => {
-    totals.aws.costPerMonth += service.estimatedCostPerMonth || 0;
-  });
-
-  // Grand total
-  totals.grandTotal = 
-    totals.internal.costPerMonth +
-    totals.external.costPerMonth +
-    totals.workflows.costPerMonth +
-    totals.aws.costPerMonth;
 
   return totals;
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import StatusDot from './StatusDot';
 
@@ -41,7 +41,9 @@ describe('StatusDot', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /rates region/i }));
+    const statusButton = screen.getByRole('button', { name: 'Show status details for Rates region' });
+    expect(statusButton).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(statusButton);
 
     const dialog = screen.getByRole('dialog', { name: /rates region/i });
     expect(dialog).toBeInTheDocument();
@@ -81,7 +83,79 @@ describe('StatusDot', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /volatility data/i }));
-    expect(screen.getByTestId('status-source-card-move')).toHaveAttribute('data-status-tone', 'as of');
-    expect(screen.getByText('As of').parentElement).toHaveClass('text-[#42648f]');
+    const sourceCard = screen.getByTestId('status-source-card-move');
+    expect(sourceCard).toHaveAttribute('data-status-tone', 'as of');
+    expect(within(sourceCard).getByText('MOVE — Yahoo Finance')).toHaveClass('text-[#42648f]');
+    expect(within(sourceCard).getByText('As of')).toBeInTheDocument();
+  });
+
+  test.each([
+    ['stale', 'error'],
+    ['inactive', 'error'],
+    ['missing', 'unknown'],
+    ['error', 'error'],
+  ])('derives the no-source dialog state for %s instead of hardcoding Live', (status, expectedTone) => {
+    render(
+      <StatusDot
+        label={`${status} feed`}
+        status={status}
+        updatedAt="2026-07-18T12:00:00.000Z"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: `Show status details for ${status} feed` }));
+
+    const row = screen.getByTestId('status-source-card-updated');
+    expect(row).toHaveAttribute('data-status-tone', expectedTone);
+    expect(within(row).queryByText('Live')).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['missing', 'inactive'],
+    ['error', 'inactive'],
+    ['unknown', 'unknown'],
+    ['delayed', 'delayed'],
+  ])('keeps an aggregate with a %s source fail-closed', (sourceStatus, aggregateStatus) => {
+    render(
+      <StatusDot
+        label={`${sourceStatus} aggregate`}
+        emoji="🟢"
+        sources={[
+          { id: 'healthy', label: 'Healthy source', status: 'current' },
+          { id: 'problem', label: 'Problem source', status: sourceStatus },
+        ]}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: `Show status details for ${sourceStatus} aggregate` });
+    expect(button).toHaveAttribute('data-status', aggregateStatus);
+    expect(screen.getByTestId('status-dot-visual')).not.toHaveTextContent('🟢');
+  });
+
+  test('uses a larger native button target without changing the visible dot size', () => {
+    render(<StatusDot label="Compact feed" status="active" size={8} />);
+
+    const button = screen.getByRole('button', { name: 'Show status details for Compact feed' });
+    const visualDot = screen.getByTestId('status-dot-visual');
+    expect(button).toHaveStyle({ width: '24px', height: '24px' });
+    expect(visualDot).toHaveStyle({ width: '8px', height: '8px' });
+  });
+
+  test('leaves keyboard activation to the native button click without double toggling', () => {
+    render(<StatusDot label="Keyboard feed" status="active" />);
+
+    const button = screen.getByRole('button', { name: 'Show status details for Keyboard feed' });
+    expect(button).toHaveAttribute('type', 'button');
+    button.focus();
+    fireEvent.keyDown(button, { key: 'Enter', code: 'Enter' });
+    expect(screen.queryByRole('dialog', { name: 'Keyboard feed' })).not.toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(screen.getByRole('dialog', { name: 'Keyboard feed' })).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(button);
+    expect(screen.queryByRole('dialog', { name: 'Keyboard feed' })).not.toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 });

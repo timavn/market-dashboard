@@ -9,9 +9,11 @@ const SNAPSHOT = {
   VIX: {
     lastPx: 17.16,
     day1Ago: 15.03,
+    day15Ago: 15.2,
     week1Ago: 15.57,
     week4Ago: 22.22,
     dayChangePct: 14.17,
+    fifteenDayChangePct: 12.89,
     weekChangePct: 10.21,
     monthChangePct: -22.77,
     threeMonthChangePct: -10.76,
@@ -30,6 +32,7 @@ const HISTORICAL_MOVE = {
   ...SNAPSHOT.VIX,
   lastPx: 92.4,
   day1Ago: 89.2,
+  day15Ago: 91.1,
   week1Ago: 94.1,
   week4Ago: 101.2,
   availability: 'historical',
@@ -64,7 +67,7 @@ describe('VolatilityTable controlled state', () => {
     expect(screen.getByTestId('volatility-table-shell').getAttribute('data-variant')).toBe('radar');
     expect(screen.getByTestId('volatility-table').getAttribute('data-variant')).toBe('radar');
     expect(screen.getByText('17.16')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /last updated time for volatility data/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /status details for volatility data/i })).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -94,7 +97,7 @@ describe('VolatilityTable controlled state', () => {
     expect(blocks[2]).toHaveAttribute('data-active', 'true');
     expect(screen.getByText('17.16')).toHaveClass('vol-mw-bucket-green');
     expect(screen.getByText('15.03')).toHaveClass('vol-mw-bucket-green');
-    expect(screen.getByText('15.57')).toHaveClass('vol-mw-bucket-green');
+    expect(screen.getByText('15.20')).toHaveClass('vol-mw-bucket-green');
     expect(screen.getByText('22.22')).toHaveClass('vol-mw-bucket-yellow');
 
     const unavailableRegime = screen.getByLabelText('VVIX volatility regime unavailable');
@@ -120,10 +123,14 @@ describe('VolatilityTable controlled state', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  test('renders historical MOVE as a labeled EOD row with regime colors', () => {
+  test('renders retained historical MOVE with its observation date and regime colors', () => {
     render(
       <VolatilityTableWithTabs
-        snapshot={{ ...SNAPSHOT, MOVE: HISTORICAL_MOVE }}
+        snapshot={{
+          ...SNAPSHOT,
+          lastUpdated: '2026-07-15T19:45:00.000Z',
+          MOVE: { ...HISTORICAL_MOVE, asOf: '2026-07-10T20:15:00.000Z' },
+        }}
         loading={false}
         error={null}
         variant="radar"
@@ -132,6 +139,7 @@ describe('VolatilityTable controlled state', () => {
 
     expect(screen.getByLabelText('MOVE end-of-day volatility regime: green')).toBeInTheDocument();
     expect(screen.getByText('92.40').closest('td')).toHaveClass('vol-mw-bucket-green');
-    expect(screen.getByText('EOD · AS OF JUL 13')).toBeInTheDocument();
+    expect(screen.getByText('EOD · AS OF JUL 10')).toBeInTheDocument();
+    expect(screen.queryByText('EOD · AS OF JUL 15')).not.toBeInTheDocument();
   });
 });

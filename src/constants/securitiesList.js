@@ -138,7 +138,7 @@ export const SECURITIES_LIST = [
 // Asset class color mapping
 export const ASSET_CLASS_COLORS = {
   fixedIncome: '#E0F2FE',   // Light blue
-  equity: '#D1FAE5',        // Light green
+  equity: '#ecfdf5',        // Light green
   currency: '#E9D5FF',      // Light purple
   commodity: '#FED7AA',     // Light orange
   crypto: '#FDE68A'         // Gold

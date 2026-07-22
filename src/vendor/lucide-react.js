@@ -5,9 +5,12 @@ export { default as ArrowRight } from 'lucide-react/dist/esm/icons/arrow-right.j
 export { default as ArrowUp } from 'lucide-react/dist/esm/icons/arrow-up.js';
 export { default as BarChart2 } from 'lucide-react/dist/esm/icons/bar-chart-2.js';
 export { default as BarChart3 } from 'lucide-react/dist/esm/icons/bar-chart-3.js';
+export { default as CalendarClock } from 'lucide-react/dist/esm/icons/calendar-clock.js';
 export { default as CalendarDays } from 'lucide-react/dist/esm/icons/calendar-days.js';
+export { default as CheckCircle2 } from 'lucide-react/dist/esm/icons/check-circle-2.js';
 export { default as ChevronDown } from 'lucide-react/dist/esm/icons/chevron-down.js';
 export { default as DollarSign } from 'lucide-react/dist/esm/icons/dollar-sign.js';
+export { default as Droplet } from 'lucide-react/dist/esm/icons/droplet.js';
 export { default as Download } from 'lucide-react/dist/esm/icons/download.js';
 export { default as FileText } from 'lucide-react/dist/esm/icons/file-text.js';
 export { default as Filter } from 'lucide-react/dist/esm/icons/filter.js';

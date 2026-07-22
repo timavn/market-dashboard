@@ -427,6 +427,49 @@ function resolvePositionSideCounts(portfolioData) {
   return { longCount, shortCount };
 }
 
+function normalizePositionCount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? Math.trunc(count) : null;
+}
+
+function getReferenceDataQuality(snapshot) {
+  return snapshot?.dataQuality || snapshot?.meta?.dataQuality || null;
+}
+
+function isCleanReferenceComparison(snapshot, { requireAvailable = false } = {}) {
+  if (!snapshot || snapshot?._cache?.stale === true) return false;
+  if (snapshot?.comparisonAvailable === false || snapshot?.available === false) return false;
+  if (requireAvailable && snapshot?.available !== true) return false;
+  return getReferenceDataQuality(snapshot)?.status === 'ok';
+}
+
+function countEtfProPositionSides(snapshot) {
+  const explicitLongCount = normalizePositionCount(snapshot?.longCount);
+  const explicitShortCount = normalizePositionCount(snapshot?.shortCount);
+  if (explicitLongCount !== null && explicitShortCount !== null) {
+    return { longCount: explicitLongCount, shortCount: explicitShortCount, hasCounts: true };
+  }
+
+  const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
+  if (rows.length === 0) {
+    return { longCount: null, shortCount: null, hasCounts: false };
+  }
+
+  const longs = new Set();
+  const shorts = new Set();
+  rows.forEach((row, index) => {
+    const ticker = String(row?.ticker || row?.symbol || '').trim().toUpperCase();
+    const key = ticker || `__row_${index}`;
+    if (String(row?.call || row?.side || '').toLowerCase() === 'short') {
+      shorts.add(key);
+    } else {
+      longs.add(key);
+    }
+  });
+  return { longCount: longs.size, shortCount: shorts.size, hasCounts: true };
+}
+
 const PortfolioSidebarSnapshot = ({
   portfolioData,
   portfolioAccountsData = [],
@@ -535,28 +578,42 @@ const PortfolioSidebarSnapshot = ({
     () => resolvePositionSideCounts(portfolioData),
     [portfolioData],
   );
-  const rtaLongCount = rtaPositions?.available ? (rtaPositions.longCount || 0) : null;
-  const rtaShortCount = rtaPositions?.available ? (rtaPositions.shortCount || 0) : null;
+  const rawRtaLongCount = normalizePositionCount(rtaPositions?.longCount);
+  const rawRtaShortCount = normalizePositionCount(rtaPositions?.shortCount);
+  const rtaAvailable = isCleanReferenceComparison(rtaPositions, { requireAvailable: true })
+    && rawRtaLongCount !== null
+    && rawRtaShortCount !== null;
+  const rtaLongCount = rtaAvailable ? rawRtaLongCount : null;
+  const rtaShortCount = rtaAvailable ? rawRtaShortCount : null;
   const { etfProLongCount, etfProShortCount, etfProAvailable } = useMemo(() => {
-    const rows = Array.isArray(etfProSnapshot?.rows) ? etfProSnapshot.rows : [];
-    if (rows.length === 0) {
-      return { etfProLongCount: null, etfProShortCount: null, etfProAvailable: false };
+    const counts = countEtfProPositionSides(etfProSnapshot);
+    const shapeAvailable = etfProSnapshot?.available === true
+      || (etfProSnapshot?.available !== false && counts.hasCounts);
+    const available = shapeAvailable && counts.hasCounts && isCleanReferenceComparison(etfProSnapshot);
+    return {
+      etfProLongCount: available ? counts.longCount : null,
+      etfProShortCount: available ? counts.shortCount : null,
+      etfProAvailable: available,
+    };
+  }, [etfProSnapshot]);
+  const buildNetDisplay = useCallback((longCount, shortCount, available = true) => {
+    if (!available) {
+      return {
+        available: false,
+        longWidth: 0,
+        shortWidth: 0,
+        markerLeft: null,
+        netPctText: '—',
+        tone: 'neutral',
+      };
     }
-    return rows.reduce((acc, row) => {
-      if (String(row.call || '').toLowerCase() === 'short') {
-        acc.etfProShortCount += 1;
-      } else {
-        acc.etfProLongCount += 1;
-      }
-      return acc;
-    }, { etfProLongCount: 0, etfProShortCount: 0, etfProAvailable: true });
-  }, [etfProSnapshot?.rows]);
-  const buildNetDisplay = useCallback((longCount, shortCount) => {
+
     const total = (longCount || 0) + (shortCount || 0);
     if (!total) {
       return {
-        longWidth: 50,
-        shortWidth: 50,
+        available: true,
+        longWidth: 0,
+        shortWidth: 0,
         markerLeft: 50,
         netPctText: '0%',
         tone: 'neutral',
@@ -568,6 +625,7 @@ const PortfolioSidebarSnapshot = ({
     const netPct = (((longCount || 0) - (shortCount || 0)) / total) * 100;
 
     return {
+      available: true,
       longWidth,
       shortWidth,
       markerLeft: longWidth,
@@ -579,11 +637,11 @@ const PortfolioSidebarSnapshot = ({
     return buildNetDisplay(liveLongCount, liveShortCount);
   }, [buildNetDisplay, liveLongCount, liveShortCount]);
   const rtaNetBar = useMemo(() => {
-    return buildNetDisplay(rtaLongCount || 0, rtaShortCount || 0);
-  }, [buildNetDisplay, rtaLongCount, rtaShortCount]);
+    return buildNetDisplay(rtaLongCount, rtaShortCount, rtaAvailable);
+  }, [buildNetDisplay, rtaAvailable, rtaLongCount, rtaShortCount]);
   const etfProNetBar = useMemo(() => {
-    return buildNetDisplay(etfProLongCount || 0, etfProShortCount || 0);
-  }, [buildNetDisplay, etfProLongCount, etfProShortCount]);
+    return buildNetDisplay(etfProLongCount, etfProShortCount, etfProAvailable);
+  }, [buildNetDisplay, etfProAvailable, etfProLongCount, etfProShortCount]);
 
   const usEquitySessionActive = useMemo(
     () => isUsEquitySessionActive(new Date(sessionClock)),
@@ -820,10 +878,10 @@ const PortfolioSidebarSnapshot = ({
               <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums">
                 {liveLongCount}
               </div>
-              <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums">
+              <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums" data-testid="rta-long-count">
                 {rtaLongCount ?? '—'}
               </div>
-              <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums">
+              <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums" data-testid="etf-pro-long-count">
                 {etfProLongCount ?? '—'}
               </div>
 
@@ -831,10 +889,10 @@ const PortfolioSidebarSnapshot = ({
               <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums">
                 {liveShortCount}
               </div>
-              <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums">
+              <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums" data-testid="rta-short-count">
                 {rtaShortCount ?? '—'}
               </div>
-              <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums">
+              <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums" data-testid="etf-pro-short-count">
                 {etfProShortCount ?? '—'}
               </div>
 
@@ -850,22 +908,30 @@ const PortfolioSidebarSnapshot = ({
                 </div>
               </div>
               <div className="pf-position-compare__cell">
-                <div className={`pf-netbar-wrap${rtaPositions?.available ? '' : ' pf-netbar-wrap--muted'}`}>
-                  <div className={`pf-netbar__pct pf-netbar__pct--${rtaNetBar.tone}`}>{rtaNetBar.netPctText}</div>
-                  <div className="pf-netbar" aria-hidden="true">
-                    <div className="pf-netbar__segment pf-netbar__segment--long" style={{ width: `${rtaNetBar.longWidth}%` }} />
-                    <div className="pf-netbar__segment pf-netbar__segment--short" style={{ width: `${rtaNetBar.shortWidth}%` }} />
-                    <div className="pf-netbar__marker" style={{ left: `${rtaNetBar.markerLeft}%` }} />
+                <div className={`pf-netbar-wrap${rtaAvailable ? '' : ' pf-netbar-wrap--muted'}`}>
+                  <div className={`pf-netbar__pct pf-netbar__pct--${rtaNetBar.tone}`} data-testid="rta-net-percent">{rtaNetBar.netPctText}</div>
+                  <div className="pf-netbar" aria-hidden="true" data-testid="rta-net-bar">
+                    {rtaNetBar.available && (
+                      <>
+                        <div className="pf-netbar__segment pf-netbar__segment--long" style={{ width: `${rtaNetBar.longWidth}%` }} />
+                        <div className="pf-netbar__segment pf-netbar__segment--short" style={{ width: `${rtaNetBar.shortWidth}%` }} />
+                        <div className="pf-netbar__marker" style={{ left: `${rtaNetBar.markerLeft}%` }} />
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
               <div className="pf-position-compare__cell">
                 <div className={`pf-netbar-wrap${etfProAvailable ? '' : ' pf-netbar-wrap--muted'}`}>
-                  <div className={`pf-netbar__pct pf-netbar__pct--${etfProNetBar.tone}`}>{etfProNetBar.netPctText}</div>
-                  <div className="pf-netbar" aria-hidden="true">
-                    <div className="pf-netbar__segment pf-netbar__segment--long" style={{ width: `${etfProNetBar.longWidth}%` }} />
-                    <div className="pf-netbar__segment pf-netbar__segment--short" style={{ width: `${etfProNetBar.shortWidth}%` }} />
-                    <div className="pf-netbar__marker" style={{ left: `${etfProNetBar.markerLeft}%` }} />
+                  <div className={`pf-netbar__pct pf-netbar__pct--${etfProNetBar.tone}`} data-testid="etf-pro-net-percent">{etfProNetBar.netPctText}</div>
+                  <div className="pf-netbar" aria-hidden="true" data-testid="etf-pro-net-bar">
+                    {etfProNetBar.available && (
+                      <>
+                        <div className="pf-netbar__segment pf-netbar__segment--long" style={{ width: `${etfProNetBar.longWidth}%` }} />
+                        <div className="pf-netbar__segment pf-netbar__segment--short" style={{ width: `${etfProNetBar.shortWidth}%` }} />
+                        <div className="pf-netbar__marker" style={{ left: `${etfProNetBar.markerLeft}%` }} />
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

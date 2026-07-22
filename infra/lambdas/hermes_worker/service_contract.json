@@ -1,0 +1,39 @@
+{
+  "awsRegion": "us-west-1",
+  "capabilityIds": [
+    "automation.hermes",
+    "dashboard.core",
+    "portfolio.live",
+    "prediction.display",
+    "prediction.ibkrExecution",
+    "research.current"
+  ],
+  "functionName": "market-dashboard-hermes-worker-v2",
+  "heartbeatTable": "MarketDashboardServiceHeartbeats",
+  "inputSnapshotTable": "HermesInputSnapshots",
+  "manifestVersion": 1,
+  "version": 1,
+  "workers": {
+    "quant-analyst": {
+      "cadenceMinutes": 15,
+      "scheduleExpression": "cron(0/15 9-16 ? * MON-FRI *)",
+      "scheduleId": "market-dashboard-hermes-quant-analyst-v2",
+      "scheduleTimeZone": "America/New_York",
+      "serviceId": "hermes:quant-analyst"
+    },
+    "quant-developer": {
+      "cadenceMinutes": 15,
+      "scheduleExpression": "cron(5/15 8-18 ? * MON-FRI *)",
+      "scheduleId": "market-dashboard-hermes-quant-developer-v2",
+      "scheduleTimeZone": "America/New_York",
+      "serviceId": "hermes:quant-developer"
+    },
+    "security": {
+      "cadenceMinutes": 60,
+      "scheduleExpression": "cron(10 * ? * MON-FRI *)",
+      "scheduleId": "market-dashboard-hermes-security-v2",
+      "scheduleTimeZone": "America/New_York",
+      "serviceId": "hermes:security"
+    }
+  }
+}

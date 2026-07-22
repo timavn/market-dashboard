@@ -2,283 +2,347 @@ const {
   summarizeRealTimeAlertPositions,
 } = require('./rtaPositionReconstruction.cjs');
 
+const JUNE_28_BASELINE = {
+  id: 'rta-website-2026-06-28',
+  asOf: '2026-06-28T00:00:00-07:00',
+  source: 'manual-website-snapshot',
+  longs: ['HLT'],
+  shorts: ['KVYO', 'ROP', 'THC', 'RMD'],
+};
+
+function snapshot(date, alert, scrapedAt = null) {
+  return {
+    date,
+    ...(scrapedAt ? { scrapedAt } : {}),
+    data: { alerts: Array.isArray(alert) ? alert : [alert] },
+  };
+}
+
 describe('summarizeRealTimeAlertPositions', () => {
-  test('flips a long to short when BUY is followed by a plain SELL', () => {
+  test('closes an existing long on a plain SELL instead of manufacturing a short', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'TBIL', action: 'BUY', name: 'TBIL' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'TBIL', action: 'SELL', name: 'TBIL' }] } },
+      snapshot('2026-06-01', { ticker: 'TBIL', action: 'BUY' }),
+      snapshot('2026-06-02', { ticker: 'TBIL', action: 'SELL' }),
     ]);
 
-    expect(summary.longCount).toBe(0);
-    expect(summary.shortCount).toBe(1);
+    expect(summary).toMatchObject({
+      available: true,
+      longCount: 0,
+      shortCount: 0,
+      ratioText: 'No holdings',
+      holdings: [],
+      dataQuality: { status: 'ok', warnings: [] },
+    });
+  });
+
+  test('lets a stored plain SELL phrase override stale open-short metadata', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-07-01', {
+        ticker: 'HLT',
+        action: 'SELL',
+        intent: 'open-short',
+        side: 'short',
+        signalPhrase: 'SELL SIGNAL HLT',
+      }),
+    ], { baseline: JUNE_28_BASELINE });
+
     expect(summary.available).toBe(true);
-    expect(summary.holdings[0]).toMatchObject({ ticker: 'TBIL', side: 'short' });
-    expect(summary.reconstructionWarnings).toEqual([]);
+    expect(summary.longCount).toBe(0);
+    expect(summary.shortCount).toBe(4);
+    expect(summary.holdings.find((holding) => holding.ticker === 'HLT')).toBeUndefined();
   });
 
-  test('opens a short when SELL is explicitly shorting', () => {
+  test('flips an existing long only when SELL explicitly opens a short', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'WMT', action: 'SELL', intent: 'open-short', name: 'WMT' }] } },
+      snapshot('2026-06-01', { ticker: 'WMT', action: 'BUY' }),
+      snapshot('2026-06-02', {
+        ticker: 'WMT',
+        action: 'SELL',
+        signalPhrase: 'SELL SIGNAL - SHORTING WMT',
+      }),
     ]);
 
     expect(summary.longCount).toBe(0);
     expect(summary.shortCount).toBe(1);
-    expect(summary.holdings[0]).toMatchObject({ ticker: 'WMT', side: 'short' });
+    expect(summary.holdings).toEqual([expect.objectContaining({ ticker: 'WMT', side: 'short' })]);
   });
 
-  test('removes a short when SELL is followed by COVER', () => {
+  test('closes an existing short on a plain BUY', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'NCLH', action: 'SELL', intent: 'open-short', name: 'NCLH' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'NCLH', action: 'COVER', name: 'NCLH' }] } },
+      snapshot('2026-06-01', { ticker: 'WMT', action: 'SELL', intent: 'open-short' }),
+      snapshot('2026-06-02', { ticker: 'WMT', action: 'BUY' }),
     ]);
 
+    expect(summary.available).toBe(true);
     expect(summary.longCount).toBe(0);
     expect(summary.shortCount).toBe(0);
-    expect(summary.available).toBe(false);
   });
 
-  test('removes a short from the active RTA board when COVER-SOME fires', () => {
+  test('flips an existing short only when BUY explicitly opens a long', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'TAP', action: 'SELL', intent: 'open-short', name: 'TAP' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'TAP', action: 'COVER-SOME', intent: 'close-short', name: 'TAP' }] } },
+      snapshot('2026-06-01', { ticker: 'WMT', action: 'SELL', intent: 'open-short' }),
+      snapshot('2026-06-02', {
+        ticker: 'WMT',
+        action: 'BUY',
+        signalPhrase: 'BUY SIGNAL - BUYING WMT',
+      }),
     ]);
 
-    expect(summary.longCount).toBe(0);
+    expect(summary.longCount).toBe(1);
     expect(summary.shortCount).toBe(0);
-    expect(summary.holdings).toEqual([]);
+    expect(summary.holdings).toEqual([expect.objectContaining({ ticker: 'WMT', side: 'long' })]);
   });
 
-  test('keeps repeated same-direction alerts idempotent', () => {
+  test('opens unheld plain BUY and SELL signals on their natural sides', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'HYG', action: 'BUY', name: 'HYG' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'HYG', action: 'BUY', name: 'HYG' }] } },
-      { date: '2026-06-03', data: { alerts: [{ ticker: 'UVXY', action: 'SELL', intent: 'open-short', name: 'UVXY' }] } },
-      { date: '2026-06-04', data: { alerts: [{ ticker: 'UVXY', action: 'SELL', intent: 'open-short', name: 'UVXY' }] } },
+      snapshot('2026-06-01', { ticker: 'BRKR', action: 'BUY' }),
+      snapshot('2026-06-02', { ticker: 'SWBI', action: 'SELL' }),
     ]);
 
     expect(summary.longCount).toBe(1);
     expect(summary.shortCount).toBe(1);
-    expect(summary.ratioText).toBe('1.0:1');
-  });
-
-  test('applies add/remove position changes by side', () => {
-    const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'AMZN', action: 'ADD', side: 'long', name: 'AMZN' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'AMZN', action: 'REMOVE', side: 'long', name: 'AMZN' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'DDOG', action: 'ADD', side: 'long', name: 'DDOG' }] } },
-    ]);
-
-    expect(summary.longCount).toBe(1);
-    expect(summary.shortCount).toBe(0);
-    expect(summary.holdings[0]).toMatchObject({ ticker: 'DDOG', side: 'long' });
-  });
-
-  test('applies side-less removals and short position-change adds', () => {
-    const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'SWBI', action: 'SELL', name: 'SWBI' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'SWBI', action: 'REMOVE', name: 'SWBI' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'AEO', action: 'ADD', side: 'short', name: 'AEO' }] } },
-    ]);
-
-    expect(summary.longCount).toBe(0);
-    expect(summary.shortCount).toBe(1);
-    expect(summary.holdings[0]).toMatchObject({ ticker: 'AEO', side: 'short' });
-  });
-
-  test('closes a long on SELL-SOME after BUY', () => {
-    const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'SPY', action: 'BUY', name: 'SPY' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'SPY', action: 'SELL-SOME', name: 'SPY' }] } },
-    ]);
-
-    expect(summary.longCount).toBe(0);
-    expect(summary.shortCount).toBe(0);
-    expect(summary.available).toBe(false);
-  });
-
-  test('ignores missing ticker alerts for counts', () => {
-    const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ action: 'BUY', name: 'Mystery Alert' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'IWM', action: 'BUY', name: 'IWM' }] } },
-    ]);
-
-    expect(summary.longCount).toBe(1);
-    expect(summary.shortCount).toBe(0);
-    expect(summary.holdings).toHaveLength(1);
-  });
-
-  test('opens a short from a plain unmatched SELL signal', () => {
-    const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-01', data: { alerts: [{ ticker: 'SWBI', action: 'SELL', name: 'SWBI' }] } },
-      { date: '2026-06-02', data: { alerts: [{ ticker: 'TAP', action: 'SELL', intent: 'open-short', name: 'TAP' }] } },
-    ]);
-
-    expect(summary.longCount).toBe(0);
-    expect(summary.shortCount).toBe(2);
-    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['SWBI', 'TAP']);
-    expect(summary.holdings.every((holding) => holding.side === 'short')).toBe(true);
-    expect(summary.reconstructionWarnings).toEqual([]);
-  });
-
-  test('matches Hedgeye screenshot state with zero longs and five shorts', () => {
-    const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-05', data: { alerts: [{ ticker: 'IWM', action: 'BUY', name: 'iShares Russell 2000 ETF' }] } },
-      { date: '2026-06-08', data: { alerts: [{ ticker: 'IWM', action: 'SELL-SOME', name: 'iShares Russell 2000 ETF' }] } },
-      { date: '2026-06-08', data: { alerts: [{ ticker: 'DPZ', action: 'SELL', name: "Domino's Pizza" }] } },
-      { date: '2026-06-09', data: { alerts: [{ ticker: 'TAP', action: 'SELL', name: 'Molson Coors' }] } },
-      { date: '2026-06-09', data: { alerts: [{ ticker: 'PAWZ', action: 'SELL', name: 'ProShares Pet Care ETF' }] } },
-      { date: '2026-06-10', data: { alerts: [{ ticker: 'BALL', action: 'SELL', name: 'Ball Corporation' }] } },
-      { date: '2026-06-10', data: { alerts: [{ ticker: 'AEO', action: 'SELL', name: 'American Eagle Outfitters' }] } },
-    ]);
-
-    expect(summary.longCount).toBe(0);
-    expect(summary.shortCount).toBe(5);
-    expect(summary.netBias).toBe('short');
-    expect(summary.ratioText).toBe('0:5');
     expect(summary.holdings).toEqual([
-      expect.objectContaining({ ticker: 'AEO', side: 'short' }),
-      expect.objectContaining({ ticker: 'BALL', side: 'short' }),
-      expect.objectContaining({ ticker: 'DPZ', side: 'short' }),
-      expect.objectContaining({ ticker: 'PAWZ', side: 'short' }),
-      expect.objectContaining({ ticker: 'TAP', side: 'short' }),
+      expect.objectContaining({ ticker: 'BRKR', side: 'long' }),
+      expect.objectContaining({ ticker: 'SWBI', side: 'short' }),
     ]);
   });
 
-  test('reconstructs current email sequence with PAWZ and DPZ covers', () => {
+  test('repairs a malformed COVERING SHORT alert from its complete signal phrase', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-08', scrapedAt: '2026-06-08T19:05:02+00:00', data: { alerts: [{ ticker: 'DPZ', action: 'SELL', name: "Domino's Pizza" }] } },
-      { date: '2026-06-09', scrapedAt: '2026-06-09T19:23:05+00:00', data: { alerts: [{ ticker: 'PAWZ', action: 'SELL', name: 'ProShares Pet Care ETF' }] } },
-      { date: '2026-06-09', scrapedAt: '2026-06-09T19:46:04+00:00', data: { alerts: [{ ticker: 'TAP', action: 'SELL', name: 'Molson Coors' }] } },
-      { date: '2026-06-10', scrapedAt: '2026-06-10T18:56:04+00:00', data: { alerts: [{ ticker: 'AEO', action: 'SELL', name: 'American Eagle Outfitters' }] } },
-      { date: '2026-06-10', scrapedAt: '2026-06-10T19:01:21+00:00', data: { alerts: [
-        { ticker: 'NCLH', action: 'REMOVE', side: 'short', name: 'NCLH' },
-        { ticker: 'AEO', action: 'ADD', side: 'short', name: 'AEO' },
-      ] } },
-      { date: '2026-06-10', scrapedAt: '2026-06-10T19:03:05+00:00', data: { alerts: [{ ticker: 'BALL', action: 'SELL', name: 'Ball Corp' }] } },
-      { date: '2026-06-11', scrapedAt: '2026-06-11T14:36:05+00:00', data: { alerts: [{ ticker: 'DPZ', action: 'COVER', name: "Domino's Pizza" }] } },
-      { date: '2026-06-11', scrapedAt: '2026-06-11T15:08:05+00:00', data: { alerts: [{ ticker: 'CMG', action: 'SELL', name: 'Chipotle' }] } },
-      { date: '2026-06-11', scrapedAt: '2026-06-11T15:13:02+00:00', data: { alerts: [{ ticker: 'PAWZ', action: 'COVER', name: 'PAWZ' }] } },
+      snapshot('2026-07-01', {
+        ticker: 'SHORT',
+        action: 'BUY',
+        signalPhrase: 'BUY SIGNAL - COVERING SHORT KVYO',
+        headline: 'Real-Time Alert: BUY SIGNAL - COVERING SHORT KVYO',
+      }, '2026-07-01T10:00:00-07:00'),
+    ], { baseline: JUNE_28_BASELINE });
+
+    expect(summary.available).toBe(true);
+    expect(summary.dataQuality.status).toBe('ok');
+    expect(summary.longCount).toBe(1);
+    expect(summary.shortCount).toBe(3);
+    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['HLT', 'RMD', 'ROP', 'THC']);
+    expect(summary.holdings.find((holding) => holding.ticker === 'SHORT')).toBeUndefined();
+  });
+
+  test('rejects reserved ticker tokens when the complete alert cannot repair them', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-07-01', {
+        ticker: 'SHORT',
+        action: 'BUY',
+        signalPhrase: 'BUY SIGNAL - COVERING SHORT',
+      }),
+    ], { baseline: JUNE_28_BASELINE });
+
+    expect(summary.available).toBe(false);
+    expect(summary.longCount).toBeNull();
+    expect(summary.shortCount).toBeNull();
+    expect(summary.holdings).toEqual([]);
+    expect(summary.dataQuality.status).toBe('error');
+    expect(summary.dataQuality.invalidEvents).toEqual([
+      expect.objectContaining({ code: 'malformed-ticker', ticker: 'SHORT' }),
+    ]);
+  });
+
+  test('fails closed for an unmatched explicit cover', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-06-01', { ticker: 'DPZ', action: 'COVER' }),
     ]);
 
+    expect(summary).toMatchObject({
+      available: false,
+      longCount: null,
+      shortCount: null,
+      ratioText: null,
+      netBias: null,
+      holdings: [],
+      dataQuality: { status: 'error' },
+    });
+    expect(summary.dataQuality.invalidEvents[0]).toMatchObject({ code: 'unmatched-cover', ticker: 'DPZ' });
+  });
+
+  test('fails closed for an unmatched explicit remove', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-06-01', { ticker: 'NCLH', action: 'REMOVE', side: 'short' }),
+    ]);
+
+    expect(summary.available).toBe(false);
+    expect(summary.dataQuality.invalidEvents[0]).toMatchObject({ code: 'unmatched-remove', ticker: 'NCLH' });
+  });
+
+  test('fails closed when an explicit close conflicts with the active side', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-06-01', { ticker: 'SPY', action: 'BUY' }),
+      snapshot('2026-06-02', { ticker: 'SPY', action: 'COVER' }),
+    ]);
+
+    expect(summary.available).toBe(false);
+    expect(summary.dataQuality.invalidEvents).toEqual([
+      expect.objectContaining({ code: 'side-mismatch', ticker: 'SPY' }),
+    ]);
+  });
+
+  test('uses eventTime, then snapshot scrapedAt, then date around a same-day baseline', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot(
+        '2026-06-28',
+        { ticker: 'IGNORED', action: 'BUY', eventTime: '2026-06-28T00:00:00-07:00' },
+        '2026-06-28T12:00:00-07:00',
+      ),
+      snapshot(
+        '2026-06-28',
+        { ticker: 'NEWW', action: 'BUY' },
+        '2026-06-28T09:30:00-07:00',
+      ),
+      snapshot(
+        '2026-06-28',
+        { ticker: 'ROP', action: 'COVER' },
+        '2026-06-28T10:15:00-07:00',
+      ),
+    ], { baseline: JUNE_28_BASELINE });
+
+    expect(summary.available).toBe(true);
+    expect(summary.longCount).toBe(2);
+    expect(summary.shortCount).toBe(3);
+    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['HLT', 'NEWW', 'KVYO', 'RMD', 'THC']);
+    expect(summary.holdings.find((holding) => holding.ticker === 'IGNORED')).toBeUndefined();
+  });
+
+  test('replays all events globally in timestamp order rather than snapshot input order', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-06-02', { ticker: 'DPZ', action: 'COVER', eventTime: '2026-06-02T15:00:00Z' }),
+      snapshot('2026-06-01', { ticker: 'DPZ', action: 'SELL', eventTime: '2026-06-01T15:00:00Z' }),
+    ]);
+
+    expect(summary.available).toBe(true);
     expect(summary.longCount).toBe(0);
-    expect(summary.shortCount).toBe(4);
-    expect(summary.ratioText).toBe('0:4');
-    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['AEO', 'BALL', 'CMG', 'TAP']);
+    expect(summary.shortCount).toBe(0);
+    expect(summary.dataQuality.status).toBe('ok');
   });
 
-  test('matches current RTA board with one long and five shorts after partial exits', () => {
+  test('deduplicates a repeated source message before applying its close twice', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-08', data: { alerts: [{ ticker: 'TAP', action: 'SELL', name: 'Molson Coors' }] } },
-      { date: '2026-06-09', data: { alerts: [{ ticker: 'TAP', action: 'COVER-SOME', intent: 'close-short', name: 'Molson Coors' }] } },
-      { date: '2026-06-10', data: { alerts: [{ ticker: 'AEO', action: 'SELL', name: 'American Eagle Outfitters' }] } },
-      { date: '2026-06-10', data: { alerts: [{ ticker: 'BALL', action: 'SELL', name: 'Ball Corporation' }] } },
-      { date: '2026-06-11', data: { alerts: [{ ticker: 'CMG', action: 'SELL', name: 'Chipotle Mexican Grill' }] } },
-      { date: '2026-06-11', data: { alerts: [{ ticker: 'VFC', action: 'SELL', name: 'V.F. Corporation' }] } },
-      { date: '2026-06-12', data: { alerts: [{ ticker: 'EPHE', action: 'SELL', name: 'iShares MSCI Philippines ETF' }] } },
-      { date: '2026-06-12', data: { alerts: [{ ticker: 'BRKR', action: 'BUY', name: 'Bruker Corporation' }] } },
-    ]);
+      snapshot('2026-07-01', {
+        ticker: 'KVYO',
+        action: 'COVER',
+        sourceMessageId: 'message-123',
+        eventTime: '2026-07-01T10:00:00-07:00',
+      }),
+      snapshot('2026-07-02', {
+        ticker: 'KVYO',
+        action: 'COVER',
+        sourceMessageId: 'message-123',
+        eventTime: '2026-07-02T10:00:00-07:00',
+      }),
+    ], { baseline: JUNE_28_BASELINE });
 
+    expect(summary.available).toBe(true);
+    expect(summary.shortCount).toBe(3);
+    expect(summary.dataQuality).toMatchObject({
+      status: 'ok',
+      processedEventCount: 1,
+      deduplicatedEventCount: 1,
+    });
+  });
+
+  test('deduplicates an exact repeated event without a source message id', () => {
+    const repeated = {
+      ticker: 'KVYO',
+      action: 'COVER',
+      eventTime: '2026-07-01T10:00:00-07:00',
+      signalPhrase: 'BUY SIGNAL - COVERING SHORT KVYO',
+    };
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-07-01', repeated),
+      snapshot('2026-07-01', { ...repeated }),
+    ], { baseline: JUNE_28_BASELINE });
+
+    expect(summary.available).toBe(true);
+    expect(summary.shortCount).toBe(3);
+    expect(summary.dataQuality.deduplicatedEventCount).toBe(1);
+  });
+
+  test('keeps the official baseline as the authoritative starting board', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-06-27', { ticker: 'OLD', action: 'BUY' }, '2026-06-27T20:00:00-07:00'),
+      snapshot('2026-06-28', { ticker: 'KVYO', action: 'REMOVE', side: 'short' }, '2026-06-28T00:00:00-07:00'),
+      snapshot('2026-06-29', { ticker: 'NEWS', action: 'SELL' }, '2026-06-29T11:00:00-07:00'),
+    ], { baseline: JUNE_28_BASELINE });
+
+    expect(summary.available).toBe(true);
+    expect(summary.baseline).toMatchObject({
+      id: JUNE_28_BASELINE.id,
+      asOf: JUNE_28_BASELINE.asOf,
+      source: JUNE_28_BASELINE.source,
+    });
     expect(summary.longCount).toBe(1);
     expect(summary.shortCount).toBe(5);
-    expect(summary.ratioText).toBe('0.2:1');
-    expect(summary.holdings.map((holding) => holding.ticker)).toEqual([
-      'BRKR',
-      'AEO',
-      'BALL',
-      'CMG',
-      'EPHE',
-      'VFC',
+    expect(summary.holdings.find((holding) => holding.ticker === 'OLD')).toBeUndefined();
+    expect(summary.holdings.find((holding) => holding.ticker === 'KVYO')).toBeDefined();
+  });
+
+  test('marks a stored-style sequence unavailable when history contains an unmatched close', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-07-01', {
+        ticker: 'SHORT',
+        action: 'BUY',
+        signalPhrase: 'BUY SIGNAL - COVERING SHORT KVYO',
+      }),
+      snapshot('2026-07-02', { ticker: 'HLT', action: 'SELL' }),
+      snapshot('2026-07-03', { ticker: 'NCLH', action: 'REMOVE', side: 'short' }),
+      snapshot('2026-07-04', { ticker: 'NEWS', action: 'SELL' }),
+    ], { baseline: JUNE_28_BASELINE });
+
+    expect(summary.available).toBe(false);
+    expect(summary.longCount).toBeNull();
+    expect(summary.shortCount).toBeNull();
+    expect(summary.holdings).toEqual([]);
+    expect(summary.dataQuality.invalidEvents).toEqual([
+      expect.objectContaining({ code: 'unmatched-remove', ticker: 'NCLH' }),
     ]);
   });
 
-  test('uses a current website benchmark as the starting board going forward', () => {
+  test('treats a missing ticker as malformed rather than silently ignoring it', () => {
     const summary = summarizeRealTimeAlertPositions([
-      { date: '2026-06-22', scrapedAt: '2026-06-22T14:32:02+00:00', data: { alerts: [{ ticker: 'CP', action: 'SELL', name: 'Canadian Pacific' }] } },
-      { date: '2026-06-23', scrapedAt: '2026-06-23T19:48:03+00:00', data: { alerts: [{ ticker: 'UHS', action: 'ADD', side: 'short', name: 'Universal Health' }] } },
-      { date: '2026-06-24', scrapedAt: '2026-06-24T14:00:00+00:00', data: { alerts: [{ ticker: 'NEWL', action: 'ADD', side: 'long', name: 'NEWL' }] } },
-    ], {
-      baseline: {
-        id: 'rta-website-2026-06-23',
-        asOf: '2026-06-23T19:48:03+00:00',
-        source: 'manual-website-snapshot',
-        longs: ['ATZAF', 'MDB', 'HQY'],
-        shorts: ['UHS'],
-      },
-    });
+      snapshot('2026-06-01', { action: 'BUY', name: 'Mystery Alert' }),
+      snapshot('2026-06-02', { ticker: 'IWM', action: 'BUY' }),
+    ]);
 
-    expect(summary.longCount).toBe(4);
+    expect(summary.available).toBe(false);
+    expect(summary.longCount).toBeNull();
+    expect(summary.dataQuality.invalidEvents[0]).toMatchObject({ code: 'malformed-ticker' });
+  });
+
+  test('applies clean position-change adds and removals by side', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-06-01', { ticker: 'AMZN', action: 'ADD', side: 'long' }),
+      snapshot('2026-06-02', { ticker: 'AMZN', action: 'REMOVE', side: 'long' }),
+      snapshot('2026-06-03', { ticker: 'AEO', action: 'ADD', side: 'short' }),
+    ]);
+
+    expect(summary.available).toBe(true);
+    expect(summary.longCount).toBe(0);
     expect(summary.shortCount).toBe(1);
-    expect(summary.baseline).toMatchObject({
-      id: 'rta-website-2026-06-23',
-      asOf: '2026-06-23T19:48:03+00:00',
-      source: 'manual-website-snapshot',
-    });
-    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['ATZAF', 'HQY', 'MDB', 'NEWL', 'UHS']);
-    expect(summary.holdings.find((holding) => holding.ticker === 'CP')).toBeUndefined();
+    expect(summary.holdings).toEqual([expect.objectContaining({ ticker: 'AEO', side: 'short' })]);
   });
 
-  test('uses the June 28 RTA screenshot benchmark as the starting board', () => {
-    const summary = summarizeRealTimeAlertPositions([], {
-      baseline: {
-        id: 'rta-website-2026-06-28',
-        asOf: '2026-06-28T00:00:00-07:00',
-        source: 'manual-website-snapshot',
-        longs: ['HLT'],
-        shorts: ['KVYO', 'ROP', 'THC', 'RMD'],
+  test('returns a standardized unavailable response when there is no source data', () => {
+    const summary = summarizeRealTimeAlertPositions([]);
+
+    expect(summary).toMatchObject({
+      available: false,
+      longCount: null,
+      shortCount: null,
+      ratioText: null,
+      netBias: null,
+      holdings: [],
+      dataQuality: {
+        status: 'unavailable',
+        warnings: [],
+        invalidEvents: [],
+        processedEventCount: 0,
+        deduplicatedEventCount: 0,
       },
     });
-
-    expect(summary.longCount).toBe(1);
-    expect(summary.shortCount).toBe(4);
-    expect(summary.baseline).toMatchObject({
-      id: 'rta-website-2026-06-28',
-      asOf: '2026-06-28T00:00:00-07:00',
-      source: 'manual-website-snapshot',
-    });
-    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['HLT', 'KVYO', 'RMD', 'ROP', 'THC']);
-  });
-
-  test('ignores RTA alerts at or before the June 28 baseline and applies newer alerts', () => {
-    const summary = summarizeRealTimeAlertPositions([
-      {
-        date: '2026-06-27',
-        scrapedAt: '2026-06-27T20:00:00-07:00',
-        data: { alerts: [{ ticker: 'OLD', action: 'ADD', side: 'long', name: 'Old Long' }] },
-      },
-      {
-        date: '2026-06-28',
-        scrapedAt: '2026-06-28T00:00:00-07:00',
-        data: { alerts: [{ ticker: 'KVYO', action: 'REMOVE', side: 'short', name: 'Klaviyo' }] },
-      },
-      {
-        date: '2026-06-28',
-        scrapedAt: '2026-06-28T09:30:00-07:00',
-        data: { alerts: [{ ticker: 'NEWW', action: 'BUY', name: 'New Winner' }] },
-      },
-      {
-        date: '2026-06-28',
-        scrapedAt: '2026-06-28T10:15:00-07:00',
-        data: { alerts: [{ ticker: 'ROP', action: 'COVER', name: 'Roper Technologies' }] },
-      },
-      {
-        date: '2026-06-28',
-        scrapedAt: '2026-06-28T11:00:00-07:00',
-        data: { alerts: [{ ticker: 'NEWS', action: 'SELL', name: 'New Short' }] },
-      },
-    ], {
-      baseline: {
-        id: 'rta-website-2026-06-28',
-        asOf: '2026-06-28T00:00:00-07:00',
-        source: 'manual-website-snapshot',
-        longs: ['HLT'],
-        shorts: ['KVYO', 'ROP', 'THC', 'RMD'],
-      },
-    });
-
-    expect(summary.longCount).toBe(2);
-    expect(summary.shortCount).toBe(4);
-    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['HLT', 'NEWW', 'KVYO', 'NEWS', 'RMD', 'THC']);
-    expect(summary.holdings.find((holding) => holding.ticker === 'OLD')).toBeUndefined();
-    expect(summary.holdings.find((holding) => holding.ticker === 'ROP')).toBeUndefined();
   });
 });

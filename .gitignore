@@ -5,6 +5,8 @@ node_modules/
 
 # Testing
 /coverage
+.pytest_cache/
+**/.pytest_cache/
 
 # Production
 /build
@@ -34,6 +36,17 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+/tmp/
+
+# Python virtual environments and bytecode
+**/.venv/
+**/.venv.*/
+**/__pycache__/
+*.py[cod]
+
+# AWS SAM local build artifacts
+.aws-sam/
+**/.aws-sam/
 
 # API keys and secrets
 /config/secrets.js

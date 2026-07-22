@@ -48,6 +48,7 @@ describe('compositePortfolioDataProvider', () => {
       summary: { totalValue: 100, positionCount: 1, longCount: 1, shortCount: 0 },
       fetchedAt: new Date().toISOString(),
       dataSource: 'ibkr_api',
+      liveSessionVerified: true,
     });
     uploadProvider.getPortfolioSnapshot.mockResolvedValue({
       holdings: [],
@@ -109,6 +110,7 @@ describe('compositePortfolioDataProvider', () => {
       summary: { totalValue: 197478.25, positionCount: 0, longCount: 0, shortCount: 0 },
       fetchedAt: new Date().toISOString(),
       dataSource: 'ibkr_api',
+      liveSessionVerified: true,
     });
 
     const composite = createCompositePortfolioDataProvider(uploadProvider);
@@ -119,7 +121,7 @@ describe('compositePortfolioDataProvider', () => {
     expect(snap.holdings).toHaveLength(0);
   });
 
-  it('uses fallback market quotes for IBKR holdings missing cache marks', async () => {
+  it('never supplies a cache/Yahoo quote fallback to the active IBKR snapshot', async () => {
     ibkrPortfolio.ENABLED = true;
     compositeMarketData.getCanonicalQuote.mockResolvedValue({
       symbol: 'CLOX',
@@ -130,55 +132,52 @@ describe('compositePortfolioDataProvider', () => {
       valid: true,
     });
     ibkrPortfolio.getPortfolioSnapshot.mockImplementation(async (accountId, quoteFn) => {
-      const quotes = await quoteFn(['CLOX']);
-      const quote = quotes.CLOX;
+      expect(quoteFn).toBeUndefined();
       return {
         holdings: [
           {
             symbol: 'CLOX',
             description: 'CLOX',
             quantity: 10,
-            price: quote?.mark ?? null,
-            marketValue: quote?.mark != null ? quote.mark * 10 : null,
+            price: null,
+            marketValue: null,
             costBasis: null,
             gainLoss: null,
             gainLossPercent: null,
             assetType: 'STK',
             assetClass: 'Equities',
             positionSource: 'ibkr_api',
-            priceSource: quote?.source || null,
-            warning: quote?.warning || 'missing_market_value',
+            priceSource: null,
+            warning: 'missing_market_value',
           },
         ],
-        summary: { totalValue: 255.9, positionCount: 1, longCount: 1, shortCount: 0 },
-        dataQuality: { status: 'ok', missingMarketValueCount: 0, warnings: [] },
+        summary: { totalValue: 0, positionCount: 1, longCount: 1, shortCount: 0 },
+        dataQuality: { status: 'partial', missingMarketValueCount: 1, warnings: ['missing'] },
         fetchedAt: '2026-06-18T18:40:30.000Z',
         dataSource: 'ibkr_api',
+        liveSessionVerified: true,
       };
     });
 
     const composite = createCompositePortfolioDataProvider(uploadProvider);
     const snap = await composite.getPortfolioSnapshot('U1');
 
-    expect(compositeMarketData.getCanonicalQuote).toHaveBeenCalledWith('CLOX');
-    expect(snap.holdings[0].marketValue).toBeCloseTo(255.9);
-    expect(snap.holdings[0].priceSource).toBe('yahoo');
-    expect(snap.holdings[0].warning).toContain('delayed_data');
-    expect(snap.dataQuality.status).toBe('ok');
+    expect(compositeMarketData.getCanonicalQuote).not.toHaveBeenCalled();
+    expect(snap.holdings[0].marketValue).toBeNull();
+    expect(snap.holdings[0].priceSource).toBeNull();
+    expect(snap.dataQuality.status).toBe('partial');
   });
 
-  it('keeps partial marks when cache and fallback quotes both fail', async () => {
+  it('rejects an IBKR-shaped snapshot without socket-verification proof', async () => {
     ibkrPortfolio.ENABLED = true;
     compositeMarketData.getCanonicalQuote.mockResolvedValue(null);
-    ibkrPortfolio.getPortfolioSnapshot.mockImplementation(async (accountId, quoteFn) => {
-      const quotes = await quoteFn(['CLOX']);
-      return {
+    ibkrPortfolio.getPortfolioSnapshot.mockResolvedValue({
         holdings: [
           {
             symbol: 'CLOX',
             description: 'CLOX',
             quantity: 10,
-            price: quotes.CLOX?.mark ?? null,
+            price: null,
             marketValue: null,
             assetType: 'STK',
             assetClass: 'Equities',
@@ -196,14 +195,17 @@ describe('compositePortfolioDataProvider', () => {
         },
         fetchedAt: '2026-06-18T18:40:30.000Z',
         dataSource: 'ibkr_api',
-      };
+        liveSessionVerified: false,
     });
 
     const composite = createCompositePortfolioDataProvider(uploadProvider);
     const snap = await composite.getPortfolioSnapshot('U1');
 
-    expect(compositeMarketData.getCanonicalQuote).toHaveBeenCalledWith('CLOX');
-    expect(snap.holdings[0].marketValue).toBeNull();
-    expect(snap.dataQuality.status).toBe('partial');
+    expect(compositeMarketData.getCanonicalQuote).not.toHaveBeenCalled();
+    expect(snap).toMatchObject({
+      dataSource: 'ibkr_offline',
+      liveSessionVerified: false,
+      holdings: [],
+    });
   });
 });

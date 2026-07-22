@@ -1,4 +1,9 @@
 const SUPPORTED_EQUITY_TYPES = new Set(['STK', 'ETF']);
+const SUPPORTED_IBKR_TYPES = new Set([...SUPPORTED_EQUITY_TYPES, 'IND']);
+
+const IBKR_CASH_INDEX_OVERRIDES = Object.freeze({
+  SPX: Object.freeze({ secType: 'IND', exchange: 'CBOE' }),
+});
 
 function normalizeProvider(provider) {
   const normalized = String(provider || 'auto').trim().toLowerCase();
@@ -26,7 +31,7 @@ function resolveInstrument(input) {
   if (typeof input === 'object') {
     const secType = (input.secType || 'STK').toUpperCase();
     const provider = normalizeProvider(input.provider);
-    const supportedByIbkr = SUPPORTED_EQUITY_TYPES.has(secType) && (provider === 'auto' || provider === 'ibkr');
+    const supportedByIbkr = SUPPORTED_IBKR_TYPES.has(secType) && (provider === 'auto' || provider === 'ibkr');
     if (secType === 'FORECAST' || secType === 'EVENT' || input.venue === 'ForecastEx') {
       return {
         symbol: input.symbol || '',
@@ -70,10 +75,11 @@ function resolveInstrument(input) {
     };
   }
 
+  const cashIndex = IBKR_CASH_INDEX_OVERRIDES[symbol];
   return {
     symbol,
-    secType: 'STK',
-    exchange: 'SMART',
+    secType: cashIndex?.secType || 'STK',
+    exchange: cashIndex?.exchange || 'SMART',
     currency: 'USD',
     provider: 'auto',
     supported: true,
@@ -106,6 +112,7 @@ function canUseSymbolStream(input) {
   const instrument = resolveInstrument(input);
   return Boolean(
     instrument.supported
+      && SUPPORTED_EQUITY_TYPES.has(instrument.secType)
       && instrument.conid == null
       && instrument.exchange === 'SMART'
       && instrument.currency === 'USD'
@@ -118,4 +125,5 @@ module.exports = {
   instrumentCacheKey,
   canUseSymbolStream,
   SUPPORTED_EQUITY_TYPES,
+  SUPPORTED_IBKR_TYPES,
 };

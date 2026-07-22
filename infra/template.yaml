@@ -1,0 +1,579 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Market Dashboard readiness, Gmail ingestion, and consolidated Hermes workers.
+
+Parameters:
+  GmailScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Kept disabled until production OAuth is promoted and the canary is ready.
+  QuantAnalystScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Enable only after the analyst worker canary is ready.
+  QuantDeveloperScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Enable only after the developer worker canary is ready.
+  SecurityScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Enable only after the security worker canary is ready.
+  OperationalAlarmsState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Alarm actions and missing-heartbeat evaluation enable after canary observation.
+  AlertEmail:
+    Type: String
+    Default: timsmithaviation@gmail.com
+  GmailOAuthSecretName:
+    Type: String
+    Default: hermes/gmail/oauth
+  RawArtifactBucketName:
+    Type: String
+    Default: market-dashboard-csv-data
+  GmailLedgerTableName:
+    Type: String
+    Default: HermesEmailIngestLedger
+  HedgeyeDailySnapshotTableName:
+    Type: String
+    Default: HedgeyeDailySnapshot
+  HedgeyeRiskRangesTableName:
+    Type: String
+    Default: HedgeyeRiskRanges
+  RiskRangeHistoryTableName:
+    Type: String
+    Default: RiskRangeData
+  HermesAgentRunsTableName:
+    Type: String
+    Default: HermesAgentRuns
+  HermesAlertsTableName:
+    Type: String
+    Default: HermesAlerts
+  BridgeHostId:
+    Type: String
+    Default: tim-market-dashboard
+  BuildVersion:
+    Type: String
+    Default: development
+
+Conditions:
+  OperationalAlarmsEnabled: !Equals [!Ref OperationalAlarmsState, ENABLED]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    Tracing: Active
+    Environment:
+      Variables:
+        BUILD_VERSION: !Ref BuildVersion
+        SERVICE_HEARTBEAT_TABLE: !Ref ServiceHeartbeatTable
+    Tags:
+      Application: market-dashboard
+      ManagedBy: aws-sam
+
+Resources:
+  ServiceHeartbeatTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: MarketDashboardServiceHeartbeats
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: serviceId
+          AttributeType: S
+        - AttributeName: observedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: serviceId
+          KeyType: HASH
+        - AttributeName: observedAt
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  HermesInputSnapshotTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: HermesInputSnapshots
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: hostId
+          AttributeType: S
+        - AttributeName: capturedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: hostId
+          KeyType: HASH
+        - AttributeName: capturedAt
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  ResearchEventLedgerV2:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: ResearchEventLedgerV2
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productKey
+          AttributeType: S
+        - AttributeName: eventKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productKey
+          KeyType: HASH
+        - AttributeName: eventKey
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  PredictionMarketCatalogV2:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: PredictionMarketCatalogV2
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: releaseKey
+          AttributeType: S
+        - AttributeName: contractKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: releaseKey
+          KeyType: HASH
+        - AttributeName: contractKey
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  RiskRangePublicationManifestsV2:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: RiskRangePublicationManifestsV2
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: publicationDate
+          AttributeType: S
+        - AttributeName: manifestType
+          AttributeType: S
+      KeySchema:
+        - AttributeName: publicationDate
+          KeyType: HASH
+        - AttributeName: manifestType
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  RuntimeFailureQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: market-dashboard-runtime-failures-v2
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  OperationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: market-dashboard-operations-v2
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  GmailIngestorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: market-dashboard-gmail-ingestor-v2
+      CodeUri: lambdas/gmail_ingestor/
+      Handler: hermes_gmail_ingestor.lambda_handler
+      Description: Cursor-based, immutable Hedgeye Gmail ingestion with typed auth state.
+      MemorySize: 512
+      Timeout: 300
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          GMAIL_OAUTH_SECRET_NAME: !Ref GmailOAuthSecretName
+          HERMES_GMAIL_ACCOUNT: !Ref AlertEmail
+          HERMES_GMAIL_QUERY: label:Hedgeye newer_than:365d
+          HERMES_LEDGER_TABLE: !Ref GmailLedgerTableName
+          HERMES_S3_BUCKET: !Ref RawArtifactBucketName
+          RESEARCH_EVENT_LEDGER_TABLE: !Ref ResearchEventLedgerV2
+          RISK_RANGE_MANIFEST_TABLE: !Ref RiskRangePublicationManifestsV2
+          HEDGEYE_RISK_RANGES_TABLE: !Ref HedgeyeRiskRangesTableName
+          RISK_RANGE_HISTORY_TABLE: !Ref RiskRangeHistoryTableName
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 900
+        MaximumRetryAttempts: 0
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt RuntimeFailureQueue.Arn
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GmailOAuthSecretName}*
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:TransactWriteItems
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GmailLedgerTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HedgeyeDailySnapshotTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HedgeyeRiskRangesTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RiskRangeHistoryTableName}
+                - !GetAtt ServiceHeartbeatTable.Arn
+                - !GetAtt ResearchEventLedgerV2.Arn
+                - !GetAtt RiskRangePublicationManifestsV2.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub arn:${AWS::Partition}:s3:::${RawArtifactBucketName}/*
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: MarketDashboard/Readiness
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt RuntimeFailureQueue.Arn
+
+  HermesWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: market-dashboard-hermes-worker-v2
+      CodeUri: lambdas/hermes_worker/
+      Handler: hermes_worker.lambda_handler
+      Description: Consolidated Hermes monitoring workers consuming verified outbound snapshots.
+      MemorySize: 256
+      Timeout: 60
+      ReservedConcurrentExecutions: 3
+      Environment:
+        Variables:
+          HERMES_INPUT_SNAPSHOT_TABLE: !Ref HermesInputSnapshotTable
+          HERMES_AGENT_RUNS_TABLE: !Ref HermesAgentRunsTableName
+          HERMES_ALERTS_TABLE: !Ref HermesAlertsTableName
+          HERMES_BRIDGE_HOST_ID: !Ref BridgeHostId
+          HERMES_MAX_SNAPSHOT_AGE_SECONDS: 180
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 900
+        MaximumRetryAttempts: 0
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt RuntimeFailureQueue.Arn
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !GetAtt HermesInputSnapshotTable.Arn
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource:
+                - !GetAtt ServiceHeartbeatTable.Arn
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HermesAgentRunsTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HermesAlertsTableName}
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: MarketDashboard/Readiness
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt RuntimeFailureQueue.Arn
+
+  SchedulerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: market-dashboard-scheduler-invoke-v2
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-owned-readiness-functions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt GmailIngestorFunction.Arn
+                  - !GetAtt HermesWorkerFunction.Arn
+
+  GmailPollSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: market-dashboard-gmail-v2-every-15m
+      Description: Gmail history poll; deliberately disabled until production OAuth promotion.
+      State: !Ref GmailScheduleState
+      ScheduleExpression: rate(15 minutes)
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt GmailIngestorFunction.Arn
+        RoleArn: !GetAtt SchedulerInvokeRole.Arn
+        Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-gmail-v2-every-15m","poll":"incremental"}'
+
+  QuantAnalystSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: market-dashboard-hermes-quant-analyst-v2
+      State: !Ref QuantAnalystScheduleState
+      ScheduleExpression: cron(0/15 9-16 ? * MON-FRI *)
+      ScheduleExpressionTimezone: America/New_York
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt HermesWorkerFunction.Arn
+        RoleArn: !GetAtt SchedulerInvokeRole.Arn
+        Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-hermes-quant-analyst-v2","jobType":"quant-analyst"}'
+
+  QuantDeveloperSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: market-dashboard-hermes-quant-developer-v2
+      State: !Ref QuantDeveloperScheduleState
+      ScheduleExpression: cron(5/15 8-18 ? * MON-FRI *)
+      ScheduleExpressionTimezone: America/New_York
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt HermesWorkerFunction.Arn
+        RoleArn: !GetAtt SchedulerInvokeRole.Arn
+        Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-hermes-quant-developer-v2","jobType":"quant-developer"}'
+
+  SecuritySchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: market-dashboard-hermes-security-v2
+      State: !Ref SecurityScheduleState
+      ScheduleExpression: cron(10 * ? * MON-FRI *)
+      ScheduleExpressionTimezone: America/New_York
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt HermesWorkerFunction.Arn
+        RoleArn: !GetAtt SchedulerInvokeRole.Arn
+        Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-hermes-security-v2","jobType":"security"}'
+
+  RuntimeFailureQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-runtime-failure-queue-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      AlarmDescription: Unexpected Lambda failures reached the no-retry operations queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RuntimeFailureQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OperationsTopic]
+
+  GmailHeartbeatMissingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-gmail-heartbeat-missing-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Heartbeat
+      Dimensions:
+        - Name: ServiceId
+          Value: gmail:timsmithaviation@gmail.com
+      Statistic: Sum
+      Period: 1800
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      AlarmActions: [!Ref OperationsTopic]
+
+  GmailUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-gmail-unhealthy-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Healthy
+      Dimensions:
+        - Name: ServiceId
+          Value: gmail:timsmithaviation@gmail.com
+      Statistic: Minimum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OperationsTopic]
+
+  AnalystHeartbeatMissingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-analyst-heartbeat-missing-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Heartbeat
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:quant-analyst
+      Statistic: Sum
+      Period: 1800
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      AlarmActions: [!Ref OperationsTopic]
+
+  AnalystUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-analyst-unhealthy-v2
+      AlarmDescription: Analyst ran on schedule but rejected its input or reported an unhealthy result.
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Healthy
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:quant-analyst
+      Statistic: Minimum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OperationsTopic]
+
+  DeveloperHeartbeatMissingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-developer-heartbeat-missing-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Heartbeat
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:quant-developer
+      Statistic: Sum
+      Period: 1800
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      AlarmActions: [!Ref OperationsTopic]
+
+  DeveloperUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-developer-unhealthy-v2
+      AlarmDescription: Developer ran on schedule but rejected its input or reported an unhealthy result.
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Healthy
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:quant-developer
+      Statistic: Minimum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OperationsTopic]
+
+  SecurityHeartbeatMissingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-security-heartbeat-missing-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Heartbeat
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:security
+      Statistic: Sum
+      Period: 7200
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      AlarmActions: [!Ref OperationsTopic]
+
+  SecurityUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-security-unhealthy-v2
+      AlarmDescription: Security ran on schedule but rejected its input or reported an unhealthy result.
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Healthy
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:security
+      Statistic: Minimum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OperationsTopic]
+
+Outputs:
+  ServiceHeartbeatTableName:
+    Value: !Ref ServiceHeartbeatTable
+  HermesInputSnapshotTableName:
+    Value: !Ref HermesInputSnapshotTable
+  GmailFunctionName:
+    Value: !Ref GmailIngestorFunction
+  HermesWorkerFunctionName:
+    Value: !Ref HermesWorkerFunction
+  OperationsTopicArn:
+    Value: !Ref OperationsTopic
+  RuntimeFailureQueueUrl:
+    Value: !Ref RuntimeFailureQueue

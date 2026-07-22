@@ -12,16 +12,57 @@ function sourceCardTestId(id) {
 
 const STATUS_DIALOG_WIDTH = 520;
 const STATUS_DIALOG_MARGIN = 16;
+const STATUS_DOT_MIN_HIT_TARGET = 24;
+
+function normalizeStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+
+  if (['active', 'current', 'live', 'connected', 'ready', 'open'].includes(normalized)) {
+    return 'active';
+  }
+
+  if (['failed', 'offline', 'unavailable'].includes(normalized)) {
+    return 'error';
+  }
+
+  if (['checking', 'loading', 'refreshing'].includes(normalized)) {
+    return 'loading';
+  }
+
+  return normalized || null;
+}
+
+function aggregateStatus(status, sourceRows) {
+  const explicitStatus = normalizeStatus(status);
+  if (!Array.isArray(sourceRows) || sourceRows.length === 0) {
+    return explicitStatus;
+  }
+
+  const statuses = sourceRows.map((source) => normalizeStatus(source?.status) || 'unknown');
+  if (explicitStatus) statuses.push(explicitStatus);
+
+  if (statuses.some((value) => ['inactive', 'defective', 'error', 'missing'].includes(value))) {
+    return 'inactive';
+  }
+  if (statuses.some((value) => value === 'unknown')) return 'unknown';
+  if (statuses.some((value) => value === 'stale')) return 'stale';
+  if (statuses.some((value) => value === 'delayed')) return 'delayed';
+  if (statuses.some((value) => value === 'loading')) return 'loading';
+  if (statuses.some((value) => value === 'historical')) return 'historical';
+  if (statuses.every((value) => value === 'active')) return 'active';
+
+  return 'unknown';
+}
 
 function getDisplayStatus(source, visibleRows = []) {
-  const rawStatus = String(source?.status || '').toLowerCase();
+  const rawStatus = normalizeStatus(source?.status);
   const rawDetail = String(source?.localeString || '').toLowerCase();
 
-  if (/checking|loading|refreshing/.test(rawStatus) || /checking|loading|refreshing/.test(rawDetail)) {
+  if (rawStatus === 'loading' || /checking|loading|refreshing/.test(rawDetail)) {
     return { label: 'Checking', className: 'text-slate-500' };
   }
 
-  if (rawStatus === 'current' || rawStatus === 'active') {
+  if (rawStatus === 'active') {
     return { label: 'Live', className: 'text-emerald-700' };
   }
 
@@ -57,7 +98,7 @@ function getDisplayStatus(source, visibleRows = []) {
 
   return visibleRows.length > 0
     ? { label: 'Error', className: 'text-[#b54708]' }
-    : { label: 'Live', className: 'text-emerald-700' };
+    : { label: 'Unknown', className: 'text-slate-500' };
 }
 
 function shouldShowDetailValue(source, displayLabel) {
@@ -167,9 +208,10 @@ const StatusDot = ({
         const activeWarnings = acknowledgeableRows.filter((detail) => !detail.acknowledged).length;
         const acknowledgedCount = acknowledgeableRows.length - activeWarnings;
         const warningResolved = Boolean(src.acknowledgeableStatus && acknowledgeableRows.length > 0 && activeWarnings === 0);
+        const effectiveSourceStatus = warningResolved ? (src.acknowledgedStatus || 'current') : src.status;
         return {
           ...src,
-          status: warningResolved ? (src.acknowledgedStatus || 'current') : src.status,
+          status: normalizeStatus(effectiveSourceStatus) || 'unknown',
           detail: warningResolved && src.acknowledgedDetail ? src.acknowledgedDetail : src.detail,
           acknowledgedCount,
           activeWarnings,
@@ -177,30 +219,30 @@ const StatusDot = ({
       })
     : null;
 
-  const effectiveStatus = (() => {
-    if (!effectiveSources || effectiveSources.length === 0) return status;
-    if (effectiveSources.some((src) => src.status === 'defective' || src.status === 'inactive')) return 'inactive';
-    if (effectiveSources.some((src) => src.status === 'stale')) return 'stale';
-    if (status === 'inactive' || status === 'defective') return status;
-    if (effectiveSources.some((src) => src.status === 'historical')) return 'historical';
-    return 'active';
+  const updatedDate = updatedAt ? new Date(updatedAt) : null;
+  const updatedTime = updatedDate?.getTime();
+  const hasValidUpdatedDate = Number.isFinite(updatedTime);
+  const hoursAgo = hasValidUpdatedDate ? (Date.now() - updatedTime) / (1000 * 60 * 60) : null;
+  const aggregateStatusValue = aggregateStatus(status, effectiveSources);
+  const effectiveStatus = aggregateStatusValue || (() => {
+    if (updatedAt && !hasValidUpdatedDate) return 'inactive';
+    if (hoursAgo == null) return 'unknown';
+    if (hoursAgo < 24) return 'active';
+    if (hoursAgo < 72) return 'stale';
+    return 'inactive';
   })();
 
   const effectiveEmoji = emoji && effectiveStatus === 'active'
     ? '🟢'
-    : emoji && effectiveStatus === 'stale'
+    : emoji && (effectiveStatus === 'stale' || effectiveStatus === 'delayed')
       ? '🟡'
       : emoji && effectiveStatus === 'historical'
         ? '🔵'
-      : emoji && (effectiveStatus === 'inactive' || effectiveStatus === 'defective')
+      : emoji && ['inactive', 'defective', 'error', 'missing'].includes(effectiveStatus)
         ? '🔴'
-        : emoji;
-
-  const updatedDate = updatedAt ? new Date(updatedAt) : null;
-
-  // Derive color: explicit status wins, otherwise based on age thresholds
-  const now = new Date();
-  const hoursAgo = updatedDate ? (now - updatedDate) / (1000 * 60 * 60) : null;
+        : emoji
+          ? '⚪'
+          : emoji;
 
   let colorClass = 'bg-gray-400';
   let colorTone = {
@@ -219,7 +261,7 @@ const StatusDot = ({
       ring: 'rgba(21, 128, 61, 0.42)',
       glow: 'rgba(34, 197, 94, 0.24)',
     };
-  } else if (effectiveStatus === 'inactive' || effectiveStatus === 'defective') {
+  } else if (['inactive', 'defective', 'error', 'missing'].includes(effectiveStatus)) {
     colorClass = 'bg-red-500';
     colorTone = {
       top: '#fecaca',
@@ -228,7 +270,7 @@ const StatusDot = ({
       ring: 'rgba(185, 28, 28, 0.42)',
       glow: 'rgba(239, 68, 68, 0.22)',
     };
-  } else if (effectiveStatus === 'stale') {
+  } else if (effectiveStatus === 'stale' || effectiveStatus === 'delayed') {
     colorClass = 'bg-yellow-500';
     colorTone = {
       top: '#fef3c7',
@@ -246,35 +288,6 @@ const StatusDot = ({
       ring: 'rgba(29, 78, 216, 0.38)',
       glow: 'rgba(59, 130, 246, 0.2)',
     };
-  } else if (hoursAgo != null) {
-    if (hoursAgo < 24) {
-      colorClass = 'bg-green-500';
-      colorTone = {
-        top: '#bbf7d0',
-        base: '#22c55e',
-        dark: '#15803d',
-        ring: 'rgba(21, 128, 61, 0.42)',
-        glow: 'rgba(34, 197, 94, 0.24)',
-      };
-    } else if (hoursAgo < 72) {
-      colorClass = 'bg-yellow-500';
-      colorTone = {
-        top: '#fef3c7',
-        base: '#f59e0b',
-        dark: '#b45309',
-        ring: 'rgba(180, 83, 9, 0.42)',
-        glow: 'rgba(245, 158, 11, 0.22)',
-      };
-    } else {
-      colorClass = 'bg-red-500';
-      colorTone = {
-        top: '#fecaca',
-        base: '#ef4444',
-        dark: '#b91c1c',
-        ring: 'rgba(185, 28, 28, 0.42)',
-        glow: 'rgba(239, 68, 68, 0.22)',
-      };
-    }
   }
 
   // Close on outside click / Escape
@@ -320,17 +333,6 @@ const StatusDot = ({
       calculatePosition();
     }
     setOpen((prev) => !prev);
-  };
-
-  const handleKeyDown = (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      if (!open) {
-        positionedByDragRef.current = false;
-        calculatePosition();
-      }
-      setOpen((prev) => !prev);
-    }
   };
 
   const clampPopoverPosition = useCallback((top, left) => {
@@ -554,18 +556,24 @@ const StatusDot = ({
           (() => {
             const { localeString } = formatLastUpdated(updatedDate || null);
             const dateOnly = formatDateOnly(updatedDate || null);
+            const displayStatus = getDisplayStatus({ status: effectiveStatus });
+            const statusRuleClass = displayStatus.label === 'Error' ? 'border-[#ead9b1]' : 'border-blue-100';
             return (
               <div className="divide-y divide-blue-100">
-                <section className="py-3 first:pt-1" data-testid="status-source-card-updated">
+                <section
+                  className="py-3 first:pt-1"
+                  data-testid="status-source-card-updated"
+                  data-status-tone={displayStatus.label.toLowerCase()}
+                >
                   <div className="flex items-baseline justify-between gap-4">
-                    <h3 className="min-w-0 text-[15px] font-normal leading-6 text-emerald-700">
+                    <h3 className={`min-w-0 text-[15px] font-normal leading-6 ${displayStatus.className}`}>
                       {label || 'Updated'}
                     </h3>
-                    <span className="shrink-0 text-right text-[15px] leading-6 text-emerald-700">
-                      Live
+                    <span className={`shrink-0 text-right text-[15px] leading-6 ${displayStatus.className}`}>
+                      {displayStatus.label}
                     </span>
                   </div>
-                  <div className="mt-2 border-t border-blue-100 pt-2">
+                  <div className={`mt-2 border-t pt-2 ${statusRuleClass}`}>
                     <div className="pl-4 whitespace-normal text-[12px] leading-5 text-slate-500">
                       {showDateOnly ? `Updated: ${dateOnly}` : `Last updated: ${localeString}`}
                     </div>
@@ -579,50 +587,70 @@ const StatusDot = ({
     </div>
   ) : null;
 
+  const visibleDotSize = size + (effectiveEmoji ? 2 : 0);
+  const hitTargetSize = Math.max(STATUS_DOT_MIN_HIT_TARGET, visibleDotSize);
+
   return (
     <div
       ref={containerRef}
       className={`relative inline-flex items-center ${className}`}
+      style={{ width: `${visibleDotSize}px`, height: `${visibleDotSize}px` }}
     >
       <button
         ref={buttonRef}
         type="button"
         onClick={handleToggle}
-        onKeyDown={handleKeyDown}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={
           label
-            ? `Show last updated time for ${label}`
-            : 'Show last updated time'
+            ? `Show status details for ${label}`
+            : 'Show status details'
         }
-        className={`appearance-none border-0 rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-indigo-500 ${
-          effectiveEmoji ? '' : colorClass
-        }`}
+        data-status={effectiveStatus}
+        className="absolute appearance-none border-0 rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-indigo-500"
         style={{
-          width: `${size + (effectiveEmoji ? 2 : 0)}px`,
-          height: `${size + (effectiveEmoji ? 2 : 0)}px`,
+          width: `${hitTargetSize}px`,
+          height: `${hitTargetSize}px`,
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
           padding: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: effectiveEmoji
-            ? 'transparent'
-            : `radial-gradient(circle at 32% 24%, #ffffff 0 10%, ${colorTone.top} 11% 28%, ${colorTone.base} 52%, ${colorTone.dark} 100%)`,
-          border: effectiveEmoji ? '0' : `1px solid ${colorTone.ring}`,
-          boxShadow: effectiveEmoji
-            ? 'none'
-            : `inset 0 1px 1px rgba(255,255,255,0.78), inset 0 -1px 1px rgba(15,23,42,0.2), 0 1px 2px rgba(15,23,42,0.16), 0 0 0 2px ${colorTone.glow}`,
+          background: 'transparent',
         }}
       >
-        {effectiveEmoji && (
-          <span
-            className="ticker-dot-emoji"
-            style={{ fontSize: '8px', lineHeight: 1 }}
-          >
-            {effectiveEmoji}
-          </span>
-        )}
+        <span
+          aria-hidden="true"
+          data-testid="status-dot-visual"
+          className={`rounded-full ${effectiveEmoji ? '' : colorClass}`}
+          style={{
+            width: `${visibleDotSize}px`,
+            height: `${visibleDotSize}px`,
+            flex: '0 0 auto',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: effectiveEmoji
+              ? 'transparent'
+              : `radial-gradient(circle at 32% 24%, #ffffff 0 10%, ${colorTone.top} 11% 28%, ${colorTone.base} 52%, ${colorTone.dark} 100%)`,
+            border: effectiveEmoji ? '0' : `1px solid ${colorTone.ring}`,
+            boxShadow: effectiveEmoji
+              ? 'none'
+              : `inset 0 1px 1px rgba(255,255,255,0.78), inset 0 -1px 1px rgba(15,23,42,0.2), 0 1px 2px rgba(15,23,42,0.16), 0 0 0 2px ${colorTone.glow}`,
+          }}
+        >
+          {effectiveEmoji && (
+            <span
+              className="ticker-dot-emoji"
+              style={{ fontSize: '8px', lineHeight: 1 }}
+            >
+              {effectiveEmoji}
+            </span>
+          )}
+        </span>
       </button>
 
       {popover && createPortal(popover, document.body)}

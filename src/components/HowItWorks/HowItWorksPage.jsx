@@ -68,7 +68,7 @@ const HowItWorksPage = ({ onBack }) => {
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = 'How It Works | Market Dashboard';
+    document.title = 'Dashboard System Guide | Market Dashboard';
     window.scrollTo?.(0, 0);
     return () => {
       document.title = previousTitle;
@@ -97,7 +97,7 @@ const HowItWorksPage = ({ onBack }) => {
         <button type="button" className="hiw-topbar-button" onClick={handleBack}>
           <span aria-hidden="true">←</span> Dashboard
         </button>
-        <span className="hiw-topbar-title">Market Dashboard / System Guide</span>
+        <span className="hiw-topbar-title">Dashboard System Guide / Technical Architecture</span>
         <button type="button" className="hiw-topbar-button hiw-theme-button" onClick={toggleTheme}>
           <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
           {theme === 'dark' ? 'Light' : 'Dark'}
@@ -106,8 +106,8 @@ const HowItWorksPage = ({ onBack }) => {
 
       <section className="hiw-hero" aria-labelledby="hiw-title">
         <div className="hiw-hero__copy">
-          <p className="hiw-kicker">Full-stack market intelligence · Technical portfolio</p>
-          <h1 id="hiw-title">How the dashboard works</h1>
+          <p className="hiw-kicker">Dashboard architecture · Technical system guide</p>
+          <h1 id="hiw-title">Dashboard System Guide</h1>
           <p className="hiw-hero__lede">
             I built this system to turn live portfolio state, cross-asset markets, published research,
             and explicit quantitative models into one inspectable decision-support workflow.
@@ -246,4 +246,3 @@ const HowItWorksPage = ({ onBack }) => {
 };
 
 export default HowItWorksPage;
-

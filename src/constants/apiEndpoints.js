@@ -37,6 +37,7 @@ export const ENDPOINTS = {
   RISK_RANGES: '/api/risk-ranges',
 
   // Workflow status
+  SYSTEM_READINESS: '/api/system-readiness',
   WORKFLOW_STATUS: '/api/workflow-status',
   HERMES_DIRECTOR_STATUS: '/api/hermes/director/status',
   HERMES_DIRECTOR_COMMAND: '/api/hermes/director/command',

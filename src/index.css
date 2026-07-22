@@ -4,6 +4,70 @@
 
 :root {
   --font-ui: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* Portfolio is the dashboard benchmark for directional color. */
+  --dashboard-positive: #059669;
+  --dashboard-positive-soft: #ecfdf5;
+  --dashboard-negative: #dc2626;
+  --dashboard-negative-soft: #fef2f2;
+}
+
+/* Use translucent versions of the same benchmark pair on dark surfaces. */
+.dark .dashboard-shell {
+  --dashboard-positive-soft: rgba(5, 150, 105, 0.16);
+  --dashboard-negative-soft: rgba(220, 38, 38, 0.16);
+}
+
+/*
+ * Normalize Tailwind directional utilities used by legacy dashboard panels.
+ * This keeps positive/long and negative/short colors aligned with Portfolio,
+ * RTA, and ETF Pro without changing neutral, warning, or informational colors.
+ */
+.dashboard-shell [class*="text-green-"],
+.dashboard-shell [class*="text-emerald-"] {
+  color: var(--dashboard-positive) !important;
+}
+
+.dashboard-shell [class*="text-red-"],
+.dashboard-shell [class*="text-rose-"] {
+  color: var(--dashboard-negative) !important;
+}
+
+.dashboard-shell [class*="bg-green-50"],
+.dashboard-shell [class*="bg-green-100"],
+.dashboard-shell [class*="bg-emerald-50"],
+.dashboard-shell [class*="bg-emerald-100"] {
+  background-color: var(--dashboard-positive-soft) !important;
+}
+
+.dashboard-shell [class*="bg-red-50"],
+.dashboard-shell [class*="bg-red-100"],
+.dashboard-shell [class*="bg-rose-50"],
+.dashboard-shell [class*="bg-rose-100"] {
+  background-color: var(--dashboard-negative-soft) !important;
+}
+
+.dashboard-shell [class*="bg-green-500"],
+.dashboard-shell [class*="bg-green-600"],
+.dashboard-shell [class*="bg-emerald-500"],
+.dashboard-shell [class*="bg-emerald-600"] {
+  background-color: var(--dashboard-positive) !important;
+}
+
+.dashboard-shell [class*="bg-red-500"],
+.dashboard-shell [class*="bg-red-600"],
+.dashboard-shell [class*="bg-rose-500"],
+.dashboard-shell [class*="bg-rose-600"] {
+  background-color: var(--dashboard-negative) !important;
+}
+
+.dashboard-shell [class*="border-green-"],
+.dashboard-shell [class*="border-emerald-"] {
+  border-color: var(--dashboard-positive) !important;
+}
+
+.dashboard-shell [class*="border-red-"],
+.dashboard-shell [class*="border-rose-"] {
+  border-color: var(--dashboard-negative) !important;
 }
 
 /* Keep every existing surface on one type system, including inline dashboard styles. */

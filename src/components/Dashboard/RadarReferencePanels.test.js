@@ -1,8 +1,13 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MarketDataService } from '../../services/api/marketDataService';
-import RadarReferencePanels, { getRowQuoteStatus, readManualRecord } from './RadarReferencePanels';
+import RadarReferencePanels, {
+  aggregateQuoteStatus,
+  CurrenciesPreview,
+  getRowQuoteStatus,
+  readManualRecord,
+} from './RadarReferencePanels';
 
 jest.mock('axios', () => ({ get: jest.fn() }));
 jest.mock('../../services/api/marketDataService', () => ({
@@ -11,10 +16,6 @@ jest.mock('../../services/api/marketDataService', () => ({
     getMarketShareVolume: jest.fn(),
   },
 }));
-jest.mock('./MultiRegionMarketOverview', () => ({
-  CurrenciesCompactRail: () => null,
-}));
-
 describe('radar reference data guards', () => {
   const now = new Date('2026-07-13T21:00:00.000Z').getTime();
 
@@ -35,6 +36,19 @@ describe('radar reference data guards', () => {
       freshness: 'current',
       quoteAsOf: '2026-07-13T20:59:00.000Z',
     }, null)).toBe('delayed');
+  });
+
+  it('reports mixed coverage when verified rows and missing rows coexist', () => {
+    expect(aggregateQuoteStatus([
+      {
+        availability: 'delayed',
+        source: 'yahoo',
+        dataType: 'delayed',
+        freshness: 'current',
+        quoteAsOf: '2026-07-13T20:59:00.000Z',
+      },
+      null,
+    ], null)).toBe('mixed');
   });
 
   it('rejects delayed public quotes beyond the four-day analytical cutoff', () => {
@@ -103,6 +117,54 @@ describe('radar reference data guards', () => {
     expect(record.lastEditedAt).toBe('2026-07-13T20:15:00.000Z');
     expect(record.rows.Value['1D']).toBe('0.2');
   });
+
+  it('shows verified delayed currency values and withholds the same row when stale', () => {
+    const delayedRow = {
+      symbol: 'EURUSD',
+      name: 'EUR/USD',
+      price: 1.15,
+      changePercent: 0.88,
+      thirtyDayChangePct: 2.5,
+      periodReturnsStatus: 'available',
+      availability: 'delayed',
+      source: 'yahoo',
+      dataType: 'delayed',
+      freshness: 'current',
+      quoteAsOf: '2026-07-13T20:59:00.000Z',
+    };
+    const { rerender } = render(<CurrenciesPreview rows={[delayedRow]} />);
+
+    let row = screen.getByRole('row', { name: /EUR\/USD/ });
+    expect(row).toHaveTextContent('1.150');
+    expect(row).toHaveTextContent('+0.88%');
+    expect(row).toHaveTextContent('+2.50%');
+
+    rerender(<CurrenciesPreview rows={[{ ...delayedRow, freshness: 'stale' }]} />);
+    row = screen.getByRole('row', { name: /EUR\/USD/ });
+    expect(within(row).getAllByRole('cell').slice(1).map(({ textContent }) => textContent))
+      .toEqual(['—', '—', '—']);
+  });
+
+  it('supports a larger guarded row limit for the split USD currency cards', () => {
+    const rows = Array.from({ length: 7 }, (_, index) => ({
+      symbol: `FX${index + 1}`,
+      name: `FX ${index + 1}`,
+      price: 1 + (index / 100),
+      changePercent: index / 10,
+      availability: 'delayed',
+      source: 'yahoo',
+      dataType: 'delayed',
+      freshness: 'current',
+      quoteAsOf: '2026-07-13T20:59:00.000Z',
+    }));
+
+    render(<CurrenciesPreview rows={rows} maxRows={6} ariaLabel="Expanded currencies" />);
+
+    const table = screen.getByRole('table', { name: 'Expanded currencies' });
+    expect(within(table).getAllByRole('row')).toHaveLength(7);
+    expect(within(table).getByText('FX 6')).toBeInTheDocument();
+    expect(within(table).queryByText('FX 7')).not.toBeInTheDocument();
+  });
 });
 
 describe('radar reference volume card', () => {
@@ -129,12 +191,15 @@ describe('radar reference volume card', () => {
     render(<RadarReferencePanels />);
 
     const referenceBar = screen.getByRole('region', { name: 'Normal / Reference' });
+    expect(within(referenceBar).queryByRole('heading', { name: 'Normal / Reference' })).not.toBeInTheDocument();
+    expect(within(referenceBar).queryByText('Select any panel for the full source view')).not.toBeInTheDocument();
     const cards = within(referenceBar).getAllByRole('region');
     const liquidity = screen.getByRole('region', { name: 'Dollar Liquidity' });
     const volume = screen.getByRole('region', { name: 'Volume' });
-    expect(cards).toHaveLength(6);
-    expect(cards[4]).toBe(liquidity);
-    expect(cards[5]).toBe(volume);
+    expect(cards).toHaveLength(5);
+    expect(cards[3]).toBe(liquidity);
+    expect(cards[4]).toBe(volume);
+    expect(within(referenceBar).queryByRole('region', { name: 'Currencies' })).not.toBeInTheDocument();
     await within(volume).findByLabelText('UNAVAILABLE');
   });
 
@@ -148,7 +213,7 @@ describe('radar reference volume card', () => {
       meta: {
         status: 'provisional',
         asOfTradingDate: '2026-07-10',
-        uploadDate: '2026-07-13',
+        uploadDate: new Date().toISOString(),
         methodologyVersion: 'hedgeye-volume-slide-direct-v1',
       },
     });
@@ -158,7 +223,14 @@ describe('radar reference volume card', () => {
     const panel = screen.getByRole('region', { name: 'Volume' });
     const chip = await within(panel).findByLabelText('PROVISIONAL · AS OF JUL 10');
     expect(chip).toHaveAttribute('data-status', 'delayed');
-    expect(chip).toHaveClass('efr-status-chip--delayed');
+    expect(chip).toHaveClass('efr-status-chip--delayed', 'efr-status-chip--indicator-only');
+    expect(chip).toHaveAttribute('title', 'PROVISIONAL · AS OF JUL 10');
+    fireEvent.click(chip);
+    const statusDialog = screen.getByRole('dialog', { name: 'Volume data status' });
+    expect(within(statusDialog).getByText('The latest dataset is preliminary and may be incomplete.'))
+      .toBeInTheDocument();
+    expect(within(panel).queryByText('PROVISIONAL')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('AS OF JUL 10')).not.toBeInTheDocument();
   });
 
   test.each([
