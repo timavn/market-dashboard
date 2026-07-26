@@ -24,8 +24,19 @@ async function sidecarRequest(path, options = {}) {
 
     const text = await res.text();
     if (!res.ok) {
-      const err = new Error(`IBKR sidecar HTTP ${res.status}: ${text.slice(0, 150)}`);
+      let errorCode = null;
+      try {
+        const payload = text ? JSON.parse(text) : null;
+        errorCode =
+          typeof payload?.errorCode === 'string'
+            ? payload.errorCode
+            : null;
+      } catch (_error) {
+        errorCode = null;
+      }
+      const err = new Error(`IBKR sidecar HTTP ${res.status}`);
       err.status = res.status;
+      err.sidecarCode = errorCode;
       throw err;
     }
     return text ? JSON.parse(text) : {};

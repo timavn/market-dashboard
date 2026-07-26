@@ -23,6 +23,20 @@
       "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchEventLedgerV2"
     },
     {
+      "Sid": "ReadPortfolioResearchIntelligence",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchEntityEventsV1",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchEntityEventsV1/index/marketDate-index",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchProductManifestsV1"
+      ]
+    },
+    {
       "Sid": "ReadExpectedRiskRangePublication",
       "Effect": "Allow",
       "Action": [

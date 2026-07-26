@@ -34,6 +34,7 @@ describe('compositePortfolioDataProvider', () => {
           symbol: 'AAPL',
           description: 'AAPL',
           quantity: 1,
+          avgCost: 90,
           price: 100,
           marketValue: 100,
           costBasis: 90,
@@ -59,6 +60,49 @@ describe('compositePortfolioDataProvider', () => {
     const composite = createCompositePortfolioDataProvider(uploadProvider);
     const snap = await composite.getPortfolioSnapshot();
     expect(snap.dataSource).toBe('ibkr_api');
+    expect(snap.holdings[0].avgCost).toBe(90);
+  });
+
+  it('preserves reference-mark warmup provenance for row-level status rendering', async () => {
+    ibkrPortfolio.ENABLED = true;
+    ibkrPortfolio.getPortfolioSnapshot.mockResolvedValue({
+      holdings: [
+        {
+          symbol: 'AAPL',
+          description: 'AAPL',
+          quantity: 1,
+          price: null,
+          marketValue: null,
+          costBasis: 90,
+          gainLoss: null,
+          gainLossPercent: null,
+          assetType: 'STK',
+          assetClass: 'Equities',
+          positionSource: 'ibkr_live_session',
+          priceSource: null,
+          priceState: 'unavailable',
+          marketValueState: 'unavailable',
+          markPending: true,
+          markWarmState: 'warming',
+          warning: 'reference_mark_warming',
+        },
+      ],
+      summary: { totalValue: 100, positionCount: 1, longCount: 1, shortCount: 0 },
+      fetchedAt: new Date().toISOString(),
+      dataSource: 'ibkr_api',
+      liveSessionVerified: true,
+    });
+
+    const composite = createCompositePortfolioDataProvider(uploadProvider);
+    const snap = await composite.getPortfolioSnapshot('U1');
+
+    expect(snap.holdings[0]).toMatchObject({
+      priceState: 'unavailable',
+      marketValueState: 'unavailable',
+      markPending: true,
+      markWarmState: 'warming',
+      warning: 'reference_mark_warming',
+    });
   });
 
   it('uses upload when source=upload', async () => {

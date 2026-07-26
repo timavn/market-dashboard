@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+"""Tests for immutable per-entity research indexing and manifests."""
+
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+from copy import deepcopy
+from pathlib import Path
+
+from botocore.exceptions import ClientError
+
+
+os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parents[1] / "lambdas" / "gmail_ingestor"),
+)
+
+import research_intelligence as intelligence  # noqa: E402
+
+
+def conditional_failure() -> ClientError:
+    return ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException", "Message": "exists"}},
+        "PutItem",
+    )
+
+
+class FakeTable:
+    def __init__(self, key_fields):
+        self.key_fields = key_fields
+        self.items = {}
+
+    def _key(self, item):
+        return tuple(item[field] for field in self.key_fields)
+
+    def get_item(self, *, Key, **_kwargs):
+        item = self.items.get(self._key(Key))
+        return {"Item": deepcopy(item)} if item else {}
+
+    def put_item(
+        self,
+        *,
+        Item,
+        ConditionExpression=None,
+        ExpressionAttributeValues=None,
+        **_kwargs,
+    ):
+        key = self._key(Item)
+        existing = self.items.get(key)
+        if existing and ConditionExpression:
+            expected = (ExpressionAttributeValues or {}).get(":expectedVersion")
+            if expected is None or int(existing.get("version", 0)) != int(expected):
+                raise conditional_failure()
+        self.items[key] = deepcopy(Item)
+        return {}
+
+
+class FakeDynamoDb:
+    def __init__(self):
+        self.events = FakeTable(("entityKey", "eventKey"))
+        self.manifests = FakeTable(("marketDate", "productKey"))
+
+    def Table(self, name):
+        if name == intelligence.ENTITY_EVENTS_TABLE:
+            return self.events
+        if name == intelligence.PRODUCT_MANIFEST_TABLE:
+            return self.manifests
+        raise AssertionError(name)
+
+
+def snapshot(product, message_id, data, article=None):
+    return {
+        "date": "2026-07-23",
+        "snapshotType": product,
+        "publishedAt": "2026-07-23T12:00:00+00:00",
+        "scrapedAt": "2026-07-23T12:05:00+00:00",
+        "gmailMessageId": message_id,
+        "htmlSource": f"hedgeye-email/{message_id}.html",
+        "data": data,
+        "article": article or {},
+    }
+
+
+class ResearchIntelligenceTests(unittest.TestCase):
+    def test_registry_is_the_signal_authority(self):
+        self.assertTrue(
+            intelligence.product_definition("risk-ranges")["authorities"]["trend"]
+        )
+        self.assertFalse(
+            intelligence.product_definition("early-look")["authorities"]["trend"]
+        )
+        self.assertTrue(
+            intelligence.product_definition("momo-tracker")["authorities"]["trade"]
+        )
+        self.assertEqual(
+            intelligence.product_definition("momo-tracker")["validationRule"],
+            "published_trade_signals",
+        )
+
+    def test_extracts_structured_tickers_aliases_and_typed_exposures(self):
+        item = snapshot(
+            "the-call",
+            "call-1",
+            {"longs": ["Healthcare (XLV)"], "shorts": [], "neutrals": []},
+            {
+                "summary": (
+                    "DDOG remains in focus while software and technology leadership improves."
+                )
+            },
+        )
+
+        references = intelligence.extract_entity_references(item)
+        keys = {reference["entityKey"] for reference in references}
+
+        self.assertIn("ticker#XLV", keys)
+        self.assertIn("ticker#DDOG", keys)
+        self.assertIn("sector#technology", keys)
+        technology = next(
+            reference
+            for reference in references
+            if reference["entityKey"] == "sector#technology"
+        )
+        self.assertEqual(technology["matchType"], "sector_reference")
+        self.assertEqual(technology["exposureType"], "sector")
+        self.assertEqual(technology["exposureId"], "technology")
+        self.assertEqual(technology["exposureLabel"], "Technology")
+        self.assertIn("software", technology["excerpt"].lower())
+
+    def test_emits_factor_sector_country_commodity_and_macro_entity_types(self):
+        item = snapshot(
+            "the-macro-show",
+            "macro-exposures",
+            {},
+            {
+                "summary": (
+                    "Growth leadership held in United States equities while "
+                    "technology strengthened, gold outperformed WTI, and the "
+                    "DXY dollar index moved higher."
+                )
+            },
+        )
+
+        events = intelligence.build_entity_events(
+            item,
+            content_sha256="9" * 64,
+        )
+        by_key = {event["entityKey"]: event for event in events}
+
+        expected = {
+            "factor#growth": ("factor", "growth"),
+            "sector#technology": ("sector", "technology"),
+            "country#united-states": ("country", "united-states"),
+            "commodity#gold": ("commodity", "gold"),
+            "commodity#crude-oil": ("commodity", "crude-oil"),
+            "macro#us-dollar": ("macro", "us-dollar"),
+        }
+        for entity_key, (exposure_type, exposure_id) in expected.items():
+            with self.subTest(entity_key=entity_key):
+                self.assertIn(entity_key, by_key)
+                self.assertEqual(
+                    by_key[entity_key]["exposureType"],
+                    exposure_type,
+                )
+                self.assertEqual(
+                    by_key[entity_key]["exposureId"],
+                    exposure_id,
+                )
+                self.assertTrue(by_key[entity_key]["exposureLabel"])
+                self.assertTrue(by_key[entity_key]["excerpt"])
+                self.assertEqual(by_key[entity_key]["schemaVersion"], 2)
+
+        self.assertIn(
+            "technology strengthened",
+            by_key["sector#technology"]["excerpt"].lower(),
+        )
+
+    def test_alias_canonicalization_and_boilerplate_rejection(self):
+        item = snapshot(
+            "early-look",
+            "early-1",
+            {"SPX": {"lrr": 6200, "hrr": 6300, "trend": "BULLISH"}},
+            {"bodyText": "THE MAIN SUMMARY FOR TODAY"},
+        )
+        references = intelligence.extract_entity_references(item)
+        keys = {reference["entityKey"] for reference in references}
+
+        self.assertIn("ticker#SPY", keys)
+        self.assertNotIn("ticker#THE", keys)
+        self.assertNotIn("ticker#MAIN", keys)
+        self.assertNotIn("ticker#TODAY", keys)
+
+    def test_same_day_publications_are_immutable_and_manifested_separately(self):
+        database = FakeDynamoDb()
+        first = snapshot(
+            "signal-strength",
+            "signal-1",
+            {"added": ["DDOG"], "removed": []},
+        )
+        second = snapshot(
+            "signal-strength",
+            "signal-2",
+            {"added": [], "removed": ["DDOG"]},
+        )
+
+        first_count = intelligence.persist_snapshot_intelligence(
+            first,
+            database,
+            content_sha256="a" * 64,
+        )
+        second_count = intelligence.persist_snapshot_intelligence(
+            second,
+            database,
+            content_sha256="b" * 64,
+        )
+
+        self.assertGreater(first_count, 0)
+        self.assertGreater(second_count, 0)
+        manifest = database.manifests.items[("2026-07-23", "signal-strength")]
+        self.assertEqual(manifest["state"], "indexed")
+        self.assertEqual(manifest["receivedCount"], 2)
+        self.assertEqual(manifest["indexedCount"], 2)
+        self.assertEqual(
+            {artifact["artifactId"] for artifact in manifest["artifacts"]},
+            {"a" * 64, "b" * 64},
+        )
+        self.assertEqual(
+            [
+                transition["stage"]
+                for transition in manifest["artifacts"][0]["stageHistory"]
+            ],
+            ["received", "parsed", "validated", "indexed"],
+        )
+        self.assertEqual(
+            manifest["manifestChecksum"],
+            intelligence._manifest_checksum(manifest["artifacts"]),
+        )
+        self.assertEqual(
+            {artifact["contentSha256"] for artifact in manifest["artifacts"]},
+            {"a" * 64, "b" * 64},
+        )
+        event_keys = {
+            item["eventKey"] for item in database.events.items.values()
+        }
+        self.assertEqual(len(event_keys), len(database.events.items))
+
+    def test_zero_references_is_indexed_not_a_parse_failure(self):
+        database = FakeDynamoDb()
+        item = snapshot(
+            "market-structure",
+            "structure-1",
+            {"summary": "Rates were unchanged."},
+        )
+
+        count = intelligence.persist_snapshot_intelligence(
+            item,
+            database,
+            content_sha256="c" * 64,
+        )
+
+        self.assertEqual(count, 0)
+        manifest = database.manifests.items[("2026-07-23", "market-structure")]
+        self.assertEqual(manifest["state"], "indexed")
+        self.assertEqual(manifest["entityEventCount"], 0)
+
+    def test_chart_only_tracker_stops_at_parsed_without_trade_authority(self):
+        database = FakeDynamoDb()
+        item = snapshot(
+            "momo-tracker",
+            "momo-chart-only",
+            {"momo-chart.png": {"chartUrl": "https://example.test/chart.png"}},
+        )
+
+        count = intelligence.persist_snapshot_intelligence(
+            item,
+            database,
+            content_sha256="d" * 64,
+        )
+
+        self.assertEqual(count, 0)
+        manifest = database.manifests.items[("2026-07-23", "momo-tracker")]
+        self.assertEqual(manifest["state"], "parsed")
+        self.assertEqual(manifest["receivedCount"], 1)
+        self.assertEqual(manifest["parsedCount"], 1)
+        self.assertEqual(manifest["indexedCount"], 0)
+
+    def test_nested_bitcoin_tracker_rows_are_signals_not_container_tickers(self):
+        item = snapshot(
+            "bitcoin-trend-tracker",
+            "bitcoin-1",
+            {
+                "cryptos": {
+                    "BTC": {
+                        "buyTrade": 100_000,
+                        "sellTrade": 110_000,
+                        "trend": "BULLISH",
+                    }
+                },
+                "stocks": {
+                    "IBIT": {
+                        "buyTrade": 60,
+                        "sellTrade": 70,
+                        "trend": "BEARISH",
+                    }
+                },
+            },
+        )
+
+        events = intelligence.build_entity_events(
+            item,
+            content_sha256="e" * 64,
+        )
+        by_key = {event["entityKey"]: event for event in events}
+
+        self.assertEqual(by_key["ticker#BTC"]["signalValue"], "BULLISH")
+        self.assertEqual(by_key["ticker#IBIT"]["signalValue"], "BEARISH")
+        self.assertNotIn("ticker#CRYPTOS", by_key)
+        self.assertNotIn("ticker#STOCKS", by_key)
+
+    def test_content_hash_deduplicates_replayed_publication_across_messages(self):
+        first = snapshot(
+            "signal-strength",
+            "signal-original",
+            {"added": ["DDOG"], "removed": []},
+        )
+        duplicate = snapshot(
+            "signal-strength",
+            "signal-forwarded",
+            {"added": ["DDOG"], "removed": []},
+        )
+
+        first_events = intelligence.build_entity_events(
+            first,
+            content_sha256="f" * 64,
+        )
+        duplicate_events = intelligence.build_entity_events(
+            duplicate,
+            content_sha256="f" * 64,
+        )
+
+        self.assertEqual(
+            {event["eventKey"] for event in first_events},
+            {event["eventKey"] for event in duplicate_events},
+        )
+        self.assertEqual(
+            {event["sourceEventId"] for event in first_events},
+            {"f" * 64},
+        )
+
+    def test_unverified_primary_risk_events_are_explicitly_non_decision_grade(self):
+        item = snapshot(
+            "risk-ranges",
+            "risk-candidate",
+            {"SPX": {"lrr": 6200, "hrr": 6300, "trend": "BULLISH"}},
+        )
+
+        events = intelligence.build_entity_events(
+            item,
+            content_sha256="1" * 64,
+        )
+
+        self.assertTrue(events)
+        self.assertTrue(all(event["decisionEligible"] is False for event in events))
+        self.assertTrue(
+            all(
+                event["verificationStatus"]
+                == "requires-primary-publication-manifest"
+                for event in events
+            )
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

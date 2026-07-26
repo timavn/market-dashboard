@@ -1,6 +1,7 @@
 const BETA_WINDOW_RETURNS = 252;
 const MIN_BETA_RETURNS = 126;
 const ATR_PERIOD = 14;
+const Z_SCORE_PERIOD = 20;
 const DEFAULT_SOURCE = 'Yahoo Finance chart API';
 
 const REASONS = Object.freeze({
@@ -12,6 +13,7 @@ const REASONS = Object.freeze({
   INVALID_SYMBOL: 'invalid_symbol',
   UNSUPPORTED_SOURCE: 'unsupported_source',
   ZERO_BENCHMARK_VARIANCE: 'zero_benchmark_variance',
+  ZERO_PRICE_STANDARD_DEVIATION: 'zero_price_standard_deviation',
 });
 
 function finiteNumber(value) {
@@ -240,6 +242,10 @@ function calculateAlignedBeta(securityBars, benchmarkBars, options = {}) {
   return {
     status: 'available',
     value: round(covariance / benchmarkVariance),
+    calculation: {
+      covarianceSum: round(covariance, 10),
+      benchmarkVarianceSum: round(benchmarkVariance, 10),
+    },
     source,
     asOf,
     observations: selected.length,
@@ -296,6 +302,58 @@ function calculateAtr14(bars, options = {}) {
   return {
     status: 'available',
     value: round(selected.reduce((sum, row) => sum + row.value, 0) / periodSessions),
+    source,
+    asOf,
+    observations: selected.length,
+    reason: null,
+    ...common,
+  };
+}
+
+function calculatePriceZScore20(bars, options = {}) {
+  const source = options.source || DEFAULT_SOURCE;
+  const periodSessions = Number.isInteger(options.periodSessions)
+    ? options.periodSessions
+    : Z_SCORE_PERIOD;
+  const selected = normalizeAdjustedPriceBars(bars)
+    .filter((row) => row.adjustedClose != null)
+    .slice(-periodSessions);
+  const asOf = selected.length > 0 ? selected[selected.length - 1].date : null;
+  const common = {
+    periodSessions,
+    priceBasis: 'completed adjusted daily close',
+  };
+
+  if (selected.length < periodSessions) {
+    return unavailableValueMetric({
+      source,
+      asOf,
+      observations: selected.length,
+      reason: REASONS.INSUFFICIENT_PRICE_HISTORY,
+      extra: common,
+    });
+  }
+
+  const mean = selected.reduce((sum, row) => sum + row.adjustedClose, 0) / periodSessions;
+  const variance = selected.reduce(
+    (sum, row) => sum + ((row.adjustedClose - mean) ** 2),
+    0,
+  ) / periodSessions;
+  const standardDeviation = Math.sqrt(variance);
+
+  if (!Number.isFinite(standardDeviation) || standardDeviation <= 0) {
+    return unavailableValueMetric({
+      source,
+      asOf,
+      observations: selected.length,
+      reason: REASONS.ZERO_PRICE_STANDARD_DEVIATION,
+      extra: common,
+    });
+  }
+
+  return {
+    status: 'available',
+    value: round((selected[selected.length - 1].adjustedClose - mean) / standardDeviation),
     source,
     asOf,
     observations: selected.length,
@@ -529,6 +587,14 @@ function createUnavailableSecurityRiskMetrics({
       priceBasis: 'adjusted daily high, low, and prior close',
     },
   });
+  const zScore20 = unavailableValueMetric({
+    source,
+    reason,
+    extra: {
+      periodSessions: Z_SCORE_PERIOD,
+      priceBasis: 'completed adjusted daily close',
+    },
+  });
   const records = {
     status: 'unavailable',
     priorAllTimeHigh: null,
@@ -554,6 +620,7 @@ function createUnavailableSecurityRiskMetrics({
     observations: 0,
     beta,
     atr14,
+    zScore20,
     records,
     priceStructure,
     provenance,
@@ -592,19 +659,21 @@ function buildSecurityRiskMetrics({
 
   const beta = calculateAlignedBeta(normalized, benchmarkBars, { source });
   const atr14 = calculateAtr14(normalized, { source });
+  const zScore20 = calculatePriceZScore20(normalized, { source });
   const records = calculatePriorAllTimePrices(normalized, { source, beforeDate: recordsBeforeDate });
   const priceStructure = calculatePriceStructureRun(normalized);
-  const availableCount = [beta, atr14, records, priceStructure]
+  const availableCount = [beta, atr14, zScore20, records, priceStructure]
     .filter((metric) => metric.status === 'available').length;
 
   return {
     symbol: normalizedSymbol,
-    status: availableCount === 4 ? 'available' : (availableCount > 0 ? 'partial' : 'unavailable'),
+    status: availableCount === 5 ? 'available' : (availableCount > 0 ? 'partial' : 'unavailable'),
     source,
     asOf: normalized[normalized.length - 1].date,
     observations: normalized.length,
     beta,
     atr14,
+    zScore20,
     records,
     priceStructure,
     provenance,
@@ -618,6 +687,7 @@ module.exports = {
   BETA_WINDOW_RETURNS,
   DEFAULT_SOURCE,
   MIN_BETA_RETURNS,
+  Z_SCORE_PERIOD,
   REASONS,
   buildAdjustedReturns,
   buildSecurityRiskMetrics,
@@ -625,6 +695,8 @@ module.exports = {
   calculateAlignedBeta,
   calculateAtr14,
   calculateBeta: calculateAlignedBeta,
+  calculatePriceZScore20,
+  calculateZScore20: calculatePriceZScore20,
   calculatePriorAllTimePrices,
   calculatePriorAllTimeRange: calculatePriorAllTimePrices,
   calculatePriceStructureRun,

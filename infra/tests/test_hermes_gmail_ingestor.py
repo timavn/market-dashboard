@@ -353,6 +353,108 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(database.heartbeat.writes[-1]["serviceId"], ingestor.GMAIL_SERVICE_ID)
         self.assertEqual(database.heartbeat.writes[-1]["triggerSource"], "aws-scheduler")
 
+    def test_auth_probe_validates_oauth_without_listing_or_materializing_messages(self):
+        ledger = FakeLedgerTable()
+        database = FakeRuntimeDynamoDb(ledger)
+        secret = {
+            "client_id": "client",
+            "client_secret": "secret",
+            "refresh_token": "refresh",
+            "user_id": "me",
+            "_secret_version": "version-probe",
+        }
+
+        with patch.object(ingestor, "dynamodb", database), patch.object(
+            ingestor, "cloudwatch", MagicMock()
+        ), patch.object(ingestor, "load_oauth_secret", return_value=secret), patch.object(
+            ingestor, "refresh_access_token", return_value="access"
+        ), patch.object(
+            ingestor, "read_ingestion_state", return_value={}
+        ) as read_state, patch.object(
+            ingestor, "get_profile_history_id", return_value="profile-history"
+        ) as get_profile, patch.object(
+            ingestor, "list_message_ids"
+        ) as list_messages, patch.object(
+            ingestor, "list_history_message_ids"
+        ) as list_history, patch.object(
+            ingestor, "process_message"
+        ) as process_message, patch.object(
+            ingestor, "write_ingestion_state"
+        ) as write_state:
+            response = ingestor.lambda_handler(
+                {
+                    "source": "activation-canary",
+                    "scheduleId": "market-dashboard-gmail-v2-activation-canary",
+                    "authProbeOnly": True,
+                    "forceAuthProbe": True,
+                },
+                None,
+            )
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(body["status"], "SUCCESS")
+        self.assertEqual(body["pollMode"], "auth_probe")
+        read_state.assert_not_called()
+        get_profile.assert_called_once_with("access", "me")
+        list_messages.assert_not_called()
+        list_history.assert_not_called()
+        process_message.assert_not_called()
+        write_state.assert_not_called()
+        heartbeat = database.heartbeat.writes[-1]
+        self.assertEqual(heartbeat["status"], "success")
+        self.assertEqual(
+            heartbeat["serviceId"],
+            f"{ingestor.GMAIL_SERVICE_ID}:manual",
+        )
+        self.assertFalse(heartbeat["scheduled"])
+
+    def test_auth_probe_reports_insufficient_readonly_scope_with_typed_failure(self):
+        ledger = FakeLedgerTable()
+        database = FakeRuntimeDynamoDb(ledger)
+        secret = {
+            "client_id": "client",
+            "client_secret": "secret",
+            "refresh_token": "refresh",
+            "user_id": "me",
+            "_secret_version": "version-probe",
+        }
+
+        with patch.object(ingestor, "dynamodb", database), patch.object(
+            ingestor, "cloudwatch", MagicMock()
+        ), patch.object(ingestor, "load_oauth_secret", return_value=secret), patch.object(
+            ingestor, "refresh_access_token", return_value="access"
+        ), patch.object(
+            ingestor, "read_ingestion_state", return_value={}
+        ), patch.object(
+            ingestor,
+            "get_profile_history_id",
+            side_effect=RuntimeError(
+                "GET Gmail profile failed with HTTP 403: insufficientPermissions"
+            ),
+        ), patch.object(
+            ingestor, "list_message_ids"
+        ) as list_messages:
+            response = ingestor.lambda_handler(
+                {
+                    "source": "activation-canary",
+                    "scheduleId": "market-dashboard-gmail-v2-activation-canary",
+                    "authProbeOnly": True,
+                    "forceAuthProbe": True,
+                },
+                None,
+            )
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 503)
+        self.assertEqual(body["status"], "ERROR")
+        self.assertEqual(body["errorCode"], "GMAIL_SCOPE_INSUFFICIENT")
+        list_messages.assert_not_called()
+        self.assertEqual(
+            database.heartbeat.writes[-1]["errorCode"],
+            "GMAIL_SCOPE_INSUFFICIENT",
+        )
+
     def test_history_listing_drains_more_than_the_old_500_message_limit(self):
         first = {
             "history": [{
@@ -961,7 +1063,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual([item["filename"] for item in result["skipped"]], ["one.csv"])
         self.assertEqual([item["filename"] for item in result["stored"]], ["two.csv"])
         self.assertEqual(s3_client.put_object.call_count, 1)
-        self.assertEqual(table.items[("gmail-partial", "inline-two")]["status"], "STORED")
+        self.assertEqual(table.items[("gmail-partial", "inline-two")]["status"], "UNSUPPORTED")
         self.assertEqual(
             table.items[("gmail-partial", ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]["status"],
             "MESSAGE_PROCESSED",
@@ -1013,7 +1115,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
 
         self.assertEqual(result["stored"][0]["filename"], "report.csv")
         self.assertEqual(s3_client.put_object.call_count, 1)
-        self.assertEqual(table.items[("gmail-crash", "inline-file")]["status"], "STORED")
+        self.assertEqual(table.items[("gmail-crash", "inline-file")]["status"], "UNSUPPORTED")
         self.assertEqual(
             table.items[("gmail-crash", ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]["status"],
             "MESSAGE_PROCESSED",
@@ -1066,6 +1168,101 @@ class HermesGmailIngestorTests(unittest.TestCase):
             ("gmail-active", ingestor.MESSAGE_LEDGER_ATTACHMENT_ID), table.items
         )
 
+    def test_textract_error_attachment_is_immediately_retryable(self):
+        table = FakeLedgerTable(
+            [
+                {
+                    "messageId": "gmail-pdf-error",
+                    "attachmentId": "attachment-pdf",
+                    "status": "TEXTRACT_ERROR",
+                    "filename": "signal-strength.pdf",
+                    "mimeType": "application/pdf",
+                    "reportType": "signal-strength",
+                    "updatedAt": "2026-07-15T11:59:00+00:00",
+                }
+            ]
+        )
+
+        claimed = ingestor.claim_attachment(
+            table,
+            message_id="gmail-pdf-error",
+            attachment_id="attachment-pdf",
+            headers={"subject": "Signal Strength"},
+            filename="signal-strength.pdf",
+            mime_type="application/pdf",
+            report_type="signal-strength",
+        )
+
+        self.assertTrue(claimed)
+        self.assertEqual(
+            table.items[("gmail-pdf-error", "attachment-pdf")]["status"],
+            "IN_PROGRESS",
+        )
+
+    def test_stale_pdf_projection_stage_is_reclaimed_but_active_stage_is_not(self):
+        now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+        stale = FakeLedgerTable(
+            [
+                {
+                    "messageId": "gmail-pdf-stale",
+                    "attachmentId": "attachment-pdf",
+                    "status": "VALIDATED",
+                    "filename": "the-call.pdf",
+                    "mimeType": "application/pdf",
+                    "reportType": "the-call",
+                    "createdAt": "2026-07-15T09:00:00+00:00",
+                    "updatedAt": "2026-07-15T10:00:00+00:00",
+                }
+            ]
+        )
+        active = FakeLedgerTable(
+            [
+                {
+                    "messageId": "gmail-pdf-active",
+                    "attachmentId": "attachment-pdf",
+                    "status": "PARSED",
+                    "filename": "the-call.pdf",
+                    "mimeType": "application/pdf",
+                    "reportType": "the-call",
+                    "createdAt": "2026-07-15T11:30:00+00:00",
+                    "updatedAt": "2026-07-15T11:30:00+00:00",
+                }
+            ]
+        )
+
+        with patch.object(ingestor, "utc_now", return_value=now):
+            self.assertTrue(
+                ingestor.claim_attachment(
+                    stale,
+                    message_id="gmail-pdf-stale",
+                    attachment_id="attachment-pdf",
+                    headers={"subject": "The Call"},
+                    filename="the-call.pdf",
+                    mime_type="application/pdf",
+                    report_type="the-call",
+                )
+            )
+            self.assertFalse(
+                ingestor.claim_attachment(
+                    active,
+                    message_id="gmail-pdf-active",
+                    attachment_id="attachment-pdf",
+                    headers={"subject": "The Call"},
+                    filename="the-call.pdf",
+                    mime_type="application/pdf",
+                    report_type="the-call",
+                )
+            )
+
+        self.assertEqual(
+            stale.items[("gmail-pdf-stale", "attachment-pdf")]["status"],
+            "IN_PROGRESS",
+        )
+        self.assertEqual(
+            active.items[("gmail-pdf-active", "attachment-pdf")]["status"],
+            "PARSED",
+        )
+
     def test_html_body_is_added_once_when_message_has_an_attachment(self):
         table = FakeLedgerTable()
         message = {
@@ -1099,7 +1296,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
 
         with patch.object(ingestor, "get_message", return_value=message), patch.object(
             ingestor, "s3", s3_client
-        ), patch.object(ingestor, "parse_html_snapshot", return_value=None):
+        ), patch.object(ingestor, "parse_html_snapshot", return_value=None), patch.object(
+            ingestor, "persist_snapshot_failure"
+        ) as persist_failure:
             result = ingestor.process_message("token", "me", "gmail-with-body", table)
 
         self.assertEqual(result["attachmentCount"], 2)
@@ -1114,6 +1313,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             if message_id == "gmail-with-body" and item.get("filename") == "message-body.html"
         ]
         self.assertEqual(len(body_items), 1)
+        persist_failure.assert_called_once()
 
     def test_new_html_parse_or_materialization_exception_is_never_stored(self):
         message = {
@@ -1308,6 +1508,8 @@ class HermesGmailIngestorTests(unittest.TestCase):
             ingestor, "claim_textract_content", side_effect=[(True, first_claim), (False, existing_claim)]
         ), patch.object(ingestor, "mark_textract_content"), patch.object(
             ingestor, "mark_attachment"
+        ), patch.object(
+            ingestor, "dispatch_pdf_processor"
         ), patch.object(ingestor, "s3", s3_client):
             first = ingestor.upload_attachment(
                 access_token="token",

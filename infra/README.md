@@ -51,6 +51,22 @@ not have deployment authority. An AWS administrator must:
    release-keyed catalog queries/atomic replacement, canonical research-event
    queries, expected-date Risk Range reads, and read-only Lambda metrics. Do
    not attach it to the outbound bridge principal.
+   The repository includes an idempotent administrator check/apply command
+   that keeps the two principals separate and simulates every required
+   action/resource pair after attachment:
+
+   ```bash
+   infra/scripts/install_local_principal_policies.sh \
+     --apply \
+     --admin-profile YOUR_ADMIN_PROFILE \
+     --create-bridge-user
+   ```
+
+   Rerun the same command with `--verify` for a read-only permissions audit.
+   It never creates access keys or edits local AWS credentials. Configure
+   `HERMES_BRIDGE_AWS_PROFILE` to a local profile for the dedicated bridge
+   principal after its credentials are provisioned through the normal secure
+   administrator workflow.
 6. Export the role ARN as `MARKET_DASHBOARD_CF_ROLE_ARN` and run:
 
    ```bash
@@ -60,7 +76,10 @@ not have deployment authority. An AWS administrator must:
 The first deployment creates retained/PITR DynamoDB tables, no-retry failure
 handling, SNS email subscription, runtime roles, disabled schedules, and
 disabled alarm actions. Confirm the SNS subscription email before the final
-rollout phase.
+rollout phase. Do not use ad hoc environment-variable deploys to activate the
+runtime. The staged activation command below preserves every deployed
+non-control parameter, applies all five control parameters explicitly, and
+verifies the resulting AWS resources.
 
 `ops/services.json` is also the source for Hermes worker IDs, heartbeat IDs,
 cadences, Scheduler expressions/time zones, capability IDs, function name, and
@@ -94,16 +113,43 @@ actions and are never attempted by a repair endpoint.
    infra/scripts/promote_gmail_secret.sh /absolute/path/to/oauth-secret.json
    ```
 
-5. Deploy with Gmail only enabled:
+5. Inspect the Gmail activation gate. This is read-only; when the schedule is
+   disabled it reports that the OAuth canary will run only in apply mode:
 
    ```bash
-   GMAIL_SCHEDULE_STATE=ENABLED infra/scripts/deploy.sh
+   infra/scripts/activate_reliability.py \
+     --phase gmail \
+     --read-profile YOUR_READ_PROFILE
    ```
 
-6. After at least four scheduled polls, require the canary to pass:
+6. Enable Gmail with the explicit administrator profile and bootstrapped
+   CloudFormation execution role:
 
    ```bash
-   infra/scripts/verify_rollout.py --phase gmail
+   infra/scripts/activate_reliability.py \
+     --phase gmail \
+     --apply \
+     --admin-profile YOUR_ADMIN_PROFILE \
+     --cloudformation-role-arn \
+       arn:aws:iam::915328198276:role/market-dashboard-cloudformation-deployment-v2
+   ```
+
+   Before enabling the schedule, apply mode checks only Secrets Manager
+   metadata (never `GetSecretValue`), verifies the Lambda is active, and invokes
+   one synchronous `authProbeOnly` canary with `forceAuthProbe`. That bounded
+   path refreshes OAuth and calls the readonly Gmail profile endpoint; it does
+   not list messages, advance the history cursor, or materialize data. The
+   command emits only typed status/count fields from the Lambda response; it
+   does not print subjects, senders, OAuth values, or the secret version.
+
+7. Let the 15-minute schedule accumulate four consecutive heartbeats, then
+   rerun the phase without `--apply`. `GMAIL_SCHEDULE_CANARY_FAILED` includes
+   the exact bad status, provenance, cadence gap, or age:
+
+   ```bash
+   infra/scripts/activate_reliability.py \
+     --phase gmail \
+     --read-profile YOUR_READ_PROFILE
    ```
 
 An `invalid_grant` records `GMAIL_AUTH_REQUIRED` once and suppresses further
@@ -132,61 +178,78 @@ projections and verify the fresh RTA/ETF checkpoints and expected Risk Range
 manifest. The active surface stays unavailable when the Gmail heartbeat is
 unhealthy; dated books remain archival only.
 
-## Hermes cutover
+## Hermes and alarm cutover
+
+The consolidated workers are lightweight readiness monitors. Analyst and
+developer run every 15 minutes; security runs hourly. All three schedules run
+24/7, including nights and weekends, so a missing-heartbeat alarm never
+confuses an intentional off-hours gap with a dead service.
 
 1. Install/restart the repo supervisor so the outbound bridge is running.
-2. Confirm the bridge heartbeat and a ready `ibkr_live` input snapshot.
-3. Enable the analyst schedule first:
+   Confirm its dedicated profile can publish a fresh, ready snapshot.
+2. Stage each worker in order. Every command is read-only unless `--apply` is
+   present:
 
    ```bash
-   GMAIL_SCHEDULE_STATE=ENABLED \
-   HERMES_QUANT_ANALYST_SCHEDULE_STATE=ENABLED \
-   infra/scripts/deploy.sh
+   infra/scripts/activate_reliability.py --phase analyst --read-profile YOUR_READ_PROFILE
+   infra/scripts/activate_reliability.py --phase analyst --apply \
+     --admin-profile YOUR_ADMIN_PROFILE \
+     --cloudformation-role-arn \
+       arn:aws:iam::915328198276:role/market-dashboard-cloudformation-deployment-v2
 
-   infra/scripts/verify_rollout.py --phase hermes --worker quant-analyst
+   # After three 15-minute analyst heartbeats:
+   infra/scripts/activate_reliability.py --phase developer --apply \
+     --admin-profile YOUR_ADMIN_PROFILE \
+     --cloudformation-role-arn \
+       arn:aws:iam::915328198276:role/market-dashboard-cloudformation-deployment-v2
+
+   # After three 15-minute developer heartbeats:
+   infra/scripts/activate_reliability.py --phase security --apply \
+     --admin-profile YOUR_ADMIN_PROFILE \
+     --cloudformation-role-arn \
+       arn:aws:iam::915328198276:role/market-dashboard-cloudformation-deployment-v2
    ```
 
-4. After three successful analyst cadences, preserve that state and enable the
-   developer schedule. Repeat the three-cadence gate before enabling security:
+   Each worker stage requires the four-poll Gmail gate, every preceding
+   worker's three-cadence gate, and a fresh verified-live outbound bridge
+   snapshot. Apply mode invokes one manual worker canary before enabling a new
+   schedule. `SUCCESS` and `DEGRADED` both prove that the monitor ran;
+   degradation remains visible as a typed `Healthy=0` condition for its alarm.
+   A rejected/stale/untrusted snapshot blocks activation with its exact code.
+
+3. After security has three hourly Scheduler heartbeats, enable alarm and
+   recovery actions:
 
    ```bash
-   GMAIL_SCHEDULE_STATE=ENABLED \
-   HERMES_QUANT_ANALYST_SCHEDULE_STATE=ENABLED \
-   HERMES_QUANT_DEVELOPER_SCHEDULE_STATE=ENABLED \
-   infra/scripts/deploy.sh
-
-   infra/scripts/verify_rollout.py --phase hermes --worker quant-developer
-
-   GMAIL_SCHEDULE_STATE=ENABLED \
-   HERMES_QUANT_ANALYST_SCHEDULE_STATE=ENABLED \
-   HERMES_QUANT_DEVELOPER_SCHEDULE_STATE=ENABLED \
-   HERMES_SECURITY_SCHEDULE_STATE=ENABLED \
-   infra/scripts/deploy.sh
-
-   infra/scripts/verify_rollout.py --phase hermes --worker security
+   infra/scripts/activate_reliability.py --phase alarms --read-profile YOUR_READ_PROFILE
+   infra/scripts/activate_reliability.py --phase alarms --apply \
+     --admin-profile YOUR_ADMIN_PROFILE \
+     --cloudformation-role-arn \
+       arn:aws:iam::915328198276:role/market-dashboard-cloudformation-deployment-v2
    ```
 
-5. After three complete cadences for every worker:
+   This final gate also requires a confirmed email subscription on the exact
+   operations SNS topic. After deployment it re-reads CloudFormation, every
+   Scheduler job, all nine alarms, both alarm and OK action targets, and every
+   heartbeat window. Missing-heartbeat alarms detect a schedule that stopped;
+   separate `Healthy` alarms diagnose a monitor that ran but rejected its input
+   or observed a degraded capability. Recovery notifications use the same
+   confirmed topic.
 
-   ```bash
-   infra/scripts/verify_rollout.py --phase hermes
-   ```
+For a read-only snapshot of the deployed controls, schedule contracts, alarm
+actions, and enabled-service heartbeats:
 
-6. Enable alarm actions only after both canaries pass:
+```bash
+infra/scripts/activate_reliability.py \
+  --phase status \
+  --read-profile YOUR_READ_PROFILE
+```
 
-   ```bash
-   GMAIL_SCHEDULE_STATE=ENABLED \
-   HERMES_QUANT_ANALYST_SCHEDULE_STATE=ENABLED \
-   HERMES_QUANT_DEVELOPER_SCHEDULE_STATE=ENABLED \
-   HERMES_SECURITY_SCHEDULE_STATE=ENABLED \
-   OPERATIONAL_ALARMS_STATE=ENABLED \
-   infra/scripts/deploy.sh
-   ```
-
-   Missing-heartbeat alarms detect a schedule that stopped invoking. Separate
-   per-worker `Healthy` alarms notify the same SNS email when a scheduled run
-   completed but rejected stale/unverified input or reported another typed
-   unhealthy result. A fresh heartbeat therefore cannot hide a failed worker.
+`--phase full` is an idempotent repair path only after all Gmail/Hermes
+heartbeat gates already pass; it never bypasses the staged canaries. Every
+mutation validates account `915328198276`, region `us-west-1`, the exact stack,
+and the explicit administrator profile. The command never creates access keys,
+edits AWS credential files, reads secret values, or deploys without `--apply`.
 
 Legacy Lambdas/schedules stay disabled for one trading-day rollback window.
 Only after that window should an administrator remove them. The old local Risk

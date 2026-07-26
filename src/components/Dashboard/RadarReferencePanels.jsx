@@ -132,14 +132,6 @@ const PreviewCard = ({
 }) => (
   <section className={`efr-reference-card efr-reference-card--${id}`} aria-labelledby={`efr-reference-${id}`}>
     <header className="efr-reference-card__header">
-      <button
-        type="button"
-        className="efr-reference-card__title"
-        onClick={() => onOpen(id)}
-        id={`efr-reference-${id}`}
-      >
-        {title}
-      </button>
       <DataStatusChip
         status={status}
         label={statusLabel}
@@ -150,6 +142,14 @@ const PreviewCard = ({
         compact
         indicatorOnly
       />
+      <button
+        type="button"
+        className="efr-reference-card__title"
+        onClick={() => onOpen(id)}
+        id={`efr-reference-${id}`}
+      >
+        {title}
+      </button>
     </header>
     <div className="efr-reference-card__body">{children}</div>
     <button type="button" className="efr-reference-card__open" onClick={() => onOpen(id)}>

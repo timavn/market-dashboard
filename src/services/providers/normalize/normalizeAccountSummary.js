@@ -13,6 +13,8 @@ function normalizeAccountSummary(raw) {
     netLiquidation: pick('NetLiquidation'),
     totalCashValue: pick('TotalCashValue'),
     settledCash: pick('SettledCash'),
+    grossPositionValue: pick('GrossPositionValue'),
+    stockMarketValue: pick('StockMarketValue'),
     buyingPower: pick('BuyingPower'),
     equityWithLoanValue: pick('EquityWithLoanValue'),
     initialMargin: pick('InitMarginReq'),

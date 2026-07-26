@@ -217,7 +217,7 @@ const PREDICTION_MARKET_STATUS_LABELS = {
   sidecar_offline: 'Sidecar offline',
   tws_offline: 'IB Gateway offline',
   auth_required: 'Login required',
-  stale: 'Error',
+  stale: 'Stale',
   error: 'Error',
   unknown: 'Unknown',
 };
@@ -242,14 +242,6 @@ function getIbkrPortfolioFreshness(updatedAt) {
     return 'stale';
   }
   return 'defective';
-}
-
-function makeAcknowledgeableWarning(id, text) {
-  return {
-    id,
-    text,
-    acknowledgeable: true,
-  };
 }
 
 function makeStatusDetail(id, text) {
@@ -280,10 +272,42 @@ function formatCounts(longCount, shortCount) {
   return `${longCount ?? '-'}/${shortCount ?? '-'}`;
 }
 
+function formatGmailPipelineReason(errorCode, reason) {
+  const rawReason = String(reason || '').trim();
+  if (
+    errorCode === 'SERVICE_HEARTBEAT_ACCESS_DENIED'
+    || (
+      /access.?denied|not authorized/i.test(rawReason)
+      && /MarketDashboardServiceHeartbeats|dynamodb:Query/i.test(rawReason)
+    )
+  ) {
+    return 'market-dashboard-local cannot query MarketDashboardServiceHeartbeats. '
+      + 'Admin fix: apply infra/iam/local-readiness-catalog-policy.json with '
+      + 'infra/scripts/install_local_principal_policies.sh.';
+  }
+  if (/invalid_grant/i.test(rawReason)) {
+    return 'Gmail rejected the OAuth refresh token (invalid_grant). '
+      + 'Reauthorize Gmail and ensure the OAuth consent app is in Production.';
+  }
+  return rawReason || 'The upstream pipeline is not current.';
+}
+
 function countEtfProRows(etfProSnapshot) {
-  const rows = Array.isArray(etfProSnapshot?.rows) ? etfProSnapshot.rows : [];
+  const activeRows = Array.isArray(etfProSnapshot?.rows) ? etfProSnapshot.rows : [];
+  const referenceRows = Array.isArray(etfProSnapshot?.lastKnownGood?.rows)
+    ? etfProSnapshot.lastKnownGood.rows
+    : [];
+  const available = etfProSnapshot?.available !== false && activeRows.length > 0;
+  const referenceAvailable = !available && referenceRows.length > 0;
+  const rows = available ? activeRows : referenceRows;
   if (rows.length === 0) {
-    return { available: false, longCount: null, shortCount: null };
+    return {
+      available: false,
+      referenceAvailable: false,
+      rowCount: 0,
+      longCount: null,
+      shortCount: null,
+    };
   }
   return rows.reduce((acc, row) => {
     if (String(row?.call || '').toLowerCase() === 'short') {
@@ -292,15 +316,41 @@ function countEtfProRows(etfProSnapshot) {
       acc.longCount += 1;
     }
     return acc;
-  }, { available: true, longCount: 0, shortCount: 0 });
+  }, {
+    available,
+    referenceAvailable,
+    rowCount: rows.length,
+    longCount: 0,
+    shortCount: 0,
+  });
 }
 
 function buildRtaStatusSource({ rtaPositions }) {
   const available = Boolean(rtaPositions?.available);
   const longCount = available ? Number(rtaPositions.longCount || 0) : null;
   const shortCount = available ? Number(rtaPositions.shortCount || 0) : null;
-  const datePart = getDatePart(rtaPositions?.lastUpdated);
-  const fresh = isFreshForToday(datePart);
+  const availability = rtaPositions?.dataAvailability || {};
+  const datePart = availability.contentDate
+    || getDatePart(availability.latestContentAt)
+    || getDatePart(rtaPositions?.lastUpdated);
+  const hasPipelineFreshness = typeof availability.current === 'boolean'
+    || typeof rtaPositions?.current === 'boolean'
+    || Boolean(availability.ingestionStatus);
+  const current = available && (
+    hasPipelineFreshness
+      ? availability.current === true || (
+          availability.current == null
+          && rtaPositions?.current === true
+        )
+      : isFreshForToday(datePart)
+  );
+  const errorCode = availability.errorCode
+    || rtaPositions?.sourceDiagnostics?.gmailIngestion?.errorCode
+    || rtaPositions?.dataQuality?.invalidEvents?.[0]?.code
+    || null;
+  const upstreamReason = availability.reason
+    || rtaPositions?.sourceDiagnostics?.gmailIngestion?.reason
+    || null;
   const reconstructionWarnings = [
     ...(Array.isArray(rtaPositions?.sourceDiagnostics?.reconstructionWarnings)
       ? rtaPositions.sourceDiagnostics.reconstructionWarnings
@@ -313,21 +363,33 @@ function buildRtaStatusSource({ rtaPositions }) {
   let detail = `Current ${formatCounts(longCount, shortCount)}`;
 
   if (!available) {
-    detailRows.push(makeStatusDetail('rta:missing', 'RTA positions unavailable'));
-    detail = 'Error';
-  }
-  if (available && !fresh) {
+    detailRows.push(makeStatusDetail(
+      'rta:missing',
+      `RTA positions unavailable${errorCode ? ` (${errorCode})` : ''}.`,
+    ));
+    detail = 'Unavailable';
+  } else if (!current) {
     detailRows.push(makeStatusDetail(
       'rta:stale',
-      `RTA stale${datePart ? `; latest stored RTA is ${datePart}` : ''}`,
+      datePart
+        ? `Last known RTA positions are from ${datePart}.`
+        : 'RTA positions are last-known-good; the content date is unavailable.',
     ));
-    detail = 'Error';
+    detail = `Stale ${formatCounts(longCount, shortCount)}`;
+  }
+  if ((!current || !available) && (errorCode || upstreamReason)) {
+    detailRows.push(makeStatusDetail(
+      'rta:upstream',
+      `Gmail ingestion${errorCode ? ` (${errorCode})` : ''}: ${
+        formatGmailPipelineReason(errorCode, upstreamReason)
+      }`,
+    ));
   }
   reconstructionWarnings.forEach((warning, index) => {
     detailRows.push(makeStatusDetail(`rta:warning:${index}`, `RTA: ${warning}`));
   });
-  if (reconstructionWarnings.length > 0 && fresh) {
-    detail = 'Error';
+  if (reconstructionWarnings.length > 0 && current) {
+    detail = `Warning ${formatCounts(longCount, shortCount)}`;
   }
 
   return {
@@ -335,34 +397,74 @@ function buildRtaStatusSource({ rtaPositions }) {
     label: 'RTA',
     detail,
     detailRows: uniqueDetailRows(detailRows),
-    status: detailRows.length > 0 ? 'stale' : 'current',
+    status: !available
+      ? 'defective'
+      : (!current || reconstructionWarnings.length > 0 ? 'stale' : 'current'),
   };
 }
 
 function buildEtfProStatusSource({ etfProSnapshot }) {
-  const { available, longCount, shortCount } = countEtfProRows(etfProSnapshot);
-  const snapshotDate = etfProSnapshot?.meta?.snapshotDate || getDatePart(etfProSnapshot?.meta?.parsedAt);
-  const fresh = isFreshForToday(snapshotDate);
-  const dataQuality = etfProSnapshot?.dataQuality || etfProSnapshot?.meta?.dataQuality || {};
+  const {
+    available,
+    referenceAvailable,
+    rowCount,
+    longCount,
+    shortCount,
+  } = countEtfProRows(etfProSnapshot);
+  const reference = referenceAvailable ? etfProSnapshot?.lastKnownGood : null;
+  const availability = etfProSnapshot?.dataAvailability || {};
+  const snapshotDate = etfProSnapshot?.meta?.snapshotDate
+    || reference?.meta?.snapshotDate
+    || getDatePart(etfProSnapshot?.meta?.parsedAt)
+    || getDatePart(reference?.meta?.parsedAt);
+  const hasPipelineFreshness = typeof availability.current === 'boolean'
+    || typeof etfProSnapshot?.current === 'boolean'
+    || Boolean(availability.ingestionStatus);
+  const current = available && (
+    hasPipelineFreshness
+      ? availability.current === true || (
+          availability.current == null
+          && etfProSnapshot?.current === true
+        )
+      : isFreshForToday(snapshotDate)
+  );
+  const dataQuality = etfProSnapshot?.dataQuality
+    || reference?.dataQuality
+    || etfProSnapshot?.meta?.dataQuality
+    || {};
   const dataQualityStatus = dataQuality?.status;
   const dataQualityWarnings = Array.isArray(dataQuality?.warnings) ? dataQuality.warnings : [];
+  const errorCode = availability.errorCode || etfProSnapshot?.meta?.errorCode || null;
+  const upstreamReason = availability.reason || etfProSnapshot?.meta?.reason || null;
   const detailRows = [];
   let detail = `Current ${formatCounts(longCount, shortCount)}`;
 
-  if (!available) {
-    detailRows.push(makeStatusDetail('etf-pro:missing', 'ETF Pro positions unavailable'));
-    detail = 'Error';
-  }
-  if (available && !fresh) {
+  if (!available && !referenceAvailable) {
+    detailRows.push(makeStatusDetail(
+      'etf-pro:missing',
+      `ETF Pro positions unavailable${errorCode ? ` (${errorCode})` : ''}.`,
+    ));
+    detail = 'Unavailable';
+  } else if (!current) {
     detailRows.push(makeStatusDetail(
       'etf-pro:stale',
-      `ETF Pro stale${snapshotDate ? `; latest stored ETF Pro is ${snapshotDate}` : ''}`,
+      snapshotDate
+        ? `Last known ETF Pro positions are from ${snapshotDate} (${rowCount} positions).`
+        : `ETF Pro has ${rowCount} last-known-good positions with no content date.`,
     ));
-    detail = 'Error';
+    detail = `Stale ${formatCounts(longCount, shortCount)}`;
   }
-  if (available && dataQualityStatus && dataQualityStatus !== 'ok') {
+  if ((!current || !available) && (errorCode || upstreamReason)) {
+    detailRows.push(makeStatusDetail(
+      'etf-pro:upstream',
+      `Gmail ingestion${errorCode ? ` (${errorCode})` : ''}: ${
+        formatGmailPipelineReason(errorCode, upstreamReason)
+      }`,
+    ));
+  }
+  if ((available || referenceAvailable) && dataQualityStatus && dataQualityStatus !== 'ok') {
     detailRows.push(makeStatusDetail('etf-pro:data-quality', `ETF Pro data quality: ${dataQualityStatus}`));
-    detail = 'Error';
+    detail = `Warning ${formatCounts(longCount, shortCount)}`;
   }
   dataQualityWarnings.forEach((warning, index) => {
     detailRows.push(makeStatusDetail(`etf-pro:warning:${index}`, warning));
@@ -373,7 +475,15 @@ function buildEtfProStatusSource({ etfProSnapshot }) {
     label: 'ETF Pro',
     detail,
     detailRows: uniqueDetailRows(detailRows),
-    status: detailRows.length > 0 ? 'stale' : 'current',
+    status: !available && !referenceAvailable
+      ? 'defective'
+      : (
+          !current ||
+          (dataQualityStatus && dataQualityStatus !== 'ok') ||
+          dataQualityWarnings.length > 0
+            ? 'stale'
+            : 'current'
+        ),
   };
 }
 
@@ -410,6 +520,42 @@ function buildPredictionMarketStatusSource(predictionMarketProviderStatus) {
   const providers = predictionMarketProviderStatus?.providers || predictionMarketProviderStatus || {};
   const ibkr = providers?.ibkr || {};
   const status = ibkr.status || (predictionMarketProviderStatus?.error ? 'error' : null);
+  const providerErrorCode = ibkr.errorCode
+    || predictionMarketProviderStatus?.readiness?.ibkrExecution?.errorCode
+    || predictionMarketProviderStatus?.errorCode
+    || null;
+  const rawProviderError = [
+    predictionMarketProviderStatus?.error,
+    ibkr.message,
+    predictionMarketProviderStatus?.readiness?.ibkrExecution?.reason,
+  ].filter(Boolean).join(' ');
+  const catalogAccessDenied = providerErrorCode === 'PREDICTION_CATALOG_ACCESS_DENIED'
+    || (
+      /access.?denied|not authorized/i.test(rawProviderError)
+      && /PredictionMarketCatalogV2|dynamodb:(?:Query|TransactWriteItems)/i.test(rawProviderError)
+    );
+  if (catalogAccessDenied) {
+    return {
+      id: 'prediction-markets',
+      label: 'Prediction markets',
+      detail: 'Error',
+      detailRows: [
+        makeStatusDetail(
+          'prediction-markets:catalog-access-code',
+          'Code: PREDICTION_CATALOG_ACCESS_DENIED',
+        ),
+        makeStatusDetail(
+          'prediction-markets:catalog-access-principal',
+          'market-dashboard-local lacks dynamodb:Query and dynamodb:TransactWriteItems on PredictionMarketCatalogV2.',
+        ),
+        makeStatusDetail(
+          'prediction-markets:catalog-access-fix',
+          'Admin fix: attach infra/iam/local-readiness-catalog-policy.json using infra/scripts/install_local_principal_policies.sh.',
+        ),
+      ],
+      status: 'defective',
+    };
+  }
   const gatewayOk = ibkr.gateway?.ok;
   const contractsTotal = getPredictionMarketContractsTotal(ibkr);
   const cpiDiscovery = getPredictionMarketCpiDiscovery(ibkr);
@@ -507,21 +653,105 @@ export function getIbkrPortfolioStatusDot({
   const portfolioFreshness = getIbkrPortfolioFreshness(updatedAt);
   const dataQuality = portfolioData?.dataQuality || {};
   const missingMarketValueCount = Number(dataQuality.missingMarketValueCount || 0);
+  const unavailableMarketValueCount = Number(
+    dataQuality.unavailableMarketValueCount ?? missingMarketValueCount,
+  );
   const missingMarketValueSymbols = Array.isArray(dataQuality.missingMarketValueSymbols)
     ? dataQuality.missingMarketValueSymbols.filter(Boolean)
     : [];
+  const markState = String(dataQuality.markState || '').trim().toLowerCase();
+  const markProgress = dataQuality.markProgress || portfolioData?.referenceMarks?.progress || {};
+  const progressNumber = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+  };
+  const warmingMarkCount = Math.max(
+    progressNumber(dataQuality.warmingMarkCount) || 0,
+    progressNumber(dataQuality.warmingMarketValueCount) || 0,
+    progressNumber(portfolioData?.referenceMarks?.warmingCount) || 0,
+    progressNumber(markProgress.pendingCount) || 0,
+  );
+  const warmingRequestedCount = progressNumber(markProgress.requestedCount)
+    ?? progressNumber(portfolioData?.referenceMarks?.requestedCount);
+  const warmingCompletedCount = progressNumber(markProgress.completedCount)
+    ?? (
+      warmingRequestedCount != null
+        ? Math.max(0, warmingRequestedCount - warmingMarkCount)
+        : null
+    );
+  const hasWarmingMarks =
+    portfolioData?.dataSource === 'ibkr_api'
+    && (
+      markState === 'warming'
+      || portfolioData?.referenceMarks?.warming === true
+      || String(markProgress.state || '').toLowerCase() === 'warming'
+      || warmingMarkCount > 0
+    );
+  const historicalHoldings = Array.isArray(portfolioData?.holdings)
+    ? portfolioData.holdings.filter((holding) => (
+        holding?.priceState === 'historical_close' ||
+        holding?.marketValueState === 'historical_close'
+      ))
+    : [];
+  const historicalMarkCount = Math.max(
+    Number(dataQuality.historicalMarkCount || 0),
+    historicalHoldings.length,
+  );
+  const referenceSessionDates = [
+    dataQuality.referenceCloseSessionDate,
+    dataQuality.latestReferenceCloseSessionDate,
+    dataQuality.latestReferenceSessionDate,
+    dataQuality.referenceMarkSessionDate,
+    ...(Array.isArray(dataQuality.referenceCloseSessionDates)
+      ? dataQuality.referenceCloseSessionDates
+      : []),
+    ...historicalHoldings.flatMap((holding) => [
+      holding?.referenceCloseSessionDate,
+      holding?.priceSessionDate,
+    ]),
+  ].map(getDatePart).filter(Boolean).sort();
+  const referenceAsOf = referenceSessionDates.at(-1) || null;
   const hasPartialMarks =
     portfolioData?.dataSource === 'ibkr_api' &&
     (
       dataQuality.status === 'partial' ||
-      missingMarketValueCount > 0
+      unavailableMarketValueCount > 0 ||
+      (!hasWarmingMarks && (missingMarketValueCount > 0 || markState === 'unavailable'))
+    );
+  const hasReferenceMarks =
+    portfolioData?.dataSource === 'ibkr_api' &&
+    !hasPartialMarks &&
+    !hasWarmingMarks &&
+    (
+      historicalMarkCount > 0 ||
+      markState === 'reference' ||
+      markState === 'mixed'
     );
   const partialMarksDetail = hasPartialMarks
     ? `Partial marks (${missingMarketValueCount || 'some'} missing market values)`
     : null;
+  const referenceMarksDetail = hasReferenceMarks
+    ? `Reference closes (${historicalMarkCount || 'some'} as of ${referenceAsOf || 'date unavailable'})`
+    : null;
+  const warmingMarksDetail = hasWarmingMarks
+    ? `Reference closes warming (${
+        warmingCompletedCount ?? historicalMarkCount
+      }/${warmingRequestedCount ?? 'unknown'} complete; ${warmingMarkCount} pending)`
+    : null;
+  const markFailureRows = Array.isArray(dataQuality.markFailures)
+    ? dataQuality.markFailures.slice(0, 3).map((failure, index) => {
+        const symbol = failure?.symbol || failure?.localSymbol || 'Unknown ticker';
+        const code = failure?.errorCode || failure?.code || 'MARK_UNAVAILABLE';
+        const message = failure?.message || failure?.reason || 'IBKR did not return a usable mark.';
+        return makeStatusDetail(
+          `ibkr-portfolio-mark-failure:${symbol}:${code}:${index}`,
+          `${symbol} (${code}): ${message}`,
+        );
+      })
+    : [];
   const partialMarksRows = hasPartialMarks
     ? [
-        makeAcknowledgeableWarning(
+        makeStatusDetail(
           `ibkr-portfolio-missing-market-values:${missingMarketValueSymbols.join('|') || missingMarketValueCount || 'unknown'}`,
           `Missing tickers: ${
             missingMarketValueSymbols.length > 0
@@ -532,13 +762,54 @@ export function getIbkrPortfolioStatusDot({
         ...(Array.isArray(dataQuality.warnings)
           ? dataQuality.warnings
               .slice(0, 2)
-              .map((warning) => makeAcknowledgeableWarning(`ibkr-portfolio-warning:${warning}`, warning))
+              .map((warning) => makeStatusDetail(`ibkr-portfolio-warning:${warning}`, warning))
+          : []),
+        ...markFailureRows,
+      ]
+    : [];
+  const referenceMarksRows = hasReferenceMarks
+    ? [
+        makeStatusDetail(
+          'ibkr-portfolio-reference-closes',
+          `${historicalMarkCount || 'Some'} position${
+            historicalMarkCount === 1 ? '' : 's'
+          } use the last completed IBKR daily close; positions are live, but those valuations are reference data.`,
+        ),
+        ...(referenceSessionDates.length > 1 && referenceSessionDates[0] !== referenceAsOf
+          ? [makeStatusDetail(
+              'ibkr-portfolio-reference-close-range',
+              `Reference-close sessions span ${referenceSessionDates[0]} through ${referenceAsOf}.`,
+            )]
+          : []),
+        ...(Array.isArray(dataQuality.warnings)
+          ? dataQuality.warnings
+              .slice(0, 2)
+              .map((warning) => makeStatusDetail(`ibkr-portfolio-reference-warning:${warning}`, warning))
+          : []),
+        ...markFailureRows,
+      ]
+    : [];
+  const warmingMarksRows = hasWarmingMarks
+    ? [
+        makeStatusDetail(
+          'ibkr-portfolio-reference-warming',
+          `IBKR is warming completed daily closes in the background (${
+            warmingCompletedCount ?? historicalMarkCount
+          }/${warmingRequestedCount ?? 'unknown'} complete; ${warmingMarkCount} pending).`,
+        ),
+        ...(historicalMarkCount > 0
+          ? [makeStatusDetail(
+              'ibkr-portfolio-reference-warming-ready',
+              `${historicalMarkCount} completed reference close${
+                historicalMarkCount === 1 ? ' is' : 's are'
+              } already available; pending rows remain unavailable and cannot enable portfolio actions.`,
+            )]
           : []),
       ]
     : [];
   const portfolioDetail =
     portfolioData?.dataSource === 'ibkr_api'
-      ? partialMarksDetail || 'Live'
+      ? partialMarksDetail || warmingMarksDetail || referenceMarksDetail || 'Live'
       : portfolioData?.dataSource === 'ibkr_offline'
         ? connection?.connected
           ? 'Not synced — use refresh'
@@ -549,6 +820,9 @@ export function getIbkrPortfolioStatusDot({
   let emoji = '🔴';
   if (connection?.connected && portfolioData?.dataSource === 'ibkr_api') {
     if (hasPartialMarks) {
+      aggregateStatus = 'inactive';
+      emoji = '🔴';
+    } else if (hasWarmingMarks || hasReferenceMarks) {
       aggregateStatus = 'stale';
       emoji = '🟡';
     } else if (portfolioFreshness === 'current') {
@@ -583,18 +857,24 @@ export function getIbkrPortfolioStatusDot({
       id: 'portfolio',
       label: 'Portfolio',
       detail: portfolioDetail,
-      detailRows: partialMarksRows.length > 0
-        ? partialMarksRows
+      detailRows: (
+        partialMarksRows.length > 0
+        || warmingMarksRows.length > 0
+        || referenceMarksRows.length > 0
+      )
+        ? [...partialMarksRows, ...warmingMarksRows, ...referenceMarksRows]
         : [makeStatusDetail('portfolio:detail', portfolioDetail)],
       acknowledgeableDetails: true,
-      acknowledgeableStatus: hasPartialMarks,
+      acknowledgeableStatus: false,
       acknowledgedStatus: portfolioFreshness,
       acknowledgedDetail: 'Partial marks acknowledged',
       status:
         portfolioData?.dataSource === 'ibkr_api'
           ? hasPartialMarks
-            ? 'stale'
-            : portfolioFreshness
+            ? 'defective'
+            : hasWarmingMarks || hasReferenceMarks
+              ? 'stale'
+              : portfolioFreshness
           : portfolioData?.dataSource === 'ibkr_offline'
             ? 'stale'
             : 'defective',

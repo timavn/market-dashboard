@@ -74,7 +74,7 @@ def schedule_interval_minutes(expression: str) -> int:
     match = re.fullmatch(r"rate\((\d+) minutes?\)", expression)
     if match:
         return int(match.group(1))
-    match = re.fullmatch(r"cron\((\S+) (\S+) \? \* MON-FRI \*\)", expression)
+    match = re.fullmatch(r"cron\((\S+) (\S+) \? \* \* \*\)", expression)
     if not match:
         raise AssertionError(f"Unsupported Scheduler cadence expression: {expression}")
     minute, hour = match.groups()
@@ -90,6 +90,31 @@ def dimension_value(properties: dict[str, Any], name: str) -> Any:
         dimension["Value"]
         for dimension in properties.get("Dimensions") or []
         if dimension.get("Name") == name
+    )
+
+
+def policy_statements(function_properties: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        statement
+        for policy in function_properties.get("Policies") or []
+        if isinstance(policy, dict)
+        for statement in policy.get("Statement") or []
+    ]
+
+
+def statement_actions(statement: dict[str, Any]) -> set[str]:
+    value = statement.get("Action") or []
+    return {value} if isinstance(value, str) else set(value)
+
+
+def statement_for_action(
+    function_properties: dict[str, Any],
+    action: str,
+) -> dict[str, Any]:
+    return next(
+        statement
+        for statement in policy_statements(function_properties)
+        if action in statement_actions(statement)
     )
 
 
@@ -249,6 +274,23 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     "jobType": job_type,
                 })
 
+    def test_worker_schedules_are_continuous_when_missing_heartbeat_alarms_enable(self):
+        services = {service["id"]: service for service in self.manifest["services"]}
+        resources = self.template["Resources"]
+        for job_type, resource_name in SCHEDULE_RESOURCES.items():
+            with self.subTest(job_type=job_type):
+                service = services[f"hermes.{job_type}"]
+                window = service["scheduleWindow"]
+                self.assertFalse(window["weekdays"])
+                self.assertEqual(window["startHour"], 0)
+                self.assertEqual(window["endHour"], 24)
+                schedule = resources[resource_name]["Properties"]
+                self.assertIn("runs 24/7", schedule["Description"])
+                self.assertRegex(
+                    schedule["ScheduleExpression"],
+                    r"^cron\(\S+ \* \? \* \* \*\)$",
+                )
+
     def test_gmail_runtime_schedule_and_sam_resources_match_manifest(self):
         services = {service["id"]: service for service in self.manifest["services"]}
         contract = services["gmail.ingestion"]
@@ -288,6 +330,207 @@ class HermesInfrastructureContractTests(unittest.TestCase):
             },
         )
 
+    def test_security_intelligence_tables_are_durable_and_match_manifest(self):
+        resources = self.template["Resources"]
+        manifest_resources = self.manifest["aws"]["resources"]
+        entity_table = resources["ResearchEntityEventsV1"]
+        product_table = resources["ResearchProductManifestsV1"]
+
+        self.assertEqual(
+            entity_table["Properties"]["TableName"],
+            manifest_resources["researchEntityEventsTable"],
+        )
+        self.assertEqual(
+            product_table["Properties"]["TableName"],
+            manifest_resources["researchProductManifestTable"],
+        )
+        self.assertEqual(
+            entity_table["Properties"]["KeySchema"],
+            [
+                {"AttributeName": "entityKey", "KeyType": "HASH"},
+                {"AttributeName": "eventKey", "KeyType": "RANGE"},
+            ],
+        )
+        self.assertEqual(
+            entity_table["Properties"]["GlobalSecondaryIndexes"],
+            [
+                {
+                    "IndexName": "marketDate-index",
+                    "KeySchema": [
+                        {"AttributeName": "marketDate", "KeyType": "HASH"},
+                        {"AttributeName": "dateEventKey", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
+            ],
+        )
+        self.assertEqual(
+            product_table["Properties"]["KeySchema"],
+            [
+                {"AttributeName": "marketDate", "KeyType": "HASH"},
+                {"AttributeName": "productKey", "KeyType": "RANGE"},
+            ],
+        )
+        for table in (entity_table, product_table):
+            with self.subTest(table=table["Properties"]["TableName"]):
+                self.assertEqual(table["DeletionPolicy"], "Retain")
+                self.assertEqual(table["UpdateReplacePolicy"], "Retain")
+                self.assertTrue(
+                    table["Properties"]["PointInTimeRecoverySpecification"][
+                        "PointInTimeRecoveryEnabled"
+                    ]
+                )
+                self.assertTrue(table["Properties"]["SSESpecification"]["SSEEnabled"])
+
+    def test_pdf_processor_has_completion_safe_runtime_and_least_privilege_access(self):
+        resources = self.template["Resources"]
+        gmail = resources["GmailIngestorFunction"]["Properties"]
+        processor = resources["HedgeyePdfProcessorFunction"]["Properties"]
+        queue = resources["RuntimeFailureQueue"]["Properties"]
+        manifest_resources = self.manifest["aws"]["resources"]
+
+        self.assertEqual(processor["Handler"], "hedgeye_pdf_processor_lambda.lambda_handler")
+        self.assertEqual(processor["CodeUri"], "../aws/lambda/")
+        self.assertEqual(processor["Architectures"], ["x86_64"])
+        self.assertEqual(processor["Timeout"], 900)
+        self.assertEqual(
+            processor["Environment"]["Variables"],
+            {
+                "HERMES_LEDGER_TABLE": {"tag": "Ref", "value": "GmailLedgerTableName"},
+                "HEDGEYE_DAILY_SNAPSHOT_TABLE": {
+                    "tag": "Ref",
+                    "value": "HedgeyeDailySnapshotTableName",
+                },
+                "RESEARCH_ENTITY_EVENTS_TABLE": {
+                    "tag": "Ref",
+                    "value": "ResearchEntityEventsV1",
+                },
+                "RESEARCH_PRODUCT_MANIFEST_TABLE": {
+                    "tag": "Ref",
+                    "value": "ResearchProductManifestsV1",
+                },
+            },
+        )
+        self.assertEqual(
+            gmail["Environment"]["Variables"]["PDF_PROCESSOR_FUNCTION_NAME"],
+            {"tag": "Ref", "value": "HedgeyePdfProcessorFunction"},
+        )
+
+        invoke = statement_for_action(gmail, "lambda:InvokeFunction")
+        self.assertEqual(
+            invoke["Resource"],
+            {"tag": "GetAtt", "value": "HedgeyePdfProcessorFunction.Arn"},
+        )
+        textract = statement_for_action(processor, "textract:AnalyzeDocument")
+        self.assertEqual(textract["Resource"], "*")
+        snapshot_access = statement_for_action(processor, "dynamodb:UpdateItem")
+        self.assertEqual(
+            set(json.dumps(resource, sort_keys=True) for resource in snapshot_access["Resource"]),
+            {
+                json.dumps(
+                    {
+                        "tag": "Sub",
+                        "value": (
+                            "arn:${AWS::Partition}:dynamodb:${AWS::Region}:"
+                            "${AWS::AccountId}:table/${GmailLedgerTableName}"
+                        ),
+                    },
+                    sort_keys=True,
+                ),
+                json.dumps(
+                    {"tag": "GetAtt", "value": "ResearchEntityEventsV1.Arn"},
+                    sort_keys=True,
+                ),
+                json.dumps(
+                    {"tag": "GetAtt", "value": "ResearchProductManifestsV1.Arn"},
+                    sort_keys=True,
+                ),
+                json.dumps(
+                    {
+                        "tag": "Sub",
+                        "value": (
+                            "arn:${AWS::Partition}:dynamodb:${AWS::Region}:"
+                            "${AWS::AccountId}:table/${HedgeyeDailySnapshotTableName}"
+                        ),
+                    },
+                    sort_keys=True,
+                ),
+            },
+        )
+        self.assertEqual(
+            manifest_resources["researchEntityEventsTable"],
+            resources["ResearchEntityEventsV1"]["Properties"]["TableName"],
+        )
+        self.assertEqual(
+            manifest_resources["researchProductManifestTable"],
+            resources["ResearchProductManifestsV1"]["Properties"]["TableName"],
+        )
+        for function in (gmail, processor):
+            dynamodb_resources = [
+                resource
+                for statement in policy_statements(function)
+                if any(action.startswith("dynamodb:") for action in statement_actions(statement))
+                for resource in (
+                    statement["Resource"]
+                    if isinstance(statement.get("Resource"), list)
+                    else [statement.get("Resource")]
+                )
+            ]
+            self.assertFalse(
+                any("/index/" in json.dumps(resource) for resource in dynamodb_resources),
+                "write-only ingestion functions do not need GSI permissions",
+            )
+
+        self.assertEqual(
+            processor["EventInvokeConfig"],
+            {
+                "MaximumEventAgeInSeconds": 3600,
+                "MaximumRetryAttempts": 2,
+                "DestinationConfig": {
+                    "OnFailure": {
+                        "Type": "SQS",
+                        "Destination": {
+                            "tag": "GetAtt",
+                            "value": "RuntimeFailureQueue.Arn",
+                        },
+                    },
+                },
+            },
+        )
+        for function in (gmail, processor):
+            with self.subTest(function=function["FunctionName"]):
+                self.assertEqual(
+                    function["EventInvokeConfig"]["DestinationConfig"]["OnFailure"],
+                    {
+                        "Type": "SQS",
+                        "Destination": {
+                            "tag": "GetAtt",
+                            "value": "RuntimeFailureQueue.Arn",
+                        },
+                    },
+                )
+                send = statement_for_action(function, "sqs:SendMessage")
+                self.assertEqual(
+                    send["Resource"],
+                    {"tag": "GetAtt", "value": "RuntimeFailureQueue.Arn"},
+                )
+        self.assertEqual(queue["MessageRetentionPeriod"], 1209600)
+        self.assertTrue(queue["SqsManagedSseEnabled"])
+
+        outputs = self.template["Outputs"]
+        self.assertEqual(
+            outputs["HedgeyePdfProcessorFunctionName"]["Value"],
+            {"tag": "Ref", "value": "HedgeyePdfProcessorFunction"},
+        )
+        self.assertEqual(
+            outputs["ResearchEntityEventsTableName"]["Value"],
+            {"tag": "Ref", "value": "ResearchEntityEventsV1"},
+        )
+        self.assertEqual(
+            outputs["ResearchProductManifestsTableName"]["Value"],
+            {"tag": "Ref", "value": "ResearchProductManifestsV1"},
+        )
+
     def test_each_worker_has_missing_and_unhealthy_sns_alarms(self):
         resources = self.template["Resources"]
         for job_type, contract in self.contract["workers"].items():
@@ -309,12 +552,37 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     unhealthy["AlarmActions"],
                     [{"tag": "Ref", "value": "OperationsTopic"}],
                 )
+                self.assertEqual(
+                    unhealthy["OKActions"],
+                    [{"tag": "Ref", "value": "OperationsTopic"}],
+                )
 
                 missing = resources[MISSING_ALARM_RESOURCES[job_type]]["Properties"]
                 self.assertEqual(missing["MetricName"], "Heartbeat")
+                self.assertEqual(
+                    missing["Period"],
+                    contract["cadenceMinutes"] * 2 * 60,
+                )
+                self.assertEqual(missing["EvaluationPeriods"], 1)
+                self.assertEqual(missing["Threshold"], 1)
+                self.assertEqual(
+                    missing["TreatMissingData"],
+                    {
+                        "tag": "If",
+                        "value": [
+                            "OperationalAlarmsEnabled",
+                            "breaching",
+                            "notBreaching",
+                        ],
+                    },
+                )
                 self.assertEqual(dimension_value(missing, "ServiceId"), contract["serviceId"])
                 self.assertEqual(
                     missing["AlarmActions"],
+                    [{"tag": "Ref", "value": "OperationsTopic"}],
+                )
+                self.assertEqual(
+                    missing["OKActions"],
                     [{"tag": "Ref", "value": "OperationsTopic"}],
                 )
 

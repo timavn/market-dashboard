@@ -135,6 +135,15 @@ const {
   buildAnalyticsDailyBrief,
 } = require('./src/utils/analyticsDailyBrief.cjs');
 const {
+  MAX_HISTORY_DAYS: SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS,
+  MAX_SYMBOLS: SECURITY_INTELLIGENCE_MAX_SYMBOLS,
+  buildSecurityIntelligence,
+  defaultResearchMarketDate,
+  isValidMarketDate,
+  loadSecurityIntelligenceInputs,
+  normalizeRequestedSymbols,
+} = require('./src/utils/securityIntelligence.cjs');
+const {
   PRESIGNED_POST_TTL_SECONDS,
   buildPortfolioPresignedPostParams,
   createPortfolioUploadKey,
@@ -986,6 +995,14 @@ const RISK_RANGE_DATA_TABLE = process.env.HEDGEYE_RISK_RANGES_TABLE
 const RESEARCH_EVENT_LEDGER_TABLE = process.env.RESEARCH_EVENT_LEDGER_TABLE
   || AWS_RESOURCE_DEFAULTS.researchEventLedgerTable
   || 'ResearchEventLedgerV2';
+const RESEARCH_ENTITY_EVENTS_TABLE = process.env.RESEARCH_ENTITY_EVENTS_TABLE
+  || AWS_RESOURCE_DEFAULTS.researchEntityEventsTable
+  || 'ResearchEntityEventsV1';
+const RESEARCH_PRODUCT_MANIFEST_TABLE = process.env.RESEARCH_PRODUCT_MANIFEST_TABLE
+  || AWS_RESOURCE_DEFAULTS.researchProductManifestTable
+  || 'ResearchProductManifestsV1';
+const RESEARCH_ENTITY_EVENTS_DATE_INDEX = process.env.RESEARCH_ENTITY_EVENTS_DATE_INDEX
+  || 'marketDate-index';
 const HERMES_EMAIL_LEDGER_TABLE = process.env.HERMES_LEDGER_TABLE
   || AWS_RESOURCE_DEFAULTS.gmailLedgerTable
   || 'HermesEmailIngestLedger';
@@ -3982,7 +3999,19 @@ async function buildRealTimeAlertPositionsResponse() {
   // ResearchEventLedgerV2 is canonical for migrated messages. The immutable
   // Gmail/S3 archive fills only uncovered source-message gaps; daily snapshots
   // remain rebuildable projections and never replace either event source.
-  const materialized = await fetchHermesRtaSnapshots(windowDays);
+  const [materialized, ingestionHealth] = await Promise.all([
+    fetchHermesRtaSnapshots(windowDays),
+    getGmailPollHealth().catch((error) => ({
+      status: 'unhealthy',
+      healthy: false,
+      verified: false,
+      errorCode: error.code || 'GMAIL_HEARTBEAT_UNAVAILABLE',
+      reason: error.message || 'Gmail ingestion health could not be loaded.',
+      observedAt: null,
+      lastSuccessAt: null,
+      source: 'service-heartbeat-table',
+    })),
+  ]);
   const rtaBenchmark = loadLocalRtaBenchmark();
 
   const summary = summarizeRealTimeAlertPositions(materialized.snapshots, {
@@ -4057,6 +4086,48 @@ async function buildRealTimeAlertPositionsResponse() {
     benchmark: summary.baseline,
     checkpointValidation: rtaBenchmark?.checkpointValidation || { valid: false, reasons: ['checkpoint-missing'] },
     reconstructionWarnings: summary.reconstructionWarnings || [],
+    gmailIngestion: {
+      status: ingestionHealth.status || 'unknown',
+      healthy: ingestionHealth.healthy === true,
+      verified: ingestionHealth.verified === true,
+      observedAt: ingestionHealth.observedAt || null,
+      lastSuccessAt: ingestionHealth.lastSuccessAt || null,
+      errorCode: ingestionHealth.errorCode || null,
+      reason: ingestionHealth.reason || null,
+      source: ingestionHealth.source || 'service-heartbeat-table',
+    },
+  };
+  const structurallyAvailable = summary.available === true
+    && summary.dataQuality?.status !== 'error';
+  const pipelineHealthy = ingestionHealth.healthy === true;
+  const contentDate = summary.lastUpdated
+    ? String(summary.lastUpdated).slice(0, 10)
+    : null;
+  const structuralErrorCode = summary.dataQuality?.invalidEvents?.[0]?.code || null;
+  summary.current = structurallyAvailable && pipelineHealthy;
+  summary.comparisonSafe = structurallyAvailable && pipelineHealthy;
+  summary.referenceOnly = structurallyAvailable && !pipelineHealthy;
+  summary.dataAvailability = {
+    structuralStatus: structurallyAvailable ? 'verified' : 'invalid',
+    ingestionStatus: ingestionHealth.status || 'unknown',
+    ingestionVerified: ingestionHealth.verified === true,
+    current: summary.current,
+    comparisonSafe: summary.comparisonSafe,
+    referenceOnly: summary.referenceOnly,
+    latestContentAt: summary.lastUpdated || null,
+    contentDate,
+    pipelineObservedAt: ingestionHealth.observedAt || null,
+    pipelineLastSuccessAt: ingestionHealth.lastSuccessAt || null,
+    errorCode: structurallyAvailable
+      ? (pipelineHealthy
+        ? null
+        : ingestionHealth.errorCode || 'GMAIL_HEARTBEAT_UNVERIFIED')
+      : structuralErrorCode || 'RTA_PROJECTION_UNAVAILABLE',
+    reason: structurallyAvailable
+      ? (pipelineHealthy
+        ? null
+        : ingestionHealth.reason || 'Gmail ingestion health could not be verified.')
+      : 'RTA position reconstruction failed structural validation.',
   };
   return summary;
 }
@@ -4678,6 +4749,79 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
     return await sendCachedJson(res, 'changelog', buildHedgeyeChangelogResponse);
   } catch (error) {
     return res.status(500).json({ error: 'Failed to fetch changelog', details: error.message });
+  }
+});
+
+app.get('/api/research/security-intelligence', async (req, res) => {
+  const now = new Date();
+  const rawSymbols = String(req.query.symbols || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const symbols = normalizeRequestedSymbols(rawSymbols);
+  const marketDate = req.query.date || defaultResearchMarketDate(now);
+  const historyDays = req.query.historyDays === undefined
+    ? SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS
+    : Number(req.query.historyDays);
+
+  if (rawSymbols.length === 0 || symbols.length === 0) {
+    return res.status(400).json({ error: 'symbols must contain at least one valid ticker' });
+  }
+  if (rawSymbols.length > SECURITY_INTELLIGENCE_MAX_SYMBOLS) {
+    return res.status(400).json({
+      error: `symbols supports at most ${SECURITY_INTELLIGENCE_MAX_SYMBOLS} tickers`,
+    });
+  }
+  if (symbols.length !== new Set(rawSymbols.map((value) => value.toUpperCase())).size) {
+    return res.status(400).json({ error: 'symbols contains an invalid ticker' });
+  }
+  if (!isValidMarketDate(marketDate)) {
+    return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  }
+  if (
+    !Number.isInteger(historyDays) ||
+    historyDays < 0 ||
+    historyDays > SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS
+  ) {
+    return res.status(400).json({
+      error: `historyDays must be an integer from 0 to ${SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS}`,
+    });
+  }
+
+  try {
+    const inputs = await loadSecurityIntelligenceInputs({
+      dynamodb,
+      marketDate,
+      historyDays,
+      now,
+      riskRangeLoader: ({ now: requestNow }) => loadRiskRangePublicationEnvelope({
+        now: requestNow,
+      }),
+      entityEventsTable: RESEARCH_ENTITY_EVENTS_TABLE,
+      productManifestTable: RESEARCH_PRODUCT_MANIFEST_TABLE,
+      entityEventsIndex: RESEARCH_ENTITY_EVENTS_DATE_INDEX,
+    });
+    const response = buildSecurityIntelligence({
+      symbols,
+      marketDate,
+      historyDays,
+      now,
+      snapshots: inputs.snapshots,
+      entityEvents: inputs.entityEvents,
+      productManifests: inputs.productManifests,
+      riskRangeEnvelope: inputs.riskRangeEnvelope,
+      loadErrors: inputs.loadErrors,
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(response);
+  } catch (error) {
+    console.error('[API] Error in /api/research/security-intelligence:', error);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(500).json({
+      error: 'Failed to build security intelligence',
+      details: error.message,
+      bySymbol: {},
+    });
   }
 });
 

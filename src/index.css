@@ -97,6 +97,48 @@ code {
 
 * {
   box-sizing: border-box;
+  /*
+   * Any non-auto standards scrollbar property makes Chromium use its native
+   * wide renderer and ignore the WebKit geometry below. Leave both at auto in
+   * Chromium; Firefox gets its own thin fallback further down.
+   */
+  scrollbar-width: auto !important;
+  scrollbar-color: auto !important;
+}
+
+*::-webkit-scrollbar {
+  width: 2px !important;
+  height: 2px !important;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece,
+*::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+*::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #111111 !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #000000 !important;
+}
+
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-width: thin !important;
+    scrollbar-color: #111111 transparent !important;
+  }
 }
 
 /* Dark mode overrides for Tremor components */

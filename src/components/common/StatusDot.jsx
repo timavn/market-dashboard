@@ -29,6 +29,10 @@ function normalizeStatus(status) {
     return 'loading';
   }
 
+  if (['degraded', 'partial', 'reference', 'warning'].includes(normalized)) {
+    return 'stale';
+  }
+
   return normalized || null;
 }
 
@@ -75,16 +79,16 @@ function getDisplayStatus(source, visibleRows = []) {
   }
 
   if (rawStatus === 'stale') {
-    return { label: 'Error', className: 'text-[#b54708]' };
+    return { label: 'Stale', className: 'text-[#ca8a04]' };
   }
 
   if (rawStatus === 'inactive' || rawStatus === 'defective' || rawStatus === 'error') {
-    return { label: 'Error', className: 'text-[#b54708]' };
+    return { label: 'Error', className: 'text-[#dc2626]' };
   }
 
   if (rawStatus === 'missing' || rawStatus === 'unknown') {
     return visibleRows.length > 0
-      ? { label: 'Error', className: 'text-[#b54708]' }
+      ? { label: 'Error', className: 'text-[#dc2626]' }
       : { label: 'Unknown', className: 'text-slate-500' };
   }
 
@@ -93,12 +97,18 @@ function getDisplayStatus(source, visibleRows = []) {
   }
 
   if (rawDetail === 'error' || rawDetail === 'offline') {
-    return { label: 'Error', className: 'text-[#b54708]' };
+    return { label: 'Error', className: 'text-[#dc2626]' };
   }
 
   return visibleRows.length > 0
-    ? { label: 'Error', className: 'text-[#b54708]' }
+    ? { label: 'Error', className: 'text-[#dc2626]' }
     : { label: 'Unknown', className: 'text-slate-500' };
+}
+
+function getStatusRuleClass(displayLabel) {
+  if (displayLabel === 'Error') return 'border-red-200';
+  if (displayLabel === 'Stale') return 'border-yellow-200';
+  return 'border-blue-100';
 }
 
 function shouldShowDetailValue(source, displayLabel) {
@@ -273,11 +283,11 @@ const StatusDot = ({
   } else if (effectiveStatus === 'stale' || effectiveStatus === 'delayed') {
     colorClass = 'bg-yellow-500';
     colorTone = {
-      top: '#fef3c7',
-      base: '#f59e0b',
-      dark: '#b45309',
-      ring: 'rgba(180, 83, 9, 0.42)',
-      glow: 'rgba(245, 158, 11, 0.22)',
+      top: '#fef9c3',
+      base: '#facc15',
+      dark: '#a16207',
+      ring: 'rgba(161, 98, 7, 0.42)',
+      glow: 'rgba(250, 204, 21, 0.28)',
     };
   } else if (effectiveStatus === 'historical') {
     colorClass = 'bg-blue-500';
@@ -463,7 +473,7 @@ const StatusDot = ({
                   const displayStatus = getDisplayStatus(src, visibleRows);
                   const detailRows = visibleRows.filter((normalized) => normalized.text !== src.localeString);
                   const showDetailValue = shouldShowDetailValue(src, displayStatus.label);
-                  const statusRuleClass = displayStatus.label === 'Error' ? 'border-[#ead9b1]' : 'border-blue-100';
+                  const statusRuleClass = getStatusRuleClass(displayStatus.label);
 
                   return (
                     <section
@@ -476,7 +486,10 @@ const StatusDot = ({
                         <h3 className={`min-w-0 text-[15px] font-normal leading-6 ${displayStatus.className}`}>
                           {src.label}
                         </h3>
-                        <span className={`shrink-0 text-right text-[15px] leading-6 ${displayStatus.className}`}>
+                        <span
+                          className={`shrink-0 text-right text-[15px] leading-6 ${displayStatus.className}`}
+                          data-testid={`${sourceCardTestId(src.id)}-state`}
+                        >
                           <span>{displayStatus.label}</span>
                           {src.action && (
                             <span className="ml-2 inline-flex align-middle">
@@ -557,7 +570,7 @@ const StatusDot = ({
             const { localeString } = formatLastUpdated(updatedDate || null);
             const dateOnly = formatDateOnly(updatedDate || null);
             const displayStatus = getDisplayStatus({ status: effectiveStatus });
-            const statusRuleClass = displayStatus.label === 'Error' ? 'border-[#ead9b1]' : 'border-blue-100';
+            const statusRuleClass = getStatusRuleClass(displayStatus.label);
             return (
               <div className="divide-y divide-blue-100">
                 <section

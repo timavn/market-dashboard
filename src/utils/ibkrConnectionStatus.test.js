@@ -261,7 +261,7 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
     expect(status.sources.some((source) => source.id === 'ibkr')).toBe(false);
     expect(status.sources.find((source) => source.id === 'rta')?.detailRows).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ text: 'RTA stale; latest stored RTA is 2026-06-18' }),
+        expect.objectContaining({ text: 'Last known RTA positions are from 2026-06-18.' }),
       ]),
     );
     expect(status.sources.find((source) => source.id === 'rta')?.detailRows).toEqual(
@@ -269,10 +269,10 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
         expect.objectContaining({ text: expect.stringMatching(/count mismatch/i) }),
       ]),
     );
-    expect(status.sources.find((source) => source.id === 'rta')?.detail).toBe('Error');
+    expect(status.sources.find((source) => source.id === 'rta')?.detail).toBe('Stale 7/0');
     expect(status.sources.find((source) => source.id === 'etf-pro')?.detailRows).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ text: 'ETF Pro stale; latest stored ETF Pro is 2026-06-18' }),
+        expect.objectContaining({ text: 'Last known ETF Pro positions are from 2026-06-18 (3 positions).' }),
         expect.objectContaining({ text: 'ETF Pro data quality: warning' }),
       ]),
     );
@@ -281,7 +281,287 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
         expect.objectContaining({ text: expect.stringMatching(/count mismatch/i) }),
       ]),
     );
-    expect(status.sources.find((source) => source.id === 'etf-pro')?.detail).toBe('Error');
+    expect(status.sources.find((source) => source.id === 'etf-pro')?.detail).toBe('Warning 2/1');
+  });
+
+  it('shows portfolio reference closes as yellow dated valuations rather than an error', () => {
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio({
+        holdings: [
+          {
+            symbol: 'FAB',
+            quantity: 10,
+            marketValue: 1000,
+            priceState: 'historical_close',
+            marketValueState: 'historical_close',
+            priceSessionDate: '2026-07-24',
+          },
+          {
+            symbol: 'URI',
+            quantity: 5,
+            marketValue: 500,
+            priceState: 'historical_close',
+            marketValueState: 'historical_close',
+            referenceCloseSessionDate: '2026-07-24',
+          },
+        ],
+        dataQuality: {
+          status: 'stale',
+          markState: 'reference',
+          liveMarkCount: 0,
+          historicalMarkCount: 2,
+          missingMarketValueCount: 0,
+          markFailureCount: 0,
+          warnings: ['Live market values were unavailable for two positions.'],
+        },
+      }),
+      loading: false,
+    });
+
+    const portfolio = status.sources.find((source) => source.id === 'portfolio');
+    expect(status).toMatchObject({ status: 'stale', emoji: '🟡' });
+    expect(portfolio).toMatchObject({
+      detail: 'Reference closes (2 as of 2026-07-24)',
+      status: 'stale',
+      acknowledgeableStatus: false,
+    });
+    expect(portfolio.detailRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        text: expect.stringMatching(/positions are live, but those valuations are reference data/i),
+      }),
+      expect.objectContaining({
+        text: 'Live market values were unavailable for two positions.',
+      }),
+    ]));
+  });
+
+  it('shows a cold reference-mark warmup as yellow progress rather than missing-value errors', () => {
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio({
+        holdings: [
+          {
+            symbol: 'FAB',
+            quantity: 10,
+            marketValue: 1000,
+            priceState: 'historical_close',
+            marketValueState: 'historical_close',
+            priceSessionDate: '2026-07-24',
+          },
+          {
+            symbol: 'URI',
+            quantity: 5,
+            marketValue: null,
+            priceState: 'unavailable',
+            marketValueState: 'unavailable',
+            markPending: true,
+            markWarmState: 'warming',
+          },
+        ],
+        referenceMarks: {
+          status: 'warming',
+          warming: true,
+          warmingCount: 38,
+          requestedCount: 49,
+          progress: {
+            state: 'warming',
+            requestedCount: 49,
+            completedCount: 11,
+            pendingCount: 38,
+          },
+        },
+        dataQuality: {
+          status: 'stale',
+          markState: 'warming',
+          historicalMarkCount: 11,
+          missingMarketValueCount: 38,
+          unavailableMarketValueCount: 0,
+          warmingMarkCount: 38,
+          markFailureCount: 0,
+          markProgress: {
+            state: 'warming',
+            requestedCount: 49,
+            completedCount: 11,
+            pendingCount: 38,
+          },
+        },
+      }),
+      loading: false,
+    });
+
+    const portfolio = status.sources.find((source) => source.id === 'portfolio');
+    expect(status).toMatchObject({ status: 'stale', emoji: '🟡' });
+    expect(portfolio).toMatchObject({
+      detail: 'Reference closes warming (11/49 complete; 38 pending)',
+      status: 'stale',
+      acknowledgeableStatus: false,
+    });
+    expect(portfolio.detailRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        text: 'IBKR is warming completed daily closes in the background (11/49 complete; 38 pending).',
+      }),
+    ]));
+    expect(portfolio.detailRows.map((row) => row.text).join(' ')).not.toMatch(/missing tickers/i);
+  });
+
+  it('keeps genuinely unavailable portfolio marks explicit and does not call them reference closes', () => {
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio({
+        dataQuality: {
+          status: 'partial',
+          markState: 'unavailable',
+          historicalMarkCount: 0,
+          missingMarketValueCount: 1,
+          missingMarketValueSymbols: ['FAB'],
+          markFailures: [{
+            symbol: 'FAB',
+            errorCode: 'REFERENCE_MARK_HISTORY_MISSING',
+            message: 'IBKR returned no completed daily close.',
+          }],
+        },
+      }),
+      loading: false,
+    });
+
+    const portfolio = status.sources.find((source) => source.id === 'portfolio');
+    expect(status).toMatchObject({ status: 'inactive', emoji: '🔴' });
+    expect(portfolio).toMatchObject({
+      status: 'defective',
+      acknowledgeableStatus: false,
+    });
+    expect(portfolio.detail).toBe('Partial marks (1 missing market values)');
+    expect(portfolio.detail).not.toMatch(/reference closes/i);
+    expect(portfolio.detailRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'Missing tickers: FAB' }),
+      expect.objectContaining({
+        text: 'FAB (REFERENCE_MARK_HISTORY_MISSING): IBKR returned no completed daily close.',
+      }),
+    ]));
+  });
+
+  it('shows the exact Gmail cause for last-known RTA data', () => {
+    const today = currentDate();
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio(),
+      loading: false,
+      rtaPositions: {
+        available: true,
+        lastUpdated: '2026-07-17T15:04:18.000Z',
+        longCount: 2,
+        shortCount: 3,
+        dataAvailability: {
+          current: false,
+          referenceOnly: true,
+          contentDate: '2026-07-17',
+          errorCode: 'GMAIL_AUTH_REQUIRED',
+          reason: 'Gmail OAuth authorization requires attention.',
+        },
+      },
+      etfProSnapshot: {
+        available: true,
+        current: true,
+        dataAvailability: { current: true, ingestionStatus: 'healthy' },
+        meta: { snapshotDate: today },
+        rows: [{ ticker: 'SPY', call: 'Long' }],
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+      predictionMarketProviderStatus: livePredictionProvider,
+    });
+
+    const rta = status.sources.find((source) => source.id === 'rta');
+    expect(rta).toMatchObject({ detail: 'Stale 2/3', status: 'stale' });
+    expect(rta.detailRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'Last known RTA positions are from 2026-07-17.' }),
+      expect.objectContaining({
+        text: 'Gmail ingestion (GMAIL_AUTH_REQUIRED): Gmail OAuth authorization requires attention.',
+      }),
+    ]));
+  });
+
+  it('replaces a raw heartbeat IAM denial with a concise policy repair', () => {
+    const rawReason = 'User: arn:aws:iam::915328198276:user/market-dashboard-local '
+      + 'is not authorized to perform: dynamodb:Query on resource: '
+      + 'arn:aws:dynamodb:us-west-1:915328198276:table/MarketDashboardServiceHeartbeats';
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio(),
+      loading: false,
+      rtaPositions: {
+        available: true,
+        lastUpdated: '2026-07-17T15:04:18.000Z',
+        longCount: 2,
+        shortCount: 3,
+        dataAvailability: {
+          current: false,
+          referenceOnly: true,
+          contentDate: '2026-07-17',
+          errorCode: 'SERVICE_HEARTBEAT_ACCESS_DENIED',
+          reason: rawReason,
+        },
+      },
+      predictionMarketProviderStatus: livePredictionProvider,
+    });
+
+    const rta = status.sources.find((source) => source.id === 'rta');
+    expect(rta.detailRows.map((row) => row.text)).toEqual(expect.arrayContaining([
+      'Gmail ingestion (SERVICE_HEARTBEAT_ACCESS_DENIED): '
+        + 'market-dashboard-local cannot query MarketDashboardServiceHeartbeats. '
+        + 'Admin fix: apply infra/iam/local-readiness-catalog-policy.json with '
+        + 'infra/scripts/install_local_principal_policies.sh.',
+    ]));
+    expect(rta.detailRows.map((row) => row.text).join(' ')).not.toContain('arn:aws:iam');
+  });
+
+  it('surfaces an archival ETF Pro book as stale with its date, count, and upstream cause', () => {
+    const today = currentDate();
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio(),
+      loading: false,
+      rtaPositions: {
+        available: true,
+        current: true,
+        dataAvailability: { current: true, ingestionStatus: 'healthy' },
+        lastUpdated: `${today}T16:00:00Z`,
+        longCount: 1,
+        shortCount: 0,
+      },
+      etfProSnapshot: {
+        available: false,
+        current: false,
+        rows: [],
+        dataAvailability: {
+          current: false,
+          referenceOnly: true,
+          errorCode: 'GMAIL_POLL_STALE',
+          reason: 'The last Gmail service heartbeat is older than 45 minutes.',
+        },
+        lastKnownGood: {
+          available: true,
+          meta: { snapshotDate: '2026-07-17' },
+          rows: [
+            { ticker: 'SPY', call: 'Long' },
+            { ticker: 'TLT', call: 'Short' },
+          ],
+          dataQuality: { status: 'ok', warnings: [] },
+        },
+      },
+      predictionMarketProviderStatus: livePredictionProvider,
+    });
+
+    const etf = status.sources.find((source) => source.id === 'etf-pro');
+    expect(etf).toMatchObject({ detail: 'Stale 1/1', status: 'stale' });
+    expect(etf.detailRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        text: 'Last known ETF Pro positions are from 2026-07-17 (2 positions).',
+      }),
+      expect.objectContaining({
+        text: 'Gmail ingestion (GMAIL_POLL_STALE): The last Gmail service heartbeat is older than 45 minutes.',
+      }),
+    ]));
   });
 
   it('turns yellow when CPI provider is positions-only while portfolio and signals are otherwise live', () => {
@@ -325,6 +605,51 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
       ]),
     );
     expect(status.sources.find((source) => source.id === 'prediction-markets')?.detail).toBe('Error');
+  });
+
+  it('turns red and replaces a raw prediction catalog IAM denial with an actionable repair', () => {
+    const today = currentDate();
+    const rawError = 'User: arn:aws:iam::915328198276:user/market-dashboard-local is not authorized to perform: dynamodb:Query on resource: arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketCatalogV2 because no identity-based policy allows the dynamodb:Query action';
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio(),
+      loading: false,
+      rtaPositions: {
+        available: true,
+        current: true,
+        dataAvailability: { current: true, ingestionStatus: 'healthy' },
+        lastUpdated: `${today}T16:00:00Z`,
+        longCount: 1,
+        shortCount: 0,
+      },
+      etfProSnapshot: {
+        available: true,
+        current: true,
+        dataAvailability: { current: true, ingestionStatus: 'healthy' },
+        meta: { snapshotDate: today },
+        rows: [{ ticker: 'SPY', call: 'Long' }],
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+      predictionMarketProviderStatus: {
+        providers: {
+          ibkr: {
+            status: 'catalog_unavailable',
+            errorCode: 'PREDICTION_CATALOG_ACCESS_DENIED',
+            message: rawError,
+          },
+        },
+      },
+    });
+
+    const prediction = status.sources.find((source) => source.id === 'prediction-markets');
+    expect(status).toMatchObject({ status: 'inactive', emoji: '🔴' });
+    expect(prediction).toMatchObject({ detail: 'Error', status: 'defective' });
+    expect(prediction.detailRows.map((row) => row.text)).toEqual([
+      'Code: PREDICTION_CATALOG_ACCESS_DENIED',
+      'market-dashboard-local lacks dynamodb:Query and dynamodb:TransactWriteItems on PredictionMarketCatalogV2.',
+      'Admin fix: attach infra/iam/local-readiness-catalog-policy.json using infra/scripts/install_local_principal_policies.sh.',
+    ]);
+    expect(prediction.detailRows.map((row) => row.text).join(' ')).not.toContain('arn:aws:iam');
   });
 
   it('keeps portfolio status green when CPI positions-only has complete combined strike coverage', () => {

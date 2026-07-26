@@ -50,9 +50,9 @@ describe('StatusDot', () => {
     expect(dialog).toHaveClass('fixed');
     expect(Number.parseInt(dialog.style.left, 10)).toBeGreaterThan(0);
     expect(screen.getByTestId('status-source-card-ust2y')).toHaveAttribute('data-status-tone', 'live');
-    expect(screen.getByTestId('status-source-card-ust5y')).toHaveAttribute('data-status-tone', 'error');
+    expect(screen.getByTestId('status-source-card-ust5y')).toHaveAttribute('data-status-tone', 'stale');
     expect(screen.getByText('2-Yr (UST2Y)')).toHaveClass('text-emerald-700');
-    expect(screen.getByText('5-Yr (UST5Y)')).toHaveClass('text-[#b54708]');
+    expect(screen.getByText('5-Yr (UST5Y)')).toHaveClass('text-[#ca8a04]');
     expect(screen.getByText('Quote refresh failed')).toBeInTheDocument();
 
     const originalLeft = dialog.style.left;
@@ -90,7 +90,11 @@ describe('StatusDot', () => {
   });
 
   test.each([
-    ['stale', 'error'],
+    ['stale', 'stale'],
+    ['warning', 'stale'],
+    ['degraded', 'stale'],
+    ['partial', 'stale'],
+    ['reference', 'stale'],
     ['inactive', 'error'],
     ['missing', 'unknown'],
     ['error', 'error'],
@@ -130,6 +134,41 @@ describe('StatusDot', () => {
     const button = screen.getByRole('button', { name: `Show status details for ${sourceStatus} aggregate` });
     expect(button).toHaveAttribute('data-status', aggregateStatus);
     expect(screen.getByTestId('status-dot-visual')).not.toHaveTextContent('🟢');
+  });
+
+  test('uses yellow for stale and reserves red for errors', () => {
+    const { rerender } = render(
+      <StatusDot
+        label="Mixed status"
+        status="stale"
+        sources={[
+          { id: 'reference', label: 'Reference data', status: 'stale' },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show status details for Mixed status' }));
+    const staleCard = screen.getByTestId('status-source-card-reference');
+    expect(within(staleCard).getByText('Reference data')).toHaveClass('text-[#ca8a04]');
+    expect(screen.getByTestId('status-source-card-reference-state')).toHaveClass('text-[#ca8a04]');
+    expect(screen.getByTestId('status-dot-visual')).toHaveClass('bg-yellow-500');
+
+    fireEvent.click(screen.getByRole('button', { name: /close mixed status/i }));
+    rerender(
+      <StatusDot
+        label="Mixed status"
+        status="error"
+        sources={[
+          { id: 'failure', label: 'Failed data', status: 'error' },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show status details for Mixed status' }));
+    const errorCard = screen.getByTestId('status-source-card-failure');
+    expect(within(errorCard).getByText('Failed data')).toHaveClass('text-[#dc2626]');
+    expect(screen.getByTestId('status-source-card-failure-state')).toHaveClass('text-[#dc2626]');
+    expect(screen.getByTestId('status-dot-visual')).toHaveClass('bg-red-500');
   });
 
   test('uses a larger native button target without changing the visible dot size', () => {

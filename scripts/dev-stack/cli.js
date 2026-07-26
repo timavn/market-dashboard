@@ -37,6 +37,7 @@ const monitorIntervalMs = Math.max(1_000, Number(process.env.MARKET_DASHBOARD_MO
 const healthFailureThreshold = Math.max(2, Number(process.env.MARKET_DASHBOARD_HEALTH_FAILURE_THRESHOLD) || 3);
 const restartWindowMs = 5 * 60 * 1000;
 const circuitOpenMs = 5 * 60 * 1000;
+const defaultBridgeAwsProfile = 'market-dashboard-bridge';
 const expectedCapabilityIds = Object.freeze([
   'automation.hermes',
   'dashboard.core',
@@ -58,10 +59,270 @@ const services = {
   },
 };
 
+const localServiceLabels = {
+  ui: 'Dashboard UI',
+  api: 'Express API',
+  sidecar: 'IBKR sidecar',
+  bridge: 'Hermes snapshot bridge',
+};
+
+function bridgeRecoveryLabel(serviceState = {}) {
+  const profile = serviceState.awsProfile || defaultBridgeAwsProfile;
+  switch (serviceState.lastPublishErrorCode) {
+    case 'HERMES_BRIDGE_AWS_PROFILE_UNAVAILABLE':
+      return `Provision credentials for the dedicated ${profile} AWS profile, then restart the stack.`;
+    case 'HERMES_BRIDGE_AWS_ACCESS_DENIED':
+      return `Attach the write-only local bridge policy to the principal used by ${profile}, then restart the stack.`;
+    case 'HERMES_BRIDGE_TABLE_MISSING':
+      return 'Deploy the Hermes input snapshot and service heartbeat tables, then restart the stack.';
+    case 'HERMES_BRIDGE_AWS_UNREACHABLE':
+      return 'Restore DNS/network access to the regional DynamoDB endpoint; the bridge will retry automatically.';
+    case 'HERMES_BRIDGE_AWS_THROTTLED':
+      return 'Inspect DynamoDB throttling and capacity; the bridge will retry automatically.';
+    default:
+      if (serviceState.lastPublishErrorCode) {
+        return `Inspect the ${serviceState.lastPublishErrorCode} publish failure for ${profile}, then restart the stack.`;
+      }
+      if (serviceState.lastInputErrorCode) {
+        return `Resolve bridge input failure ${serviceState.lastInputErrorCode} in the API or IBKR sidecar, then restart the stack.`;
+      }
+      return 'Restart the repo-owned local stack, then rerun the morning checklist.';
+  }
+}
+
 function ensureDirs() { fs.mkdirSync(appSupport, { recursive: true }); fs.mkdirSync(logDir, { recursive: true }); }
 function readState() { try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { return null; } }
-function writeState(state) { ensureDirs(); fs.writeFileSync(stateFile, JSON.stringify(state, null, 2)); }
+function writeJsonAtomically(targetPath, value, {
+  fileSystem = fs,
+  processId = process.pid,
+} = {}) {
+  const temporaryPath = `${targetPath}.tmp-${processId}`;
+  try {
+    fileSystem.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fileSystem.writeFileSync(temporaryPath, JSON.stringify(value, null, 2), { mode: 0o600 });
+    fileSystem.renameSync(temporaryPath, targetPath);
+    return { ok: true, error: null };
+  } catch (error) {
+    try { fileSystem.unlinkSync(temporaryPath); } catch {}
+    return {
+      ok: false,
+      error,
+      errorCode: error?.code || 'STATE_WRITE_FAILED',
+    };
+  }
+}
+
+let lastStateWriteErrorCode = null;
+function planStateWriteNotification(previousErrorCode, result, observedAt = new Date().toISOString()) {
+  const currentErrorCode = result?.ok ? null : (result?.errorCode || 'STATE_WRITE_FAILED');
+  if (!previousErrorCode && currentErrorCode) {
+    return {
+      nextErrorCode: currentErrorCode,
+      event: {
+        kind: 'failure',
+        service: 'supervisor-state',
+        title: 'Market Dashboard: supervisor state persistence failed',
+        body: `dev-stack.json could not be updated (${currentErrorCode}). The supervisor is still running with in-memory state; check free disk space.`,
+        observedAt,
+      },
+    };
+  }
+  if (previousErrorCode && !currentErrorCode) {
+    return {
+      nextErrorCode: null,
+      event: {
+        kind: 'recovery',
+        service: 'supervisor-state',
+        title: 'Market Dashboard: supervisor state persistence recovered',
+        body: `dev-stack.json writes are healthy again after ${previousErrorCode}.`,
+        observedAt,
+      },
+    };
+  }
+  return { nextErrorCode: currentErrorCode, event: null };
+}
+
+function writeState(state) {
+  const result = writeJsonAtomically(stateFile, state);
+  const transition = planStateWriteNotification(lastStateWriteErrorCode, result);
+  if (!result.ok) {
+    if (lastStateWriteErrorCode !== result.errorCode) {
+      console.error(
+        `[dashboard-supervisor] State persistence degraded (${result.errorCode}): ${result.error?.message || 'unknown error'}`,
+      );
+    }
+    if (transition.event && localNotificationsEnabled()) sendMacNotification(transition.event);
+    lastStateWriteErrorCode = transition.nextErrorCode;
+    return false;
+  }
+  if (lastStateWriteErrorCode) {
+    console.log('[dashboard-supervisor] State persistence recovered.');
+  }
+  if (transition.event && localNotificationsEnabled()) sendMacNotification(transition.event);
+  lastStateWriteErrorCode = transition.nextErrorCode;
+  return true;
+}
 function removeState() { try { fs.unlinkSync(stateFile); } catch {} }
+
+function configuredBridgeAwsProfile(env = process.env) {
+  return String(env.HERMES_BRIDGE_AWS_PROFILE || defaultBridgeAwsProfile).trim()
+    || defaultBridgeAwsProfile;
+}
+
+function childEnvironment(name, inheritedEnv = process.env) {
+  const environment = { ...inheritedEnv, ...(services[name]?.env || {}) };
+  if (name !== 'bridge') return environment;
+
+  // The bridge is a write-only security principal. Environment credentials
+  // take precedence over AWS_PROFILE in the SDK, so remove them before
+  // selecting the dedicated profile.
+  for (const key of [
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_SECURITY_TOKEN',
+    'AWS_ROLE_ARN',
+    'AWS_WEB_IDENTITY_TOKEN_FILE',
+    'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+    'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+  ]) {
+    delete environment[key];
+  }
+  const profile = configuredBridgeAwsProfile(inheritedEnv);
+  environment.HERMES_BRIDGE_AWS_PROFILE = profile;
+  environment.AWS_PROFILE = profile;
+  environment.AWS_SDK_LOAD_CONFIG = '1';
+  return environment;
+}
+
+function localNotificationsEnabled(env = process.env, platform = process.platform) {
+  if (platform !== 'darwin') return false;
+  const configured = String(
+    env.MARKET_DASHBOARD_LOCAL_NOTIFICATIONS
+      ?? env.MARKET_DASHBOARD_NOTIFICATIONS_ENABLED
+      ?? 'true',
+  ).trim().toLowerCase();
+  return !['0', 'false', 'no', 'off', 'disabled'].includes(configured);
+}
+
+function notificationPhase(serviceState = {}) {
+  if (serviceState.status === 'ready') return 'ready';
+  if (['blocked', 'degraded', 'failed'].includes(serviceState.status)) return 'failed';
+  if (
+    serviceState.status === 'down'
+    && Number(serviceState.healthFailures || 0) >= healthFailureThreshold
+  ) {
+    return 'failed';
+  }
+  return 'pending';
+}
+
+function serviceFailureCode(name, serviceState = {}) {
+  return serviceState.lastPublishErrorCode
+    || serviceState.lastInputErrorCode
+    || serviceState.lastErrorCode
+    || serviceState.errorCode
+    || `LOCAL_${String(name).toUpperCase()}_UNAVAILABLE`;
+}
+
+function serviceFailureDetail(serviceState = {}) {
+  const detail = serviceState.lastPublishDetail
+    || serviceState.lastInputDetail
+    || serviceState.lastDetail
+    || serviceState.error
+    || null;
+  if (!detail) return null;
+  return String(detail).replace(/[\r\n]+/g, ' ').slice(0, 180);
+}
+
+function planServiceNotificationTransition({
+  name,
+  serviceState,
+  previous = null,
+  observedAt = new Date().toISOString(),
+} = {}) {
+  const phase = notificationPhase(serviceState);
+  if (phase === 'pending') return { next: previous, event: null };
+
+  const label = localServiceLabels[name] || name;
+  const errorCode = phase === 'failed' ? serviceFailureCode(name, serviceState) : null;
+  const failureDetail = phase === 'failed' ? serviceFailureDetail(serviceState) : null;
+  const next = {
+    ...(previous || {}),
+    phase,
+    errorCode,
+    status: serviceState.status || null,
+    transitionedAt: previous?.phase === phase ? previous.transitionedAt : observedAt,
+    observedAt,
+  };
+
+  if (!previous) {
+    if (phase === 'ready') return { next, event: null };
+    return {
+      next,
+      event: {
+        kind: 'failure',
+        service: name,
+        title: `Market Dashboard: ${label} unavailable`,
+        body: `${label} is ${serviceState.status || 'unavailable'} (${errorCode}).${failureDetail ? ` ${failureDetail}` : ''}`,
+        observedAt,
+      },
+    };
+  }
+  if (previous.phase === phase) return { next, event: null };
+  if (phase === 'failed') {
+    return {
+      next,
+      event: {
+        kind: 'failure',
+        service: name,
+        title: `Market Dashboard: ${label} unavailable`,
+        body: `${label} is ${serviceState.status || 'unavailable'} (${errorCode}).${failureDetail ? ` ${failureDetail}` : ''}`,
+        observedAt,
+      },
+    };
+  }
+
+  const failedAt = Date.parse(String(previous.transitionedAt || ''));
+  const recoveredAt = Date.parse(observedAt);
+  const durationMinutes = Number.isFinite(failedAt) && Number.isFinite(recoveredAt)
+    ? Math.max(0, Math.round((recoveredAt - failedAt) / 60_000))
+    : null;
+  return {
+    next,
+    event: {
+      kind: 'recovery',
+      service: name,
+      title: `Market Dashboard: ${label} recovered`,
+      body: `${label} is healthy again${durationMinutes == null ? '' : ` after ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`}.`,
+      observedAt,
+    },
+  };
+}
+
+function sendMacNotification(event, {
+  execute = execFileSync,
+  platform = process.platform,
+} = {}) {
+  if (platform !== 'darwin' || !event) return { delivered: false, reason: 'unsupported' };
+  const script = [
+    'on run argv',
+    'display notification (item 2 of argv) with title (item 1 of argv)',
+    'end run',
+  ].join('\n');
+  try {
+    execute('/usr/bin/osascript', ['-e', script, event.title, event.body], {
+      stdio: 'ignore',
+      timeout: 3_000,
+    });
+    return { delivered: true };
+  } catch (error) {
+    return {
+      delivered: false,
+      reason: error?.code || error?.message || 'notification_failed',
+    };
+  }
+}
 function launchAgentDomain() {
   return typeof process.getuid === 'function' ? `gui/${process.getuid()}/${launchAgentLabel}` : null;
 }
@@ -171,9 +432,54 @@ function processServiceStatus(name, item, now = Date.now()) {
     heartbeatAgeMs: age,
     lastResultStatus: item?.lastResultStatus || null,
     lastErrorCode: item?.lastErrorCode || null,
+    lastInputErrorCode: item?.lastInputErrorCode || null,
+    lastInputDetail: item?.lastInputDetail || null,
+    lastPublishErrorCode: item?.lastPublishErrorCode || null,
+    lastPublishStage: item?.lastPublishStage || null,
+    lastPublishDetail: item?.lastPublishDetail || null,
+    lastPublishFailures: Array.isArray(item?.lastPublishFailures)
+      ? item.lastPublishFailures
+      : [],
+    lastDetail: item?.lastDetail || null,
     lastSuccessAt: item?.lastSuccessAt || null,
+    lastFailureAt: item?.lastFailureAt || null,
+    awsProfile: item?.awsProfile || null,
   };
 }
+
+function applyBridgeStatusPayload(item, payload, observedAt = new Date().toISOString()) {
+  if (!item || !payload || !['ready', 'error', 'degraded'].includes(payload.status)) return false;
+  item.lastHeartbeatAt = payload.observedAt || observedAt;
+  item.lastResultStatus = payload.status === 'ready' ? 'ready' : 'error';
+  item.lastInputErrorCode = payload.inputErrorCode || payload.input?.errorCode || null;
+  item.lastInputDetail = payload.input?.detail || null;
+  item.lastPublishErrorCode = payload.publishErrorCode || payload.publish?.errorCode || null;
+  item.lastPublishStage = payload.publishStage || payload.publish?.stage || null;
+  item.lastPublishDetail = payload.publish?.detail || null;
+  item.lastPublishFailures = Array.isArray(payload.publish?.failures)
+    ? payload.publish.failures.map(failure => ({
+      stage: failure?.stage || null,
+      errorCode: failure?.errorCode || null,
+      detail: failure?.detail || null,
+    }))
+    : [];
+  item.awsProfile = payload.awsProfile || item.awsProfile || null;
+  item.lastErrorCode = item.lastPublishErrorCode
+    || item.lastInputErrorCode
+    || payload.errorCode
+    || null;
+  item.lastDetail = payload.detail
+    || payload.publish?.detail
+    || payload.input?.detail
+    || null;
+  if (item.lastResultStatus === 'ready') {
+    item.lastSuccessAt = item.lastHeartbeatAt;
+  } else {
+    item.lastFailureAt = item.lastHeartbeatAt;
+  }
+  return true;
+}
+
 function rotate(file) {
   try {
     if (fs.statSync(file).size < maxLogBytes) return;
@@ -183,15 +489,21 @@ function rotate(file) {
 }
 function streamToLog(stream, file, onActivity) {
   stream.on('data', chunk => {
-    rotate(file);
-    fs.appendFileSync(file, chunk);
+    try {
+      rotate(file);
+      fs.appendFileSync(file, chunk);
+    } catch (error) {
+      if (!['ENOSPC', 'EDQUOT'].includes(error?.code)) {
+        console.error(`[dashboard-supervisor] Could not append ${path.basename(file)}: ${error.message}`);
+      }
+    }
     onActivity?.(chunk);
   });
 }
 function childFor(name, onActivity) {
   const service = services[name];
   const file = path.join(logDir, `${name}.log`);
-  const options = { cwd: root, env: { ...process.env, ...service.env }, stdio: ['ignore', 'pipe', 'pipe'] };
+  const options = { cwd: root, env: childEnvironment(name), stdio: ['ignore', 'pipe', 'pipe'] };
   const child = service.shell ? spawn('bash', service.args, options) : spawn(process.execPath, service.args, options);
   streamToLog(child.stdout, file, chunk => onActivity?.('stdout', chunk));
   streamToLog(child.stderr, file, chunk => onActivity?.('stderr', chunk));
@@ -214,7 +526,8 @@ async function terminate(pid) {
 }
 async function stop(options = {}) {
   const quiet = options.quiet === true;
-  const state = readState();
+  const preserveState = options.preserveState === true;
+  const state = options.state || readState();
   if (state?.supervisor?.pid && state.supervisor.pid !== process.pid) {
     if (isOwned(state.supervisor.pid)) await terminate(state.supervisor.pid);
     else if (isAlive(state.supervisor.pid)) console.warn(`Refusing to stop unknown supervisor PID ${state.supervisor.pid}.`);
@@ -230,7 +543,7 @@ async function stop(options = {}) {
     if (isOwned(pid)) await terminate(pid);
     else console.warn(`Refusing to stop unknown listener PID ${pid} on port ${service.port}.`);
   }
-  removeState();
+  if (!preserveState) removeState();
   if (!quiet) console.log('Dashboard stack stopped.');
 }
 async function waitFor(name, timeout = 30000) {
@@ -247,6 +560,7 @@ async function runMonitor() {
   ensureDirs();
   assertPorts();
   const previousState = readState();
+  const notificationsActive = localNotificationsEnabled();
   const state = {
     version: 2,
     root,
@@ -254,41 +568,81 @@ async function runMonitor() {
     sourceFingerprint: computeRuntimeFingerprint(root),
     supervisor: { pid: process.pid },
     children: {},
+    notifications: notificationsActive && previousState?.notifications
+      ? { ...previousState.notifications }
+      : {},
   };
   const children = {};
   const histories = {};
   const restartPending = new Set();
+  const bridgeOutputBuffers = { stdout: '', stderr: '' };
   let timer = null;
   let reconciling = false;
+
+  function observeServiceNotification(name, serviceState, observedAt = new Date().toISOString()) {
+    if (!notificationsActive) return null;
+    const planned = planServiceNotificationTransition({
+      name,
+      serviceState,
+      previous: state.notifications[name] || null,
+      observedAt,
+    });
+    if (planned.next) state.notifications[name] = planned.next;
+    if (!planned.event) return null;
+    const delivery = sendMacNotification(planned.event);
+    state.notifications[name] = {
+      ...state.notifications[name],
+      lastNotificationAt: observedAt,
+      notificationDelivered: delivery.delivered,
+      notificationError: delivery.delivered ? null : delivery.reason,
+    };
+    return planned.event;
+  }
 
   function recordActivity(name, pid, streamName, chunk) {
     if (!state.children[name] || state.children[name].pid !== pid) return;
     const item = state.children[name];
     if (name === 'bridge') {
-      item.lastHeartbeatAt = new Date().toISOString();
+      bridgeOutputBuffers[streamName] += String(chunk);
+      const lines = bridgeOutputBuffers[streamName].split(/\r?\n/);
+      bridgeOutputBuffers[streamName] = lines.pop() || '';
       let parsedStatus = false;
-      for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) {
+      for (const line of lines.filter(Boolean)) {
         try {
           const payload = JSON.parse(line);
-          if (payload?.status) {
+          parsedStatus = applyBridgeStatusPayload(item, payload) || parsedStatus;
+        } catch {
+          if (streamName === 'stderr' && /\[hermes-bridge\]\s+fatal:/i.test(line)) {
+            const observedAt = new Date().toISOString();
             parsedStatus = true;
-            item.lastResultStatus = payload.status === 'ready' ? 'ready' : 'error';
-            item.lastErrorCode = payload.errorCode || null;
-            if (item.lastResultStatus === 'ready') item.lastSuccessAt = item.lastHeartbeatAt;
+            item.lastHeartbeatAt = observedAt;
+            item.lastResultStatus = 'error';
+            item.lastErrorCode = 'HERMES_BRIDGE_PROCESS_ERROR';
+            item.lastInputErrorCode = null;
+            item.lastInputDetail = null;
+            item.lastPublishErrorCode = null;
+            item.lastPublishStage = null;
+            item.lastPublishDetail = null;
+            item.lastPublishFailures = [];
+            item.lastDetail = line.slice(0, 500);
+            item.lastFailureAt = observedAt;
           }
-        } catch {}
+        }
       }
-      if (streamName === 'stderr' && !parsedStatus && item.lastResultStatus !== 'error') {
-        item.lastResultStatus = 'error';
-        item.lastErrorCode = 'HERMES_BRIDGE_PROCESS_ERROR';
+      if (parsedStatus) {
+        item.status = processServiceStatus(name, item).status;
+        observeServiceNotification(name, item, item.lastHeartbeatAt);
       }
-      item.status = processServiceStatus(name, item).status;
     }
     writeState(state);
   }
 
   async function startOne(name, { initial = false } = {}) {
     const service = services[name];
+    if (name === 'bridge') {
+      bridgeOutputBuffers.stdout = '';
+      bridgeOutputBuffers.stderr = '';
+    }
     let existing = service.processOnly
       ? Number((initial ? previousState : state)?.children?.[name]?.pid) || null
       : listenerPid(service.port);
@@ -329,7 +683,18 @@ async function runMonitor() {
       startedAt: new Date().toISOString(),
       healthFailures: 0,
       restarts: (histories[name] || []).length,
-      ...(service.processOnly ? { lastHeartbeatAt: null, lastResultStatus: 'starting', lastErrorCode: null } : {}),
+      ...(service.processOnly ? {
+        lastHeartbeatAt: null,
+        lastResultStatus: 'starting',
+        lastErrorCode: null,
+        lastInputErrorCode: null,
+        lastInputDetail: null,
+        lastPublishErrorCode: null,
+        lastPublishStage: null,
+        lastPublishDetail: null,
+        lastPublishFailures: [],
+        awsProfile: configuredBridgeAwsProfile(),
+      } : {}),
     };
     writeState(state);
     child.on('error', (error) => {
@@ -340,6 +705,7 @@ async function runMonitor() {
         errorCode: error.code || 'LOCAL_PROCESS_SPAWN_ERROR',
         error: error.message,
       };
+      observeServiceNotification(name, state.children[name]);
       writeState(state);
     });
     child.on('exit', (code, signal) => {
@@ -375,6 +741,16 @@ async function runMonitor() {
     const service = services[name];
     const circuitUntil = Date.parse(String(state.children[name]?.circuitOpenUntil || ''));
     if (Number.isFinite(circuitUntil) && circuitUntil > Date.now()) return;
+    observeServiceNotification(name, {
+      ...state.children[name],
+      status: 'down',
+      healthFailures: Math.max(
+        healthFailureThreshold,
+        Number(state.children[name]?.healthFailures || 0),
+      ),
+      errorCode: state.children[name]?.errorCode
+        || `LOCAL_${name.toUpperCase()}_${context.reason === 'process-exit' ? 'PROCESS_EXIT' : 'UNHEALTHY'}`,
+    });
     restartPending.add(name);
     try {
       const policy = restartPolicyFor({
@@ -394,7 +770,7 @@ async function runMonitor() {
         };
         state.stopping = true;
         writeState(state);
-        await stop({ quiet: true });
+        await stop({ quiet: true, preserveState: true, state });
         process.exit(1);
       }
       if (policy.circuitOpenUntil) {
@@ -437,6 +813,9 @@ async function runMonitor() {
   for (const name of ['api', 'ui']) state.children[name].status = await waitFor(name) ? 'ready' : 'starting';
   if (state.children.sidecar) state.children.sidecar.status = await waitFor('sidecar', 5000) ? 'ready' : 'degraded';
   if (state.children.bridge) state.children.bridge.status = await waitFor('bridge', 5000) ? 'ready' : 'degraded';
+  for (const [name, item] of Object.entries(state.children)) {
+    observeServiceNotification(name, item);
+  }
   writeState(state);
   const degradedServices = ['sidecar', 'bridge'].filter(name => state.children[name]?.status !== 'ready');
   console.log(`Dashboard ${degradedServices.length === 0 ? 'READY' : `DEGRADED: ${degradedServices.join(', ')} unavailable`} (UI :3000, API :3001)`);
@@ -469,10 +848,11 @@ async function runMonitor() {
           if (!snapshot.owned && snapshot.running) {
             item.status = 'blocked';
             item.errorCode = 'LOCAL_PORT_OWNERSHIP_CONFLICT';
+            observeServiceNotification(name, item);
             continue;
           }
           item.healthFailures = staleOrDead ? Number(item.healthFailures || 0) + 1 : 0;
-          if (!staleOrDead) item.lastHealthyAt = new Date().toISOString();
+          if (snapshot.ready) item.lastHealthyAt = new Date().toISOString();
         } else {
           const pid = listenerPid(service.port);
           const owned = Boolean(pid && isOwned(pid));
@@ -483,14 +863,18 @@ async function runMonitor() {
             item.status = 'blocked';
             item.errorCode = 'LOCAL_PORT_OWNERSHIP_CONFLICT';
             item.healthFailures = 0;
+            observeServiceNotification(name, item);
             continue;
           }
           item.status = healthy ? 'ready' : (pid ? 'starting' : 'down');
-          item.errorCode = healthy ? null : item.errorCode;
+          item.errorCode = healthy
+            ? null
+            : (item.errorCode || `LOCAL_${name.toUpperCase()}_UNHEALTHY`);
           item.healthFailures = healthy ? 0 : Number(item.healthFailures || 0) + 1;
           if (healthy) item.lastHealthyAt = new Date().toISOString();
         }
 
+        observeServiceNotification(name, item);
         if (item.healthFailures >= healthFailureThreshold) {
           void scheduleRestart(name, { reason: 'health-check-failed' });
         }
@@ -505,7 +889,7 @@ async function runMonitor() {
     state.stopping = true;
     clearInterval(timer);
     for (const [name] of Object.entries(services)) await terminateOwnedService(name);
-    removeState();
+    writeState(state);
     process.exit(0);
   }
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
@@ -587,13 +971,6 @@ async function doctorReport() {
   return report;
 }
 
-const localServiceLabels = {
-  ui: 'Dashboard UI',
-  api: 'Express API',
-  sidecar: 'IBKR sidecar',
-  bridge: 'Hermes snapshot bridge',
-};
-
 async function localStackGroup() {
   const state = readState();
   const snapshots = await Promise.all(Object.entries(services).map(async ([name, service]) => {
@@ -605,6 +982,10 @@ async function localStackGroup() {
     const healthy = service.processOnly ? processSnapshot.healthy : await httpOk(service.health);
     let summary;
     let recovery;
+    const processErrorCode = processSnapshot?.lastPublishErrorCode
+      || processSnapshot?.lastInputErrorCode
+      || processSnapshot?.lastErrorCode
+      || null;
 
     if (pid && !owned) {
       summary = service.processOnly
@@ -630,11 +1011,16 @@ async function localStackGroup() {
       summary = service.processOnly
         ? `Repo-owned bridge PID ${pid} is not publishing a fresh successful heartbeat.`
         : `Repo-owned PID ${pid} is listening on port ${service.port}, but its health check failed.`;
-      recovery = {
-        kind: service.processOnly ? 'manual' : 'command',
-        label: 'Restart the repo-owned local stack, then rerun the morning checklist.',
-        command: 'npm run dev:restart',
-      };
+      recovery = service.processOnly
+        ? {
+          kind: 'manual',
+          label: bridgeRecoveryLabel(processSnapshot),
+        }
+        : {
+          kind: 'command',
+          label: 'Restart the repo-owned local stack, then rerun the morning checklist.',
+          command: 'npm run dev:restart',
+        };
     } else {
       summary = service.processOnly
         ? `Publishing outbound snapshots from repo-owned PID ${pid}.`
@@ -652,9 +1038,22 @@ async function localStackGroup() {
         ? null
         : (pid && !owned
           ? 'LOCAL_PORT_OWNERSHIP_CONFLICT'
-          : (!pid ? `LOCAL_${name.toUpperCase()}_NOT_RUNNING` : `LOCAL_${name.toUpperCase()}_UNHEALTHY`)),
+          : (!pid
+            ? `LOCAL_${name.toUpperCase()}_NOT_RUNNING`
+            : (processErrorCode || `LOCAL_${name.toUpperCase()}_UNHEALTHY`))),
       detail: service.processOnly
-        ? `Heartbeat ${processSnapshot.lastHeartbeatAt || 'unavailable'}; latest result ${processSnapshot.lastResultStatus || 'unknown'}${processSnapshot.lastErrorCode ? ` (${processSnapshot.lastErrorCode})` : ''}.`
+        ? [
+          `Heartbeat ${processSnapshot.lastHeartbeatAt || 'unavailable'}; latest result ${processSnapshot.lastResultStatus || 'unknown'}.`,
+          processSnapshot.lastInputErrorCode
+            ? `Input: ${processSnapshot.lastInputErrorCode}${processSnapshot.lastInputDetail ? ` — ${processSnapshot.lastInputDetail}` : ''}.`
+            : null,
+          processSnapshot.lastPublishErrorCode
+            ? `Publish: ${processSnapshot.lastPublishErrorCode}${processSnapshot.lastPublishStage ? ` at ${processSnapshot.lastPublishStage}` : ''}${processSnapshot.lastPublishDetail ? ` — ${processSnapshot.lastPublishDetail}` : ''}.`
+            : null,
+          !processSnapshot.lastInputDetail && !processSnapshot.lastPublishDetail
+            ? processSnapshot.lastDetail || null
+            : null,
+        ].filter(Boolean).join(' ')
         : service.health,
       observedAt: new Date().toISOString(),
       ageSeconds: 0,
@@ -1191,17 +1590,26 @@ if (require.main === module) {
 }
 
 module.exports = {
+  applyBridgeStatusPayload,
+  bridgeRecoveryLabel,
+  childEnvironment,
+  configuredBridgeAwsProfile,
   formatMorningReport,
   hasExpectedDashboardSignature,
   launchAgentIsLoaded,
+  localNotificationsEnabled,
   mergedMorningReport,
   morningExitCode,
   pathIsInRoot,
+  planServiceNotificationTransition,
+  planStateWriteNotification,
   recoveryActions,
   restartPolicyFor,
+  sendMacNotification,
   services,
   summarizeGroups,
   systemSourceIsStale,
   hasStartupReadinessMismatch,
   validateSystemReadinessReport,
+  writeJsonAtomically,
 };

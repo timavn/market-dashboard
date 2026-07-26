@@ -88,6 +88,67 @@ const cleanIssues = (issues) => (Array.isArray(issues) ? issues : [issues])
   .filter(Boolean)
   .slice(0, 3);
 
+/** Map detailed tones onto the 3 visual glyphs: live / stale / error. */
+export const getStatusIndicatorKind = (status) => {
+  const normalized = normalizeStatus(status);
+  if (normalized === 'live') return 'live';
+  if (normalized === 'offline' || normalized === 'unavailable') return 'error';
+  return 'stale';
+};
+
+const StatusIndicatorIcon = ({ kind }) => {
+  if (kind === 'live') {
+    return (
+      <svg className="efr-status-chip__icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <circle cx="8" cy="8" r="8" fill="currentColor" />
+        <path
+          d="M4.55 8.15l2.2 2.2 4.7-4.75"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  if (kind === 'error') {
+    return (
+      <svg className="efr-status-chip__icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <circle cx="8" cy="8" r="8" fill="currentColor" />
+        <path
+          d="M4.75 4.75l6.5 6.5"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="2.15"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="efr-status-chip__icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M8 1.35 L14.85 13.75 H1.15 Z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 5.35v4.05"
+        fill="none"
+        stroke="#1f2937"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+      />
+      <circle cx="8" cy="11.45" r="1" fill="#1f2937" />
+    </svg>
+  );
+};
+
 /**
  * Explicit data-state control used by the Exception-First Radar.
  * Delayed, historical, missing, and unavailable data always retain non-live tones.
@@ -107,6 +168,7 @@ const DataStatusChip = ({
 }) => {
   const normalizedStatus = normalizeStatus(status);
   const meta = DATA_STATUS_META[normalizedStatus];
+  const indicatorKind = getStatusIndicatorKind(normalizedStatus);
   const visibleLabel = label || meta.label;
   const accessibleLabel = detail ? `${visibleLabel} · ${detail}` : visibleLabel;
   const diagnosticRows = cleanDiagnostics(diagnostics);
@@ -254,9 +316,14 @@ const DataStatusChip = ({
         aria-expanded={isOpen}
         aria-controls={isOpen ? dialogId : undefined}
         data-status={normalizedStatus}
+        data-indicator={indicatorOnly ? indicatorKind : undefined}
         onClick={togglePopover}
       >
-        <span className="efr-status-chip__dot" aria-hidden="true" />
+        {indicatorOnly ? (
+          <StatusIndicatorIcon kind={indicatorKind} />
+        ) : (
+          <span className="efr-status-chip__dot" aria-hidden="true" />
+        )}
         {!indicatorOnly ? <span>{visibleLabel}</span> : null}
         {!indicatorOnly && detail ? <span className="efr-status-chip__detail">{detail}</span> : null}
       </button>
@@ -265,5 +332,5 @@ const DataStatusChip = ({
   );
 };
 
-export { getStatusSummary, normalizeStatus };
+export { getStatusSummary, normalizeStatus, StatusIndicatorIcon };
 export default DataStatusChip;

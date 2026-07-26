@@ -22,6 +22,12 @@ const INTERVAL_MS = Math.max(30_000, Number(process.env.HERMES_BRIDGE_INTERVAL_M
 const REQUEST_TIMEOUT_MS = Math.max(2_000, Number(process.env.HERMES_BRIDGE_REQUEST_TIMEOUT_MS) || 20_000);
 const MAX_INPUT_AGE_MS = Math.max(30_000, Number(process.env.HERMES_BRIDGE_MAX_INPUT_AGE_MS) || 180_000);
 const TTL_DAYS = Math.max(1, Number(process.env.HERMES_BRIDGE_TTL_DAYS) || 30);
+const configuredBridgeAwsProfile = String(
+  process.env.HERMES_BRIDGE_AWS_PROFILE
+    || process.env.AWS_PROFILE
+    || 'market-dashboard-bridge',
+).trim();
+const BRIDGE_AWS_PROFILE = configuredBridgeAwsProfile || 'market-dashboard-bridge';
 const once = process.argv.includes('--once');
 const EXPECTED_CAPABILITY_IDS = Object.freeze([
   'automation.hermes',
@@ -46,6 +52,8 @@ function assertLoopbackBase(raw, label) {
 assertLoopbackBase(API_BASE, 'MARKET_DASHBOARD_API_URL');
 assertLoopbackBase(SIDECAR_BASE, 'IBKR_SIDECAR_URL');
 
+process.env.AWS_PROFILE = BRIDGE_AWS_PROFILE;
+process.env.AWS_SDK_LOAD_CONFIG = process.env.AWS_SDK_LOAD_CONFIG || '1';
 const dynamodb = new AWS.DynamoDB.DocumentClient({ region: REGION });
 
 function nowIso() {
@@ -68,8 +76,48 @@ function publishErrorCode(error) {
   if (code.includes('ACCESSDENIED') || /not authorized/i.test(String(error?.message || ''))) {
     return 'HERMES_BRIDGE_AWS_ACCESS_DENIED';
   }
+  if (
+    code.includes('CREDENTIAL')
+    || code.includes('EXPIREDTOKEN')
+    || code.includes('INVALIDCLIENTTOKEN')
+    || code.includes('UNRECOGNIZEDCLIENT')
+    || /credentials?.*(?:not loaded|could not|missing|unavailable)/i.test(String(error?.message || ''))
+  ) {
+    return 'HERMES_BRIDGE_AWS_PROFILE_UNAVAILABLE';
+  }
+  if (code.includes('THROTTL') || code.includes('PROVISIONEDTHROUGHPUT')) {
+    return 'HERMES_BRIDGE_AWS_THROTTLED';
+  }
+  if (
+    code.includes('NETWORK')
+    || code.includes('TIMEOUT')
+    || ['ECONNREFUSED', 'ECONNRESET', 'ENETUNREACH', 'ENOTFOUND', 'ETIMEDOUT'].includes(code)
+  ) {
+    return 'HERMES_BRIDGE_AWS_UNREACHABLE';
+  }
   if (code.includes('RESOURCE') && code.includes('NOTFOUND')) return 'HERMES_BRIDGE_TABLE_MISSING';
   return 'HERMES_BRIDGE_PUBLISH_FAILED';
+}
+
+function inputFailure(error) {
+  return {
+    status: 'error',
+    errorCode: error?.code || 'HERMES_BRIDGE_INPUT_ERROR',
+    detail: boundedDetail(error),
+  };
+}
+
+function publishFailure(error, stage) {
+  const errorCode = publishErrorCode(error);
+  return {
+    status: 'error',
+    stage,
+    errorCode,
+    detail: errorCode === 'HERMES_BRIDGE_AWS_PROFILE_UNAVAILABLE'
+      ? `Dedicated AWS profile ${BRIDGE_AWS_PROFILE} has no usable credentials.`
+      : boundedDetail(error),
+    awsProfile: BRIDGE_AWS_PROFILE,
+  };
 }
 
 function ageMs(value) {
@@ -224,7 +272,21 @@ function buildReadySnapshot({ portfolio, readiness, capturedAt = nowIso() }) {
       socketVerifiedAt: verified.socketVerifiedAt,
     },
     capabilities: sanitizeCapabilities(readiness),
-    rootCauseCodes: Array.from(new Set((readiness.rootCauses || []).map(item => item?.errorCode).filter(Boolean))),
+    rootCauseCodes: Array.from(new Set(
+      (readiness.rootCauses || [])
+        .map(item => item?.errorCode)
+        .filter(Boolean)
+        .map(value => boundedDetail(value).slice(0, 120)),
+    )).slice(0, 24),
+    rootCauses: (readiness.rootCauses || []).slice(0, 24).map(item => ({
+      id: item?.id ? boundedDetail(item.id).slice(0, 120) : null,
+      errorCode: item?.errorCode ? boundedDetail(item.errorCode).slice(0, 120) : null,
+      summary: item?.summary ? boundedDetail(item.summary).slice(0, 300) : null,
+      owner: item?.owner ? boundedDetail(item.owner).slice(0, 120) : null,
+      affectedCheckIds: Array.isArray(item?.affectedCheckIds)
+        ? item.affectedCheckIds.slice(0, 24).map(value => boundedDetail(value).slice(0, 120))
+        : [],
+    })),
     manualActions: (readiness.manualActions || []).map(item => ({
       id: item.id || null,
       label: item.label || item.summary || null,
@@ -245,14 +307,16 @@ function buildReadySnapshot({ portfolio, readiness, capturedAt = nowIso() }) {
 }
 
 function buildDegradedSnapshot(error, capturedAt = nowIso()) {
+  const failure = inputFailure(error);
   return {
     hostId: HOST_ID,
     capturedAt,
     source: 'local-outbound-bridge',
     bridgeStatus: 'error',
     buildVersion: BUILD_VERSION,
-    errorCode: error?.code || 'HERMES_BRIDGE_INPUT_ERROR',
-    detail: boundedDetail(error),
+    errorCode: failure.errorCode,
+    detail: failure.detail,
+    inputErrorCode: failure.errorCode,
     gateway: { connected: false },
     capabilities: {},
     manualActions: [],
@@ -266,54 +330,136 @@ function buildDegradedSnapshot(error, capturedAt = nowIso()) {
   };
 }
 
-async function putHeartbeat(snapshot, startedAt) {
+async function putHeartbeat(snapshot, startedAt, {
+  client = dynamodb,
+  publishProblem = null,
+} = {}) {
   const observedAt = nowIso();
-  await dynamodb.put({
+  const inputErrorCode = snapshot.bridgeStatus === 'ready'
+    ? null
+    : (snapshot.inputErrorCode || snapshot.errorCode || 'HERMES_BRIDGE_INPUT_ERROR');
+  await client.put({
     TableName: HEARTBEAT_TABLE,
     Item: {
       serviceId: 'bridge:local-dashboard',
       observedAt,
       startedAt,
       finishedAt: observedAt,
-      status: snapshot.bridgeStatus === 'ready' ? 'success' : 'error',
-      errorCode: snapshot.errorCode || null,
-      detail: snapshot.detail || null,
+      status: inputErrorCode || publishProblem ? 'error' : 'success',
+      errorCode: publishProblem?.errorCode || inputErrorCode || null,
+      inputErrorCode,
+      publishErrorCode: publishProblem?.errorCode || null,
+      publishStage: publishProblem?.stage || null,
+      detail: publishProblem?.detail || snapshot.detail || null,
       source: 'local-outbound-bridge',
       buildVersion: BUILD_VERSION,
+      awsProfile: BRIDGE_AWS_PROFILE,
       counts: { positions: snapshot.portfolio?.positionCount || 0 },
       ttl: ttlEpoch(),
     },
   }).promise();
 }
 
-async function captureAndPublish() {
+async function publishBridgeSnapshot(snapshot, startedAt, {
+  client = dynamodb,
+} = {}) {
+  const failures = [];
+  let snapshotPublished = false;
+  let heartbeatPublished = false;
+
+  try {
+    await client.put({ TableName: SNAPSHOT_TABLE, Item: snapshot }).promise();
+    snapshotPublished = true;
+  } catch (error) {
+    failures.push(publishFailure(error, 'snapshot'));
+  }
+
+  try {
+    await putHeartbeat(snapshot, startedAt, {
+      client,
+      publishProblem: failures[0] || null,
+    });
+    heartbeatPublished = true;
+  } catch (error) {
+    failures.push(publishFailure(error, 'heartbeat'));
+  }
+
+  return {
+    status: failures.length === 0 ? 'ready' : 'error',
+    snapshotPublished,
+    heartbeatPublished,
+    failures,
+  };
+}
+
+function buildBridgeResult(snapshot, published) {
+  const inputErrorCode = snapshot.bridgeStatus === 'ready'
+    ? null
+    : (snapshot.inputErrorCode || snapshot.errorCode || 'HERMES_BRIDGE_INPUT_ERROR');
+  const primaryPublishFailure = published.failures[0] || null;
+  const publishErrorCode = primaryPublishFailure?.errorCode || null;
+  const status = inputErrorCode || publishErrorCode ? 'error' : 'ready';
+  const publishStages = published.failures.map(item => item.stage);
+  return {
+    observedAt: snapshot.capturedAt,
+    status,
+    errorCode: publishErrorCode || inputErrorCode || null,
+    inputErrorCode,
+    publishErrorCode,
+    publishStage: publishStages.length > 0 ? publishStages.join(',') : null,
+    detail: primaryPublishFailure?.detail || snapshot.detail || null,
+    positions: snapshot.portfolio?.positionCount || 0,
+    awsProfile: BRIDGE_AWS_PROFILE,
+    input: {
+      status: inputErrorCode ? 'error' : 'ready',
+      errorCode: inputErrorCode,
+      detail: inputErrorCode ? snapshot.detail || null : null,
+    },
+    publish: {
+      status: publishErrorCode ? 'error' : 'ready',
+      errorCode: publishErrorCode,
+      stage: publishStages.length > 0 ? publishStages.join(',') : null,
+      detail: primaryPublishFailure?.detail || null,
+      snapshotPublished: published.snapshotPublished,
+      heartbeatPublished: published.heartbeatPublished,
+      failures: published.failures,
+    },
+  };
+}
+
+async function captureAndPublish({
+  client = dynamodb,
+  readJson = getJson,
+} = {}) {
   const startedAt = nowIso();
   let snapshot;
   try {
     const [portfolio, readiness] = await Promise.all([
-      getJson(`${SIDECAR_BASE}/portfolio/live-positions`),
-      getJson(`${API_BASE}/api/system-readiness?refresh=1`),
+      readJson(`${SIDECAR_BASE}/portfolio/live-positions`),
+      readJson(`${API_BASE}/api/system-readiness?refresh=1`),
     ]);
     snapshot = buildReadySnapshot({ portfolio, readiness });
   } catch (error) {
     snapshot = buildDegradedSnapshot(error);
   }
 
-  await dynamodb.put({ TableName: SNAPSHOT_TABLE, Item: snapshot }).promise();
-  await putHeartbeat(snapshot, startedAt);
-  process.stdout.write(`${JSON.stringify({
-    observedAt: snapshot.capturedAt,
-    status: snapshot.bridgeStatus,
-    errorCode: snapshot.errorCode || null,
-    positions: snapshot.portfolio?.positionCount || 0,
-  })}\n`);
-  return snapshot;
+  const published = await publishBridgeSnapshot(snapshot, startedAt, { client });
+  return {
+    snapshot,
+    published,
+    result: buildBridgeResult(snapshot, published),
+  };
+}
+
+function writeBridgeResult(result) {
+  process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
 async function main() {
   if (once) {
-    const snapshot = await captureAndPublish();
-    process.exitCode = snapshot.bridgeStatus === 'ready' ? 0 : 2;
+    const outcome = await captureAndPublish();
+    writeBridgeResult(outcome.result);
+    process.exitCode = outcome.result.status === 'ready' ? 0 : 2;
     return;
   }
   let stopping = false;
@@ -322,15 +468,30 @@ async function main() {
   process.on('SIGTERM', stop);
   while (!stopping) {
     try {
-      await captureAndPublish();
+      const outcome = await captureAndPublish();
+      writeBridgeResult(outcome.result);
     } catch (error) {
-      process.stdout.write(`${JSON.stringify({
+      writeBridgeResult({
         observedAt: nowIso(),
         status: 'error',
-        errorCode: publishErrorCode(error),
+        errorCode: error?.code || 'HERMES_BRIDGE_RUNTIME_ERROR',
+        inputErrorCode: error?.code || 'HERMES_BRIDGE_RUNTIME_ERROR',
+        publishErrorCode: null,
+        publishStage: null,
         detail: boundedDetail(error),
         positions: 0,
-      })}\n`);
+        awsProfile: BRIDGE_AWS_PROFILE,
+        input: inputFailure(error),
+        publish: {
+          status: 'unknown',
+          errorCode: null,
+          stage: null,
+          detail: null,
+          snapshotPublished: false,
+          heartbeatPublished: false,
+          failures: [],
+        },
+      });
     }
     if (stopping) break;
     await new Promise(resolve => setTimeout(resolve, INTERVAL_MS));
@@ -345,14 +506,21 @@ if (require.main === module) {
 }
 
 module.exports = {
+  BRIDGE_AWS_PROFILE,
   PROHIBITED_PROVENANCE,
   EXPECTED_CAPABILITY_IDS,
   accountRef,
   assertLoopbackBase,
+  buildBridgeResult,
   buildDegradedSnapshot,
   buildReadySnapshot,
+  captureAndPublish,
   capabilityIsReady,
+  inputFailure,
+  publishBridgeSnapshot,
+  publishFailure,
   publishErrorCode,
+  putHeartbeat,
   readinessCapabilities,
   sanitizeCapabilities,
   verifyPortfolio,

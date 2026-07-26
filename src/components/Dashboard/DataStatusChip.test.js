@@ -26,9 +26,21 @@ describe('DataStatusChip', () => {
 
     const chip = screen.getByLabelText('DELAYED · AS OF JUL 10');
     expect(chip).toHaveClass('efr-status-chip--indicator-only', 'efr-status-chip--delayed');
+    expect(chip).toHaveAttribute('data-indicator', 'stale');
     expect(chip).toHaveAttribute('title', 'DELAYED · AS OF JUL 10');
     expect(screen.queryByText('DELAYED')).not.toBeInTheDocument();
     expect(screen.queryByText('AS OF JUL 10')).not.toBeInTheDocument();
+  });
+
+  it('maps indicator glyphs to live, stale, and error', () => {
+    const { rerender } = render(<DataStatusChip status="live" indicatorOnly />);
+    expect(screen.getByLabelText('LIVE')).toHaveAttribute('data-indicator', 'live');
+
+    rerender(<DataStatusChip status="manual" indicatorOnly />);
+    expect(screen.getByLabelText('MANUAL')).toHaveAttribute('data-indicator', 'stale');
+
+    rerender(<DataStatusChip status="unavailable" indicatorOnly />);
+    expect(screen.getByLabelText('UNAVAILABLE')).toHaveAttribute('data-indicator', 'error');
   });
 
   it('never silently treats an unknown state as live', () => {

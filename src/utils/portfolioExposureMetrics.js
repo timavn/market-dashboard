@@ -245,4 +245,4 @@ export function computeMarginMetrics(accountSummary) {
 }
 
 export const IDLE_CASH_TOOLTIP =
-  'Idle cash as % of NLV (IBKR TotalCashValue). Fully deployed margin accounts often show 0%.';
+  'IBKR TotalCashValue as % of NLV. It can include short-sale proceeds and cash in another account segment, so it is not safe long-buying capacity; use Cash debit guard.';

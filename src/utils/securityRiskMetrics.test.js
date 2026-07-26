@@ -2,9 +2,11 @@ const {
   BETA_WINDOW_RETURNS,
   MIN_BETA_RETURNS,
   REASONS,
+  Z_SCORE_PERIOD,
   buildSecurityRiskMetrics,
   calculateAlignedBeta,
   calculateAtr14,
+  calculatePriceZScore20,
   calculatePriorAllTimePrices,
   calculatePriceStructureRun,
   createUnavailableSecurityRiskMetrics,
@@ -85,6 +87,11 @@ describe('security historical risk metrics', () => {
       minObservations: MIN_BETA_RETURNS,
       source: 'Yahoo Finance chart API',
     });
+    expect(beta.calculation.covarianceSum).toEqual(expect.any(Number));
+    expect(beta.calculation.benchmarkVarianceSum).toEqual(expect.any(Number));
+    expect(
+      beta.calculation.covarianceSum / beta.calculation.benchmarkVarianceSum
+    ).toBeCloseTo(beta.value, 6);
     expect(beta.asOf).toBe(securityBars[securityBars.length - 1].date);
   });
 
@@ -161,6 +168,54 @@ describe('security historical risk metrics', () => {
       value: null,
       observations: 13,
       reason: REASONS.INSUFFICIENT_TRUE_RANGES,
+    });
+  });
+
+  test('calculates price Z-score with population standard deviation over the latest 20 adjusted closes', () => {
+    const bars = [
+      { date: '2025-12-31', adjustedClose: 10000 },
+      ...Array.from({ length: Z_SCORE_PERIOD }, (_, index) => ({
+        date: `2026-01-${String(index + 1).padStart(2, '0')}`,
+        adjustedClose: index + 1,
+      })),
+      { date: '2026-01-21', close: 99999 },
+    ];
+
+    expect(calculatePriceZScore20(bars)).toEqual({
+      status: 'available',
+      value: 1.647509,
+      source: 'Yahoo Finance chart API',
+      asOf: '2026-01-20',
+      observations: Z_SCORE_PERIOD,
+      reason: null,
+      periodSessions: Z_SCORE_PERIOD,
+      priceBasis: 'completed adjusted daily close',
+    });
+  });
+
+  test('fails price Z-score closed for insufficient adjusted closes or zero population variance', () => {
+    expect(calculatePriceZScore20(Array.from({ length: Z_SCORE_PERIOD - 1 }, (_, index) => ({
+      date: `2026-01-${String(index + 1).padStart(2, '0')}`,
+      adjustedClose: index + 1,
+    })))).toMatchObject({
+      status: 'unavailable',
+      value: null,
+      asOf: '2026-01-19',
+      observations: Z_SCORE_PERIOD - 1,
+      periodSessions: Z_SCORE_PERIOD,
+      reason: REASONS.INSUFFICIENT_PRICE_HISTORY,
+    });
+
+    expect(calculatePriceZScore20(Array.from({ length: Z_SCORE_PERIOD }, (_, index) => ({
+      date: `2026-01-${String(index + 1).padStart(2, '0')}`,
+      adjustedClose: 100,
+    })))).toMatchObject({
+      status: 'unavailable',
+      value: null,
+      asOf: '2026-01-20',
+      observations: Z_SCORE_PERIOD,
+      periodSessions: Z_SCORE_PERIOD,
+      reason: REASONS.ZERO_PRICE_STANDARD_DEVIATION,
     });
   });
 
@@ -439,6 +494,12 @@ describe('security historical risk metrics', () => {
       provenance: { provider: 'Yahoo Finance', range: 'max', interval: '1d' },
       beta: { status: 'available', observations: 252 },
       atr14: { status: 'available', observations: 14 },
+      zScore20: {
+        status: 'available',
+        observations: Z_SCORE_PERIOD,
+        periodSessions: Z_SCORE_PERIOD,
+        priceBasis: 'completed adjusted daily close',
+      },
       records: { status: 'available', observations: 261 },
     });
   });
@@ -456,6 +517,13 @@ describe('security historical risk metrics', () => {
       executable: false,
       beta: { status: 'unavailable', value: null, observations: 0 },
       atr14: { status: 'unavailable', value: null, observations: 0 },
+      zScore20: {
+        status: 'unavailable',
+        value: null,
+        observations: 0,
+        periodSessions: Z_SCORE_PERIOD,
+        priceBasis: 'completed adjusted daily close',
+      },
       records: {
         status: 'unavailable',
         priorAllTimeHigh: null,

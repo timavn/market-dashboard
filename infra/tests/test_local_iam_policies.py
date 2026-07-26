@@ -38,12 +38,14 @@ class LocalIamPolicyContractTests(unittest.TestCase):
                 "ReadOwnedServiceHeartbeats",
                 "ReconcilePredictionCatalogV2",
                 "ReadCanonicalResearchEvents",
+                "ReadPortfolioResearchIntelligence",
                 "ReadExpectedRiskRangePublication",
                 "ReadLambdaDiagnostics",
             },
         )
         permitted = {
             "dynamodb:GetItem",
+            "dynamodb:BatchGetItem",
             "dynamodb:Query",
             "dynamodb:TransactWriteItems",
             "cloudwatch:GetMetricStatistics",
@@ -58,6 +60,22 @@ class LocalIamPolicyContractTests(unittest.TestCase):
             research_resource.endswith(
                 f'table/{MANIFEST["aws"]["resources"]["researchEventLedgerTable"]}'
             )
+        )
+        intelligence_resources = statements["ReadPortfolioResearchIntelligence"]["Resource"]
+        self.assertEqual(
+            {
+                resource.split(":table/", 1)[-1]
+                for resource in intelligence_resources
+            },
+            {
+                MANIFEST["aws"]["resources"]["hedgeyeDailySnapshotTable"],
+                MANIFEST["aws"]["resources"]["researchEntityEventsTable"],
+                (
+                    f'{MANIFEST["aws"]["resources"]["researchEntityEventsTable"]}'
+                    '/index/marketDate-index'
+                ),
+                MANIFEST["aws"]["resources"]["researchProductManifestTable"],
+            },
         )
         risk_resources = statements["ReadExpectedRiskRangePublication"]["Resource"]
         self.assertEqual(

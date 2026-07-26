@@ -448,17 +448,44 @@ function appendWarnings(payload, warnings = []) {
 }
 
 function normalizeIngestionHealth(health) {
-  if (!health) return { status: 'unknown', verified: false, healthy: null, reason: null };
+  if (!health) {
+    return {
+      status: 'unknown',
+      rawStatus: 'unknown',
+      verified: false,
+      healthy: null,
+      errorCode: 'GMAIL_HEARTBEAT_UNVERIFIED',
+      reason: 'Gmail ingestion health was not provided.',
+    };
+  }
   const rawStatus = String(health.status || '').trim().toLowerCase();
   const explicitlyHealthy = health.healthy === true || ['healthy', 'ok', 'success'].includes(rawStatus);
   const explicitlyUnhealthy = health.healthy === false ||
     ['auth_required', 'degraded', 'error', 'fail', 'failed', 'stale', 'unhealthy'].includes(rawStatus);
+  const defaultErrorCode = rawStatus === 'auth_required'
+    ? 'GMAIL_AUTH_REQUIRED'
+    : rawStatus === 'stale'
+      ? 'GMAIL_POLL_STALE'
+      : explicitlyUnhealthy
+        ? 'GMAIL_INGESTION_UNHEALTHY'
+        : 'GMAIL_HEARTBEAT_UNVERIFIED';
+  const defaultReason = rawStatus === 'auth_required'
+    ? 'Gmail OAuth authorization requires attention.'
+    : rawStatus === 'stale'
+      ? 'The scheduled Gmail ingestion heartbeat is stale.'
+      : explicitlyUnhealthy
+        ? 'The scheduled Gmail ingestion pipeline is unhealthy.'
+        : 'Gmail ingestion health could not be verified.';
   return {
     ...health,
     status: explicitlyHealthy ? 'healthy' : explicitlyUnhealthy ? 'unhealthy' : 'unknown',
+    rawStatus: rawStatus || 'unknown',
     verified: explicitlyHealthy || explicitlyUnhealthy,
     healthy: explicitlyHealthy ? true : explicitlyUnhealthy ? false : null,
-    reason: health.reason || health.error || null,
+    observedAt: health.observedAt || health.checkedAt || null,
+    lastSuccessAt: health.lastSuccessAt || null,
+    errorCode: health.errorCode || (explicitlyHealthy ? null : defaultErrorCode),
+    reason: health.reason || health.error || (explicitlyHealthy ? null : defaultReason),
   };
 }
 
@@ -470,44 +497,96 @@ function applyIngestionHealth(payload, ingestionHealth) {
   const availability = {
     structuralStatus: structurallyAvailable ? 'verified' : 'invalid',
     ingestionStatus: health.status,
+    ingestionState: health.rawStatus,
     ingestionVerified: health.verified,
+    current: structurallyAvailable && health.healthy === true,
+    comparisonSafe: structurallyAvailable && health.healthy === true,
+    referenceOnly: structurallyAvailable && health.healthy !== true,
     latestContentAt: counted.meta?.parsedAt || counted.meta?.snapshotDate || null,
+    contentDate: counted.meta?.snapshotDate || null,
+    pipelineObservedAt: health.observedAt || null,
+    pipelineLastSuccessAt: health.lastSuccessAt || null,
+    errorCode: structurallyAvailable
+      ? (health.healthy !== true
+        ? health.errorCode || 'GMAIL_HEARTBEAT_UNVERIFIED'
+        : null)
+      : 'ETF_PRO_BOOK_INVALID',
     reason: structurallyAvailable
-      ? (health.healthy === false ? health.reason || 'Gmail ingestion is unhealthy.' : null)
+      ? (health.healthy !== true
+        ? health.reason || 'Gmail ingestion health could not be verified.'
+        : null)
       : 'ETF Pro active book failed structural validation.',
   };
 
   // Unit-level/offline resolvers may not have a poll-health provider. Runtime
-  // callers supply it; when it explicitly reports unhealthy, never expose the
-  // last-known rows on the active endpoint.
-  if (health.healthy !== false) {
+  // callers supply it. Only a verified healthy pipeline may expose rows on the
+  // active endpoint; an unverified or unhealthy pipeline retains the complete
+  // structurally valid book under lastKnownGood for dated reference use.
+  if (health.healthy === true || !ingestionHealth) {
     return {
       ...counted,
+      current: structurallyAvailable && health.healthy === true,
+      comparisonSafe: structurallyAvailable && health.healthy === true,
+      referenceOnly: structurallyAvailable && health.healthy !== true,
       dataAvailability: availability,
       meta: {
         ...(counted.meta || {}),
+        current: structurallyAvailable && health.healthy === true,
+        comparisonSafe: structurallyAvailable && health.healthy === true,
+        referenceOnly: structurallyAvailable && health.healthy !== true,
         structurallyAvailable,
         ingestionStatus: health.status,
+        ingestionState: health.rawStatus,
       },
     };
   }
 
   const archivedRowCount = Array.isArray(counted.rows) ? counted.rows.length : 0;
+  const lastKnownGood = structurallyAvailable
+    ? {
+        ...counted,
+        current: false,
+        comparisonSafe: false,
+        referenceOnly: true,
+        dataAvailability: {
+          ...availability,
+          current: false,
+          comparisonSafe: false,
+          referenceOnly: true,
+        },
+        meta: {
+          ...(counted.meta || {}),
+          current: false,
+          comparisonSafe: false,
+          referenceOnly: true,
+        },
+      }
+    : null;
   return {
     ...counted,
     available: false,
+    current: false,
+    comparisonSafe: false,
+    referenceOnly: true,
     rows: [],
     actionRows: [],
     changes: null,
     longCount: null,
     shortCount: null,
+    lastKnownGood,
     dataAvailability: availability,
     meta: {
       ...(counted.meta || {}),
       available: false,
+      current: false,
+      comparisonSafe: false,
+      referenceOnly: true,
       structurallyAvailable,
       ingestionStatus: health.status,
+      ingestionState: health.rawStatus,
       blockedByIngestion: true,
+      errorCode: availability.errorCode,
+      reason: availability.reason,
       archivedRowCount,
       rowCount: 0,
       longCount: null,

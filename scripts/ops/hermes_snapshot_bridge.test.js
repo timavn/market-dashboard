@@ -3,7 +3,10 @@ const assert = require('node:assert/strict');
 
 const {
   assertLoopbackBase,
+  buildBridgeResult,
+  buildDegradedSnapshot,
   buildReadySnapshot,
+  publishBridgeSnapshot,
   publishErrorCode,
   verifyPortfolio,
 } = require('./hermes_snapshot_bridge');
@@ -136,4 +139,119 @@ test('AWS publish denial is reported with a stable typed error', () => {
     code: 'AccessDeniedException',
     message: 'not authorized to perform dynamodb:PutItem',
   }), 'HERMES_BRIDGE_AWS_ACCESS_DENIED');
+});
+
+test('missing dedicated profile credentials have a distinct actionable code', () => {
+  assert.equal(publishErrorCode({
+    code: 'CredentialsError',
+    message: 'Could not load credentials from any providers',
+  }), 'HERMES_BRIDGE_AWS_PROFILE_UNAVAILABLE');
+  assert.equal(publishErrorCode({
+    code: 'ExpiredTokenException',
+    message: 'The security token included in the request is expired',
+  }), 'HERMES_BRIDGE_AWS_PROFILE_UNAVAILABLE');
+  assert.equal(publishErrorCode({
+    code: 'NetworkingError',
+    message: 'getaddrinfo ENOTFOUND dynamodb.us-west-1.amazonaws.com',
+  }), 'HERMES_BRIDGE_AWS_UNREACHABLE');
+});
+
+test('ready snapshots carry bounded readiness root causes without account identifiers', () => {
+  const candidate = inputs();
+  candidate.readiness.rootCauses = [{
+    id: 'prediction-catalog',
+    errorCode: 'PREDICTION_CATALOG_ACCESS_DENIED',
+    summary: 'Catalog access denied.',
+    owner: 'automation-operations',
+    affectedCheckIds: ['prediction.display', 'prediction.ibkrExecution'],
+    credentials: 'must-not-be-copied',
+  }];
+  const snapshot = buildReadySnapshot(candidate);
+
+  assert.deepEqual(snapshot.rootCauses, [{
+    id: 'prediction-catalog',
+    errorCode: 'PREDICTION_CATALOG_ACCESS_DENIED',
+    summary: 'Catalog access denied.',
+    owner: 'automation-operations',
+    affectedCheckIds: ['prediction.display', 'prediction.ibkrExecution'],
+  }]);
+  assert.equal(JSON.stringify(snapshot).includes('must-not-be-copied'), false);
+});
+
+test('publish diagnostics retain an independent input error when the snapshot write is denied', async () => {
+  const inputError = new Error('Portfolio input is stale.');
+  inputError.code = 'PORTFOLIO_SNAPSHOT_STALE';
+  const snapshot = buildDegradedSnapshot(inputError, '2026-07-25T15:00:00.000Z');
+  const calls = [];
+  const client = {
+    put(params) {
+      calls.push(params);
+      return {
+        async promise() {
+          if (params.TableName === 'HermesInputSnapshots') {
+            const error = new Error('not authorized to perform dynamodb:PutItem');
+            error.code = 'AccessDeniedException';
+            throw error;
+          }
+          return {};
+        },
+      };
+    },
+  };
+
+  const published = await publishBridgeSnapshot(
+    snapshot,
+    '2026-07-25T15:00:00.000Z',
+    { client },
+  );
+  const result = buildBridgeResult(snapshot, published);
+
+  assert.equal(result.status, 'error');
+  assert.equal(result.inputErrorCode, 'PORTFOLIO_SNAPSHOT_STALE');
+  assert.equal(result.publishErrorCode, 'HERMES_BRIDGE_AWS_ACCESS_DENIED');
+  assert.equal(result.publishStage, 'snapshot');
+  assert.equal(result.publish.snapshotPublished, false);
+  assert.equal(result.publish.heartbeatPublished, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].Item.inputErrorCode, 'PORTFOLIO_SNAPSHOT_STALE');
+  assert.equal(calls[1].Item.publishErrorCode, 'HERMES_BRIDGE_AWS_ACCESS_DENIED');
+  assert.equal(calls[1].Item.publishStage, 'snapshot');
+});
+
+test('a healthy input remains distinct when only heartbeat publication fails', async () => {
+  const candidate = inputs();
+  const snapshot = buildReadySnapshot({
+    ...candidate,
+    capturedAt: '2026-07-25T15:00:00.000Z',
+  });
+  const calls = [];
+  const client = {
+    put(params) {
+      calls.push(params);
+      return {
+        async promise() {
+          if (params.TableName === 'MarketDashboardServiceHeartbeats') {
+            const error = new Error('heartbeat table is unavailable');
+            error.code = 'ResourceNotFoundException';
+            throw error;
+          }
+          return {};
+        },
+      };
+    },
+  };
+
+  const published = await publishBridgeSnapshot(
+    snapshot,
+    '2026-07-25T15:00:00.000Z',
+    { client },
+  );
+  const result = buildBridgeResult(snapshot, published);
+
+  assert.equal(result.input.status, 'ready');
+  assert.equal(result.inputErrorCode, null);
+  assert.equal(result.publishErrorCode, 'HERMES_BRIDGE_TABLE_MISSING');
+  assert.equal(result.publishStage, 'heartbeat');
+  assert.equal(result.publish.snapshotPublished, true);
+  assert.equal(result.publish.heartbeatPublished, false);
 });

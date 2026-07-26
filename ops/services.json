@@ -25,6 +25,8 @@
       "hermesInputSnapshotTable": "HermesInputSnapshots",
       "predictionCatalogTable": "PredictionMarketCatalogV2",
       "researchEventLedgerTable": "ResearchEventLedgerV2",
+      "researchEntityEventsTable": "ResearchEntityEventsV1",
+      "researchProductManifestTable": "ResearchProductManifestsV1",
       "riskRangeManifestTable": "RiskRangePublicationManifestsV2",
       "riskRangeDataTable": "HedgeyeRiskRanges",
       "riskRangeHistoryTable": "RiskRangeData",
@@ -106,7 +108,7 @@
     {
       "id": "research.current",
       "label": "Research data",
-      "description": "RTA, ETF Pro, and risk-range inputs are current and internally consistent.",
+      "description": "Registered research products are received, parsed, validated, and indexed with current provenance.",
       "blocking": false
     }
   ],
@@ -274,11 +276,11 @@
       "runbookId": "automation-schedules",
       "cadenceMinutes": 15,
       "readinessMaxAgeMinutes": 45,
-      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": true, "startHour": 9, "endHour": 17 },
+      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": false, "startHour": 0, "endHour": 24 },
       "aws": {
         "functionName": "market-dashboard-hermes-worker-v2",
         "scheduleId": "market-dashboard-hermes-quant-analyst-v2",
-        "scheduleExpression": "cron(0/15 9-16 ? * MON-FRI *)",
+        "scheduleExpression": "cron(0/15 * ? * * *)",
         "scheduleTimeZone": "America/New_York",
         "heartbeatServiceId": "hermes:quant-analyst"
       },
@@ -306,11 +308,11 @@
       "runbookId": "automation-schedules",
       "cadenceMinutes": 15,
       "readinessMaxAgeMinutes": 45,
-      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": true, "startHour": 8, "endHour": 19 },
+      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": false, "startHour": 0, "endHour": 24 },
       "aws": {
         "functionName": "market-dashboard-hermes-worker-v2",
         "scheduleId": "market-dashboard-hermes-quant-developer-v2",
-        "scheduleExpression": "cron(5/15 8-18 ? * MON-FRI *)",
+        "scheduleExpression": "cron(5/15 * ? * * *)",
         "scheduleTimeZone": "America/New_York",
         "heartbeatServiceId": "hermes:quant-developer"
       },
@@ -326,11 +328,11 @@
       "runbookId": "automation-schedules",
       "cadenceMinutes": 60,
       "readinessMaxAgeMinutes": 120,
-      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": true, "startHour": 0, "endHour": 24 },
+      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": false, "startHour": 0, "endHour": 24 },
       "aws": {
         "functionName": "market-dashboard-hermes-worker-v2",
         "scheduleId": "market-dashboard-hermes-security-v2",
-        "scheduleExpression": "cron(10 * ? * MON-FRI *)",
+        "scheduleExpression": "cron(10 * ? * * *)",
         "scheduleTimeZone": "America/New_York",
         "heartbeatServiceId": "hermes:security"
       },
@@ -435,6 +437,22 @@
       "aws": {
         "manifestTable": "RiskRangePublicationManifestsV2",
         "dataTable": "HedgeyeRiskRanges"
+      }
+    },
+    {
+      "id": "research.pipeline-coverage",
+      "label": "Daily research product pipeline",
+      "owner": "research-operations",
+      "runbookId": "research-projections",
+      "capabilityIds": ["research.current"],
+      "dependsOn": ["gmail.ingestion"],
+      "blocking": false,
+      "automatic": false,
+      "aws": {
+        "gmailLedgerTable": "HermesEmailIngestLedger",
+        "snapshotTable": "HedgeyeDailySnapshot",
+        "entityEventsTable": "ResearchEntityEventsV1",
+        "productManifestTable": "ResearchProductManifestsV1"
       }
     },
     {

@@ -26,6 +26,14 @@ apiClient.interceptors.response.use(
 );
 
 const inFlightGetRequests = new Map();
+const FUNDING_UNAVAILABLE_REASON_ALLOWLIST = new Set([
+  'non_settlement_day',
+  'unsettled_securities_activity',
+  'settlement_unverified',
+]);
+
+const sanitizeFundingUnavailableReason = (value) =>
+  FUNDING_UNAVAILABLE_REASON_ALLOWLIST.has(value) ? value : null;
 
 const normalizeParamsForKey = (params = {}) => Object.keys(params)
   .sort()
@@ -222,13 +230,13 @@ export class MarketDataService {
         portfolioData = {
           summary: {
             totalValue: data.summary.totalValue,
-            totalDayChange: data.summary.totalDayChange || 0,
-            totalDayChangePercent: data.summary.totalDayChangePercent || '0.00',
-            totalGainLoss: data.summary.totalGainLoss || 0,
-            totalGainLossPercent: data.summary.totalGainLossPercent || '0.00',
-            positionCount: data.summary.positionCount || 0,
-            longCount: data.summary.longCount || 0,
-            shortCount: data.summary.shortCount || 0,
+            totalDayChange: data.summary.totalDayChange ?? null,
+            totalDayChangePercent: data.summary.totalDayChangePercent ?? null,
+            totalGainLoss: data.summary.totalGainLoss ?? null,
+            totalGainLossPercent: data.summary.totalGainLossPercent ?? null,
+            positionCount: data.summary.positionCount ?? 0,
+            longCount: data.summary.longCount ?? 0,
+            shortCount: data.summary.shortCount ?? 0,
           },
           assetAllocation: data.assetAllocation || {},
           holdings: data.holdings || [],
@@ -236,6 +244,11 @@ export class MarketDataService {
           lastUpdated: data.lastUpdated || new Date().toLocaleString(),
           dataSource: data.dataSource || null,
           accountSummary: data.accountSummary || null,
+          funding: data.funding || null,
+          fundingReference: data.fundingReference || null,
+          fundingUnavailableReason: sanitizeFundingUnavailableReason(
+            data.fundingUnavailableReason,
+          ),
           accountId: data.accountId || null,
           pnl: data.pnl || null,
           empty: Boolean(data.empty),
@@ -261,6 +274,52 @@ export class MarketDataService {
       return portfolioData;
     } catch (error) {
       console.error('Error fetching portfolio:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch the verified research projection for a set of portfolio symbols.
+   *
+   * This is intentionally a single bulk request. The response is kept separate
+   * from getPortfolio so a research outage can never change live IBKR holdings.
+   */
+  static async getSecurityIntelligence({
+    symbols = [],
+    date = null,
+    historyDays = 5,
+    signal = undefined,
+  } = {}) {
+    const normalizedSymbols = [...new Set(
+      (Array.isArray(symbols) ? symbols : [])
+        .map((symbol) => String(symbol || '').trim().toUpperCase())
+        .filter(Boolean)
+    )];
+
+    if (normalizedSymbols.length === 0) {
+      return {
+        schemaVersion: '1',
+        marketDate: date,
+        status: 'no_references',
+        bySymbol: {},
+        sourceCoverage: [],
+      };
+    }
+
+    try {
+      const response = await dedupedGet('/api/research/security-intelligence', {
+        params: {
+          symbols: normalizedSymbols.join(','),
+          ...(date ? { date } : {}),
+          historyDays,
+        },
+        ...(signal ? { signal } : {}),
+      });
+      return response.data;
+    } catch (error) {
+      if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+        console.error('Error fetching portfolio security intelligence:', error);
+      }
       throw error;
     }
   }

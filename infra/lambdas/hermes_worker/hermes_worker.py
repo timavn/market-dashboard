@@ -326,13 +326,13 @@ def write_deduplicated_alert(
 ) -> None:
     now = utc_now().isoformat()
     item = {
-        "alertId": f"{job_type}#input#{error_code}",
+        "alertId": f"{job_type}#runtime-health",
         "worker": job_type,
         "severity": "warning",
         "status": "open",
-        "type": "input-readiness",
+        "type": "runtime-health",
         "dedupeKey": error_code,
-        "title": f"{job_type} input unavailable",
+        "title": f"{job_type} monitoring degraded",
         "message": message[:500],
         "recommendedAction": "Run npm run morning and resolve the named readiness root cause.",
         "sourceRunId": source_run_id,
@@ -344,26 +344,91 @@ def write_deduplicated_alert(
     dynamodb.Table(ALERTS_TABLE).put_item(Item=item)
 
 
-def build_result(job_type: str, snapshot: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+def write_resolved_alert(job_type: str, *, source_run_id: str) -> None:
+    now = utc_now().isoformat()
+    item = {
+        "alertId": f"{job_type}#runtime-health",
+        "worker": job_type,
+        "severity": "info",
+        "status": "resolved",
+        "type": "runtime-health",
+        "dedupeKey": "RECOVERED",
+        "title": f"{job_type} monitoring recovered",
+        "message": "The scheduled worker completed with every readiness capability healthy.",
+        "recommendedAction": None,
+        "sourceRunId": source_run_id,
+        "channels": ["dashboard", "sns"],
+        "details": {"errorCode": None, "hostId": HOST_ID},
+        "createdAt": now,
+        "updatedAt": now,
+        "resolvedAt": now,
+    }
+    dynamodb.Table(ALERTS_TABLE).put_item(Item=item)
+
+
+def degraded_capability_findings(snapshot: Dict[str, Any]) -> list[Dict[str, str]]:
+    capabilities = snapshot.get("capabilities") or {}
+    findings = []
+    for capability_id, capability in sorted(capabilities.items()):
+        if not isinstance(capability, dict):
+            findings.append(
+                {
+                    "capabilityId": capability_id,
+                    "status": "invalid",
+                    "errorCode": "CAPABILITY_STATUS_INVALID",
+                    "detail": "Capability status is not an object.",
+                }
+            )
+            continue
+        status = str(capability.get("status") or "unknown").lower()
+        ready = capability.get("ready")
+        if status in {"pass", "ready"} and ready is not False:
+            continue
+        normalized_id = re.sub(r"[^A-Z0-9]+", "_", capability_id.upper()).strip("_")
+        findings.append(
+            {
+                "capabilityId": capability_id,
+                "status": status,
+                "errorCode": str(
+                    capability.get("errorCode")
+                    or capability.get("code")
+                    or f"{normalized_id}_DEGRADED"
+                ),
+                "detail": str(
+                    capability.get("detail")
+                    or capability.get("message")
+                    or capability.get("reason")
+                    or "Capability is not ready."
+                )[:300],
+            }
+        )
+    return findings
+
+
+def build_result(
+    job_type: str, snapshot: Dict[str, Any]
+) -> Tuple[str, Dict[str, Any], list[Dict[str, str]]]:
     portfolio = snapshot["portfolio"]
     positions = portfolio.get("positions") or []
-    capabilities = snapshot.get("capabilities") or {}
-    unavailable = sorted(
-        capability_id
-        for capability_id, capability in capabilities.items()
-        if isinstance(capability, dict) and capability.get("status") not in {"pass", "ready"}
-    )
+    findings = degraded_capability_findings(snapshot)
+    unavailable = [finding["capabilityId"] for finding in findings]
 
     if job_type == "quant-analyst":
         summary = (
             f"Verified {len(positions)} live IBKR position"
-            f"{'s' if len(positions) != 1 else ''}; monitoring completed without synthetic suggestions."
+            f"{'s' if len(positions) != 1 else ''}; "
+            + (
+                f"found {len(findings)} degraded readiness capability gate(s)."
+                if findings
+                else "monitoring completed without synthetic suggestions."
+            )
         )
         detail = {
             "positionCount": len(positions),
             "accountCount": int(portfolio.get("accountCount") or 0),
             "portfolioObservedAt": portfolio.get("observedAt"),
             "suggestions": [],
+            "degradedCapabilities": findings,
         }
     elif job_type == "quant-developer":
         summary = (
@@ -371,7 +436,7 @@ def build_result(job_type: str, snapshot: Dict[str, Any]) -> Tuple[str, Dict[str
             if not unavailable
             else f"Dashboard snapshot has {len(unavailable)} degraded capability gate(s)."
         )
-        detail = {"degradedCapabilities": unavailable}
+        detail = {"degradedCapabilities": findings}
     else:
         manual_actions = snapshot.get("manualActions") or []
         summary = (
@@ -379,8 +444,21 @@ def build_result(job_type: str, snapshot: Dict[str, Any]) -> Tuple[str, Dict[str
             if not manual_actions
             else f"Security review found {len(manual_actions)} manual operator action(s)."
         )
-        detail = {"manualActionCount": len(manual_actions)}
-    return summary, detail
+        detail = {
+            "manualActionCount": len(manual_actions),
+            "degradedCapabilities": findings,
+        }
+        if manual_actions:
+            findings = [
+                *findings,
+                {
+                    "capabilityId": "security.manualActions",
+                    "status": "warning",
+                    "errorCode": "MANUAL_SECURITY_ACTION_REQUIRED",
+                    "detail": f"{len(manual_actions)} manual operator action(s) require review.",
+                },
+            ]
+    return summary, detail, findings
 
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
@@ -394,28 +472,65 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     started_at = utc_now().isoformat()
     try:
         snapshot = validate_snapshot(latest_input_snapshot())
-        summary, detail = build_result(job_type, snapshot)
+        summary, detail, findings = build_result(job_type, snapshot)
+        is_degraded = len(findings) > 0
+        finding_codes = [finding["errorCode"] for finding in findings]
         run = write_run(
             job_type,
             started_at=started_at,
-            status="succeeded",
+            status="warning" if is_degraded else "succeeded",
             summary=summary,
-            severity="info",
+            severity="warning" if is_degraded else "info",
             metadata={
                 **detail,
                 "snapshotCapturedAt": snapshot.get("capturedAt"),
                 "snapshotBuildVersion": snapshot.get("buildVersion"),
             },
         )
+        if is_degraded:
+            error_code = finding_codes[0] if len(finding_codes) == 1 else "SYSTEM_CAPABILITIES_DEGRADED"
+            write_deduplicated_alert(
+                job_type,
+                error_code=error_code,
+                message="; ".join(
+                    f"{finding['capabilityId']}: {finding['errorCode']} ({finding['detail']})"
+                    for finding in findings
+                ),
+                source_run_id=run["runId"],
+            )
+        else:
+            write_resolved_alert(job_type, source_run_id=run["runId"])
         write_heartbeat(
             job_type,
             started_at=started_at,
-            status="success",
+            status="warning" if is_degraded else "success",
             trigger_source=trigger_source,
             schedule_id=schedule_id,
+            error_code=(
+                finding_codes[0]
+                if len(finding_codes) == 1
+                else "SYSTEM_CAPABILITIES_DEGRADED" if is_degraded else None
+            ),
+            detail=(
+                "; ".join(
+                    f"{finding['capabilityId']}={finding['errorCode']}"
+                    for finding in findings
+                )
+                if is_degraded
+                else None
+            ),
             counts={"positions": len(snapshot["portfolio"].get("positions") or [])},
         )
-        return {"statusCode": 200, "body": json.dumps({"status": "SUCCESS", "runId": run["runId"]})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {
+                    "status": "DEGRADED" if is_degraded else "SUCCESS",
+                    "runId": run["runId"],
+                    "errorCodes": finding_codes,
+                }
+            ),
+        }
     except SnapshotRejected as error:
         run = write_run(
             job_type,

@@ -29,6 +29,10 @@
     <string>__PATH_VALUE__</string>
     <key>MARKET_DASHBOARD_LAUNCHD_LABEL</key>
     <string>com.market-dashboard.stack</string>
+    <key>HERMES_BRIDGE_AWS_PROFILE</key>
+    <string>__HERMES_BRIDGE_AWS_PROFILE__</string>
+    <key>MARKET_DASHBOARD_LOCAL_NOTIFICATIONS</key>
+    <string>__LOCAL_NOTIFICATIONS__</string>
   </dict>
   <key>StandardOutPath</key>
   <string>__LOG_PATH__/launchd.stdout.log</string>

@@ -76,6 +76,7 @@
     "collect:etfpro": "node scripts/collect_etfpro_daily.js",
     "research:rta:checkpoint": "node scripts/capture_rta_checkpoint.js",
     "research:rta:rebuild": "node scripts/rebuild_rta_materializations.js",
+    "research:intelligence:replay": "python3 infra/scripts/replay_security_intelligence.py",
     "rebuild:rta": "node scripts/rebuild_rta_materializations.js",
     "ibkr-sidecar": "bash scripts/ibkr_sidecar/start.sh",
     "ibkr-sidecar:check": "bash scripts/ibkr_sidecar/check_gateway.sh",

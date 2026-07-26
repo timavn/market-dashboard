@@ -183,6 +183,50 @@ class HermesWorkerTests(unittest.TestCase):
         self.assertEqual(heartbeat["serviceId"], "hermes:quant-analyst")
         self.assertEqual(heartbeat["triggerSource"], "aws-scheduler")
         self.assertTrue(heartbeat["scheduled"])
+        alert = database.tables[worker.ALERTS_TABLE].writes[0]
+        self.assertEqual(alert["status"], "resolved")
+
+    def test_degraded_non_portfolio_capability_is_unhealthy_and_diagnostic(self):
+        now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
+        snapshot = live_snapshot(now)
+        snapshot["capabilities"]["prediction.display"] = {
+            "status": "fail",
+            "ready": False,
+            "errorCode": "PREDICTION_CATALOG_ACCESS_DENIED",
+            "detail": "dynamodb:Query is denied on PredictionMarketCatalogV2.",
+        }
+        database = FakeDynamo(snapshot)
+        metrics = MagicMock()
+
+        with patch.object(worker, "dynamodb", database), patch.object(
+            worker, "cloudwatch", metrics
+        ), patch.object(
+            worker, "utc_now", return_value=now
+        ):
+            response = worker.lambda_handler({
+                "source": "aws-scheduler",
+                "scheduleId": worker.EXPECTED_SCHEDULE_IDS["quant-developer"],
+                "jobType": "quant-developer",
+            }, None)
+
+        body = json.loads(response["body"])
+        self.assertEqual(body["status"], "DEGRADED")
+        self.assertEqual(body["errorCodes"], ["PREDICTION_CATALOG_ACCESS_DENIED"])
+        run = database.tables[worker.RUNS_TABLE].writes[0]
+        self.assertEqual(run["status"], "warning")
+        self.assertEqual(
+            run["metadata"]["degradedCapabilities"][0]["capabilityId"],
+            "prediction.display",
+        )
+        heartbeat = database.tables[worker.HEARTBEAT_TABLE].writes[0]
+        self.assertEqual(heartbeat["status"], "warning")
+        self.assertEqual(heartbeat["errorCode"], "PREDICTION_CATALOG_ACCESS_DENIED")
+        alert = database.tables[worker.ALERTS_TABLE].writes[0]
+        self.assertEqual(alert["status"], "open")
+        self.assertIn("PredictionMarketCatalogV2", alert["message"])
+        metric_data = metrics.put_metric_data.call_args.kwargs["MetricData"]
+        healthy = next(metric for metric in metric_data if metric["MetricName"] == "Healthy")
+        self.assertEqual(healthy["Value"], 0)
 
     def test_missing_input_is_deduplicated_and_not_retried(self):
         now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)

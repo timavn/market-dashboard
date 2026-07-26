@@ -1,6 +1,6 @@
 /**
  * @param {object} raw - IBKR sidecar position row
- * @param {object} [marketQuote] - optional normalized quote for market value
+ * @param {object} [marketQuote] - validated broker-native live/reference mark
  */
 function normalizeIbkrPosition(raw, marketQuote = null) {
   const conid = raw.conId ?? raw.conid ?? null;
@@ -10,7 +10,11 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
   const quantity = Number.isFinite(quantityValue) ? quantityValue : null;
   const avgCost = Number.isFinite(avgCostValue) ? avgCostValue : null;
   const isPredictionMarket = isPredictionMarketContract(raw);
-  const mark = marketQuote?.mark ?? null;
+  const marketQuoteValue =
+    marketQuote?.mark == null || marketQuote?.mark === ''
+      ? null
+      : Number(marketQuote.mark);
+  const mark = Number.isFinite(marketQuoteValue) ? marketQuoteValue : null;
   const rawMarketValue =
     raw.marketValue != null && Number.isFinite(Number(raw.marketValue))
       ? Number(raw.marketValue)
@@ -34,9 +38,75 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
       : marketValue != null && costBasis != null
         ? marketValue - costBasis
         : null;
+  const priceState =
+    derivedMark == null
+      ? 'unavailable'
+      : marketQuote?.priceState || 'unavailable';
+  const priceSource =
+    marketQuote?.priceSource
+    || marketQuote?.source
+    || (rawMarketValue != null ? 'ibkr_portfolio' : null);
+  const priceObservedAt =
+    marketQuote?.priceObservedAt
+    || marketQuote?.timestamp
+    || raw.mark_observed_at
+    || raw.updated_at
+    || raw.fetched_at
+    || null;
+  const referenceCloseValue =
+    marketQuote?.referenceClose == null || marketQuote?.referenceClose === ''
+      ? null
+      : Number(marketQuote.referenceClose);
+  const previousCloseValue =
+    marketQuote?.previousClose == null || marketQuote?.previousClose === ''
+      ? null
+      : Number(marketQuote.previousClose);
+  const referenceClose =
+    Number.isFinite(referenceCloseValue) ? referenceCloseValue : null;
+  const previousClose =
+    Number.isFinite(previousCloseValue) ? previousCloseValue : null;
+  let dayPriceChange = null;
+  let dayChangeState = null;
+  let dayChangeSessionDate = null;
+  if (priceState === 'live' && derivedMark != null && referenceClose != null) {
+    dayPriceChange = derivedMark - referenceClose;
+    dayChangeState = 'live_vs_reference_close';
+    dayChangeSessionDate = marketQuote?.referenceCloseSessionDate || null;
+  } else if (
+    priceState === 'historical_close'
+    && referenceClose != null
+    && previousClose != null
+  ) {
+    dayPriceChange = referenceClose - previousClose;
+    dayChangeState = 'historical_session';
+    dayChangeSessionDate = marketQuote?.referenceCloseSessionDate || null;
+  }
+  const dayGainLoss =
+    dayPriceChange != null && quantity != null
+      ? quantity * dayPriceChange
+      : null;
+  const comparisonClose =
+    priceState === 'live' ? referenceClose : previousClose;
+  const dayChangePercent =
+    dayGainLoss != null
+    && quantity != null
+    && quantity !== 0
+    && comparisonClose != null
+    && comparisonClose !== 0
+      ? (dayGainLoss / Math.abs(quantity * comparisonClose)) * 100
+      : null;
   const warning =
     marketQuote?.warning ||
     (quantity != null && quantity !== 0 && marketValue == null && !isPredictionMarket ? 'missing_market_value' : null);
+  const markPending = marketQuote?.warming === true;
+  const markWarmState =
+    markPending
+      ? 'warming'
+      : marketQuote?.failure
+        ? 'degraded'
+        : derivedMark != null
+          ? 'complete'
+          : 'unavailable';
 
   return {
     positionId: conid ? `${accountId}#${conid}` : `${accountId}#${raw.symbol}`,
@@ -47,6 +117,16 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
     quantity,
     avgCost,
     price: derivedMark,
+    priceState,
+    marketValueState: priceState,
+    markPending,
+    markWarmState,
+    priceSource,
+    priceObservedAt,
+    priceSessionDate:
+      priceState === 'historical_close'
+        ? marketQuote?.priceSessionDate || null
+        : null,
     marketValue,
     costBasis,
     gainLoss,
@@ -56,6 +136,24 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
         : null,
     unrealizedPnL: raw.unrealizedPnL != null ? Number(raw.unrealizedPnL) : null,
     realizedPnL: raw.realizedPnL != null ? Number(raw.realizedPnL) : null,
+    referenceClose,
+    referenceCloseSource:
+      referenceClose != null ? marketQuote?.referenceCloseSource || null : null,
+    referenceCloseSessionDate:
+      referenceClose != null ? marketQuote?.referenceCloseSessionDate || null : null,
+    referenceCloseObservedAt:
+      referenceClose != null ? marketQuote?.referenceCloseObservedAt || null : null,
+    referenceCloseCacheState:
+      referenceClose != null ? marketQuote?.referenceCloseCacheState || null : null,
+    previousClose,
+    previousCloseSessionDate:
+      previousClose != null ? marketQuote?.previousCloseSessionDate || null : null,
+    dayPriceChange,
+    dayChange: dayGainLoss,
+    dayGainLoss,
+    dayChangePercent,
+    dayChangeState,
+    dayChangeSessionDate,
     currency: raw.currency || 'USD',
     secType: raw.secType || 'STK',
     exchange: raw.exchange || null,
@@ -63,8 +161,8 @@ function normalizeIbkrPosition(raw, marketQuote = null) {
     assetClass: isPredictionMarket ? 'Prediction Markets' : mapSecTypeToAssetClass(raw.secType),
     isPredictionMarket,
     positionSource: 'ibkr_api',
-    priceSource: marketQuote?.source || (rawMarketValue != null ? 'ibkr_portfolio' : null),
-    lastUpdated: marketQuote?.timestamp || raw.updated_at || raw.fetched_at || null,
+    lastUpdated: priceObservedAt,
+    markFailure: marketQuote?.failure || null,
     warning,
   };
 }
@@ -114,6 +212,12 @@ function normalizeUploadedHolding(holding, snapshotId) {
     quantity: holding.quantity || 0,
     avgCost: holding.costBasis && holding.quantity ? holding.costBasis / holding.quantity : 0,
     price: holding.price || 0,
+    priceState: 'unavailable',
+    marketValueState: 'unavailable',
+    markPending: false,
+    markWarmState: 'unavailable',
+    priceObservedAt: null,
+    priceSessionDate: null,
     marketValue: holding.marketValue || 0,
     costBasis: holding.costBasis || 0,
     gainLoss: holding.gainLoss || 0,
@@ -125,7 +229,21 @@ function normalizeUploadedHolding(holding, snapshotId) {
     assetClass: holding.assetClass || 'Other',
     positionSource: 'uploaded_statement',
     priceSource: 'uploaded_statement',
+    referenceClose: null,
+    referenceCloseSource: null,
+    referenceCloseSessionDate: null,
+    referenceCloseObservedAt: null,
+    referenceCloseCacheState: null,
+    previousClose: null,
+    previousCloseSessionDate: null,
+    dayPriceChange: null,
+    dayChange: null,
+    dayGainLoss: null,
+    dayChangePercent: null,
+    dayChangeState: null,
+    dayChangeSessionDate: null,
     lastUpdated: null,
+    markFailure: null,
     warning: null,
   };
 }

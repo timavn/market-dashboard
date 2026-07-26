@@ -62,6 +62,15 @@ def _split_exact_items(raw_text):
     return list(dict.fromkeys(items))
 
 
+def _extract_main_summary(text):
+    match = re.search(
+        r"MAIN SUMMARY\s*:?\s*(.+?)(?=\n\s*(?:CLICK|Watch|Disclaimer|Copyright)\b|$)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    return re.sub(r"\s+", " ", match.group(1)).strip()[:40000] if match else ""
+
+
 def extract_macro_show(pdf_path, s3_key=None):
     """Extract BULLISH/BEARISH positions from Macro Show summary PDF"""
     import pdfplumber
@@ -131,6 +140,8 @@ def extract_macro_show(pdf_path, s3_key=None):
         'rawLongsText': bullish_raw,
         'rawShortsText': bearish_raw,
         'rawNeutralText': neutral_raw,
+        'summary': _extract_main_summary(text),
+        'bodyText': text[:40000],
         'timestamp': ts,
         'source': 'macro-show-pdf'
     }
@@ -176,6 +187,8 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
     raw_longs_text = data.get('rawLongsText', '')
     raw_shorts_text = data.get('rawShortsText', '')
     raw_neutral_text = data.get('rawNeutralText', '')
+    summary = data.get('summary', '')
+    body_text = data.get('bodyText', '')
     total = len(longs) + len(shorts) + len(neutrals)
 
     print(f"\n💾 Saving {total} positions to DynamoDB (longs: {len(longs)}, shorts: {len(shorts)}, neutrals: {len(neutrals)})...")
@@ -199,6 +212,10 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
         'scrapedAt': ts,
         'source': 'pdf',
         'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
+    }
+    snapshot_item['article'] = {
+        'summary': summary,
+        'bodyText': body_text,
     }
 
     if pdf_s3_key:

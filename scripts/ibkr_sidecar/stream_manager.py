@@ -119,6 +119,8 @@ class StreamManager:
         self._ref_counts: Dict[int, int] = {}
         self._contracts: Dict[int, Contract] = {}
         self._tickers: Dict[int, Any] = {}
+        self._live_last_ticks: Dict[int, Dict[str, Any]] = {}
+        self._connection_generation = 0
 
         self._portfolio_positions: Dict[str, Dict[int, Dict[str, Any]]] = {}
         self._account_summary: Dict[str, Dict[str, Any]] = {}
@@ -145,6 +147,11 @@ class StreamManager:
             "max_stream_subs": MAX_STREAM_SUBS,
             "portfolio_account": self._portfolio_account,
         }
+
+    @property
+    def connection_generation(self) -> int:
+        """Generation token used to reject evidence retained across reconnects."""
+        return self._connection_generation
 
     async def start(self) -> None:
         if self._started:
@@ -211,6 +218,9 @@ class StreamManager:
     async def connect(self) -> Dict[str, Any]:
         async with self._connect_lock:
             if self.ib.isConnected():
+                if not self.connected:
+                    self._connection_generation += 1
+                    self._live_last_ticks.clear()
                 self.connected = True
                 self.reconnecting = False
                 await self._resubscribe_all()
@@ -222,6 +232,8 @@ class StreamManager:
                 candidate = base_id + offset
                 if await self._try_connect_once(candidate):
                     self.client_id = candidate
+                    self._connection_generation += 1
+                    self._live_last_ticks.clear()
                     self.connected = True
                     self.reconnecting = False
                     self.last_error = None
@@ -253,6 +265,10 @@ class StreamManager:
 
     def _on_disconnected(self) -> None:
         self.connected = False
+        self._live_last_ticks.clear()
+        self._tickers.clear()
+        self._quote_cache.clear()
+        self._pending_notify.clear()
         self._broadcast_status("disconnected", "IB socket disconnected")
 
     async def _reconnect_loop(self) -> None:
@@ -362,6 +378,7 @@ class StreamManager:
     def _sync_positions_from_ib(self, acct: str) -> None:
         old_positions = self._portfolio_positions.get(acct) or {}
         positions: Dict[int, Dict[str, Any]] = {}
+        identity_observed_at = now_iso()
         for pos in self.ib.positions():
             if pos.account != acct:
                 continue
@@ -383,7 +400,19 @@ class StreamManager:
                 "marketValue": old_pos.get("marketValue"),
                 "unrealizedPnL": old_pos.get("unrealizedPnL"),
                 "realizedPnL": old_pos.get("realizedPnL"),
-                "updated_at": now_iso(),
+                # An identity/quantity refresh must not make a retained mark
+                # look newly observed. Keep the legacy updated_at anchored to
+                # the last portfolio-value event when one exists.
+                "identity_observed_at": identity_observed_at,
+                "mark_observed_at": (
+                    old_pos.get("mark_observed_at")
+                    or (
+                        old_pos.get("updated_at")
+                        if old_pos.get("marketValue") is not None
+                        else None
+                    )
+                ),
+                "updated_at": old_pos.get("updated_at") or identity_observed_at,
             }
         self._portfolio_positions[acct] = positions
 
@@ -432,6 +461,7 @@ class StreamManager:
         if position == 0 and (market_value is None or market_value == 0):
             self._portfolio_positions[acct].pop(cid, None)
             return
+        observed_at = now_iso()
         self._portfolio_positions[acct][cid] = {
             "account": acct,
             "symbol": c.symbol,
@@ -445,7 +475,9 @@ class StreamManager:
             "marketValue": market_value,
             "unrealizedPnL": float(item.unrealizedPNL) if item.unrealizedPNL == item.unrealizedPNL else None,
             "realizedPnL": float(item.realizedPNL) if item.realizedPNL == item.realizedPNL else None,
-            "updated_at": now_iso(),
+            "identity_observed_at": observed_at,
+            "mark_observed_at": observed_at if market_value is not None else None,
+            "updated_at": observed_at,
         }
 
     async def _account_summary_loop(self) -> None:
@@ -483,6 +515,26 @@ class StreamManager:
             cid = int(contract.conId)
             if cid not in self._ref_counts:
                 continue
+            for tick in list(getattr(ticker, "ticks", None) or []):
+                if getattr(tick, "tickType", None) != 4:
+                    continue
+                try:
+                    last_price = float(getattr(tick, "price", None))
+                except (TypeError, ValueError):
+                    continue
+                tick_time = getattr(tick, "time", None)
+                if (
+                    last_price != last_price
+                    or last_price <= 0
+                    or not isinstance(tick_time, datetime)
+                    or tick_time.tzinfo is None
+                ):
+                    continue
+                self._live_last_ticks[cid] = {
+                    "price": last_price,
+                    "observedAt": tick_time.astimezone(timezone.utc),
+                    "connectionGeneration": self._connection_generation,
+                }
             raw = ticker_to_raw_quote(ticker, contract)
             self._quote_cache[cid] = raw
             self.last_tick_at = now_iso()
@@ -650,6 +702,54 @@ class StreamManager:
             "positions": positions,
             "fetched_at": now_iso(),
         }
+
+    def get_fresh_direct_live_marks(
+        self,
+        con_ids: List[int],
+        *,
+        max_age_seconds: float,
+    ) -> Dict[int, Dict[str, Any]]:
+        """Return only direct, fresh IBKR live-last ticks from active streams.
+
+        This deliberately bypasses ``_quote_cache``. A fetched/cache timestamp
+        cannot prove when IBKR observed a price, so only the ticker's native,
+        timezone-aware timestamp is accepted.
+        """
+        if not self.connected or not self.ib.isConnected():
+            return {}
+
+        current = datetime.now(timezone.utc)
+        marks: Dict[int, Dict[str, Any]] = {}
+        for raw_con_id in con_ids:
+            try:
+                con_id = int(raw_con_id)
+            except (TypeError, ValueError):
+                continue
+            ticker = self._tickers.get(con_id)
+            last_tick = self._live_last_ticks.get(con_id)
+            if (
+                ticker is None
+                or last_tick is None
+                or getattr(ticker, "marketDataType", None) != 1
+                or last_tick.get("connectionGeneration")
+                != self._connection_generation
+            ):
+                continue
+
+            observed = last_tick["observedAt"]
+            age_seconds = (current - observed).total_seconds()
+            if age_seconds < -5 or age_seconds > max_age_seconds:
+                continue
+
+            last = last_tick["price"]
+
+            marks[con_id] = {
+                "liveMark": last,
+                "liveMarkSource": "ibkr_live_last",
+                "liveMarkObservedAt": observed.isoformat().replace("+00:00", "Z"),
+                "marketDataType": 1,
+            }
+        return marks
 
     def get_account_summary_cache(self, account: Optional[str] = None) -> Dict[str, Any]:
         acct = account or self._portfolio_account

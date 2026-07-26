@@ -11,6 +11,7 @@ const {
 const {
   buildDashboardChecks,
   buildHermesBridgeCheck,
+  buildResearchPipelineCheck,
   buildResearchChecks,
   buildSidecarChecks,
   collectHermesWorkerSignals,
@@ -190,12 +191,13 @@ describe('system readiness evaluation', () => {
     expect(check.summary).toMatch(/expected within 45 minutes/i);
   });
 
-  test('uses each manifest-owned worker window instead of a global due flag', () => {
-    expect(isHermesDueNow(new Date('2026-07-21T12:10:00.000Z'), 'quant-analyst')).toBe(false);
-    expect(isHermesDueNow(new Date('2026-07-21T12:20:00.000Z'), 'quant-developer')).toBe(true);
+  test('treats manifest-owned Hermes monitors as due continuously after the first cadence', () => {
+    expect(isHermesDueNow(new Date('2026-07-21T04:10:00.000Z'), 'quant-analyst')).toBe(false);
+    expect(isHermesDueNow(new Date('2026-07-21T04:20:00.000Z'), 'quant-developer')).toBe(true);
+    expect(isHermesDueNow(new Date('2026-07-21T12:10:00.000Z'), 'quant-analyst')).toBe(true);
     expect(isHermesDueNow(new Date('2026-07-21T13:20:00.000Z'), 'quant-analyst')).toBe(true);
-    expect(isHermesDueNow(new Date('2026-07-21T23:30:00.000Z'), 'quant-developer')).toBe(false);
-    expect(isHermesDueNow(new Date('2026-07-25T16:00:00.000Z'), 'security')).toBe(false);
+    expect(isHermesDueNow(new Date('2026-07-21T23:30:00.000Z'), 'quant-developer')).toBe(true);
+    expect(isHermesDueNow(new Date('2026-07-25T16:00:00.000Z'), 'security')).toBe(true);
   });
 
   test('queries the newest per-service heartbeat without scanning the shared table', async () => {
@@ -765,6 +767,219 @@ describe('system readiness evaluation', () => {
       status: 'pass',
       dependsOn: [],
     });
+  });
+
+  test('does not pass an old clean RTA projection when the Gmail pipeline has failed', () => {
+    const checks = buildResearchChecks({
+      rtaResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          lastUpdated: '2026-07-17T15:04:18.000Z',
+          longCount: 2,
+          shortCount: 3,
+          dataQuality: { status: 'ok', warnings: [] },
+          dataAvailability: {
+            current: false,
+            comparisonSafe: false,
+            referenceOnly: true,
+            contentDate: '2026-07-17',
+            latestContentAt: '2026-07-17T15:04:18.000Z',
+            errorCode: 'GMAIL_AUTH_REQUIRED',
+            reason: 'Gmail OAuth authorization requires attention.',
+          },
+        },
+      },
+      etfResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          current: true,
+          meta: { available: true, ingestionStatus: 'healthy', snapshotDate: '2026-07-17' },
+          dataAvailability: { current: true, ingestionStatus: 'healthy' },
+          rows: [{ ticker: 'SPY' }],
+        },
+      },
+      workflow: { hedgeye: { status: 'pending', lastRun: '2026-07-20' } },
+      gmailCheck: {
+        status: 'fail',
+        errorCode: 'GMAIL_AUTH_REQUIRED',
+        summary: 'Gmail OAuth authorization requires attention.',
+        recovery: { kind: 'manual', label: 'Reauthorize Gmail.' },
+      },
+      now: NOW,
+    });
+
+    expect(checks.find((check) => check.id === 'research.rta')).toMatchObject({
+      status: 'warn',
+      errorCode: 'GMAIL_AUTH_REQUIRED',
+      dependsOn: ['gmail.ingestion'],
+      summary: 'RTA is last-known-good from 2026-07-17; Gmail ingestion is not current.',
+      recovery: { label: 'Reauthorize Gmail.' },
+      provenance: {
+        contentDate: '2026-07-17',
+      },
+    });
+  });
+
+  test('treats an old RTA content date as current when the scheduled Gmail heartbeat is healthy', () => {
+    const checks = buildResearchChecks({
+      rtaResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          lastUpdated: '2026-07-10T15:04:18.000Z',
+          longCount: 2,
+          shortCount: 3,
+          dataQuality: { status: 'ok', warnings: [] },
+        },
+      },
+      etfResult: {
+        status: 'fulfilled',
+        value: {
+          meta: { available: true, snapshotDate: '2026-07-10' },
+          rows: [{ ticker: 'SPY' }],
+        },
+      },
+      workflow: { hedgeye: { status: 'pending', lastRun: '2026-07-20' } },
+      gmailCheck: {
+        status: 'pass',
+        observedAt: NOW.toISOString(),
+      },
+      now: NOW,
+    });
+
+    expect(checks.find((check) => check.id === 'research.rta')).toMatchObject({
+      status: 'pass',
+      dependsOn: [],
+      provenance: { contentDate: '2026-07-10' },
+    });
+  });
+
+  test('reports an archival ETF Pro book as a warning with the exact Gmail cause', () => {
+    const checks = buildResearchChecks({
+      rtaResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          current: false,
+          lastUpdated: '2026-07-17T15:04:18.000Z',
+          dataQuality: { status: 'ok', warnings: [] },
+          dataAvailability: {
+            current: false,
+            contentDate: '2026-07-17',
+            errorCode: 'GMAIL_POLL_STALE',
+          },
+        },
+      },
+      etfResult: {
+        status: 'fulfilled',
+        value: {
+          available: false,
+          current: false,
+          rows: [],
+          dataAvailability: {
+            current: false,
+            referenceOnly: true,
+            contentDate: '2026-07-17',
+            errorCode: 'GMAIL_POLL_STALE',
+            reason: 'The last Gmail service heartbeat is older than 45 minutes.',
+          },
+          lastKnownGood: {
+            available: true,
+            meta: { snapshotDate: '2026-07-17', parsedAt: '2026-07-17T12:00:00.000Z' },
+            rows: [{ ticker: 'SPY' }, { ticker: 'TLT', call: 'Short' }],
+            dataQuality: { status: 'ok', warnings: [] },
+          },
+        },
+      },
+      workflow: { hedgeye: { status: 'pending', lastRun: '2026-07-20' } },
+      gmailCheck: {
+        status: 'fail',
+        errorCode: 'GMAIL_POLL_STALE',
+        summary: 'The scheduled Gmail heartbeat is stale.',
+      },
+      now: NOW,
+    });
+
+    expect(checks.find((check) => check.id === 'research.etf-pro')).toMatchObject({
+      status: 'warn',
+      errorCode: 'GMAIL_POLL_STALE',
+      dependsOn: ['gmail.ingestion'],
+      summary: 'ETF Pro is last-known-good from 2026-07-17 (2 positions); Gmail ingestion is not current.',
+      detail: expect.stringContaining('older than 45 minutes'),
+      provenance: {
+        contentDate: '2026-07-17',
+        referenceOnly: true,
+      },
+    });
+  });
+
+  test('degrades research for incomplete product coverage without blocking the live portfolio capability', () => {
+    const pipelineCheck = buildResearchPipelineCheck({
+      coverage: {
+        schemaVersion: 1,
+        marketDate: '2026-07-21',
+        generatedAt: NOW.toISOString(),
+        status: 'failed',
+        collectionErrors: [],
+        summary: {
+          failed: 1,
+          missing: 1,
+          received: 0,
+          parsed: 0,
+          validated: 0,
+          indexed: 2,
+          not_due: 10,
+        },
+        products: [
+          {
+            id: 'risk-ranges',
+            label: 'Risk Ranges',
+            status: 'missing',
+            errorCode: 'RESEARCH_PRODUCT_DUE_MISSING',
+          },
+          {
+            id: 'unsupported:new-letter',
+            label: 'New Letter',
+            status: 'failed',
+            errorCode: 'RESEARCH_PRODUCT_UNSUPPORTED',
+          },
+        ],
+      },
+      gmailCheck: { status: 'pass' },
+      now: NOW,
+    });
+    const report = buildSystemReadiness([
+      {
+        id: 'portfolio.live',
+        label: 'Live portfolio',
+        checks: [{
+          id: 'ibkr.portfolio',
+          status: 'pass',
+          blocking: true,
+          capabilityIds: ['portfolio.live'],
+        }],
+      },
+      {
+        id: 'research.current',
+        label: 'Research',
+        checks: [pipelineCheck],
+      },
+    ], { now: NOW });
+
+    expect(pipelineCheck).toMatchObject({
+      id: 'research.pipeline-coverage',
+      status: 'fail',
+      blocking: false,
+      capabilityIds: ['research.current'],
+      errorCode: 'RESEARCH_PRODUCT_COVERAGE_FAILED',
+    });
+    expect(report.status).toBe('degraded');
+    expect(report.capabilities.find((capability) => capability.id === 'portfolio.live').status)
+      .toBe('ready');
+    expect(report.capabilities.find((capability) => capability.id === 'research.current').status)
+      .toBe('degraded');
   });
 
   test('verifies UI and runtime provenance while treating a missing supervisor as degraded', () => {

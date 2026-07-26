@@ -43,6 +43,14 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 from parse_hedgeye_email_html import parse_html_snapshot, save_snapshot_to_dynamodb
+from research_intelligence import (
+    PARSER_VERSION as SECURITY_INTELLIGENCE_PARSER_VERSION,
+    persist_snapshot_failure,
+    persist_snapshot_intelligence,
+    product_definition,
+    product_ids,
+    report_rules,
+)
 
 
 AWS_REGION = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-west-1"))
@@ -69,14 +77,8 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
 MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro"}
-RESEARCH_EVENT_SNAPSHOT_TYPES = {
-    "real-time-alert",
-    "investing-ideas",
-    "etf-pro",
-    "risk-ranges",
-    "early-look",
-}
-MATERIALIZED_DATA_VERSION = "gmail-materialized-v2"
+RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
+MATERIALIZED_DATA_VERSION = "gmail-materialized-v3-security-intelligence"
 RESEARCH_PARSER_VERSION = "research-event-ledger-v2"
 MATERIALIZATION_WRITE_RETRIES = 3
 MATERIALIZATION_MAX_ATTEMPTS = 3
@@ -94,12 +96,17 @@ GMAIL_SCHEDULE_ID = os.environ.get(
 )
 RUNTIME_STATE_MESSAGE_ID = f"runtime#gmail#{GMAIL_ACCOUNT.lower()}"
 HISTORY_CURSOR_ATTACHMENT_ID = "history-cursor"
+PDF_PROCESSOR_FUNCTION_NAME = os.environ.get(
+    "PDF_PROCESSOR_FUNCTION_NAME",
+    "market-dashboard-hedgeye-pdf-processor-v1",
+)
 
 
 secretsmanager = boto3.client("secretsmanager", region_name=AWS_REGION)
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 s3 = boto3.client("s3", region_name=AWS_REGION)
 cloudwatch = boto3.client("cloudwatch", region_name=AWS_REGION)
+lambda_client = boto3.client("lambda", region_name=AWS_REGION)
 
 
 _oauth_secret_cache: Optional[Dict[str, Any]] = None
@@ -112,21 +119,7 @@ class RetryableResearchMaterializationError(RuntimeError):
     retryable = True
 
 
-REPORT_RULES = [
-    ("risk-ranges", ("risk range", "risk-range", "risk_ranges", "processing signals")),
-    ("early-look", ("early look", "early-look", "early_look")),
-    ("crypto-quant", ("crypto quant",)),
-    ("bitcoin-trend-tracker", ("bitcoin", "btc", "bitcoin trend tracker")),
-    ("portfolio-solutions", ("portfolio solution", "portfolio-solutions")),
-    ("momo-tracker", ("momo", "momentum tracker")),
-    ("signal-strength", ("signal strength", "signal-strength")),
-    ("real-time-alert", ("real-time alert", "real time alert")),
-    ("the-macro-show", ("macro show", "the macro show")),
-    ("the-call", ("the call", "call @ hedgeye", "hedgeye call")),
-    ("volume", ("volume", "market share volume")),
-    ("cftc-positioning", ("cftc", "positioning")),
-    ("etf-pro", ("etf pro", "etf-pro", "etfpro")),
-]
+REPORT_RULES = report_rules()
 
 
 def utc_now() -> datetime:
@@ -357,10 +350,21 @@ def classify_runtime_error(error: Exception) -> str:
     if typed_error_code:
         return str(typed_error_code)
     message = str(error).lower()
-    if "invalid_grant" in message or "expired or revoked" in message:
+    if (
+        "invalid_grant" in message
+        or "expired or revoked" in message
+        or "invalid credentials" in message
+        or "http 401" in message
+    ):
         return "GMAIL_AUTH_REQUIRED"
     if "disabled_client" in message:
         return "GMAIL_OAUTH_CLIENT_DISABLED"
+    if (
+        "insufficient authentication scopes" in message
+        or "insufficient permission" in message
+        or "insufficientpermissions" in message
+    ):
+        return "GMAIL_SCOPE_INSUFFICIENT"
     if "accessdenied" in message or "not authorized" in message:
         return "AWS_ACCESS_DENIED"
     if "missing required keys" in message or "secret" in message and "missing" in message:
@@ -629,7 +633,17 @@ def attachment_records_are_terminal(items: Iterable[Dict[str, Any]]) -> bool:
     ]
 
     def is_terminal(item: Dict[str, Any]) -> bool:
-        if item.get("status") not in {"STORED", "DUPLICATE"}:
+        status = item.get("status")
+        if status == "UNSUPPORTED":
+            return True
+        mime_type = str(item.get("mimeType") or "").lower()
+        filename = str(item.get("filename") or "").lower()
+        is_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
+        if is_pdf:
+            if status == "DUPLICATE":
+                return True
+            return status == "INDEXED"
+        if status not in {"STORED", "DUPLICATE", "INDEXED"}:
             return False
         # Older deployments could persist a parser/materializer exception on a
         # STORED row. Treat those rows as unfinished so a message sentinel can
@@ -639,6 +653,18 @@ def attachment_records_are_terminal(items: Iterable[Dict[str, Any]]) -> bool:
         if item.get("retryable") is True:
             return False
         if item.get("parseError") and not item.get("materializationStatus"):
+            return False
+        report_type = str(item.get("reportType") or "")
+        if (
+            report_type in RESEARCH_EVENT_SNAPSHOT_TYPES
+            and str(item.get("attachmentId") or "").startswith("message-body-")
+            and item.get("materializationStatus") not in {
+                "INDEXED",
+                "MATERIALIZED",
+                "EVENT_LEDGERED",
+                "PARSED",
+            }
+        ):
             return False
         return True
 
@@ -730,9 +756,16 @@ def claim_attachment(
     try:
         table.put_item(
             Item=claim_item,
-            ConditionExpression="attribute_not_exists(messageId) OR #status = :error",
+            ConditionExpression=(
+                "attribute_not_exists(messageId) "
+                "OR #status = :error "
+                "OR #status = :textractError"
+            ),
             ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={":error": "ERROR"},
+            ExpressionAttributeValues={
+                ":error": "ERROR",
+                ":textractError": "TEXTRACT_ERROR",
+            },
         )
         return True
     except ClientError as err:
@@ -742,7 +775,26 @@ def claim_attachment(
     key = {"messageId": message_id, "attachmentId": attachment_id}
     existing = table.get_item(Key=key, ConsistentRead=True).get("Item")
     expected_updated_at = existing.get("updatedAt") if existing else None
-    if not existing or existing.get("status") != "IN_PROGRESS" or not expected_updated_at:
+    existing_status = str(existing.get("status") or "") if existing else ""
+    is_pdf = (
+        str(mime_type or "").lower() == "application/pdf"
+        or str(filename or "").lower().endswith(".pdf")
+    )
+    if existing_status == "IN_PROGRESS":
+        stale_seconds = ATTACHMENT_CLAIM_STALE_SECONDS
+    elif is_pdf and existing_status in {
+        "TEXTRACT_DISPATCHED",
+        "RECEIVED",
+        "PARSED",
+        "VALIDATED",
+    }:
+        # A process can exit after dispatch or between projection stages. Keep
+        # active 15-minute Lambda work protected, then let the scheduled Gmail
+        # poll safely re-dispatch the immutable content after one hour.
+        stale_seconds = TEXTRACT_CLAIM_STALE_SECONDS
+    else:
+        return False
+    if not expected_updated_at:
         return False
 
     try:
@@ -752,7 +804,7 @@ def claim_attachment(
         updated_at = updated_at.astimezone(timezone.utc)
     except (TypeError, ValueError):
         return False
-    if now_dt - updated_at < timedelta(seconds=ATTACHMENT_CLAIM_STALE_SECONDS):
+    if now_dt - updated_at < timedelta(seconds=stale_seconds):
         return False
 
     reclaimed_item = {
@@ -766,7 +818,7 @@ def claim_attachment(
             ConditionExpression="#status = :inProgress AND #updatedAt = :expectedUpdatedAt",
             ExpressionAttributeNames={"#status": "status", "#updatedAt": "updatedAt"},
             ExpressionAttributeValues={
-                ":inProgress": "IN_PROGRESS",
+                ":inProgress": existing_status,
                 ":expectedUpdatedAt": expected_updated_at,
             },
         )
@@ -1455,6 +1507,38 @@ def mark_textract_content(
     )
 
 
+def dispatch_pdf_processor(
+    *,
+    bucket: str,
+    s3_key: str,
+    message_id: str,
+    attachment_id: str,
+    content_sha256: str,
+    report_type: str,
+    received_at: datetime,
+) -> None:
+    """Invoke the completion-safe PDF processor after the immutable S3 write."""
+    payload = {
+        "source": "gmail-ingestor",
+        "bucket": bucket,
+        "key": s3_key,
+        "messageId": message_id,
+        "attachmentId": attachment_id,
+        "contentSha256": content_sha256,
+        "reportType": report_type,
+        "receivedAt": received_at.isoformat(),
+    }
+    response = lambda_client.invoke(
+        FunctionName=PDF_PROCESSOR_FUNCTION_NAME,
+        InvocationType="Event",
+        Payload=json.dumps(payload).encode("utf-8"),
+    )
+    if int(response.get("StatusCode", 0)) != 202:
+        raise RuntimeError(
+            f"PDF processor dispatch returned {response.get('StatusCode')!r}"
+        )
+
+
 def _materialization_attempt_count(item: Dict[str, Any]) -> int:
     if item.get("materializationAttemptVersion") != MATERIALIZED_DATA_VERSION:
         return 0
@@ -1522,6 +1606,7 @@ def backfill_html_snapshot(
         return False
     attempt_count = _materialization_attempt_count(item) + 1
 
+    snapshot: Optional[Dict[str, Any]] = None
     try:
         obj = s3.get_object(Bucket=item["s3Bucket"], Key=item["s3Key"])
         html_body = obj["Body"].read().decode("utf-8", errors="replace")
@@ -1534,7 +1619,7 @@ def backfill_html_snapshot(
             subject=item.get("subject", ""),
         )
         if not snapshot:
-            if report_type in MATERIALIZED_SNAPSHOT_TYPES:
+            if report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
                 raise RetryableResearchMaterializationError(
                     f"Research parser returned no {report_type} snapshot"
                 )
@@ -1559,26 +1644,36 @@ def backfill_html_snapshot(
             dynamodb,
             content_sha256=item.get("contentSha256"),
         )
+        entity_event_count = persist_snapshot_intelligence(
+            snapshot,
+            dynamodb,
+            content_sha256=item.get("contentSha256"),
+        )
         materialized, _ = materialize_email_snapshot(snapshot, dynamodb)
+        entity_projection_status = (
+            "PARSED"
+            if product_definition(snapshot["snapshotType"])
+            .get("authorities", {})
+            .get("trade")
+            and entity_event_count == 0
+            else "INDEXED"
+        )
         materialization_extra = {
             "snapshotType": snapshot["snapshotType"],
             "snapshotDate": snapshot["date"],
             "snapshotSource": snapshot["source"],
             "researchEventCount": event_count,
             "researchParserVersion": RESEARCH_PARSER_VERSION,
+            "researchEntityEventCount": entity_event_count,
+            "securityIntelligenceParserVersion": SECURITY_INTELLIGENCE_PARSER_VERSION,
             "error": None,
             "errorCode": None,
             "retryable": False,
             "parseError": None,
         }
-        if snapshot.get("snapshotType") in MATERIALIZED_SNAPSHOT_TYPES:
-            materialization_extra["materializationAttemptVersion"] = MATERIALIZED_DATA_VERSION
-            materialization_extra["materializationAttemptCount"] = attempt_count
-            materialization_extra["materializationStatus"] = "MATERIALIZED"
-        elif event_count > 0:
-            materialization_extra["materializationAttemptVersion"] = MATERIALIZED_DATA_VERSION
-            materialization_extra["materializationAttemptCount"] = attempt_count
-            materialization_extra["materializationStatus"] = "EVENT_LEDGERED"
+        materialization_extra["materializationAttemptVersion"] = MATERIALIZED_DATA_VERSION
+        materialization_extra["materializationAttemptCount"] = attempt_count
+        materialization_extra["materializationStatus"] = entity_projection_status
         if materialized.get("dataVersion"):
             materialization_extra["materializedDataVersion"] = materialized["dataVersion"]
         if materialized.get("materializedAt"):
@@ -1587,11 +1682,26 @@ def backfill_html_snapshot(
             table,
             message_id=message_id,
             attachment_id=attachment_id,
-            status="STORED",
+            status="STORED" if entity_projection_status == "PARSED" else "INDEXED",
             extra=materialization_extra,
         )
         return True
     except Exception as parse_err:
+        if snapshot or report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
+            try:
+                persist_snapshot_failure(
+                    snapshot or _manifest_stub(
+                        report_type=report_type,
+                        received_at=received_at,
+                        message_id=message_id,
+                        s3_key=item.get("s3Key"),
+                    ),
+                    dynamodb,
+                    content_sha256=item.get("contentSha256"),
+                    error=parse_err,
+                )
+            except Exception:
+                pass
         retryable_error = _retryable_materialization_error(parse_err)
         mark_attachment(
             table,
@@ -1633,6 +1743,25 @@ def _should_backfill_materialized_snapshot(item: Dict[str, Any]) -> bool:
     )
 
 
+def _manifest_stub(
+    *,
+    report_type: str,
+    received_at: datetime,
+    message_id: str,
+    s3_key: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "date": received_at.astimezone(timezone.utc).strftime("%Y-%m-%d"),
+        "snapshotType": report_type or "unknown",
+        "reportType": report_type or "unknown",
+        "scrapedAt": received_at.astimezone(timezone.utc).isoformat(),
+        "publishedAt": received_at.astimezone(timezone.utc).isoformat(),
+        "gmailMessageId": message_id,
+        "htmlSource": s3_key,
+        "data": {},
+    }
+
+
 def upload_attachment(
     *,
     access_token: str,
@@ -1672,6 +1801,7 @@ def upload_attachment(
     content_sha256: Optional[str] = None
     textract_claimed = False
     textract_dispatched = False
+    snapshot: Optional[Dict[str, Any]] = None
     try:
         if attachment.get("inlineData"):
             content = decode_base64url(attachment["inlineData"])
@@ -1746,6 +1876,15 @@ def upload_attachment(
             Metadata=metadata,
         )
         if is_pdf:
+            dispatch_pdf_processor(
+                bucket=S3_BUCKET,
+                s3_key=s3_key,
+                message_id=message_id,
+                attachment_id=attachment_id,
+                content_sha256=content_sha256,
+                report_type=report_type,
+                received_at=received_at,
+            )
             mark_textract_content(
                 table,
                 content_sha256=content_sha256,
@@ -1778,25 +1917,62 @@ def upload_attachment(
                         dynamodb,
                         content_sha256=content_sha256,
                     )
+                    entity_event_count = persist_snapshot_intelligence(
+                        snapshot,
+                        dynamodb,
+                        content_sha256=content_sha256,
+                    )
                     materialized, _ = materialize_email_snapshot(snapshot, dynamodb)
+                    entity_projection_status = (
+                        "PARSED"
+                        if product_definition(snapshot["snapshotType"])
+                        .get("authorities", {})
+                        .get("trade")
+                        and entity_event_count == 0
+                        else "INDEXED"
+                    )
                     extra["snapshotType"] = snapshot["snapshotType"]
                     extra["snapshotDate"] = snapshot["date"]
                     extra["snapshotSource"] = snapshot["source"]
                     extra["researchEventCount"] = event_count
                     extra["researchParserVersion"] = RESEARCH_PARSER_VERSION
+                    extra["researchEntityEventCount"] = entity_event_count
+                    extra["securityIntelligenceParserVersion"] = (
+                        SECURITY_INTELLIGENCE_PARSER_VERSION
+                    )
                     if materialized.get("dataVersion"):
                         extra["materializedDataVersion"] = materialized["dataVersion"]
                     if materialized.get("materializedAt"):
                         extra["materializedAt"] = materialized["materializedAt"]
-                    if snapshot.get("snapshotType") in MATERIALIZED_SNAPSHOT_TYPES:
-                        extra["materializationAttemptVersion"] = MATERIALIZED_DATA_VERSION
-                        extra["materializationAttemptCount"] = 1
-                        extra["materializationStatus"] = "MATERIALIZED"
-                    elif event_count > 0:
-                        extra["materializationAttemptVersion"] = MATERIALIZED_DATA_VERSION
-                        extra["materializationAttemptCount"] = 1
-                        extra["materializationStatus"] = "EVENT_LEDGERED"
-                elif report_type in MATERIALIZED_SNAPSHOT_TYPES:
+                    extra["materializationAttemptVersion"] = MATERIALIZED_DATA_VERSION
+                    extra["materializationAttemptCount"] = 1
+                    extra["materializationStatus"] = entity_projection_status
+                elif report_type == "unknown":
+                    unsupported = RetryableResearchMaterializationError(
+                        "Received Hedgeye product is not registered or parseable"
+                    )
+                    persist_snapshot_failure(
+                        _manifest_stub(
+                            report_type=report_type,
+                            received_at=received_at,
+                            message_id=message_id,
+                            s3_key=s3_key,
+                        ),
+                        dynamodb,
+                        content_sha256=content_sha256,
+                        error=unsupported,
+                    )
+                    extra.update(
+                        {
+                            "materializationAttemptVersion": MATERIALIZED_DATA_VERSION,
+                            "materializationAttemptCount": 1,
+                            "materializationStatus": "ERROR",
+                            "parseError": str(unsupported),
+                            "errorCode": "RESEARCH_PRODUCT_UNSUPPORTED",
+                            "retryable": False,
+                        }
+                    )
+                elif report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
                     raise RetryableResearchMaterializationError(
                         f"Research parser returned no {report_type} snapshot"
                     )
@@ -1814,11 +1990,37 @@ def upload_attachment(
             table,
             message_id=message_id,
             attachment_id=attachment_id,
-            status="STORED",
+            status="TEXTRACT_DISPATCHED" if is_pdf else (
+                (
+                    "INDEXED"
+                    if extra.get("materializationStatus") == "INDEXED"
+                    else "STORED"
+                ) if snapshot else (
+                    "UNSUPPORTED" if report_type == "unknown" else "STORED"
+                )
+            ),
             extra=extra,
         )
         return "stored", s3_key
     except Exception as err:
+        if snapshot or (
+            str(attachment_id).startswith("message-body-")
+            and str(mime_type).lower() == "text/html"
+        ):
+            try:
+                persist_snapshot_failure(
+                    snapshot or _manifest_stub(
+                        report_type=report_type,
+                        received_at=received_at,
+                        message_id=message_id,
+                        s3_key=locals().get("s3_key"),
+                    ),
+                    dynamodb,
+                    content_sha256=content_sha256,
+                    error=err,
+                )
+            except Exception:
+                pass
         if content_sha256 and textract_claimed and not textract_dispatched:
             mark_textract_content(
                 table,
@@ -1969,7 +2171,14 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         raise
 
     user_id = event.get("userId") or secret.get("user_id") or os.environ.get("GMAIL_USER_ID", "me")
-    state = read_ingestion_state(table)
+    # A forced activation probe validates OAuth/Gmail without depending on or
+    # mutating the ingestion cursor. Normal polls still require the ledger
+    # state before deciding whether the auth circuit is open.
+    state = (
+        {}
+        if event.get("authProbeOnly") and event.get("forceAuthProbe")
+        else read_ingestion_state(table)
+    )
     # While auth is blocked, do not call Google, but do check Secrets Manager on
     # every scheduled invocation. A long-lived warm-runtime cache must not delay
     # recovery for hours after an operator atomically promotes a new version.
@@ -2055,6 +2264,55 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
                 secret_version=secret_version,
             )
             raise
+
+    if event.get("authProbeOnly"):
+        # Activation can validate the refresh grant and readonly Gmail API
+        # access without listing messages, advancing the history cursor, or
+        # materializing any research data. This remains a manual heartbeat and
+        # can never satisfy the scheduled-poller rollout gate.
+        try:
+            get_profile_history_id(access_token, user_id)
+        except Exception as err:
+            error_code = classify_runtime_error(err)
+            write_service_heartbeat(
+                started_at=started_at,
+                status="error",
+                trigger_source=trigger_source,
+                schedule_id=schedule_id,
+                error_code=error_code,
+                detail=safe_error_detail(err),
+                secret_version=secret_version,
+            )
+            return {
+                "statusCode": 503,
+                "body": json.dumps({
+                    "status": "ERROR",
+                    "errorCode": error_code,
+                    "pollMode": "auth_probe",
+                    "messageCount": 0,
+                    "errorCount": 1,
+                }),
+            }
+
+        write_service_heartbeat(
+            started_at=started_at,
+            status="success",
+            trigger_source=trigger_source,
+            schedule_id=schedule_id,
+            secret_version=secret_version,
+            counts={"messages": 0, "stored": 0, "skipped": 0, "errors": 0, "dropped": 0},
+        )
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
+                "status": "SUCCESS",
+                "pollMode": "auth_probe",
+                "messageCount": 0,
+                "storedCount": 0,
+                "skippedCount": 0,
+                "errorCount": 0,
+            }),
+        }
 
     message_ids = list(event.get("messageIds") or [])
     poll_mode = "explicit" if message_ids else "query"

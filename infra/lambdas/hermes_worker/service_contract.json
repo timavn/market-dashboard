@@ -16,21 +16,21 @@
   "workers": {
     "quant-analyst": {
       "cadenceMinutes": 15,
-      "scheduleExpression": "cron(0/15 9-16 ? * MON-FRI *)",
+      "scheduleExpression": "cron(0/15 * ? * * *)",
       "scheduleId": "market-dashboard-hermes-quant-analyst-v2",
       "scheduleTimeZone": "America/New_York",
       "serviceId": "hermes:quant-analyst"
     },
     "quant-developer": {
       "cadenceMinutes": 15,
-      "scheduleExpression": "cron(5/15 8-18 ? * MON-FRI *)",
+      "scheduleExpression": "cron(5/15 * ? * * *)",
       "scheduleId": "market-dashboard-hermes-quant-developer-v2",
       "scheduleTimeZone": "America/New_York",
       "serviceId": "hermes:quant-developer"
     },
     "security": {
       "cadenceMinutes": 60,
-      "scheduleExpression": "cron(10 * ? * MON-FRI *)",
+      "scheduleExpression": "cron(10 * ? * * *)",
       "scheduleId": "market-dashboard-hermes-security-v2",
       "scheduleTimeZone": "America/New_York",
       "serviceId": "hermes:security"

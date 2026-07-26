@@ -13,10 +13,14 @@ import {
   computePortfolioExposure,
   formatExposurePct,
   formatCurrency,
+  formatSignedCurrency,
   IDLE_CASH_TOOLTIP,
   isUsEquitySessionActive,
   resolvePortfolioHeaderSnapshot,
 } from '../../../utils/portfolioExposureMetrics';
+import calculateIbkrCashBorrowing, {
+  calculateIbkrCashBorrowingReference,
+} from '../../../utils/ibkrCashBorrowing';
 import { getLongShortPositionSnapshot } from '../../../utils/portfolioBreakdownUtils';
 import {
   buildHedgeyeLatestUpdatesFeed,
@@ -31,6 +35,22 @@ import './PortfolioSidebarSnapshot.css';
 const STRATEGY_SUBTITLE = 'Long/Short Global Macro';
 const PORTFOLIO_CLOSE_CACHE_PREFIX = 'portfolioCloseSnapshot:';
 const FLEX_RECONCILIATION_TOLERANCE_PCT = 2.5;
+const CASH_GUARD_MAX_AGE_MS = 15 * 1000;
+const CASH_GUARD_REFERENCE_MAX_AGE_MS = 2 * 60 * 1000;
+const CASH_GUARD_FUTURE_TOLERANCE_MS = 5 * 1000;
+const CASH_GUARD_PRIOR_CLOSE_SOURCES = new Set([
+  'ibkr_live_tick_close',
+  'ibkr_historical_daily_close',
+]);
+const consumedCashGuardSnapshots = new Set();
+
+function consumeCashGuardSnapshot(snapshotKey) {
+  consumedCashGuardSnapshots.add(snapshotKey);
+  while (consumedCashGuardSnapshots.size > 100) {
+    const oldest = consumedCashGuardSnapshots.values().next().value;
+    consumedCashGuardSnapshots.delete(oldest);
+  }
+}
 
 function AccountDropdownLabel({ accountId, value, currency, dailyPct }) {
   const label = formatIbkrAccountLabel(accountId);
@@ -91,8 +111,9 @@ function ExposureBar({ label, pct, amount, currency = 'USD', netAmount = false, 
   const display = formatExposurePct(pct);
   const amountDisplay = netAmount ? formatSignedNominal(amount) : formatCurrency(amount, currency);
   const hasAmount = amountDisplay !== '—';
+  const hasValue = pct != null && Number.isFinite(pct);
   const segmentTestId = `exposure-segment-${label.toLowerCase().replace(/\s+/g, '-')}`;
-  const value = pct != null && Number.isFinite(pct) ? pct : 0;
+  const value = hasValue ? pct : 0;
   const roundedValue = Math.round(value);
   const scaleRange = scaleMax - scaleMin;
   const tone = roundedValue > 0 ? 'positive' : roundedValue < 0 ? 'negative' : 'neutral';
@@ -117,7 +138,7 @@ function ExposureBar({ label, pct, amount, currency = 'USD', netAmount = false, 
   const ticks = [-200, -100, 0, 100, 200];
 
   return (
-    <div className="pf-bar" title={tooltip || undefined}>
+    <div className="pf-bar" role="group" aria-label={label} title={tooltip || undefined}>
       <div className="pf-bar__row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="pf-label">{label}</span>
         <span className={`pf-bar__value pf-bar__value--${tone}`} style={{ marginLeft: 'auto' }}>
@@ -147,7 +168,7 @@ function ExposureBar({ label, pct, amount, currency = 'USD', netAmount = false, 
           <div className="pf-bar__zero-line" style={{ left: `${zeroPos}%` }} />
 
           {/* Active bar segment from 0 to value */}
-          {value !== 0 && barWidth > 0 && (
+          {hasValue && value !== 0 && barWidth > 0 && (
             <div
               className="pf-bar__segment"
               data-testid={segmentTestId}
@@ -160,7 +181,7 @@ function ExposureBar({ label, pct, amount, currency = 'USD', netAmount = false, 
           )}
 
           {/* Zero marker when value is exactly 0 */}
-          {value === 0 && (
+          {hasValue && value === 0 && (
             <div
               className="pf-bar__zero-marker"
               style={{ left: `${zeroPos}%` }}
@@ -171,6 +192,1187 @@ function ExposureBar({ label, pct, amount, currency = 'USD', netAmount = false, 
         </div>
       </div>
     </div>
+  );
+}
+
+function isCurrentFundingTimestamp(value, now) {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const ageMs = Number(now) - timestamp;
+  return ageMs >= -CASH_GUARD_FUTURE_TOLERANCE_MS && ageMs <= CASH_GUARD_MAX_AGE_MS;
+}
+
+function isCurrentReferenceTimestamp(value, now) {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const ageMs = Number(now) - timestamp;
+  return (
+    ageMs >= -CASH_GUARD_FUTURE_TOLERANCE_MS
+    && ageMs <= CASH_GUARD_REFERENCE_MAX_AGE_MS
+  );
+}
+
+function cashGuardReasonText(reason) {
+  const messages = {
+    refreshing: 'Refreshing the verified IBKR funding snapshot.',
+    portfolio_offline: 'Verified live IBKR funding is unavailable.',
+    provider_status_delayed: 'The live IBKR connection status could not be refreshed. Refresh before sizing.',
+    live_session_unverified: 'The portfolio is not backed by a verified live IBKR session.',
+    cached_snapshot: 'Cached portfolio or funding data cannot be used for sizing.',
+    account_mismatch: 'The funding snapshot does not match the selected account.',
+    funding_missing: 'IBKR did not return the funding inputs required for this guard.',
+    funding_unverified: 'The funding snapshot is not verified as live IBKR data.',
+    funding_stale: 'The live funding snapshot is more than 15 seconds old. Refresh for a one-use estimate.',
+    reference_unverified: 'IBKR did not return a verified completed-session reference.',
+    reference_stale: 'The broker connection used for this reference is no longer current. Refresh to verify it again.',
+    short_evidence_mismatch: 'The verified short-position evidence is incomplete.',
+    short_evidence_unverified: 'Every short requires a fresh live IBKR prior close and current price.',
+    short_exposure_evidence_mismatch: 'Live short marks do not reconcile to IBKR aggregate short exposure.',
+    settlement_unverified: 'IBKR has not verified that the short evidence is fully settled.',
+    unsettled_securities_activity: 'Unsettled securities activity prevents safe cash sizing.',
+    non_settlement_day: 'Cash sizing is unavailable outside a U.S. securities settlement day.',
+    execution_unverified: 'IBKR has not verified that there are no same-day executions.',
+    open_orders_present: 'Open orders can change cash. Resolve them and refresh.',
+    unsupported_currency: 'This guard currently supports USD-only funding and positions.',
+    unsupported_short_position_currency: 'A short position is outside the supported USD scope.',
+    unsupported_position_scope: 'This guard requires a stock-only portfolio.',
+    account_not_ready: 'IBKR has not marked the account funding snapshot ready.',
+    invalid_funding_payload: 'The live funding payload is incomplete.',
+    inconsistent_stock_exposure: 'IBKR returned inconsistent stock exposure totals.',
+  };
+  return messages[reason] || 'The live funding inputs are incomplete or inconsistent.';
+}
+
+function resolveCashDebitGuard({
+  portfolioData,
+  selectedAccount,
+  connection,
+  refreshing,
+  now,
+}) {
+  if (refreshing) {
+    return {
+      available: false,
+      viewStatus: 'refreshing',
+      reason: 'refreshing',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  if (connection?.statusRefreshDelayed === true) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'provider_status_delayed',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  if (connection?.connected !== true || portfolioData?.dataSource !== 'ibkr_api') {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'portfolio_offline',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  if (portfolioData?.liveSessionVerified !== true) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'live_session_unverified',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  const funding = portfolioData?.funding;
+  const fundingReference = portfolioData?.fundingReference;
+  const selectedEvidence = funding || fundingReference;
+  if (
+    portfolioData?.fromCache === true
+    || (selectedEvidence && selectedEvidence.fromCache !== false)
+  ) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'cached_snapshot',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  const requestedAccount = String(selectedAccount || '').trim();
+  const fundingAccount = String(selectedEvidence?.accountId || '').trim();
+  const portfolioAccount = String(portfolioData?.accountId || '').trim();
+  if (
+    !requestedAccount ||
+    (selectedEvidence && fundingAccount !== requestedAccount) ||
+    (portfolioAccount && portfolioAccount !== requestedAccount)
+  ) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'account_mismatch',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  if (!funding && fundingReference) {
+    if (
+      portfolioData?.fundingUnavailableReason !== 'non_settlement_day'
+      || fundingReference.status !== 'reference'
+      || fundingReference.source !== 'ibkr_completed_session_reference'
+      || fundingReference.referenceOnly !== true
+      || fundingReference.actionable !== false
+    ) {
+      return {
+        available: false,
+        viewStatus: 'unavailable',
+        reason: 'reference_unverified',
+        calculation: null,
+        funding: null,
+      };
+    }
+
+    const referenceTimestamps = [
+      fundingReference.observedAt,
+      fundingReference.socketVerifiedAt,
+      fundingReference.accountValuesObservedAt,
+    ];
+    if (
+      referenceTimestamps.some(
+        (timestamp) => !isCurrentReferenceTimestamp(timestamp, now),
+      )
+    ) {
+      return {
+        available: false,
+        viewStatus: 'unavailable',
+        reason: 'reference_stale',
+        calculation: null,
+        funding: null,
+      };
+    }
+
+    const referenceCalculation =
+      calculateIbkrCashBorrowingReference(fundingReference);
+    if (
+      referenceCalculation?.available !== true
+      || referenceCalculation.referenceOnly !== true
+      || referenceCalculation.actionable !== false
+    ) {
+      return {
+        available: false,
+        viewStatus: 'unavailable',
+        reason: referenceCalculation?.reason || 'reference_unverified',
+        reasons: referenceCalculation?.reasons || [],
+        calculation: null,
+        funding: null,
+      };
+    }
+
+    return {
+      available: false,
+      referenceAvailable: true,
+      viewStatus: 'reference',
+      reason: 'non_settlement_day',
+      calculation: referenceCalculation,
+      funding: null,
+      referenceFunding: fundingReference,
+    };
+  }
+
+  if (!funding) {
+    const unavailableReason = [
+      'non_settlement_day',
+      'settlement_unverified',
+      'unsettled_securities_activity',
+    ].includes(portfolioData?.fundingUnavailableReason)
+      ? portfolioData.fundingUnavailableReason
+      : 'funding_missing';
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: unavailableReason,
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  if (
+    funding.status !== 'live' ||
+    funding.source !== 'ibkr_live_session'
+  ) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'funding_unverified',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  if (funding.settledShortPositionsVerified !== true) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'settlement_unverified',
+      calculation: null,
+      funding: null,
+    };
+  }
+  if (funding.settlementStatus !== 'settled') {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'unsettled_securities_activity',
+      calculation: null,
+      funding: null,
+    };
+  }
+  if (
+    funding.noSameDayExecutionsVerified !== true ||
+    funding.sameDayExecutionCount !== 0
+  ) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'execution_unverified',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  const fundingTimestamps = [
+    funding.observedAt,
+    funding.socketVerifiedAt,
+    funding.accountValuesObservedAt,
+  ];
+  if (fundingTimestamps.some((timestamp) => !isCurrentFundingTimestamp(timestamp, now))) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'funding_stale',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  const shortPositions = Array.isArray(funding.shortPositions) ? funding.shortPositions : null;
+  const shortPositionCount = Number(funding.shortPositionCount);
+  if (
+    !shortPositions ||
+    !Number.isInteger(shortPositionCount) ||
+    shortPositionCount < 0 ||
+    shortPositionCount !== shortPositions.length
+  ) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'short_evidence_mismatch',
+      calculation: null,
+      funding: null,
+    };
+  }
+  if (shortPositions.some((position) => (
+    Number(position?.marketDataType) !== 1 ||
+    position?.currentPriceSource !== 'ibkr_ticker_direct_max' ||
+    !CASH_GUARD_PRIOR_CLOSE_SOURCES.has(position?.priorCloseSource) ||
+    !isCurrentFundingTimestamp(position?.snapshotTimestamp, now)
+  ))) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'short_evidence_unverified',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  const calculation = calculateIbkrCashBorrowing(funding);
+  if (calculation?.available !== true) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: calculation?.reason || 'invalid_funding_payload',
+      reasons: calculation?.reasons || [],
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  return {
+    available: true,
+    viewStatus: 'live',
+    reason: null,
+    calculation,
+    funding,
+  };
+}
+
+function formatLiveFundingTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Live';
+  return `Live ${date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  })}`;
+}
+
+function formatSettlementDate(value) {
+  const normalized = String(value || '').trim();
+  const match = normalized.match(/^(\d{4})-?(\d{2})-?(\d{2})$/);
+  if (!match) return normalized || 'unknown date';
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function formatReferenceDate(value, { weekday = false } = {}) {
+  const normalized = String(value || '').trim();
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return normalized || 'unknown date';
+  const date = new Date(Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+  ));
+  return date.toLocaleDateString('en-US', {
+    ...(weekday ? { weekday: 'short' } : {}),
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function positiveInputNumber(value) {
+  if (String(value || '').trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function formatShareQuantity(value) {
+  if (!Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 4,
+  }).format(value);
+}
+
+function formatProjectedExposure(value, nlv, currency, { signed = false } = {}) {
+  if (!Number.isFinite(value)) return '—';
+  const amount = signed ? formatSignedCurrency(value, currency) : formatCurrency(value, currency);
+  if (!Number.isFinite(nlv) || nlv <= 0) return amount;
+  const pct = (value / nlv) * 100;
+  return `${amount} · ${formatExposurePct(pct, { signed })}`;
+}
+
+function scenarioReasonText(reason) {
+  const messages = {
+    invalid_long_notional: 'Enter a positive dollar amount.',
+    short_trade_requires_quantity: 'Enter a positive share quantity.',
+    short_trade_requires_limit_price: 'Enter a positive limit price.',
+    add_short_limit_above_live_bid: 'For immediate sizing, the add-to-short sell limit must be at or below the verified live bid.',
+    cover_short_limit_below_live_ask: 'For immediate sizing, the cover buy limit must be at or above the verified live ask.',
+    short_trade_requires_verified_conid: 'Select one exact verified live short position.',
+    short_trade_position_not_found: 'That short is no longer present in the verified snapshot.',
+    short_trade_position_ambiguous: 'IBKR returned an ambiguous short identity. Refresh before sizing.',
+    short_trade_identity_unavailable: 'No uniquely identified live short is available for sizing.',
+    short_trade_manual_pricing_not_allowed: 'Current and prior market evidence must come from the verified live position.',
+    cover_short_quantity_exceeds_verified_position: 'Cover shares exceed that exact verified short.',
+    cover_short_exceeds_validated_short_exposure: 'The cover exceeds verified aggregate short exposure.',
+  };
+  return messages[reason] || 'This planned trade cannot be projected from the verified snapshot.';
+}
+
+function CashDebitReferenceContent({ calculation, funding }) {
+  const currency = calculation?.currency || 'USD';
+  const hasHeadroom = calculation.guardedHeadroom >= 0;
+  const referenceAmount = hasHeadroom
+    ? calculation.addLongAllowed
+    : calculation.longTrimNeeded;
+  const commodityAdjustment = Number(
+    calculation?.adjustmentForSecuritiesDeficit || 0,
+  );
+  const commodityCashExcluded = Number(
+    calculation?.commodityCashExcluded || 0,
+  );
+  const referenceDate = formatReferenceDate(
+    funding?.referenceSessionDate,
+    { weekday: true },
+  );
+  const cashObservedDate = formatReferenceDate(
+    funding?.cashLedgerObservedDate,
+    { weekday: true },
+  );
+  const settlementHorizonDate = formatReferenceDate(
+    funding?.settlementHorizonDate,
+    { weekday: true },
+  );
+
+  return (
+    <div
+      className="pf-cash-guard__reference"
+      data-testid="cash-debit-reference"
+    >
+      <div
+        className="pf-cash-guard__reference-summary"
+        data-testid="cash-debit-guard-hero"
+        aria-describedby="cash-debit-reference-caution"
+      >
+        <span className="pf-cash-guard__reference-label">
+          {hasHeadroom
+            ? 'Estimated long headroom'
+            : 'Estimated long reduction'}
+        </span>
+        <strong
+          className={`pf-cash-guard__reference-value ${
+            hasHeadroom
+              ? 'pf-cash-guard__reference-value--headroom'
+              : 'pf-cash-guard__reference-value--trim'
+          }`}
+        >
+          {formatCurrency(referenceAmount, currency)}
+        </strong>
+        <span className="pf-cash-guard__reference-basis">
+          {hasHeadroom
+            ? 'Remaining after short collateral and safety reserves'
+            : 'Needed to restore the no-borrow cash buffer'}
+        </span>
+      </div>
+
+      <p
+        id="cash-debit-reference-caution"
+        className="pf-cash-guard__reference-caution"
+        role="note"
+      >
+        <strong>Historical only.</strong>
+        {' '}Refresh on a settlement day before sizing an order.
+      </p>
+
+      <dl
+        className="pf-cash-guard__reference-ledger"
+        aria-label="Historical cash debit calculation"
+      >
+        <div className="pf-cash-guard__reference-row">
+          <dt>
+            Securities cash floor · {formatSettlementDate(
+              calculation.worstSettlementDate,
+            )}
+          </dt>
+          <dd>
+            {formatSignedCurrency(calculation.securitiesCashFloor, currency)}
+          </dd>
+        </div>
+        <div className="pf-cash-guard__reference-row">
+          <dt>Less: required short collateral</dt>
+          <dd>
+            {formatSignedCurrency(
+              -Math.abs(calculation.shortCollateral),
+              currency,
+            )}
+          </dd>
+        </div>
+        <div className="pf-cash-guard__reference-row pf-cash-guard__reference-row--subtotal">
+          <dt>Cash after short collateral</dt>
+          <dd>
+            {formatSignedCurrency(calculation.brokerAdjustedCash, currency)}
+          </dd>
+        </div>
+        <div className="pf-cash-guard__reference-row">
+          <dt>
+            <span>Less: 5% safety buffer</span>
+            <small>
+              {formatCurrency(calculation.policyBuffer.base, currency)}
+              {' minimum + '}
+              {formatCurrency(
+                calculation.policyBuffer.shortShock,
+                currency,
+              )}
+              {' short stress'}
+            </small>
+          </dt>
+          <dd>
+            {formatSignedCurrency(
+              -Math.abs(calculation.policyBuffer.total),
+              currency,
+            )}
+          </dd>
+        </div>
+        {calculation.negativeAccruedCashReserve > 0 && (
+          <div className="pf-cash-guard__reference-row">
+            <dt>Less: accrued-cash reserve</dt>
+            <dd>
+              {formatSignedCurrency(
+                -calculation.negativeAccruedCashReserve,
+                currency,
+              )}
+            </dd>
+          </div>
+        )}
+      </dl>
+
+      <div
+        className="pf-cash-guard__reference-details"
+        aria-label="Additional calculation details"
+      >
+        <div className="pf-cash-guard__reference-secondary">
+          <div>
+            <span>Long exposure at close</span>
+            <strong>{formatCurrency(calculation.longMV, currency)}</strong>
+          </div>
+          <div>
+            <span>
+              {commodityAdjustment > 0
+                ? 'Commodity cash applied'
+                : 'Commodity cash excluded'}
+            </span>
+            <strong>
+              {formatCurrency(
+                commodityAdjustment > 0
+                  ? commodityAdjustment
+                  : commodityCashExcluded,
+                currency,
+              )}
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      <p className="pf-cash-guard__reference-copy">
+        IBKR cash {cashObservedDate}
+        {' · '}prices {referenceDate} close
+        {' · '}settlements included through {settlementHorizonDate}
+      </p>
+    </div>
+  );
+}
+
+function CashDebitGuardCard({ guard, selectedAccount, onRefresh }) {
+  const [action, setAction] = useState('add_long');
+  const [longAmount, setLongAmount] = useState('');
+  const [shortShares, setShortShares] = useState('');
+  const [shortConId, setShortConId] = useState('');
+  const [shortLimitPrice, setShortLimitPrice] = useState('');
+  const [shortShockPercent, setShortShockPercent] = useState('5');
+  const [consumedSnapshotKey, setConsumedSnapshotKey] = useState(null);
+  const [lockedEstimate, setLockedEstimate] = useState(null);
+  const [estimateRefreshing, setEstimateRefreshing] = useState(false);
+  const isAddShort = action === 'add_short';
+  const isShortAction = isAddShort || action === 'cover_short';
+  const funding = guard?.funding;
+  const referenceFunding = guard?.referenceFunding;
+  const snapshotKey = guard?.available === true
+    ? [
+      selectedAccount,
+      funding?.observedAt,
+      funding?.accountValuesObservedAt,
+      funding?.socketVerifiedAt,
+    ].join('|')
+    : null;
+  const shortShockPercentNumber = Number(shortShockPercent);
+  const shortShockInputValid =
+    Number.isFinite(shortShockPercentNumber) &&
+    shortShockPercentNumber >= 5 &&
+    shortShockPercentNumber <= 200;
+  const calculation = useMemo(() => {
+    if (
+      guard?.available !== true ||
+      !funding ||
+      !shortShockInputValid
+    ) {
+      return guard?.calculation;
+    }
+    return calculateIbkrCashBorrowing({
+      ...funding,
+      policyShortAdverseMoveRate: shortShockPercentNumber / 100,
+    });
+  }, [
+    funding,
+    guard?.available,
+    guard?.calculation,
+    shortShockInputValid,
+    shortShockPercentNumber,
+  ]);
+  const snapshotConsumed =
+    Boolean(snapshotKey) && (
+      consumedSnapshotKey === snapshotKey ||
+      consumedCashGuardSnapshots.has(snapshotKey)
+    );
+  const activeLockedEstimate =
+    guard?.available === true &&
+    Boolean(snapshotKey) &&
+    lockedEstimate?.snapshotKey === snapshotKey
+      ? lockedEstimate
+      : null;
+
+  useEffect(() => {
+    if (consumedSnapshotKey && consumedSnapshotKey !== snapshotKey) {
+      setConsumedSnapshotKey(null);
+    }
+    if (
+      lockedEstimate &&
+      (
+        guard?.available !== true ||
+        lockedEstimate.snapshotKey !== snapshotKey
+      )
+    ) {
+      setLockedEstimate(null);
+      setEstimateRefreshing(false);
+    }
+  }, [
+    consumedSnapshotKey,
+    guard?.available,
+    lockedEstimate,
+    snapshotKey,
+  ]);
+
+  const currency = calculation?.currency || 'USD';
+  const verifiedShortPositions = useMemo(() => {
+    const positions = Array.isArray(calculation?.collateralBreakdown?.positions)
+      ? calculation.collateralBreakdown.positions
+      : [];
+    const counts = positions.reduce((accumulator, position) => {
+      const conId = String(position?.conId || '').trim();
+      if (conId) {
+        accumulator.set(conId, (accumulator.get(conId) || 0) + 1);
+      }
+      return accumulator;
+    }, new Map());
+
+    return positions.filter((position) => {
+      const conId = String(position?.conId || '').trim();
+      return conId && counts.get(conId) === 1;
+    });
+  }, [calculation]);
+
+  const projectionState = useMemo(() => {
+    if (guard?.available !== true || !calculation) {
+      return { kind: 'hidden', projection: null };
+    }
+
+    if (!isShortAction) {
+      if (String(longAmount || '').trim() === '') {
+        return { kind: 'empty', projection: null };
+      }
+      const amount = positiveInputNumber(longAmount);
+      if (amount == null) {
+        return {
+          kind: 'invalid',
+          projection: { available: false, reason: 'invalid_long_notional' },
+        };
+      }
+      return {
+        kind: 'ready',
+        projection: calculation.projectScenario({ type: action, amount }),
+      };
+    }
+
+    if (verifiedShortPositions.length === 0) {
+      return {
+        kind: 'invalid',
+        projection: {
+          available: false,
+          reason: 'short_trade_identity_unavailable',
+        },
+      };
+    }
+    if (
+      String(shortConId || '').trim() === '' &&
+      String(shortShares || '').trim() === '' &&
+      String(shortLimitPrice || '').trim() === ''
+    ) {
+      return { kind: 'empty', projection: null };
+    }
+    if (String(shortConId || '').trim() === '') {
+      return {
+        kind: 'invalid',
+        projection: {
+          available: false,
+          reason: 'short_trade_requires_verified_conid',
+        },
+      };
+    }
+    const quantity = positiveInputNumber(shortShares);
+    if (quantity == null) {
+      return {
+        kind: 'invalid',
+        projection: {
+          available: false,
+          reason: 'short_trade_requires_quantity',
+        },
+      };
+    }
+    const limitPrice = positiveInputNumber(shortLimitPrice);
+    if (limitPrice == null) {
+      return {
+        kind: 'invalid',
+        projection: {
+          available: false,
+          reason: 'short_trade_requires_limit_price',
+        },
+      };
+    }
+    return {
+      kind: 'ready',
+      projection: calculation.projectScenario({
+        type: action,
+        conId: shortConId,
+        quantity,
+        limitPrice,
+      }),
+    };
+  }, [
+    action,
+    calculation,
+    guard?.available,
+    isShortAction,
+    longAmount,
+    shortConId,
+    shortLimitPrice,
+    shortShares,
+    verifiedShortPositions,
+  ]);
+
+  const projection = projectionState.projection;
+  const projectionAvailable = projection?.available === true;
+  const canLockEstimate =
+    guard?.available === true &&
+    calculation?.available === true &&
+    Boolean(snapshotKey) &&
+    !snapshotConsumed &&
+    shortShockInputValid &&
+    (
+      isShortAction
+        ? projectionAvailable
+        : projectionState.kind === 'empty' || projectionAvailable
+    );
+  const lockEstimate = () => {
+    if (!canLockEstimate) return;
+    consumeCashGuardSnapshot(snapshotKey);
+    setConsumedSnapshotKey(snapshotKey);
+    setLockedEstimate({
+      snapshotKey,
+      action,
+      calculation,
+      funding,
+      isShortAction,
+      projection: projectionAvailable ? projection : null,
+    });
+  };
+  const refreshEstimate = async () => {
+    setLockedEstimate(null);
+    setEstimateRefreshing(true);
+    try {
+      await onRefresh?.();
+    } finally {
+      setEstimateRefreshing(false);
+    }
+  };
+  const displayedCalculation = activeLockedEstimate?.calculation || calculation;
+  const displayedFunding = activeLockedEstimate?.funding || funding;
+  const displayedProjection = activeLockedEstimate?.projection || null;
+  const nlv = Number(displayedFunding?.netLiquidation);
+  const commodityAdjustment = Number(
+    displayedCalculation?.adjustmentForSecuritiesDeficit || 0,
+  );
+  const commodityCashExcluded = Number(
+    displayedCalculation?.commodityCashExcluded || 0,
+  );
+  const tone = guard?.referenceAvailable === true
+    ? 'reference'
+    : guard?.available
+      ? displayedCalculation?.guardedHeadroom >= 0
+        ? 'safe'
+        : 'trim'
+      : 'unavailable';
+
+  return (
+    <section
+      className={`pf-cash-guard pf-cash-guard--${tone}`}
+      aria-label="Cash debit guard"
+      data-testid="cash-debit-guard"
+      data-status={guard?.viewStatus || 'unavailable'}
+    >
+      <header className="pf-cash-guard__header">
+        <h2 className="pf-cash-guard__title">Cash debit guard</h2>
+        <span className={`pf-cash-guard__status pf-cash-guard__status--${guard?.viewStatus || 'unavailable'}`}>
+          {guard?.viewStatus === 'live'
+            ? activeLockedEstimate
+              ? `One use · ${formatLiveFundingTime(displayedFunding?.observedAt)}`
+              : snapshotConsumed
+                ? 'Refresh required'
+                : `Ready · ${formatLiveFundingTime(funding?.observedAt)}`
+            : guard?.viewStatus === 'reference'
+              ? `Historical · ${formatReferenceDate(
+                referenceFunding?.referenceSessionDate,
+                { weekday: true },
+              )}`
+            : guard?.viewStatus === 'refreshing'
+              ? 'Refreshing'
+              : 'Unavailable'}
+        </span>
+      </header>
+
+      {guard?.referenceAvailable === true ? (
+        <CashDebitReferenceContent
+          calculation={guard.calculation}
+          funding={referenceFunding}
+        />
+      ) : guard?.available !== true ? (
+        <div className="pf-cash-guard__unavailable" role="status" aria-live="polite">
+          <strong>
+            {guard?.viewStatus === 'refreshing' ? 'Refreshing' : 'Unavailable'}
+          </strong>
+          <span>{cashGuardReasonText(guard?.reason)}</span>
+        </div>
+      ) : (
+        <>
+          {activeLockedEstimate && (
+            <>
+              <p
+                className={`pf-cash-guard__hero pf-cash-guard__hero--${tone}`}
+                data-testid="cash-debit-guard-hero"
+              >
+                <span>
+                  {displayedCalculation.guardedHeadroom >= 0
+                    ? 'BUFFERED MAX ESTIMATE'
+                    : 'BUFFERED TRIM ESTIMATE'}
+                </span>
+                {' '}
+                <strong>
+                  {formatCurrency(
+                    displayedCalculation.guardedHeadroom >= 0
+                      ? displayedCalculation.addLongAllowed
+                      : displayedCalculation.longTrimNeeded,
+                    currency,
+                  )}
+                </strong>
+                {' '}
+                <span>LONGS AFTER SETTLEMENT</span>
+              </p>
+
+              <div className="pf-cash-guard__metrics">
+                <div className="pf-cash-guard__metric">
+                  <span title={`Worst securities settlement balance on ${formatSettlementDate(displayedCalculation.worstSettlementDate)}`}>
+                    Securities settled cash · {formatSettlementDate(displayedCalculation.worstSettlementDate)}
+                  </span>
+                  <strong>{formatSignedCurrency(displayedCalculation.securitiesCashFloor, currency)}</strong>
+                </div>
+                <div className="pf-cash-guard__metric">
+                  <span>Short collateral</span>
+                  <strong>{formatCurrency(displayedCalculation.shortCollateral, currency)}</strong>
+                </div>
+                <div className="pf-cash-guard__metric">
+                  <span>IBKR adjusted cash</span>
+                  <strong>{formatSignedCurrency(displayedCalculation.brokerAdjustedCash, currency)}</strong>
+                </div>
+                <div className="pf-cash-guard__metric">
+                  <span>Policy buffer</span>
+                  <strong>{formatCurrency(displayedCalculation.policyBuffer.total, currency)}</strong>
+                  <small>
+                    {formatCurrency(displayedCalculation.policyBuffer.base, currency)} base
+                    {' + '}
+                    {formatCurrency(displayedCalculation.policyBuffer.shortShock, currency)} short shock
+                  </small>
+                </div>
+                <div className="pf-cash-guard__metric">
+                  <span>Current long</span>
+                  <strong>{formatCurrency(displayedCalculation.longMV, currency)}</strong>
+                </div>
+                <div className="pf-cash-guard__metric">
+                  <span>
+                    {commodityAdjustment > 0
+                      ? 'Commodity transfer applied'
+                      : 'Commodities cash excluded'}
+                  </span>
+                  <strong>
+                    {formatCurrency(
+                      commodityAdjustment > 0
+                        ? commodityAdjustment
+                        : commodityCashExcluded,
+                      currency,
+                    )}
+                  </strong>
+                </div>
+              </div>
+
+              {displayedCalculation.negativeAccruedCashReserve > 0 && (
+                <div className="pf-cash-guard__accrued">
+                  <span>Negative accrued cash</span>
+                  <strong>
+                    {formatSignedCurrency(
+                      -displayedCalculation.negativeAccruedCashReserve,
+                      currency,
+                    )}
+                  </strong>
+                </div>
+              )}
+            </>
+          )}
+
+          {!activeLockedEstimate && !snapshotConsumed && (
+            <p className="pf-cash-guard__one-use-intro">
+              Set the trade and short-shock buffer, then lock one estimate.
+              Actionable numbers stay hidden until the snapshot is consumed.
+            </p>
+          )}
+
+          {snapshotConsumed && !activeLockedEstimate ? (
+            <div className="pf-cash-guard__consumed" role="status">
+              <strong>Snapshot consumed</strong>
+              <span>
+                Refresh after any order or fill before sizing another trade.
+              </span>
+              <button
+                type="button"
+                onClick={refreshEstimate}
+                disabled={estimateRefreshing}
+              >
+                {estimateRefreshing ? 'Refreshing…' : 'Refresh for another estimate'}
+              </button>
+            </div>
+          ) : (
+          <div className="pf-cash-guard__scenario" aria-label="Planned trade calculator">
+            <div
+              className={`pf-cash-guard__scenario-row${
+                isShortAction ? ' pf-cash-guard__scenario-row--cover' : ''
+              }`}
+            >
+              <label className="pf-cash-guard__field pf-cash-guard__field--action">
+                <span>Planned trade</span>
+                <select
+                  aria-label="Planned trade action"
+                  value={action}
+                  onChange={(event) => setAction(event.target.value)}
+                  disabled={Boolean(activeLockedEstimate)}
+                >
+                  <option value="add_long">Add long</option>
+                  <option value="trim_long">Trim long</option>
+                  <option value="add_short">Add to short</option>
+                  <option value="cover_short">Cover short</option>
+                </select>
+              </label>
+
+              {!isShortAction ? (
+                <label className="pf-cash-guard__field">
+                  <span>Dollars</span>
+                  <input
+                    aria-label="Planned long dollars"
+                    inputMode="decimal"
+                    min="0"
+                    step="100"
+                    type="number"
+                    value={longAmount}
+                    onChange={(event) => setLongAmount(event.target.value)}
+                    placeholder="0"
+                    disabled={Boolean(activeLockedEstimate)}
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="pf-cash-guard__field">
+                    <span>Verified short</span>
+                    <select
+                      aria-label="Verified short position"
+                      value={shortConId}
+                      onChange={(event) => setShortConId(event.target.value)}
+                      disabled={
+                        Boolean(activeLockedEstimate) ||
+                        verifiedShortPositions.length === 0
+                      }
+                    >
+                      <option value="">
+                        {verifiedShortPositions.length > 0
+                          ? 'Select position'
+                          : 'No unique live short'}
+                      </option>
+                      {verifiedShortPositions.map((position) => (
+                        <option key={position.conId} value={position.conId}>
+                          {position.symbol || 'Short'} · {position.conId} ·{' '}
+                          {formatShareQuantity(position.quantity)} sh
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="pf-cash-guard__field">
+                    <span>Shares</span>
+                    <input
+                      aria-label={
+                        isAddShort
+                          ? 'Planned add-to-short shares'
+                          : 'Planned cover shares'
+                      }
+                      inputMode="decimal"
+                      min="0"
+                      step="any"
+                      type="number"
+                      value={shortShares}
+                      onChange={(event) => setShortShares(event.target.value)}
+                      placeholder="0"
+                      disabled={Boolean(activeLockedEstimate)}
+                    />
+                  </label>
+                  <label className="pf-cash-guard__field">
+                    <span>Limit price</span>
+                    <input
+                      aria-label="Limit price"
+                      inputMode="decimal"
+                      min="0.00000001"
+                      required
+                      step="any"
+                      type="number"
+                      value={shortLimitPrice}
+                      onChange={(event) => setShortLimitPrice(event.target.value)}
+                      placeholder="0.00"
+                      disabled={Boolean(activeLockedEstimate)}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+
+            <div className="pf-cash-guard__lock-row">
+              <label className="pf-cash-guard__field pf-cash-guard__field--shock">
+                <span>Adverse short move buffer</span>
+                <span className="pf-cash-guard__percent-input">
+                  <input
+                    aria-label="Adverse short move buffer percent"
+                    inputMode="decimal"
+                    min="5"
+                    max="200"
+                    step="1"
+                    type="number"
+                    value={shortShockPercent}
+                    onChange={(event) => setShortShockPercent(event.target.value)}
+                    disabled={Boolean(activeLockedEstimate)}
+                  />
+                  <span>%</span>
+                </span>
+              </label>
+              {!activeLockedEstimate && (
+                <button
+                  type="button"
+                  className="pf-cash-guard__lock-button"
+                  onClick={lockEstimate}
+                  disabled={!canLockEstimate}
+                >
+                  Lock one-use estimate
+                </button>
+              )}
+            </div>
+
+            {!shortShockInputValid && !activeLockedEstimate ? (
+              <p className="pf-cash-guard__scenario-error" role="status">
+                Enter a short-move buffer from 5% to 200%.
+              </p>
+            ) : activeLockedEstimate && displayedProjection ? (
+              <div
+                className={`pf-cash-guard__projection${displayedProjection.guardedHeadroom < 0 ? ' pf-cash-guard__projection--trim' : ''}`}
+                data-testid="cash-debit-projection"
+                aria-live="polite"
+              >
+                <div>
+                  <span>
+                    {activeLockedEstimate.isShortAction
+                      ? 'Buffered headroom if limit fills'
+                      : 'Buffered headroom after settlement'}
+                  </span>
+                  <strong>
+                    {formatSignedCurrency(
+                      displayedProjection.guardedHeadroom,
+                      currency,
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Gross</span>
+                  <strong>
+                    {formatProjectedExposure(
+                      displayedProjection.grossMV,
+                      nlv,
+                      currency,
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Net</span>
+                  <strong>
+                    {formatProjectedExposure(
+                      displayedProjection.netMV,
+                      nlv,
+                      currency,
+                      { signed: true },
+                    )}
+                  </strong>
+                </div>
+              </div>
+            ) : activeLockedEstimate ? (
+              <p className="pf-cash-guard__scenario-hint">
+                The one-use maximum estimate is locked above.
+              </p>
+            ) : projectionState.kind === 'empty' ? (
+              <p className="pf-cash-guard__scenario-hint">
+                Leave dollars blank to lock the current maximum, or enter one
+                planned trade.
+              </p>
+            ) : projectionAvailable ? (
+              <p className="pf-cash-guard__scenario-hint">
+                Trade inputs are valid. Lock to reveal one actionable estimate.
+              </p>
+            ) : (
+              <p className="pf-cash-guard__scenario-error" role="status">
+                {scenarioReasonText(projection?.reason)}
+              </p>
+            )}
+
+            {activeLockedEstimate && (
+              <div className="pf-cash-guard__one-use-warning" role="status">
+                <strong>One use only</strong>
+                <span>
+                  This snapshot is consumed. Do not reuse this number for a
+                  second order; refresh after any order or fill.
+                </span>
+                <button
+                  type="button"
+                  onClick={refreshEstimate}
+                  disabled={estimateRefreshing}
+                >
+                  {estimateRefreshing ? 'Refreshing…' : 'Refresh for another estimate'}
+                </button>
+              </div>
+            )}
+          </div>
+          )}
+
+          <p className="pf-cash-guard__disclaimer">
+            This is a buffered live policy estimate, not a zero-debit guarantee.
+            A short move beyond the selected buffer, a journal/transfer, or an
+            account change before settlement can still create a debit. Use one
+            locked estimate for one order only.
+            {' '}
+            Short projections apply only to a limit order at the entered price or
+            better, submitted immediately against this live snapshot. Add-to-short
+            sell limits must be at or below the displayed live bid, and cover buy
+            limits must be at or above the displayed live ask. Cancel and refresh if
+            the order does not fill promptly. Market-order short sizing is unsupported.
+            Short changes remain bound to one verified live position,
+            and this calculator does not size a new short name. Stock-borrow fees and
+            payments in lieu of dividends are separate. Selling longs may not stop
+            today&apos;s interest immediately; trim figures are post-settlement.
+          </p>
+          <span className="sr-only">Selected account {selectedAccount}</span>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -496,7 +1698,7 @@ const PortfolioSidebarSnapshot = ({
   const [cachedCloseSnapshot, setCachedCloseSnapshot] = useState(null);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setSessionClock(Date.now()), 60000);
+    const interval = window.setInterval(() => setSessionClock(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -531,6 +1733,73 @@ const PortfolioSidebarSnapshot = ({
     summary: portfolioData?.summary,
   });
   const currency = portfolioData?.accountSummary?.currency || 'USD';
+  const cashDebitGuard = useMemo(
+    () => resolveCashDebitGuard({
+      portfolioData,
+      selectedAccount,
+      connection,
+      refreshing: loading || refreshing,
+      now: sessionClock,
+    }),
+    [
+      connection,
+      loading,
+      portfolioData,
+      refreshing,
+      selectedAccount,
+      sessionClock,
+    ],
+  );
+  const displayExposure = useMemo(() => {
+    if (cashDebitGuard.available !== true) {
+      const reportedMissingMarks = Number(
+        portfolioData?.dataQuality?.missingMarketValueCount,
+      );
+      const hasMissingDirectMarks =
+        (Number.isFinite(reportedMissingMarks) && reportedMissingMarks > 0) ||
+        (Array.isArray(portfolioData?.holdings) &&
+          portfolioData.holdings.some((holding) => {
+            const quantity = Number(holding?.quantity);
+            const directMarketValue = holding?.marketValue;
+            return (
+              Number.isFinite(quantity) &&
+              quantity !== 0 &&
+              (directMarketValue == null ||
+                directMarketValue === '' ||
+                !Number.isFinite(Number(directMarketValue)))
+            );
+          }));
+
+      if (!hasMissingDirectMarks) return exposure;
+      return {
+        ...exposure,
+        longMV: null,
+        shortMV: null,
+        netMV: null,
+        grossPct: null,
+        netPct: null,
+        longPct: null,
+        shortPct: null,
+        hasData: false,
+      };
+    }
+    const calculation = cashDebitGuard.calculation;
+    const nlv = Number(cashDebitGuard.funding?.netLiquidation);
+    if (!Number.isFinite(nlv) || nlv <= 0) return exposure;
+
+    return {
+      ...exposure,
+      nlv,
+      longMV: calculation.longMV,
+      shortMV: calculation.shortMV,
+      netMV: calculation.netMV,
+      longPct: (calculation.longMV / nlv) * 100,
+      shortPct: (calculation.shortMV / nlv) * 100,
+      grossPct: (calculation.grossMV / nlv) * 100,
+      netPct: (calculation.netMV / nlv) * 100,
+      hasData: true,
+    };
+  }, [cashDebitGuard, exposure, portfolioData]);
   const sidebarBanner = getPortfolioSidebarBanner({ portfolioData, selectedAccount });
   const showMetrics =
     showPortfolioContent && exposure.nlv != null && Number.isFinite(exposure.nlv);
@@ -863,6 +2132,15 @@ const PortfolioSidebarSnapshot = ({
         <p className="pf-banner">{sidebarBanner.message}</p>
       )}
 
+      {!showMetrics && (
+        <CashDebitGuardCard
+          key={selectedAccount || 'no-account'}
+          guard={cashDebitGuard}
+          selectedAccount={selectedAccount}
+          onRefresh={onRefresh}
+        />
+      )}
+
       {showMetrics && (
         <div className="pf-body">
 
@@ -938,32 +2216,44 @@ const PortfolioSidebarSnapshot = ({
             </div>
           </div>
 
+          <CashDebitGuardCard
+            key={selectedAccount || 'no-account'}
+            guard={cashDebitGuard}
+            selectedAccount={selectedAccount}
+            onRefresh={onRefresh}
+          />
+
           {/* Exposure */}
           <div className="pf-section">
             <div className="pf-bars">
               <ExposureBar
                 label="Gross Exposure"
-                pct={exposure.grossPct}
-                amount={exposure.longMV + exposure.shortMV}
+                pct={displayExposure.grossPct}
+                amount={
+                  Number.isFinite(displayExposure.longMV) &&
+                  Number.isFinite(displayExposure.shortMV)
+                    ? displayExposure.longMV + displayExposure.shortMV
+                    : null
+                }
                 currency={currency}
               />
               <ExposureBar
                 label="Net Exposure"
-                pct={exposure.netPct}
-                amount={exposure.netMV}
+                pct={displayExposure.netPct}
+                amount={displayExposure.netMV}
                 netAmount
                 currency={currency}
               />
               <ExposureBar
                 label="Long Exposure"
-                pct={exposure.longPct}
-                amount={exposure.longMV}
+                pct={displayExposure.longPct}
+                amount={displayExposure.longMV}
                 currency={currency}
               />
               <ExposureBar
                 label="Short Exposure"
-                pct={exposure.shortPct}
-                amount={exposure.shortMV}
+                pct={displayExposure.shortPct}
+                amount={displayExposure.shortMV}
                 currency={currency}
               />
               <ExposureBar
@@ -977,7 +2267,7 @@ const PortfolioSidebarSnapshot = ({
           </div>
 
           <FlexReconciliationPanel
-            liveExposure={exposure}
+            liveExposure={displayExposure}
             currency={currency}
             reconciliation={exposureReconciliation}
             loading={exposureReconciliationLoading}

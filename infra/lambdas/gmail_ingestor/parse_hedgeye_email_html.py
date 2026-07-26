@@ -299,6 +299,18 @@ def _extract_article_sections(text: str) -> Dict[str, str]:
     return sections
 
 
+def _extract_main_summary(text: str) -> Optional[str]:
+    summary = _extract_first(
+        r"MAIN SUMMARY\s*:?\s*(.+?)(?=\n\s*(?:Watch|Click Here|Disclosures?|Disclaimer|Copyright)\b|$)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not summary:
+        return None
+    normalized = re.sub(r"\s+", " ", summary).strip()
+    return normalized[:40_000] or None
+
+
 def _extract_symbol_list(raw_text: str) -> List[str]:
     ignored_tokens = {
         "ADDED",
@@ -907,6 +919,7 @@ def _base_snapshot(
             "teaser": _extract_meta(html_body, "hedgeye-teaser"),
             "feedUrl": _extract_feed_url(text),
             "imageUrls": _extract_image_urls(html_body),
+            "bodyText": text[:40_000],
         },
         "reportType": report_type,
     }
@@ -984,6 +997,7 @@ def parse_html_snapshot(
             "shorts": shorts,
             "neutrals": neutrals,
         }
+        snapshot["article"]["summary"] = _extract_main_summary(text)
         return snapshot
 
     if report_type == "the-macro-show":
@@ -1013,6 +1027,7 @@ def parse_html_snapshot(
             "rawShortsText": bearish_raw,
             "rawNeutralText": neutral_raw,
         }
+        snapshot["article"]["summary"] = _extract_main_summary(text)
         return snapshot
 
     if report_type == "signal-strength":

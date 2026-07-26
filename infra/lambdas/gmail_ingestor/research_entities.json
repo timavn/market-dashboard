@@ -1,0 +1,494 @@
+{
+  "schemaVersion": 2,
+  "reservedTokens": [
+    "ADD",
+    "ADDED",
+    "BUY",
+    "CALL",
+    "CLOSE",
+    "CLOSED",
+    "COVER",
+    "HOLD",
+    "LONG",
+    "LONGS",
+    "REMOVE",
+    "REMOVED",
+    "SELL",
+    "SHORT",
+    "SHORTS",
+    "SIGNAL",
+    "TREND",
+    "UPDATE"
+  ],
+  "tickerAliases": {
+    "BTC": [
+      "BITCOIN",
+      "BTCUSD"
+    ],
+    "GLD": [
+      "GOLD"
+    ],
+    "IWM": [
+      "RUT",
+      "RUSSELL 2000"
+    ],
+    "QQQ": [
+      "NDX",
+      "NASDAQ 100"
+    ],
+    "SPY": [
+      "SPX",
+      "S&P 500",
+      "S&P500"
+    ],
+    "USO": [
+      "WTI",
+      "WTIC",
+      "CRUDE OIL"
+    ],
+    "UUP": [
+      "DXY",
+      "USD",
+      "US DOLLAR"
+    ]
+  },
+  "factorAliases": {
+    "credit": [
+      "credit",
+      "credit spreads",
+      "high yield",
+      "investment grade"
+    ],
+    "defensive": [
+      "defensive",
+      "defensives"
+    ],
+    "growth": [
+      "growth",
+      "long duration equity"
+    ],
+    "healthcare": [
+      "health care",
+      "healthcare"
+    ],
+    "industrials": [
+      "industrial",
+      "industrials"
+    ],
+    "technology": [
+      "software",
+      "technology",
+      "tech"
+    ],
+    "utilities": [
+      "utility",
+      "utilities"
+    ],
+    "value": [
+      "value",
+      "value factor"
+    ],
+    "high-beta": [
+      "high beta",
+      "high-beta"
+    ],
+    "momentum": [
+      "momentum",
+      "price momentum"
+    ],
+    "leverage": [
+      "leverage",
+      "leveraged equity"
+    ],
+    "secular-growth": [
+      "secular growth",
+      "long duration growth"
+    ],
+    "mid-caps": [
+      "mid caps",
+      "mid-caps",
+      "mid cap"
+    ],
+    "small-caps": [
+      "small caps",
+      "small-caps",
+      "small cap"
+    ],
+    "cyclical-growth": [
+      "cyclical growth",
+      "cyclicals"
+    ],
+    "low-beta": [
+      "low beta",
+      "low-beta"
+    ],
+    "quality": [
+      "quality",
+      "quality factor"
+    ],
+    "dividend-yield": [
+      "dividend yield",
+      "high dividend"
+    ]
+  },
+  "controlledExposures": {
+    "factor": {
+      "credit": {
+        "label": "Credit",
+        "aliases": [
+          "credit",
+          "credit spreads",
+          "high yield",
+          "investment grade"
+        ]
+      },
+      "defensive": {
+        "label": "Defensives",
+        "aliases": [
+          "defensive",
+          "defensives"
+        ]
+      },
+      "growth": {
+        "label": "Growth",
+        "aliases": [
+          "growth",
+          "long duration equity"
+        ]
+      },
+      "value": {
+        "label": "Value",
+        "aliases": [
+          "value",
+          "value factor"
+        ]
+      },
+      "high-beta": {
+        "label": "High Beta",
+        "aliases": [
+          "high beta",
+          "high-beta"
+        ]
+      },
+      "momentum": {
+        "label": "Momentum",
+        "aliases": [
+          "momentum",
+          "price momentum"
+        ]
+      },
+      "leverage": {
+        "label": "Leverage",
+        "aliases": [
+          "leverage",
+          "leveraged equity"
+        ]
+      },
+      "secular-growth": {
+        "label": "Secular Growth",
+        "aliases": [
+          "secular growth",
+          "long duration growth"
+        ]
+      },
+      "mid-caps": {
+        "label": "Mid Caps",
+        "aliases": [
+          "mid caps",
+          "mid-caps",
+          "mid cap"
+        ]
+      },
+      "small-caps": {
+        "label": "Small Caps",
+        "aliases": [
+          "small caps",
+          "small-caps",
+          "small cap"
+        ]
+      },
+      "cyclical-growth": {
+        "label": "Cyclical Growth",
+        "aliases": [
+          "cyclical growth",
+          "cyclicals"
+        ]
+      },
+      "low-beta": {
+        "label": "Low Beta",
+        "aliases": [
+          "low beta",
+          "low-beta"
+        ]
+      },
+      "quality": {
+        "label": "Quality",
+        "aliases": [
+          "quality",
+          "quality factor"
+        ]
+      },
+      "dividend-yield": {
+        "label": "Dividend Yield",
+        "aliases": [
+          "dividend yield",
+          "high dividend"
+        ]
+      }
+    },
+    "sector": {
+      "healthcare": {
+        "label": "Healthcare",
+        "aliases": [
+          "health care",
+          "healthcare"
+        ]
+      },
+      "industrials": {
+        "label": "Industrials",
+        "aliases": [
+          "industrial",
+          "industrials"
+        ]
+      },
+      "technology": {
+        "label": "Technology",
+        "aliases": [
+          "software",
+          "technology",
+          "tech"
+        ]
+      },
+      "utilities": {
+        "label": "Utilities",
+        "aliases": [
+          "utility",
+          "utilities"
+        ]
+      }
+    },
+    "country": {
+      "united-states": {
+        "label": "United States",
+        "aliases": [
+          "united states",
+          "u.s. equities",
+          "us equities"
+        ]
+      }
+    },
+    "commodity": {
+      "crude-oil": {
+        "label": "Crude Oil",
+        "aliases": [
+          "crude oil",
+          "west texas intermediate",
+          "wti"
+        ]
+      },
+      "gold": {
+        "label": "Gold",
+        "aliases": [
+          "bullion",
+          "gold"
+        ]
+      }
+    },
+    "macro": {
+      "us-dollar": {
+        "label": "U.S. Dollar",
+        "aliases": [
+          "dollar index",
+          "dxy",
+          "u.s. dollar",
+          "us dollar"
+        ]
+      }
+    }
+  },
+  "securityExposures": {
+    "CLOX": [
+      "credit"
+    ],
+    "CLOZ": [
+      "credit"
+    ],
+    "DDOG": [
+      "growth",
+      "technology"
+    ],
+    "GLD": [
+      "low-beta",
+      "defensive",
+      "gold"
+    ],
+    "GOOGL": [
+      "secular-growth",
+      "high-beta",
+      "technology"
+    ],
+    "IBIT": [
+      "high-beta",
+      "momentum"
+    ],
+    "QQQ": [
+      "secular-growth",
+      "high-beta",
+      "momentum",
+      "technology"
+    ],
+    "SPY": [
+      "united-states"
+    ],
+    "URI": [
+      "industrials"
+    ],
+    "USO": [
+      "crude-oil"
+    ],
+    "UUP": [
+      "us-dollar"
+    ],
+    "VOOG": [
+      "growth"
+    ],
+    "XLU": [
+      "defensive",
+      "utilities"
+    ],
+    "XLV": [
+      "defensive",
+      "healthcare"
+    ]
+  },
+  "securityExposureTags": {
+    "CLOX": [
+      {
+        "id": "credit",
+        "type": "factor"
+      }
+    ],
+    "CLOZ": [
+      {
+        "id": "credit",
+        "type": "factor"
+      }
+    ],
+    "DDOG": [
+      {
+        "id": "growth",
+        "type": "factor"
+      },
+      {
+        "id": "technology",
+        "type": "sector"
+      }
+    ],
+    "GLD": [
+      {
+        "id": "low-beta",
+        "type": "factor"
+      },
+      {
+        "id": "defensive",
+        "type": "factor"
+      },
+      {
+        "id": "gold",
+        "type": "commodity"
+      }
+    ],
+    "GOOGL": [
+      {
+        "id": "secular-growth",
+        "type": "factor"
+      },
+      {
+        "id": "high-beta",
+        "type": "factor"
+      },
+      {
+        "id": "technology",
+        "type": "sector"
+      }
+    ],
+    "IBIT": [
+      {
+        "id": "high-beta",
+        "type": "factor"
+      },
+      {
+        "id": "momentum",
+        "type": "factor"
+      }
+    ],
+    "QQQ": [
+      {
+        "id": "secular-growth",
+        "type": "factor"
+      },
+      {
+        "id": "high-beta",
+        "type": "factor"
+      },
+      {
+        "id": "momentum",
+        "type": "factor"
+      },
+      {
+        "id": "technology",
+        "type": "sector"
+      }
+    ],
+    "SPY": [
+      {
+        "id": "united-states",
+        "type": "country"
+      }
+    ],
+    "URI": [
+      {
+        "id": "industrials",
+        "type": "sector"
+      }
+    ],
+    "USO": [
+      {
+        "id": "crude-oil",
+        "type": "commodity"
+      }
+    ],
+    "UUP": [
+      {
+        "id": "us-dollar",
+        "type": "macro"
+      }
+    ],
+    "VOOG": [
+      {
+        "id": "growth",
+        "type": "factor"
+      }
+    ],
+    "XLU": [
+      {
+        "id": "defensive",
+        "type": "factor"
+      },
+      {
+        "id": "utilities",
+        "type": "sector"
+      }
+    ],
+    "XLV": [
+      {
+        "id": "defensive",
+        "type": "factor"
+      },
+      {
+        "id": "healthcare",
+        "type": "sector"
+      }
+    ]
+  }
+}

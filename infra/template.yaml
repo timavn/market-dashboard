@@ -151,6 +151,63 @@ Resources:
       SSESpecification:
         SSEEnabled: true
 
+  ResearchEntityEventsV1:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: ResearchEntityEventsV1
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: entityKey
+          AttributeType: S
+        - AttributeName: eventKey
+          AttributeType: S
+        - AttributeName: marketDate
+          AttributeType: S
+        - AttributeName: dateEventKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: entityKey
+          KeyType: HASH
+        - AttributeName: eventKey
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: marketDate-index
+          KeySchema:
+            - AttributeName: marketDate
+              KeyType: HASH
+            - AttributeName: dateEventKey
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  ResearchProductManifestsV1:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: ResearchProductManifestsV1
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: marketDate
+          AttributeType: S
+        - AttributeName: productKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: marketDate
+          KeyType: HASH
+        - AttributeName: productKey
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
   PredictionMarketCatalogV2:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -228,9 +285,12 @@ Resources:
           HERMES_LEDGER_TABLE: !Ref GmailLedgerTableName
           HERMES_S3_BUCKET: !Ref RawArtifactBucketName
           RESEARCH_EVENT_LEDGER_TABLE: !Ref ResearchEventLedgerV2
+          RESEARCH_ENTITY_EVENTS_TABLE: !Ref ResearchEntityEventsV1
+          RESEARCH_PRODUCT_MANIFEST_TABLE: !Ref ResearchProductManifestsV1
           RISK_RANGE_MANIFEST_TABLE: !Ref RiskRangePublicationManifestsV2
           HEDGEYE_RISK_RANGES_TABLE: !Ref HedgeyeRiskRangesTableName
           RISK_RANGE_HISTORY_TABLE: !Ref RiskRangeHistoryTableName
+          PDF_PROCESSOR_FUNCTION_NAME: !Ref HedgeyePdfProcessorFunction
       EventInvokeConfig:
         MaximumEventAgeInSeconds: 900
         MaximumRetryAttempts: 0
@@ -258,6 +318,8 @@ Resources:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RiskRangeHistoryTableName}
                 - !GetAtt ServiceHeartbeatTable.Arn
                 - !GetAtt ResearchEventLedgerV2.Arn
+                - !GetAtt ResearchEntityEventsV1.Arn
+                - !GetAtt ResearchProductManifestsV1.Arn
                 - !GetAtt RiskRangePublicationManifestsV2.Arn
             - Effect: Allow
               Action:
@@ -273,6 +335,59 @@ Resources:
             - Effect: Allow
               Action: sqs:SendMessage
               Resource: !GetAtt RuntimeFailureQueue.Arn
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt HedgeyePdfProcessorFunction.Arn
+
+  HedgeyePdfProcessorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: market-dashboard-hedgeye-pdf-processor-v1
+      CodeUri: ../aws/lambda/
+      Handler: hedgeye_pdf_processor_lambda.lambda_handler
+      Description: Parses immutable Hedgeye PDF artifacts and writes verified research projections.
+      Architectures: [x86_64]
+      MemorySize: 2048
+      Timeout: 900
+      ReservedConcurrentExecutions: 2
+      Environment:
+        Variables:
+          HERMES_LEDGER_TABLE: !Ref GmailLedgerTableName
+          HEDGEYE_DAILY_SNAPSHOT_TABLE: !Ref HedgeyeDailySnapshotTableName
+          RESEARCH_ENTITY_EVENTS_TABLE: !Ref ResearchEntityEventsV1
+          RESEARCH_PRODUCT_MANIFEST_TABLE: !Ref ResearchProductManifestsV1
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 3600
+        MaximumRetryAttempts: 2
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt RuntimeFailureQueue.Arn
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub arn:${AWS::Partition}:s3:::${RawArtifactBucketName}/hedgeye-uploads/*
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GmailLedgerTableName}
+                - !GetAtt ResearchEntityEventsV1.Arn
+                - !GetAtt ResearchProductManifestsV1.Arn
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HedgeyeDailySnapshotTableName}
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt RuntimeFailureQueue.Arn
+            - Effect: Allow
+              Action: textract:AnalyzeDocument
+              Resource: '*'
 
   HermesWorkerFunction:
     Type: AWS::Serverless::Function
@@ -360,8 +475,9 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: market-dashboard-hermes-quant-analyst-v2
+      Description: Continuous 15-minute readiness monitor; runs 24/7 so missing-heartbeat alarms are meaningful.
       State: !Ref QuantAnalystScheduleState
-      ScheduleExpression: cron(0/15 9-16 ? * MON-FRI *)
+      ScheduleExpression: cron(0/15 * ? * * *)
       ScheduleExpressionTimezone: America/New_York
       FlexibleTimeWindow:
         Mode: 'OFF'
@@ -374,8 +490,9 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: market-dashboard-hermes-quant-developer-v2
+      Description: Continuous 15-minute readiness monitor; runs 24/7 so missing-heartbeat alarms are meaningful.
       State: !Ref QuantDeveloperScheduleState
-      ScheduleExpression: cron(5/15 8-18 ? * MON-FRI *)
+      ScheduleExpression: cron(5/15 * ? * * *)
       ScheduleExpressionTimezone: America/New_York
       FlexibleTimeWindow:
         Mode: 'OFF'
@@ -388,8 +505,9 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: market-dashboard-hermes-security-v2
+      Description: Continuous hourly readiness monitor; runs 24/7 so missing-heartbeat alarms are meaningful.
       State: !Ref SecurityScheduleState
-      ScheduleExpression: cron(10 * ? * MON-FRI *)
+      ScheduleExpression: cron(10 * ? * * *)
       ScheduleExpressionTimezone: America/New_York
       FlexibleTimeWindow:
         Mode: 'OFF'
@@ -416,6 +534,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   GmailHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -434,6 +553,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   GmailUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -452,6 +572,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   AnalystHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -470,6 +591,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   AnalystUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -489,6 +611,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   DeveloperHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -507,6 +630,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   DeveloperUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -526,6 +650,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   SecurityHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -544,6 +669,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
   SecurityUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -563,6 +689,7 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
 
 Outputs:
   ServiceHeartbeatTableName:
@@ -571,6 +698,12 @@ Outputs:
     Value: !Ref HermesInputSnapshotTable
   GmailFunctionName:
     Value: !Ref GmailIngestorFunction
+  HedgeyePdfProcessorFunctionName:
+    Value: !Ref HedgeyePdfProcessorFunction
+  ResearchEntityEventsTableName:
+    Value: !Ref ResearchEntityEventsV1
+  ResearchProductManifestsTableName:
+    Value: !Ref ResearchProductManifestsV1
   HermesWorkerFunctionName:
     Value: !Ref HermesWorkerFunction
   OperationsTopicArn:

@@ -1,0 +1,375 @@
+{
+  "schemaVersion": 1,
+  "marketTimeZone": "America/New_York",
+    "stages": [
+        "received",
+        "parsed",
+        "validated",
+        "indexed"
+    ],
+    "validationRules": {
+        "non_empty": "The recognized publication must retain non-empty searchable content.",
+        "primary_risk_ranges": "At least one row must contain a ticker, TREND, LRR, and HRR.",
+        "supplemental_risk_ranges": "At least one row must contain a ticker, supplemental TREND, LRR, and HRR.",
+        "published_trade_signals": "At least one structured security row must contain the tracker's published Trade signal.",
+        "entity_rows": "At least one valid ticker/entity row or structured addition/removal must be retained.",
+        "portfolio_rankings": "At least one Portfolio Solutions row must contain a valid ticker and rank.",
+        "signal_strength_membership": "At least one valid security must be present in the full Signal Strength membership.",
+        "volume_metrics": "Both total-market and exchange metric groups must contain parsed percentage data.",
+        "cftc_metrics": "At least one CFTC row must contain a metric name and parsed latest value."
+    },
+  "products": [
+    {
+      "id": "risk-ranges",
+      "label": "Risk Ranges",
+      "cadence": "market_day_0800",
+      "matchTerms": [
+        "risk range",
+        "risk-range",
+        "risk_ranges",
+        "processing signals"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_all_risk_range_data"
+            },
+            "validationRule": "primary_risk_ranges",
+      "authorities": {
+        "trade": false,
+        "trend": true,
+        "riskRange": true,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "early-look",
+      "label": "Early Look",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "early look",
+        "early-look",
+        "early_look"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_early_look"
+            },
+            "validationRule": "supplemental_risk_ranges",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": true
+      }
+    },
+    {
+      "id": "crypto-quant",
+      "label": "Crypto Quant",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "crypto quant"
+      ],
+            "parserModes": [
+                "html"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch"
+            },
+            "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "bitcoin-trend-tracker",
+      "label": "Bitcoin Tracker",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "bitcoin trend tracker",
+        "bitcoin",
+        "btc"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "_extract_bitcoin_tracker_with_pdf_pages"
+            },
+            "validationRule": "published_trade_signals",
+      "authorities": {
+        "trade": true,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "portfolio-solutions",
+      "label": "Portfolio Solutions",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "portfolio solution",
+        "portfolio-solutions"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_portfolio_solutions"
+            },
+            "validationRule": "portfolio_rankings",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "momo-tracker",
+      "label": "MOMO Tracker",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "momo",
+        "momentum tracker"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_momo_tracker"
+            },
+            "validationRule": "published_trade_signals",
+      "authorities": {
+        "trade": true,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "signal-strength",
+      "label": "Signal Strength",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "signal strength",
+        "signal-strength"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_signal_strength"
+            },
+            "validationRule": "signal_strength_membership",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "real-time-alert",
+      "label": "Real-Time Alerts",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "real-time alert",
+        "real time alert"
+      ],
+            "parserModes": [
+                "html"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch"
+            },
+            "validationRule": "entity_rows",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "the-macro-show",
+      "label": "Macro Show",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "the macro show",
+        "macro show"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_macro_show"
+            },
+            "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "the-call",
+      "label": "The Call",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "the call",
+        "call @ hedgeye",
+        "hedgeye call"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_the_call"
+            },
+            "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "volume",
+      "label": "Volume / Market Structure",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "market share volume",
+        "volume"
+      ],
+            "parserModes": [
+                "pdf"
+            ],
+            "parsers": {
+                "pdf": "extract_volume_snapshot"
+            },
+            "validationRule": "volume_metrics",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "market-structure",
+      "label": "Market Structure",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "market structure"
+      ],
+            "parserModes": [
+                "html"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch"
+            },
+            "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "cftc-positioning",
+      "label": "CFTC Positioning",
+      "cadence": "weekly",
+      "matchTerms": [
+        "cftc",
+        "positioning"
+      ],
+            "parserModes": [
+                "html",
+                "pdf"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch",
+                "pdf": "extract_cftc_data"
+            },
+            "validationRule": "cftc_metrics",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "etf-pro",
+      "label": "ETF Pro",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "etf pro",
+        "etf-pro",
+        "etfpro"
+      ],
+            "parserModes": [
+                "html"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch"
+            },
+            "validationRule": "entity_rows",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "investing-ideas",
+      "label": "Investing Ideas",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "investing ideas",
+        "investment idea"
+      ],
+            "parserModes": [
+                "html"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch"
+            },
+            "validationRule": "entity_rows",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    }
+  ]
+}

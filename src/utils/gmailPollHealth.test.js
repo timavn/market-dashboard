@@ -186,8 +186,23 @@ describe('typed Gmail poll health', () => {
       rows: [],
       longCount: null,
       shortCount: null,
-      dataAvailability: { ingestionStatus: 'unhealthy' },
+      dataAvailability: {
+        ingestionStatus: 'unhealthy',
+        current: false,
+        comparisonSafe: false,
+        referenceOnly: true,
+        errorCode: 'GMAIL_AUTH_REQUIRED',
+      },
       meta: { blockedByIngestion: true, archivedRowCount: 2 },
     });
+    expect(payload.lastKnownGood).toMatchObject({
+      available: true,
+      current: false,
+      comparisonSafe: false,
+      referenceOnly: true,
+      longCount: 1,
+      shortCount: 1,
+    });
+    expect(payload.lastKnownGood.rows).toHaveLength(2);
   });
 });

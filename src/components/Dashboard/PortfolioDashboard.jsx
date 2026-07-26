@@ -25,7 +25,11 @@ const SignalStrengthPanel = lazy(() => import('./SignalStrengthPanel'));
 const EtfProPanel = lazy(() => import('./EtfProPanel'));
 const HedgeyeShowPanel = lazy(() => import('./HedgeyeShowPanel'));
 
-const PORTFOLIO_POLL_MS = 10000;
+// The funding guard may need fresh IBKR daily bars for symbols whose live
+// stream omits the prior-close tick. Keep the full portfolio/funding refresh
+// below IBKR historical-data pacing while remaining inside the guard's
+// freshness window.
+const PORTFOLIO_POLL_MS = 50000;
 const PORTFOLIO_ACCOUNTS_POLL_MS = 60000;
 const REFERENCE_DATA_POLL_MS = 5 * 60 * 1000;
 const PREDICTION_PROVIDER_STATUS_POLL_MS = 30000;
@@ -115,7 +119,18 @@ const prepareReferenceComparisonSnapshot = (snapshot, {
   const quality = getReferenceDataQuality(snapshot);
   const qualityStatus = quality?.status;
   const available = requireAvailable ? snapshot?.available === true : snapshot?.available !== false;
-  const comparisonAvailable = available && !cacheIsStale && qualityStatus === 'ok';
+  const explicitlyReferenceOnly = snapshot?.referenceOnly === true
+    || snapshot?.dataAvailability?.referenceOnly === true;
+  const explicitlyNotCurrent = snapshot?.current === false
+    || snapshot?.dataAvailability?.current === false;
+  const explicitlyUnsafe = snapshot?.comparisonSafe === false
+    || snapshot?.dataAvailability?.comparisonSafe === false;
+  const comparisonAvailable = available
+    && !cacheIsStale
+    && qualityStatus === 'ok'
+    && !explicitlyReferenceOnly
+    && !explicitlyNotCurrent
+    && !explicitlyUnsafe;
   const prepared = {
     ...snapshot,
     _cache: snapshot?._cache,
@@ -413,6 +428,7 @@ const PortfolioDashboard = ({ onOpenProcess, onOpenWhitePaper }) => {
   const ibkrConnectionRef = useRef(null);
   const lastGoodProviderStatusRef = useRef(null);
   const portfolioDataRef = useRef(null);
+  const portfolioRequestSequenceRef = useRef(0);
   const persistedPanelState = useMemo(
     () => migratePredictionMarketsPanelState(readDashboardPanelState()),
     [],
@@ -665,6 +681,8 @@ const PortfolioDashboard = ({ onOpenProcess, onOpenWhitePaper }) => {
   };
 
   const fetchPortfolio = useCallback(async (accountId, silent = false) => {
+    const requestSequence = ++portfolioRequestSequenceRef.current;
+    const requestedAccount = String(accountId || '').trim();
     const hasExistingPortfolio = Boolean(portfolioDataRef.current);
     const shouldShowInitialLoading = !silent && !hasExistingPortfolio;
     try {
@@ -675,10 +693,23 @@ const PortfolioDashboard = ({ onOpenProcess, onOpenWhitePaper }) => {
       }
       setPortfolioError(null);
       const data = await MarketDataService.getPortfolio({ account: accountId || undefined });
+      if (
+        requestSequence !== portfolioRequestSequenceRef.current
+        || (
+          requestedAccount
+          && selectedAccountRef.current
+          && requestedAccount !== selectedAccountRef.current
+        )
+      ) {
+        return null;
+      }
       setPortfolioData(data);
       portfolioDataRef.current = data;
       return data;
     } catch (e) {
+      if (requestSequence !== portfolioRequestSequenceRef.current) {
+        return null;
+      }
       // Never keep a previously live portfolio mounted after its refresh
       // fails. Active sizing and position surfaces must fail closed rather
       // than silently aging the last successful response.
@@ -689,10 +720,12 @@ const PortfolioDashboard = ({ onOpenProcess, onOpenWhitePaper }) => {
       }
       throw e;
     } finally {
-      if (shouldShowInitialLoading) {
-        setPortfolioLoading(false);
+      if (requestSequence === portfolioRequestSequenceRef.current) {
+        if (shouldShowInitialLoading) {
+          setPortfolioLoading(false);
+        }
+        setPortfolioRefreshing(false);
       }
-      setPortfolioRefreshing(false);
     }
   }, []);
 
@@ -833,10 +866,21 @@ const PortfolioDashboard = ({ onOpenProcess, onOpenWhitePaper }) => {
   }, []);
 
   const handleAccountChange = useCallback((accountId) => {
+    // Invalidate a request for the prior account before clearing its data.
+    portfolioRequestSequenceRef.current += 1;
     saveSelectedAccount(accountId);
     selectedAccountRef.current = accountId || '';
     setSelectedAccount(accountId);
-  }, []);
+    // Never leave the prior account's executable risk numbers mounted during
+    // an account switch. Clear immediately, then request a same-account live
+    // snapshot instead of waiting for the next polling interval.
+    setPortfolioData(null);
+    portfolioDataRef.current = null;
+    if (accountId) {
+      return fetchPortfolio(accountId).catch(() => null);
+    }
+    return Promise.resolve(null);
+  }, [fetchPortfolio]);
 
   const refreshProviderStatus = useCallback(async () => {
     try {
@@ -942,13 +986,14 @@ const PortfolioDashboard = ({ onOpenProcess, onOpenWhitePaper }) => {
         if (cancelled) return;
         const acct = pollingFnsRef.current.resolvePortfolioAccount(status);
         if (acct && acct !== selectedAccountRef.current) {
-          pollingFnsRef.current.handleAccountChange(acct);
-        }
-        try {
-          await pollingFnsRef.current.fetchPortfolio(acct);
-        } catch (err) {
-          if (!cancelled) {
-            setPortfolioError(err.message || 'Failed to load portfolio');
+          await pollingFnsRef.current.handleAccountChange(acct);
+        } else {
+          try {
+            await pollingFnsRef.current.fetchPortfolio(acct);
+          } catch (err) {
+            if (!cancelled) {
+              setPortfolioError(err.message || 'Failed to load portfolio');
+            }
           }
         }
         cancelDeferredSecondary = scheduleBackgroundTask(() => {

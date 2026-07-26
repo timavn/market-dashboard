@@ -13,6 +13,10 @@ const {
   evaluatePredictionMarketExecution,
 } = require('../utils/systemReadiness.cjs');
 const { computeRuntimeFingerprint } = require('../utils/runtimeFingerprint.cjs');
+const {
+  buildResearchPipelineCoverage,
+  collectResearchPipelineCoverage,
+} = require('../utils/researchPipelineCoverage.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const RUNTIME_BOOT_FINGERPRINT = computeRuntimeFingerprint(REPO_ROOT);
@@ -37,6 +41,20 @@ const DEFAULT_WORKER_THRESHOLDS_MINUTES = Object.fromEntries(
 const DEFAULT_SERVICE_HEARTBEAT_TABLE = process.env.SERVICE_HEARTBEAT_TABLE
   || SERVICE_MANIFEST.aws?.resources?.serviceHeartbeatTable
   || 'MarketDashboardServiceHeartbeats';
+const RESEARCH_PIPELINE_TABLES = Object.freeze({
+  ledger: process.env.HERMES_EMAIL_LEDGER_TABLE
+    || SERVICE_MANIFEST.aws?.resources?.gmailLedgerTable
+    || 'HermesEmailIngestLedger',
+  snapshots: process.env.HEDGEYE_DAILY_SNAPSHOT_TABLE
+    || SERVICE_MANIFEST.aws?.resources?.hedgeyeDailySnapshotTable
+    || 'HedgeyeDailySnapshot',
+  events: process.env.RESEARCH_ENTITY_EVENTS_TABLE
+    || SERVICE_MANIFEST.aws?.resources?.researchEntityEventsTable
+    || 'ResearchEntityEventsV1',
+  manifests: process.env.RESEARCH_PRODUCT_MANIFEST_TABLE
+    || SERVICE_MANIFEST.aws?.resources?.researchProductManifestTable
+    || 'ResearchProductManifestsV1',
+});
 const GMAIL_READINESS_MAX_AGE_MINUTES = Number(
   SERVICE_DEFINITIONS.get('gmail.ingestion')?.readinessMaxAgeMinutes,
 ) || 45;
@@ -840,97 +858,301 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
   return [sidecar, runtimeCheck, gatewayCheck, accountsCheck, portfolioCheck];
 }
 
-function buildResearchChecks({ rtaResult, etfResult, workflow, gmailCheck, now }) {
+function buildResearchPipelineCheck({ coverage, gmailCheck, now }) {
+  if (!coverage || !Array.isArray(coverage.products)) return null;
+  const summary = coverage.summary || {};
+  const status = coverage.status === 'complete'
+    ? 'pass'
+    : (coverage.status === 'degraded' ? 'warn' : 'fail');
+  const failed = Number(summary.failed || 0);
+  const missing = Number(summary.missing || 0);
+  const incomplete = Number(summary.received || 0)
+    + Number(summary.parsed || 0)
+    + Number(summary.validated || 0);
+  const indexed = Number(summary.indexed || 0);
+  const notDue = Number(summary.not_due || 0);
+  const unavailable = Array.isArray(coverage.collectionErrors)
+    && coverage.collectionErrors.length > 0;
+  let summaryText;
+  if (status === 'pass') {
+    summaryText = `${indexed} product publication(s) are fully indexed; ${notDue} product(s) are not due.`;
+  } else if (unavailable) {
+    summaryText = 'Daily research product coverage could not be verified from the authoritative pipeline evidence.';
+  } else {
+    summaryText = [
+      failed ? `${failed} failed` : null,
+      missing ? `${missing} missing` : null,
+      incomplete ? `${incomplete} still processing` : null,
+      indexed ? `${indexed} indexed` : null,
+      notDue ? `${notDue} not due` : null,
+    ].filter(Boolean).join(', ');
+  }
+  const dependsOnGmail = !unavailable
+    && coverage.products.some((product) => (
+      ['missing', 'received'].includes(product.status)
+      && product.errorCode !== 'RESEARCH_PRODUCT_UNSUPPORTED'
+    ))
+    && gmailCheck?.status !== 'pass';
+
+  return makeCheck({
+    id: 'research.pipeline-coverage',
+    label: 'Daily research product pipeline',
+    status,
+    blocking: false,
+    errorCode: status === 'pass'
+      ? null
+      : (unavailable
+        ? 'RESEARCH_PIPELINE_EVIDENCE_UNAVAILABLE'
+        : (failed || missing
+          ? 'RESEARCH_PRODUCT_COVERAGE_FAILED'
+          : 'RESEARCH_PRODUCT_COVERAGE_INCOMPLETE')),
+    dependsOn: dependsOnGmail ? ['gmail.ingestion'] : [],
+    summary: summaryText || 'No registered research products were evaluated.',
+    detail: unavailable
+      ? coverage.collectionErrors.join(' ')
+      : `Market date ${coverage.marketDate}. Every received publication must complete received, parsed, validated, and indexed stages.`,
+    observedAt: coverage.generatedAt,
+    now,
+    impact: status === 'pass'
+      ? null
+      : 'Portfolio research context may be incomplete. Live IBKR holdings remain independently verified and unaffected.',
+    recovery: status === 'pass'
+      ? null
+      : {
+        kind: 'manual',
+        label: 'Inspect the product matrix, repair the first incomplete stage, replay immutable artifacts, and refresh SYS.',
+      },
+    provenance: {
+      source: 'research-product-manifests-and-ledgers',
+      marketDate: coverage.marketDate,
+      status: coverage.status,
+      summary,
+      tableNames: RESEARCH_PIPELINE_TABLES,
+    },
+  });
+}
+
+function buildResearchChecks({
+  rtaResult,
+  etfResult,
+  workflow,
+  gmailCheck,
+  researchPipelineCoverage = null,
+  now,
+}) {
   const rta = fulfilledValue(rtaResult);
   const etf = fulfilledValue(etfResult);
   const rtaCacheStale = rta?._readinessCache?.status === 'stale';
   const etfCacheStale = etf?._readinessCache?.status === 'stale';
   const workflowCacheStale = workflow?._readinessCache?.status === 'stale';
-  const rtaWarnings = rta?.dataQuality?.warnings || rta?.reconstructionWarnings || [];
-  const rtaErrorCode = rta?.dataQuality?.invalidEvents?.[0]?.code || null;
-  const rtaCheck = !rtaCacheStale && rta?.available === true && rta?.dataQuality?.status !== 'error'
-    ? makeCheck({
-        id: 'research.rta',
-        label: 'RTA positions',
-        status: rtaWarnings.length ? 'warn' : 'pass',
-        blocking: false,
-        summary: rtaWarnings.length
-          ? `RTA positions loaded with ${rtaWarnings.length} reconstruction warning(s).`
-          : 'RTA positions are available.',
-        detail: rtaWarnings.join(' '),
-        dependsOn: [],
-        observedAt: rta.lastUpdated,
-        now,
-        impact: rtaWarnings.length ? 'The RTA position book may be incomplete.' : null,
-        recovery: rtaWarnings.length ? {
-          kind: 'manual',
-          label: 'Reconcile the invalid RTA events against the active-position baseline.',
-        } : null,
-      })
-    : serviceFailureCheck({
-        id: 'research.rta',
-        label: 'RTA positions',
-        blocking: false,
-        errorCode: rtaErrorCode || 'RTA_PROJECTION_UNAVAILABLE',
-        dependsOn: rtaErrorCode ? [] : (gmailCheck?.status === 'pass' ? [] : ['gmail.ingestion']),
-        message: rta
-          ? (rtaCacheStale
-            ? 'RTA refresh failed; only a stale cached response is available.'
-            : `RTA positions are unavailable${rtaWarnings.length ? `: ${rtaWarnings.join(' ')}` : '.'}`)
-          : `RTA check failed${errorMessage(rtaResult) ? `: ${errorMessage(rtaResult)}` : '.'}`,
-        impact: 'RTA long/short positioning cannot be displayed reliably.',
-        recovery: {
-          kind: 'command',
-          label: 'Rebuild the deterministic RTA projections from the immutable Gmail ledger, then refresh.',
-          command: 'npm run rebuild:rta -- --apply --window-days=90 --json',
-        },
-      });
+  const rtaWarnings = [...new Set([
+    ...(Array.isArray(rta?.dataQuality?.warnings) ? rta.dataQuality.warnings : []),
+    ...(Array.isArray(rta?.reconstructionWarnings) ? rta.reconstructionWarnings : []),
+  ].filter(Boolean))];
+  const gmailWasEvaluated = Boolean(gmailCheck);
+  const gmailPassed = gmailCheck?.status === 'pass';
+  const researchPipelineState = (payload) => {
+    const availability = payload?.dataAvailability || {};
+    const explicitlyUnhealthy = availability.current === false
+      || ['unhealthy', 'stale', 'auth_required', 'error', 'failed'].includes(
+        String(availability.ingestionStatus || availability.ingestionState || '').toLowerCase(),
+      );
+    const payloadHealthy = availability.current === true
+      || String(availability.ingestionStatus || '').toLowerCase() === 'healthy'
+      || payload?.meta?.ingestionStatus === 'healthy';
+    const healthy = gmailWasEvaluated
+      ? gmailPassed && !explicitlyUnhealthy
+      : payloadHealthy && !explicitlyUnhealthy;
+    return {
+      healthy,
+      availability,
+      errorCode: availability.errorCode
+        || (!gmailPassed ? gmailCheck?.errorCode : null)
+        || 'GMAIL_HEARTBEAT_UNVERIFIED',
+      reason: availability.reason
+        || (!gmailPassed ? gmailCheck?.summary || gmailCheck?.detail : null)
+        || 'Scheduled Gmail ingestion health could not be verified.',
+      observedAt: availability.pipelineObservedAt || gmailCheck?.observedAt || null,
+      lastSuccessAt: availability.pipelineLastSuccessAt || gmailCheck?.lastSuccessAt || null,
+      recovery: gmailCheck?.recovery || {
+        kind: 'manual',
+        label: 'Restore scheduled Gmail ingestion, process the missed messages, then refresh readiness.',
+      },
+    };
+  };
 
-  const snapshotDate = etf?.meta?.snapshotDate || null;
+  const rtaPipeline = researchPipelineState(rta);
+  const rtaContentAt = rta?.dataAvailability?.latestContentAt || rta?.lastUpdated || null;
+  const rtaContentDate = rta?.dataAvailability?.contentDate
+    || (rtaContentAt ? String(rtaContentAt).slice(0, 10) : null);
+  const rtaStructurallyAvailable = !rtaCacheStale
+    && rta?.available === true
+    && rta?.dataQuality?.status !== 'error';
+  const rtaStructuralErrorCode = rta?.dataQuality?.invalidEvents?.[0]?.code
+    || rta?.dataAvailability?.errorCode
+    || null;
+  let rtaCheck;
+  if (rtaStructurallyAvailable && rtaPipeline.healthy) {
+    rtaCheck = makeCheck({
+      id: 'research.rta',
+      label: 'RTA positions',
+      status: rtaWarnings.length ? 'warn' : 'pass',
+      blocking: false,
+      summary: rtaWarnings.length
+        ? `RTA positions loaded with ${rtaWarnings.length} reconstruction warning(s).`
+        : `RTA ingestion is current; the latest position-changing content is ${rtaContentDate || 'undated'}.`,
+      detail: [
+        `${Number(rta.longCount || 0)} long / ${Number(rta.shortCount || 0)} short position(s).`,
+        ...rtaWarnings,
+      ].join(' '),
+      dependsOn: [],
+      observedAt: rtaPipeline.observedAt || rtaContentAt,
+      lastSuccessAt: rtaPipeline.lastSuccessAt || null,
+      now,
+      impact: rtaWarnings.length ? 'The RTA position book may be incomplete.' : null,
+      recovery: rtaWarnings.length ? {
+        kind: 'manual',
+        label: 'Reconcile the invalid RTA events against the active-position baseline.',
+      } : null,
+      provenance: {
+        contentDate: rtaContentDate,
+        latestContentAt: rtaContentAt,
+        pipelineObservedAt: rtaPipeline.observedAt,
+      },
+    });
+  } else if (rtaStructurallyAvailable) {
+    rtaCheck = makeCheck({
+      id: 'research.rta',
+      label: 'RTA positions',
+      status: 'warn',
+      blocking: false,
+      errorCode: rtaPipeline.errorCode,
+      dependsOn: ['gmail.ingestion'],
+      summary: `RTA is last-known-good from ${rtaContentDate || 'an unknown date'}; Gmail ingestion is not current.`,
+      detail: [
+        `${Number(rta.longCount || 0)} long / ${Number(rta.shortCount || 0)} short position(s).`,
+        rtaPipeline.reason,
+      ].filter(Boolean).join(' '),
+      observedAt: rtaPipeline.observedAt || rtaContentAt,
+      lastSuccessAt: rtaPipeline.lastSuccessAt || null,
+      now,
+      impact: 'RTA positions remain available as dated reference data but are not comparison-safe.',
+      recovery: rtaPipeline.recovery,
+      provenance: {
+        contentDate: rtaContentDate,
+        latestContentAt: rtaContentAt,
+        pipelineObservedAt: rtaPipeline.observedAt,
+      },
+    });
+  } else {
+    rtaCheck = serviceFailureCheck({
+      id: 'research.rta',
+      label: 'RTA positions',
+      blocking: false,
+      errorCode: rtaCacheStale
+        ? 'RTA_RESPONSE_CACHE_STALE'
+        : rtaStructuralErrorCode || 'RTA_PROJECTION_UNAVAILABLE',
+      dependsOn: rtaStructuralErrorCode || rtaCacheStale || gmailPassed ? [] : ['gmail.ingestion'],
+      message: rta
+        ? (rtaCacheStale
+          ? 'RTA refresh failed; only a stale cached response is available.'
+          : `RTA positions are unavailable${rtaWarnings.length ? `: ${rtaWarnings.join(' ')}` : '.'}`)
+        : `RTA check failed${errorMessage(rtaResult) ? `: ${errorMessage(rtaResult)}` : '.'}`,
+      detail: rta?.dataAvailability?.reason || null,
+      impact: 'RTA long/short positioning cannot be displayed reliably.',
+      recovery: {
+        kind: 'command',
+        label: 'Rebuild the deterministic RTA projections from the immutable Gmail ledger, then refresh.',
+        command: 'npm run rebuild:rta -- --apply --window-days=90 --json',
+      },
+    });
+  }
+
+  const activeEtfAvailable = Boolean(etf)
+    && etf?.available !== false
+    && etf?.meta?.available !== false
+    && etf?.dataQuality?.status !== 'error'
+    && Array.isArray(etf?.rows)
+    && etf.rows.length > 0;
+  const referenceEtf = etf?.lastKnownGood;
+  const referenceEtfAvailable = Boolean(referenceEtf)
+    && referenceEtf?.available !== false
+    && referenceEtf?.dataQuality?.status !== 'error'
+    && Array.isArray(referenceEtf?.rows)
+    && referenceEtf.rows.length > 0;
+  const etfBook = activeEtfAvailable ? etf : (referenceEtfAvailable ? referenceEtf : null);
+  const snapshotDate = etfBook?.meta?.snapshotDate
+    || etf?.dataAvailability?.contentDate
+    || null;
   const businessAge = businessDaysSince(snapshotDate, now);
-  const etfAvailable = Boolean(etf) && !etfCacheStale && etf?.meta?.available !== false
-    && Array.isArray(etf.rows) && etf.rows.length > 0;
-  const etfIngestionHealthy = etf?.meta?.ingestionStatus === 'healthy'
-    || etf?.dataAvailability?.ingestionStatus === 'healthy'
-    || gmailCheck?.status === 'pass';
-  const etfStatus = etfAvailable && etfIngestionHealthy ? 'pass' : 'fail';
-  const etfCheck = etfStatus === 'pass'
-    ? makeCheck({
-        id: 'research.etf-pro',
-        label: 'ETF Pro',
-        status: 'pass',
-        blocking: false,
-        summary: `ETF Pro's structurally valid book remains current; last position-changing content is ${snapshotDate}.`,
-        detail: `${etf.rows.length} active row(s); ${businessAge ?? 'unknown'} business day(s) since the latest book change; Gmail polling is healthy.`,
-        observedAt: etf.meta?.parsedAt || snapshotDate,
-        dependsOn: [],
-        now,
-      })
-    : makeCheck({
-        id: 'research.etf-pro',
-        label: 'ETF Pro',
-        status: etfStatus,
-        blocking: false,
-        errorCode: etf?.meta?.blockedByIngestion || !etfIngestionHealthy
-          ? 'ETF_PRO_INGESTION_BLOCKED'
-          : 'ETF_PRO_BOOK_UNAVAILABLE',
-        dependsOn: etf?.meta?.blockedByIngestion || !etfIngestionHealthy ? ['gmail.ingestion'] : [],
-        summary: !etf
-          ? `ETF Pro check failed${errorMessage(etfResult) ? `: ${errorMessage(etfResult)}` : '.'}`
-          : (!etfAvailable
-            ? (etfCacheStale
-              ? 'ETF Pro refresh failed; only a stale cached response is available.'
-              : `ETF Pro snapshot ${snapshotDate || 'unknown'} is marked unavailable.`)
-            : 'ETF Pro ingestion health could not be verified.'),
-        detail: etf?.meta?.headline || null,
-        observedAt: etf?.meta?.parsedAt || snapshotDate,
-        now,
-        impact: 'ETF Pro positions and changes may be stale or incomplete.',
-        recovery: {
-          kind: 'manual',
-          label: 'Restore Gmail ingestion, process the latest ETF Pro email, then verify the snapshot date and availability.',
-        },
-      });
+  const etfPipeline = researchPipelineState(etf);
+  const etfStructurallyAvailable = !etfCacheStale && Boolean(etfBook);
+  let etfCheck;
+  if (etfStructurallyAvailable && activeEtfAvailable && etfPipeline.healthy) {
+    etfCheck = makeCheck({
+      id: 'research.etf-pro',
+      label: 'ETF Pro',
+      status: 'pass',
+      blocking: false,
+      summary: `ETF Pro ingestion is current; the latest position-changing content is ${snapshotDate || 'undated'}.`,
+      detail: `${etfBook.rows.length} active row(s); ${businessAge ?? 'unknown'} business day(s) since the latest book change. A quiet content date is valid while the Gmail heartbeat remains healthy.`,
+      observedAt: etfPipeline.observedAt || etfBook.meta?.parsedAt || snapshotDate,
+      lastSuccessAt: etfPipeline.lastSuccessAt || null,
+      dependsOn: [],
+      now,
+      provenance: {
+        contentDate: snapshotDate,
+        pipelineObservedAt: etfPipeline.observedAt,
+      },
+    });
+  } else if (etfStructurallyAvailable) {
+    etfCheck = makeCheck({
+      id: 'research.etf-pro',
+      label: 'ETF Pro',
+      status: 'warn',
+      blocking: false,
+      errorCode: etfPipeline.errorCode || 'ETF_PRO_INGESTION_BLOCKED',
+      dependsOn: ['gmail.ingestion'],
+      summary: `ETF Pro is last-known-good from ${snapshotDate || 'an unknown date'} (${etfBook.rows.length} positions); Gmail ingestion is not current.`,
+      detail: [
+        etfPipeline.reason,
+        etfBook.meta?.headline,
+      ].filter(Boolean).join(' '),
+      observedAt: etfPipeline.observedAt || etfBook.meta?.parsedAt || snapshotDate,
+      lastSuccessAt: etfPipeline.lastSuccessAt || null,
+      now,
+      impact: 'ETF Pro positions remain available as dated reference data but are not comparison-safe.',
+      recovery: etfPipeline.recovery,
+      provenance: {
+        contentDate: snapshotDate,
+        pipelineObservedAt: etfPipeline.observedAt,
+        referenceOnly: !activeEtfAvailable || etf?.dataAvailability?.referenceOnly === true,
+      },
+    });
+  } else {
+    etfCheck = serviceFailureCheck({
+      id: 'research.etf-pro',
+      label: 'ETF Pro',
+      blocking: false,
+      errorCode: etfCacheStale
+        ? 'ETF_PRO_RESPONSE_CACHE_STALE'
+        : etf?.dataAvailability?.errorCode || etf?.meta?.errorCode || 'ETF_PRO_BOOK_UNAVAILABLE',
+      dependsOn: etf?.meta?.blockedByIngestion && !gmailPassed ? ['gmail.ingestion'] : [],
+      message: !etf
+        ? `ETF Pro check failed${errorMessage(etfResult) ? `: ${errorMessage(etfResult)}` : '.'}`
+        : (etfCacheStale
+          ? 'ETF Pro refresh failed; only a stale cached response is available.'
+          : `ETF Pro has no structurally valid active or last-known-good book${snapshotDate ? ` for ${snapshotDate}` : ''}.`),
+      detail: etf?.dataAvailability?.reason || etf?.meta?.reason || etf?.meta?.headline || null,
+      observedAt: etf?.dataAvailability?.pipelineObservedAt || etf?.meta?.parsedAt || snapshotDate,
+      now,
+      impact: 'ETF Pro positions and changes are unavailable.',
+      recovery: {
+        kind: 'manual',
+        label: 'Repair ETF Pro projection errors, restore Gmail ingestion if needed, then verify a structurally valid book.',
+      },
+    });
+  }
 
   const risk = workflow?.hedgeye;
   const riskManifestAccessDenied = risk?.errorCode === 'RISK_RANGE_MANIFEST_ACCESS_DENIED';
@@ -976,7 +1198,13 @@ function buildResearchChecks({ rtaResult, etfResult, workflow, gmailCheck, now }
         }),
   });
 
-  return [rtaCheck, etfCheck, riskCheck];
+  const pipelineCheck = buildResearchPipelineCheck({
+    coverage: researchPipelineCoverage,
+    gmailCheck,
+    now,
+  });
+
+  return [rtaCheck, etfCheck, riskCheck, ...(pipelineCheck ? [pipelineCheck] : [])];
 }
 
 function createSystemReadinessService({
@@ -1024,6 +1252,18 @@ function createSystemReadinessService({
     ]).then(([result]) => result);
 
     const workflow = fulfilledValue(workflowResult) || {};
+    const researchPipelineCoveragePromise = collectResearchPipelineCoverage({
+      dynamodb,
+      now,
+      riskRange: workflow.hedgeye || null,
+      tables: RESEARCH_PIPELINE_TABLES,
+    }).catch((error) => buildResearchPipelineCoverage({
+      now,
+      riskRange: workflow.hedgeye || null,
+      collectionErrors: [
+        `Research pipeline collection failed (${error.code || error.name || 'COLLECTION_FAILED'}): ${error.message || String(error)}`,
+      ],
+    }));
     let director = { workers: [], recentRuns: [] };
     try {
       director = await getDirectorSnapshot({ dynamodb, workflowSnapshot: workflow });
@@ -1207,9 +1447,17 @@ function createSystemReadinessService({
     const dashboardChecks = buildDashboardChecks({ uiResult, supervisor, runtime, launchAgent, now });
     const bridgeCheck = buildHermesBridgeCheck({ supervisor, now });
     const sidecarChecks = buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolioResult, now });
-    const researchChecks = buildResearchChecks({ rtaResult, etfResult, workflow, gmailCheck, now });
+    const researchPipelineCoverage = await researchPipelineCoveragePromise;
+    const researchChecks = buildResearchChecks({
+      rtaResult,
+      etfResult,
+      workflow,
+      gmailCheck,
+      researchPipelineCoverage,
+      now,
+    });
 
-    return buildSystemReadiness([
+    const report = buildSystemReadiness([
       {
         id: 'dashboard',
         label: 'Dashboard',
@@ -1224,6 +1472,10 @@ function createSystemReadinessService({
       },
       { id: 'research', label: 'Research data', checks: researchChecks },
     ], { now });
+    return {
+      ...report,
+      researchProductMatrix: researchPipelineCoverage,
+    };
   }
 
   async function collect({ refresh = false } = {}) {
@@ -1260,6 +1512,7 @@ module.exports = {
   probeUrl,
   serviceHeartbeatErrorCode,
   buildSidecarChecks,
+  buildResearchPipelineCheck,
   buildResearchChecks,
   createSystemReadinessService,
   getLocalCurrentPredictionMarkets,

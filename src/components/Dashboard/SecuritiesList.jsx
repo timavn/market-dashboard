@@ -137,7 +137,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
 
     // Priority 2: Check price update status
     if (!timestamp) {
-      return { status: 'stale', color: '#EF4444', emoji: '🔴' }; // Red for no timestamp
+      return { status: 'error', color: '#EF4444', emoji: '🔴' }; // Error: no timestamp
     }
 
     const now = Date.now();
@@ -151,7 +151,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
     } else if (elapsedMinutes < 5) {
       return { status: 'recent', color: '#F59E0B', emoji: '🟡' }; // Yellow/Orange
     } else {
-      return { status: 'stale', color: '#EF4444', emoji: '🔴' }; // Red
+      return { status: 'stale', color: '#EAB308', emoji: '🟡' }; // Yellow: stale
     }
   };
 

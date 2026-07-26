@@ -13,6 +13,16 @@ LOG_DIR="${USER_HOME}/Library/Logs/market-dashboard"
 NODE_PATH="$(command -v node)"
 NODE_REAL_PATH="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$NODE_PATH")"
 PATH_VALUE="$(dirname "$NODE_PATH"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+BRIDGE_AWS_PROFILE="${HERMES_BRIDGE_AWS_PROFILE:-market-dashboard-bridge}"
+LOCAL_NOTIFICATIONS="${MARKET_DASHBOARD_LOCAL_NOTIFICATIONS:-true}"
+case "$(printf '%s' "$LOCAL_NOTIFICATIONS" | tr '[:upper:]' '[:lower:]')" in
+  0|false|no|off|disabled)
+    LOCAL_NOTIFICATIONS="false"
+    ;;
+  *)
+    LOCAL_NOTIFICATIONS="true"
+    ;;
+esac
 
 if [[ "$USER_HOME" != /* || "$LAUNCH_AGENTS_DIR" != "$USER_HOME/Library/LaunchAgents" ]]; then
   echo "Could not resolve a safe per-user LaunchAgents directory." >&2
@@ -20,6 +30,14 @@ if [[ "$USER_HOME" != /* || "$LAUNCH_AGENTS_DIR" != "$USER_HOME/Library/LaunchAg
 fi
 if [[ ! -f "$TEMPLATE_PATH" || ! -x "$NODE_PATH" ]]; then
   echo "LaunchAgent template or Node.js runtime is missing." >&2
+  exit 1
+fi
+if [[ -z "${BRIDGE_AWS_PROFILE//[[:space:]]/}" ]]; then
+  echo "HERMES_BRIDGE_AWS_PROFILE must name the dedicated outbound bridge profile." >&2
+  exit 1
+fi
+if [[ ! "$BRIDGE_AWS_PROFILE" =~ ^[A-Za-z0-9_+=,.@-]+$ ]]; then
+  echo "HERMES_BRIDGE_AWS_PROFILE contains unsupported characters." >&2
   exit 1
 fi
 
@@ -31,6 +49,8 @@ repo_xml="$(xml_escape "$REPO_DIR")"
 node_xml="$(xml_escape "$NODE_PATH")"
 log_xml="$(xml_escape "$LOG_DIR")"
 path_xml="$(xml_escape "$PATH_VALUE")"
+bridge_profile_xml="$(xml_escape "$BRIDGE_AWS_PROFILE")"
+local_notifications_xml="$(xml_escape "$LOCAL_NOTIFICATIONS")"
 staged_path="$(mktemp "${TMPDIR:-/tmp}/market-dashboard-launchagent.XXXXXX.plist")"
 trap 'rm -f "$staged_path"' EXIT
 
@@ -39,6 +59,8 @@ sed \
   -e "s|__NODE_PATH__|${node_xml}|g" \
   -e "s|__LOG_PATH__|${log_xml}|g" \
   -e "s|__PATH_VALUE__|${path_xml}|g" \
+  -e "s|__HERMES_BRIDGE_AWS_PROFILE__|${bridge_profile_xml}|g" \
+  -e "s|__LOCAL_NOTIFICATIONS__|${local_notifications_xml}|g" \
   "$TEMPLATE_PATH" > "$staged_path"
 
 plutil -lint "$staged_path" >/dev/null

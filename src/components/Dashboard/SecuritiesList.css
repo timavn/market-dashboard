@@ -333,6 +333,10 @@
 }
 
 .status-dot.stale {
+  background: #EAB308;
+}
+
+.status-dot.error {
   background: #EF4444;
 }
 

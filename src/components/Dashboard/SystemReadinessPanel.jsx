@@ -46,6 +46,16 @@ const AGGREGATE_RANK = {
   blocked: 2,
 };
 
+const PRODUCT_PIPELINE_STATUS_META = {
+  not_due: { label: 'Not due', glyph: '—' },
+  missing: { label: 'Missing', glyph: '×' },
+  received: { label: 'Received', glyph: '↓' },
+  parsed: { label: 'Parsed', glyph: 'P' },
+  validated: { label: 'Validated', glyph: 'V' },
+  indexed: { label: 'Indexed', glyph: '✓' },
+  failed: { label: 'Failed', glyph: '×' },
+};
+
 function normalizeAggregateStatus(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(AGGREGATE_RANK, normalized)
@@ -98,6 +108,57 @@ function normalizeCapability(capability, index) {
     blocking: capability?.blocking === true,
     checkIds: Array.isArray(capability?.checkIds) ? capability.checkIds.map(String) : [],
     rootCauseIds: Array.isArray(capability?.rootCauseIds) ? capability.rootCauseIds.map(String) : [],
+  };
+}
+
+function normalizeResearchProductMatrix(matrix) {
+  if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) return null;
+  const rawProducts = Array.isArray(matrix.products) ? matrix.products : [];
+  const products = rawProducts.map((product, index) => {
+    const rawStatus = String(product?.status || '').trim().toLowerCase();
+    const recognized = Object.prototype.hasOwnProperty.call(PRODUCT_PIPELINE_STATUS_META, rawStatus);
+    const status = recognized ? rawStatus : 'failed';
+    return {
+      ...product,
+      id: String(product?.id || `research-product-${index + 1}`),
+      label: String(product?.label || product?.id || `Research product ${index + 1}`),
+      cadence: String(product?.cadence || 'unknown'),
+      status,
+      statusLabel: PRODUCT_PIPELINE_STATUS_META[status].label,
+      due: product?.due === true,
+      detail: product?.detail
+        || (recognized ? PRODUCT_PIPELINE_STATUS_META[status].label : 'Unrecognized product pipeline status.'),
+      observedAt: product?.observedAt || null,
+      publicationDate: product?.publicationDate || null,
+      errorCode: status === 'failed'
+        ? (product?.errorCode || 'RESEARCH_PRODUCT_STATUS_INVALID')
+        : (product?.errorCode || null),
+      stages: {
+        received: product?.stages?.received === true,
+        parsed: product?.stages?.parsed === true,
+        validated: product?.stages?.validated === true,
+        indexed: product?.stages?.indexed === true,
+      },
+    };
+  });
+  const collectionErrors = Array.isArray(matrix.collectionErrors)
+    ? matrix.collectionErrors.filter(Boolean).map(String)
+    : [];
+  const hasFailure = collectionErrors.length > 0 || products.some((product) => (
+    product.status === 'failed' || product.status === 'missing'
+  ));
+  const hasIncomplete = products.some((product) => (
+    product.status === 'received'
+    || product.status === 'parsed'
+    || product.status === 'validated'
+  ));
+  const status = hasFailure ? 'failed' : (hasIncomplete ? 'degraded' : 'complete');
+  return {
+    ...matrix,
+    schemaVersion: Number(matrix.schemaVersion) || 1,
+    status,
+    products,
+    collectionErrors,
   };
 }
 
@@ -204,13 +265,17 @@ export function normalizeReadinessSnapshot(payload, now = Date.now()) {
   const checks = groups.flatMap((group) => group.checks);
   const capabilities = (Array.isArray(payload.capabilities) ? payload.capabilities : [])
     .map(normalizeCapability);
+  const researchProductMatrix = normalizeResearchProductMatrix(payload.researchProductMatrix);
   const rootCauses = deriveRootCauses(checks, payload.rootCauses);
   const derivedStatus = deriveAggregateStatus(checks, capabilities);
   const reportedStatus = normalizeAggregateStatus(payload.status);
   const readyFlagStatus = payload.ready === false && reportedStatus === 'ready'
     ? 'degraded'
     : reportedStatus;
-  const status = worstAggregateStatus(derivedStatus, readyFlagStatus);
+  const researchStatus = !researchProductMatrix || researchProductMatrix.status === 'complete'
+    ? 'ready'
+    : 'degraded';
+  const status = worstAggregateStatus(derivedStatus, readyFlagStatus, researchStatus);
   const counts = checks.reduce((result, check) => {
     result.total += 1;
     result[check.status] += 1;
@@ -223,6 +288,7 @@ export function normalizeReadinessSnapshot(payload, now = Date.now()) {
     checkedAt: checkedAt.toISOString(),
     groups,
     capabilities,
+    researchProductMatrix,
     rootCauses,
     status,
     ready: status === 'ready',
@@ -335,6 +401,90 @@ function CheckRow({ check, onRepair, repairingActionId }) {
         ) : null}
       </div>
     </article>
+  );
+}
+
+function formatProductCadence(value) {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'market_day_0800') return 'Market days';
+  if (normalized === 'event_driven') return 'When published';
+  if (normalized === 'weekly') return 'Weekly';
+  if (normalized === 'unsupported') return 'Unsupported';
+  return value || 'Unknown';
+}
+
+function ProductPipelineMatrix({ matrix }) {
+  if (!matrix) return null;
+  const products = matrix.products || [];
+  return (
+    <section className="sr-products" aria-labelledby="sr-products-title">
+      <header className="sr-section-heading">
+        <div>
+          <h2 id="sr-products-title">Research product pipeline</h2>
+          <p>{matrix.marketDate ? `Market date ${matrix.marketDate}` : 'Current market date'}</p>
+        </div>
+        <span>{products.length}</span>
+      </header>
+      <p className="sr-products__intro">
+        Each received publication must be parsed, validated, and indexed before portfolio research is complete.
+      </p>
+      {matrix.collectionErrors.length > 0 ? (
+        <div className="sr-products__errors" role="alert">
+          <strong>Pipeline evidence unavailable</strong>
+          {matrix.collectionErrors.map((message) => <p key={message}>{message}</p>)}
+        </div>
+      ) : null}
+      <div className="sr-products__table-wrap">
+        <table className="sr-products__table">
+          <thead>
+            <tr>
+              <th scope="col">Product</th>
+              <th scope="col">Cadence</th>
+              <th scope="col">Pipeline state</th>
+              <th scope="col">Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((product) => {
+              const meta = PRODUCT_PIPELINE_STATUS_META[product.status];
+              return (
+                <tr key={product.id} data-status={product.status}>
+                  <th scope="row">
+                    <strong>{product.label}</strong>
+                    {product.due ? <span className="sr-products__due">Due</span> : null}
+                  </th>
+                  <td>{formatProductCadence(product.cadence)}</td>
+                  <td>
+                    <span className="sr-products__status">
+                      <span aria-hidden="true">{meta.glyph}</span>
+                      {meta.label}
+                    </span>
+                    <span className="sr-products__stages" aria-label={`${product.label} completed stages`}>
+                      {['received', 'parsed', 'validated', 'indexed'].map((stage) => (
+                        <span
+                          key={stage}
+                          data-complete={product.stages[stage] ? 'true' : 'false'}
+                          title={stage}
+                          aria-label={`${stage}: ${product.stages[stage] ? 'complete' : 'not verified'}`}
+                        >
+                          {stage.slice(0, 1).toUpperCase()}
+                        </span>
+                      ))}
+                    </span>
+                  </td>
+                  <td>
+                    <span>{product.publicationDate || 'No publication'}</span>
+                    {product.observedAt ? <span>Observed {formatDateTime(product.observedAt)}</span> : null}
+                    <small>{product.detail}</small>
+                    {product.errorCode ? <code>{product.errorCode}</code> : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -503,6 +653,8 @@ const SystemReadinessPanel = ({
                 </div>
               </section>
             ) : null}
+
+            <ProductPipelineMatrix matrix={snapshot.researchProductMatrix} />
 
             {snapshot.rootCauses.length > 0 ? (
               <section className="sr-root-causes" aria-labelledby="sr-root-causes-title">

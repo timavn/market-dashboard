@@ -398,8 +398,26 @@ describe('ETF Pro resolver', () => {
     expect(payload.dataAvailability).toMatchObject({
       structuralStatus: 'verified',
       ingestionStatus: 'unhealthy',
+      current: false,
+      comparisonSafe: false,
+      referenceOnly: true,
+      contentDate: '2026-07-17',
+      errorCode: 'GMAIL_AUTH_REQUIRED',
       reason: 'All recent Gmail polls failed.',
     });
+    expect(payload.lastKnownGood).toMatchObject({
+      available: true,
+      current: false,
+      comparisonSafe: false,
+      referenceOnly: true,
+      longCount: 1,
+      shortCount: 1,
+      meta: {
+        snapshotDate: '2026-07-17',
+        rowCount: 2,
+      },
+    });
+    expect(payload.lastKnownGood.rows).toHaveLength(2);
     expect(payload.meta).toMatchObject({
       available: false,
       structurallyAvailable: true,

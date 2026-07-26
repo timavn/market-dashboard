@@ -24,6 +24,7 @@ function readinessPayload({
   checks,
   capabilities,
   rootCauses,
+  researchProductMatrix,
 } = {}) {
   return {
     version: 1,
@@ -33,6 +34,7 @@ function readinessPayload({
     summary: {},
     ...(capabilities ? { capabilities } : {}),
     ...(rootCauses ? { rootCauses } : {}),
+    ...(researchProductMatrix ? { researchProductMatrix } : {}),
     groups: [
       {
         id: 'local-stack',
@@ -208,6 +210,64 @@ describe('SystemReadinessPanel', () => {
     expect(within(affectedChecks).getByText('Hermes analyst')).toBeInTheDocument();
     expect(within(affectedChecks).getByText('Hermes developer')).toBeInTheDocument();
     expect(screen.getByText('1 root cause')).toBeInTheDocument();
+  });
+
+  test('renders the cadence-aware research product matrix and degrades without blocking live portfolio', async () => {
+    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload({
+      status: 'ready',
+      ready: true,
+      researchProductMatrix: {
+        schemaVersion: 1,
+        marketDate: '2026-07-21',
+        status: 'failed',
+        collectionErrors: [],
+        products: [
+          {
+            id: 'risk-ranges',
+            label: 'Risk Ranges',
+            cadence: 'market_day_0800',
+            due: true,
+            status: 'missing',
+            stages: { received: false, parsed: false, validated: false, indexed: false },
+            detail: 'Risk Ranges are due but no artifact was received.',
+            errorCode: 'RESEARCH_PRODUCT_DUE_MISSING',
+          },
+          {
+            id: 'the-call',
+            label: 'The Call',
+            cadence: 'event_driven',
+            due: false,
+            status: 'not_due',
+            stages: { received: false, parsed: false, validated: false, indexed: false },
+            detail: 'No publication is due.',
+          },
+          {
+            id: 'signal-strength',
+            label: 'Signal Strength',
+            cadence: 'event_driven',
+            due: true,
+            status: 'indexed',
+            publicationDate: '2026-07-21',
+            observedAt: new Date().toISOString(),
+            stages: { received: true, parsed: true, validated: true, indexed: true },
+            detail: 'All stages complete.',
+          },
+        ],
+      },
+    }));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} />);
+
+    expect(await screen.findByText('Degraded')).toBeInTheDocument();
+    const matrix = screen.getByRole('region', { name: 'Research product pipeline' });
+    expect(within(matrix).getByText('Market date 2026-07-21')).toBeInTheDocument();
+    expect(within(matrix).getByText('Risk Ranges')).toBeInTheDocument();
+    expect(within(matrix).getByText('Missing')).toBeInTheDocument();
+    expect(within(matrix).getByText('The Call')).toBeInTheDocument();
+    expect(within(matrix).getByText('Not due')).toBeInTheDocument();
+    expect(within(matrix).getByText('Signal Strength')).toBeInTheDocument();
+    expect(within(matrix).getByText('Indexed')).toBeInTheDocument();
+    expect(screen.queryByText('Blocked')).not.toBeInTheDocument();
   });
 
   test('runs only an automatic repair action exposed by the readiness contract', async () => {

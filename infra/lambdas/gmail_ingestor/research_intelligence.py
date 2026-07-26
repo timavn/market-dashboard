@@ -1,0 +1,884 @@
+"""Canonical research-product, entity-event, and publication-manifest helpers.
+
+The Gmail and PDF ingestion paths use the same product vocabulary and write the
+same immutable event/manifest contracts. Runtime consumers can rebuild their
+portfolio projection from these records without treating a daily snapshot as an
+authoritative or complete source.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+
+from botocore.exceptions import ClientError
+
+
+MODULE_DIR = Path(__file__).resolve().parent
+ENTITY_EVENTS_TABLE = os.environ.get(
+    "RESEARCH_ENTITY_EVENTS_TABLE",
+    "ResearchEntityEventsV1",
+)
+PRODUCT_MANIFEST_TABLE = os.environ.get(
+    "RESEARCH_PRODUCT_MANIFEST_TABLE",
+    "ResearchProductManifestsV1",
+)
+PARSER_VERSION = "security-intelligence-v2"
+MAX_MANIFEST_WRITE_RETRIES = 4
+MAX_BODY_TEXT_LENGTH = 40_000
+MANIFEST_STAGES = {"received", "parsed", "validated", "indexed", "failed"}
+CONTROLLED_EXPOSURE_TYPES = {
+    "factor",
+    "sector",
+    "country",
+    "commodity",
+    "macro",
+}
+
+
+def _load_json(filename: str) -> Dict[str, Any]:
+    with (MODULE_DIR / filename).open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+PRODUCT_REGISTRY = _load_json("research_products.json")
+ENTITY_CATALOG = _load_json("research_entities.json")
+PRODUCTS_BY_ID = {
+    product["id"]: product for product in PRODUCT_REGISTRY.get("products", [])
+}
+RESERVED_TOKENS = {
+    str(token).upper() for token in ENTITY_CATALOG.get("reservedTokens", [])
+}
+RESERVED_TOKENS.update(
+    {
+        "API",
+        "ALL",
+        "AND",
+        "CEO",
+        "CPI",
+        "DAY",
+        "ETF",
+        "ETFS",
+        "FED",
+        "FOR",
+        "FROM",
+        "GDP",
+        "HTML",
+        "LOOK",
+        "LRR",
+        "MAIN",
+        "MARKET",
+        "NAV",
+        "NOT",
+        "NOW",
+        "PDF",
+        "PM",
+        "RANGE",
+        "RISK",
+        "SHOW",
+        "SUMMARY",
+        "THAT",
+        "THE",
+        "THIS",
+        "TODAY",
+        "TRADE",
+        "USD",
+        "WEEK",
+        "WITH",
+    }
+)
+
+
+def product_ids() -> List[str]:
+    return list(PRODUCTS_BY_ID)
+
+
+def report_rules() -> List[Tuple[str, Tuple[str, ...]]]:
+    return [
+        (
+            product["id"],
+            tuple(str(term).lower() for term in product.get("matchTerms", [])),
+        )
+        for product in PRODUCT_REGISTRY.get("products", [])
+        if product.get("matchTerms")
+    ]
+
+
+def product_definition(product_id: str) -> Dict[str, Any]:
+    return PRODUCTS_BY_ID.get(
+        str(product_id or ""),
+        {
+            "id": str(product_id or "unknown"),
+            "label": str(product_id or "Unknown"),
+            "cadence": "unsupported",
+            "authorities": {},
+        },
+    )
+
+
+def _alias_maps() -> Tuple[Dict[str, str], Dict[str, List[str]]]:
+    alias_to_ticker: Dict[str, str] = {}
+    aliases_by_ticker: Dict[str, List[str]] = {}
+    for ticker, aliases in ENTITY_CATALOG.get("tickerAliases", {}).items():
+        canonical = str(ticker).upper()
+        values = [canonical, *[str(alias) for alias in aliases]]
+        aliases_by_ticker[canonical] = values
+        for value in values:
+            alias_to_ticker[value.upper()] = canonical
+    return alias_to_ticker, aliases_by_ticker
+
+
+ALIAS_TO_TICKER, ALIASES_BY_TICKER = _alias_maps()
+
+
+def _controlled_exposure_catalog() -> Dict[Tuple[str, str], Dict[str, Any]]:
+    configured = ENTITY_CATALOG.get("controlledExposures") or {}
+    if not configured:
+        configured = {
+            "factor": {
+                exposure_id: {
+                    "label": exposure_id,
+                    "aliases": aliases,
+                }
+                for exposure_id, aliases in ENTITY_CATALOG.get(
+                    "factorAliases",
+                    {},
+                ).items()
+            }
+        }
+
+    catalog: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for exposure_type, definitions in configured.items():
+        normalized_type = str(exposure_type).strip().lower()
+        if (
+            normalized_type not in CONTROLLED_EXPOSURE_TYPES
+            or not isinstance(definitions, dict)
+        ):
+            continue
+        for exposure_id, definition in definitions.items():
+            normalized_id = str(exposure_id).strip().lower()
+            if not normalized_id:
+                continue
+            if isinstance(definition, dict):
+                aliases = definition.get("aliases") or []
+                label = definition.get("label") or normalized_id
+            else:
+                aliases = definition if isinstance(definition, list) else []
+                label = normalized_id
+            catalog[(normalized_type, normalized_id)] = {
+                "type": normalized_type,
+                "id": normalized_id,
+                "label": str(label),
+                "aliases": list(
+                    dict.fromkeys(
+                        [
+                            normalized_id,
+                            *[
+                                str(alias).strip().lower()
+                                for alias in aliases
+                                if str(alias).strip()
+                            ],
+                        ]
+                    )
+                ),
+            }
+    return catalog
+
+
+CONTROLLED_EXPOSURES = _controlled_exposure_catalog()
+
+
+def canonical_ticker(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        value = value.get("ticker") or value.get("symbol") or value.get("asset")
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    parenthesized = re.findall(r"\(([A-Z][A-Z0-9./-]{0,11})\)", raw.upper())
+    candidate = parenthesized[-1] if parenthesized else raw.upper()
+    candidate = ALIAS_TO_TICKER.get(candidate, candidate)
+    if candidate in RESERVED_TOKENS:
+        return None
+    if not re.fullmatch(r"[A-Z][A-Z0-9./-]{0,11}", candidate):
+        return None
+    return candidate
+
+
+def _iter_content_blocks(
+    value: Any,
+    path: str = "",
+) -> Iterator[Tuple[str, str]]:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            yield from _iter_content_blocks(child, child_path)
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _iter_content_blocks(child, f"{path}[{index}]")
+        return
+    if not isinstance(value, str):
+        return
+    text = re.sub(r"\s+", " ", value).strip()
+    if not text or text.startswith(("http://", "https://", "s3://")):
+        return
+    yield path, text[:MAX_BODY_TEXT_LENGTH]
+
+
+def _direction_from_path(path: str, text: str = "") -> Optional[str]:
+    haystack = f"{path} {text[:80]}".lower()
+    if any(token in haystack for token in ("removed", "remove", "short", "bear", "sell")):
+        return "negative"
+    if any(token in haystack for token in ("added", "add", "long", "bull", "buy")):
+        return "positive"
+    if "neutral" in haystack:
+        return "neutral"
+    return None
+
+
+def _event_kind(product_id: str, path: str) -> str:
+    lowered = path.lower()
+    if product_id == "risk-ranges":
+        return "risk_range"
+    if product_id == "early-look":
+        return "supplemental_risk_range"
+    if product_id == "signal-strength":
+        if "added" in lowered:
+            return "signal_strength_added"
+        if "removed" in lowered:
+            return "signal_strength_removed"
+        return "signal_strength_membership"
+    if product_id in {"momo-tracker", "bitcoin-trend-tracker"}:
+        return "trade_signal"
+    if product_id == "portfolio-solutions":
+        return "portfolio_rank"
+    if product_id in {"the-call", "the-macro-show"}:
+        return "position_reference"
+    if product_id in {"real-time-alert", "investing-ideas", "etf-pro"}:
+        return "position_change"
+    return "mention"
+
+
+def _excerpt(text: str, start: int, end: int, radius: int = 150) -> str:
+    left = max(0, start - radius)
+    right = min(len(text), end + radius)
+    excerpt = text[left:right].strip()
+    if left:
+        excerpt = f"…{excerpt}"
+    if right < len(text):
+        excerpt = f"{excerpt}…"
+    return excerpt
+
+
+def _reference(
+    *,
+    entity_type: str,
+    entity_id: str,
+    match_type: str,
+    matched_text: str,
+    excerpt: str,
+    field_path: str,
+    product_id: str,
+    direction: Optional[str] = None,
+    value: Optional[Any] = None,
+) -> Dict[str, Any]:
+    reference = {
+        "entityType": entity_type,
+        "entityId": entity_id,
+        "entityKey": f"{entity_type}#{entity_id}",
+        "matchType": match_type,
+        "matchedText": matched_text,
+        "excerpt": excerpt[:700],
+        "fieldPath": field_path,
+        "eventType": _event_kind(product_id, field_path),
+        "direction": direction,
+    }
+    if entity_type in CONTROLLED_EXPOSURE_TYPES:
+        reference["exposureType"] = entity_type
+        reference["exposureId"] = entity_id
+        reference["exposureLabel"] = CONTROLLED_EXPOSURES.get(
+            (entity_type, entity_id),
+            {},
+        ).get("label", entity_id)
+    if value is not None:
+        reference["value"] = value
+    return reference
+
+
+def _structured_ticker_references(
+    snapshot: Dict[str, Any],
+    product_id: str,
+) -> List[Dict[str, Any]]:
+    data = snapshot.get("data")
+    references: List[Dict[str, Any]] = []
+
+    def signal_value(value: Dict[str, Any]) -> Any:
+        for key in ("trade", "tradeBias", "signal", "trend"):
+            if value.get(key) is not None:
+                return value[key]
+        return None
+
+    def security_record(value: Any) -> bool:
+        return isinstance(value, dict) and any(
+            key in value
+            for key in (
+                "ticker",
+                "symbol",
+                "asset",
+                "trade",
+                "tradeBias",
+                "signal",
+                "trend",
+                "lrr",
+                "hrr",
+                "buyTrade",
+                "sellTrade",
+                "rank",
+                "score",
+            )
+        )
+
+    if isinstance(data, dict) and product_id in {
+        "risk-ranges",
+        "early-look",
+        "momo-tracker",
+    }:
+        for key, value in data.items():
+            ticker = canonical_ticker(key)
+            if not ticker:
+                continue
+            detail = json.dumps(value, sort_keys=True, default=str)
+            references.append(
+                _reference(
+                    entity_type="ticker",
+                    entity_id=ticker,
+                    match_type="structured_membership",
+                    matched_text=str(key),
+                    excerpt=f"{key}: {detail}",
+                    field_path=f"data.{key}",
+                    product_id=product_id,
+                    direction=_direction_from_path(f"data.{key}", detail),
+                    value=signal_value(value) if isinstance(value, dict) else None,
+                )
+            )
+
+    def visit(value: Any, path: str = "data") -> None:
+        if isinstance(value, dict):
+            direct_value = value.get("ticker") or value.get("symbol") or value.get("asset")
+            ticker = canonical_ticker(direct_value)
+            if ticker:
+                detail = json.dumps(value, sort_keys=True, default=str)
+                references.append(
+                    _reference(
+                        entity_type="ticker",
+                        entity_id=ticker,
+                        match_type="structured_membership",
+                        matched_text=str(direct_value),
+                        excerpt=detail,
+                        field_path=path,
+                        product_id=product_id,
+                        direction=_direction_from_path(path, detail),
+                        value=signal_value(value),
+                    )
+                )
+            for key, child in value.items():
+                child_path = f"{path}.{key}"
+                key_ticker = canonical_ticker(key)
+                if key_ticker and security_record(child):
+                    detail = json.dumps(child, sort_keys=True, default=str)
+                    references.append(
+                        _reference(
+                            entity_type="ticker",
+                            entity_id=key_ticker,
+                            match_type="structured_membership",
+                            matched_text=str(key),
+                            excerpt=f"{key}: {detail}",
+                            field_path=child_path,
+                            product_id=product_id,
+                            direction=_direction_from_path(child_path, detail),
+                            value=signal_value(child),
+                        )
+                    )
+                visit(child, child_path)
+            return
+        if isinstance(value, list):
+            for index, child in enumerate(value):
+                child_path = f"{path}[{index}]"
+                if isinstance(child, str):
+                    ticker = canonical_ticker(child)
+                    if ticker:
+                        references.append(
+                            _reference(
+                                entity_type="ticker",
+                                entity_id=ticker,
+                                match_type="structured_membership",
+                                matched_text=child,
+                                excerpt=child,
+                                field_path=child_path,
+                                product_id=product_id,
+                                direction=_direction_from_path(path, child),
+                            )
+                        )
+                else:
+                    visit(child, child_path)
+
+    visit(data)
+    return references
+
+
+def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
+    product_id = str(
+        snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
+    )
+    references = _structured_ticker_references(snapshot, product_id)
+    searchable = {
+        "article": snapshot.get("article") or {},
+        "data": snapshot.get("data") or {},
+        "trendChanges": snapshot.get("trendChanges") or [],
+    }
+
+    ticker_token_pattern = re.compile(r"\b[A-Z][A-Z0-9./-]{1,11}\b")
+
+    for path, text in _iter_content_blocks(searchable):
+        occupied: set[Tuple[str, str]] = set()
+
+        for ticker, aliases in ALIASES_BY_TICKER.items():
+            for alias in sorted(aliases, key=len, reverse=True):
+                pattern = re.compile(rf"(?<![A-Z0-9]){re.escape(alias)}(?![A-Z0-9])", re.IGNORECASE)
+                for match in pattern.finditer(text):
+                    match_type = "explicit_ticker" if alias.upper() == ticker else "name_alias"
+                    references.append(
+                        _reference(
+                            entity_type="ticker",
+                            entity_id=ticker,
+                            match_type=match_type,
+                            matched_text=match.group(0),
+                            excerpt=_excerpt(text, match.start(), match.end()),
+                            field_path=path,
+                            product_id=product_id,
+                            direction=_direction_from_path(path, text),
+                        )
+                    )
+                    occupied.add((ticker, path))
+
+        for match in ticker_token_pattern.finditer(text):
+            ticker = canonical_ticker(match.group(0))
+            if not ticker or (ticker, path) in occupied:
+                continue
+            references.append(
+                _reference(
+                    entity_type="ticker",
+                    entity_id=ticker,
+                    match_type="explicit_ticker",
+                    matched_text=match.group(0),
+                    excerpt=_excerpt(text, match.start(), match.end()),
+                    field_path=path,
+                    product_id=product_id,
+                    direction=_direction_from_path(path, text),
+                )
+            )
+
+        lowered = text.lower()
+        for (exposure_type, exposure_id), definition in CONTROLLED_EXPOSURES.items():
+            for alias in sorted(
+                (str(item) for item in definition["aliases"]),
+                key=len,
+                reverse=True,
+            ):
+                pattern = re.compile(rf"(?<![a-z0-9]){re.escape(alias.lower())}(?![a-z0-9])")
+                match = pattern.search(lowered)
+                if not match:
+                    continue
+                references.append(
+                    _reference(
+                        entity_type=exposure_type,
+                        entity_id=exposure_id,
+                        match_type=f"{exposure_type}_reference",
+                        matched_text=text[match.start() : match.end()],
+                        excerpt=_excerpt(text, match.start(), match.end()),
+                        field_path=path,
+                        product_id=product_id,
+                        direction=_direction_from_path(path, text),
+                    )
+                )
+                break
+
+    deduplicated: Dict[str, Dict[str, Any]] = {}
+    for reference in references:
+        signature = "|".join(
+            [
+                reference["entityKey"],
+                reference["eventType"],
+                str(reference.get("direction") or ""),
+                reference["fieldPath"],
+                reference["excerpt"],
+            ]
+        )
+        deduplicated[hashlib.sha256(signature.encode("utf-8")).hexdigest()] = reference
+    return list(deduplicated.values())
+
+
+def build_entity_events(
+    snapshot: Dict[str, Any],
+    *,
+    content_sha256: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    product_id = str(
+        snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
+    )
+    market_date = str(snapshot.get("date") or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", market_date):
+        raise ValueError(f"Research snapshot has no valid market date: {market_date!r}")
+
+    published_at = str(
+        snapshot.get("publishedAt")
+        or snapshot.get("scrapedAt")
+        or f"{market_date}T00:00:00+00:00"
+    )
+    source_event_id = str(
+        content_sha256
+        or snapshot.get("sourceEventId")
+        or snapshot.get("gmailMessageId")
+        or hashlib.sha256(
+            json.dumps(snapshot, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+    )
+    source_url = (
+        (snapshot.get("article") or {}).get("feedUrl")
+        or snapshot.get("htmlSource")
+        or snapshot.get("pdfS3Key")
+        or snapshot.get("source")
+    )
+    definition = product_definition(product_id)
+    events = []
+    for reference in extract_entity_references(snapshot):
+        identity = "|".join(
+            [
+                product_id,
+                market_date,
+                source_event_id,
+                reference["entityKey"],
+                reference["fieldPath"],
+                reference["excerpt"],
+            ]
+        )
+        event_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        event_key = f"{market_date}#{published_at}#{product_id}#{event_id}"
+        event = {
+            "entityKey": reference["entityKey"],
+            "eventKey": event_key,
+            "marketDate": market_date,
+            "dateEventKey": (
+                f"{product_id}#{published_at}#{reference['entityKey']}#{event_id}"
+            ),
+            "schemaVersion": 2,
+            "productKey": product_id,
+            "productLabel": definition.get("label", product_id),
+            "eventType": reference["eventType"],
+            "direction": reference.get("direction"),
+            "excerpt": reference["excerpt"],
+            "matchedText": reference["matchedText"],
+            "matchType": reference["matchType"],
+            "fieldPath": reference["fieldPath"],
+            "entityType": reference["entityType"],
+            "entityId": reference["entityId"],
+            "publishedAt": published_at,
+            "ingestedAt": str(snapshot.get("scrapedAt") or published_at),
+            "sourceEventId": source_event_id,
+            "sourceMessageId": snapshot.get("gmailMessageId"),
+            "sourceUrl": source_url,
+            "contentSha256": content_sha256,
+            "parserVersion": PARSER_VERSION,
+            "qualityStatus": "validated",
+            **(
+                {"signalValue": reference["value"]}
+                if reference.get("value") is not None
+                else {}
+            ),
+        }
+        if reference.get("exposureType"):
+            event["exposureType"] = reference["exposureType"]
+            event["exposureId"] = reference["exposureId"]
+            event["exposureLabel"] = reference["exposureLabel"]
+        if product_id in {"risk-ranges", "early-look"}:
+            event["decisionEligible"] = False
+            event["verificationStatus"] = (
+                "requires-primary-publication-manifest"
+                if product_id == "risk-ranges"
+                else "supplemental-only"
+            )
+        elif definition.get("authorities", {}).get("trade"):
+            event["decisionEligible"] = bool(event.get("signalValue"))
+        events.append(event)
+    return events
+
+
+def _conditional_failure(error: ClientError) -> bool:
+    return (
+        error.response.get("Error", {}).get("Code")
+        == "ConditionalCheckFailedException"
+    )
+
+
+def _manifest_checksum(artifacts: List[Dict[str, Any]]) -> str:
+    canonical = [
+        {
+            "artifactId": artifact.get("artifactId"),
+            "contentSha256": artifact.get("contentSha256"),
+            "stage": artifact.get("stage"),
+            "eventCount": int(artifact.get("eventCount", 0)),
+            "parserVersion": artifact.get("parserVersion"),
+        }
+        for artifact in sorted(
+            artifacts,
+            key=lambda item: str(item.get("artifactId") or ""),
+        )
+    ]
+    return hashlib.sha256(
+        json.dumps(
+            canonical,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def persist_entity_events(
+    events: Iterable[Dict[str, Any]],
+    dynamodb: Any,
+) -> int:
+    table = dynamodb.Table(ENTITY_EVENTS_TABLE)
+    written = 0
+    for event in events:
+        item = {key: value for key, value in event.items() if value is not None}
+        try:
+            table.put_item(
+                Item=item,
+                ConditionExpression=(
+                    "attribute_not_exists(entityKey) AND attribute_not_exists(eventKey)"
+                ),
+            )
+            written += 1
+        except ClientError as error:
+            if not _conditional_failure(error):
+                raise
+    return written
+
+
+def _artifact_id(
+    snapshot: Dict[str, Any],
+    content_sha256: Optional[str],
+) -> str:
+    return str(
+        content_sha256
+        or snapshot.get("gmailMessageId")
+        or snapshot.get("sourceEventId")
+        or hashlib.sha256(
+            json.dumps(snapshot, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+    )
+
+
+def update_product_manifest(
+    snapshot: Dict[str, Any],
+    dynamodb: Any,
+    *,
+    stage: str,
+    content_sha256: Optional[str] = None,
+    event_count: int = 0,
+    error: Optional[str] = None,
+) -> Dict[str, Any]:
+    if stage not in MANIFEST_STAGES:
+        raise ValueError(f"Unsupported manifest stage: {stage}")
+    product_id = str(
+        snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
+    )
+    market_date = str(snapshot.get("date") or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", market_date):
+        raise ValueError(f"Research snapshot has no valid market date: {market_date!r}")
+    definition = product_definition(product_id)
+    table = dynamodb.Table(PRODUCT_MANIFEST_TABLE)
+    key = {"marketDate": market_date, "productKey": product_id}
+    artifact_id = _artifact_id(snapshot, content_sha256)
+    now = datetime.now(timezone.utc).isoformat()
+
+    for _ in range(MAX_MANIFEST_WRITE_RETRIES):
+        existing = table.get_item(Key=key, ConsistentRead=True).get("Item") or {}
+        version = int(existing.get("version", 0))
+        artifacts = {
+            str(item.get("artifactId")): dict(item)
+            for item in existing.get("artifacts", [])
+            if item.get("artifactId")
+        }
+        previous = artifacts.get(artifact_id, {})
+        effective_stage = (
+            "indexed"
+            if previous.get("stage") == "indexed" and stage != "indexed"
+            else stage
+        )
+        stage_history = list(previous.get("stageHistory") or [])
+        transition = {"stage": stage, "at": now}
+        if error:
+            transition["error"] = str(error)[:1000]
+        stage_history.append(transition)
+        artifact = {
+            **previous,
+            "artifactId": artifact_id,
+            "stage": effective_stage,
+            "stageHistory": stage_history[-50:],
+            "sourceMessageId": snapshot.get("gmailMessageId"),
+            "sourceKey": snapshot.get("htmlSource") or snapshot.get("pdfS3Key"),
+            "publishedAt": snapshot.get("publishedAt"),
+            "parserVersion": PARSER_VERSION,
+            "eventCount": max(int(previous.get("eventCount", 0)), int(event_count)),
+            "updatedAt": now,
+        }
+        if content_sha256:
+            artifact["contentSha256"] = content_sha256
+        if product_id in {"risk-ranges", "early-look"}:
+            artifact["decisionEligible"] = False
+            artifact["verificationStatus"] = (
+                "requires-primary-publication-manifest"
+                if product_id == "risk-ranges"
+                else "supplemental-only"
+            )
+        if error and effective_stage != "indexed":
+            artifact["error"] = str(error)[:1000]
+        else:
+            artifact.pop("error", None)
+        artifacts[artifact_id] = {key: value for key, value in artifact.items() if value is not None}
+
+        artifact_list = sorted(artifacts.values(), key=lambda item: item["artifactId"])
+        counts = {
+            "receivedCount": len(artifact_list),
+            "parsedCount": sum(
+                item.get("stage") in {"parsed", "validated", "indexed"}
+                for item in artifact_list
+            ),
+            "validatedCount": sum(
+                item.get("stage") in {"validated", "indexed"}
+                for item in artifact_list
+            ),
+            "indexedCount": sum(item.get("stage") == "indexed" for item in artifact_list),
+            "failedCount": sum(item.get("stage") == "failed" for item in artifact_list),
+        }
+        state = (
+            "failed"
+            if counts["failedCount"]
+            else "indexed"
+            if counts["indexedCount"] == counts["receivedCount"]
+            else "validated"
+            if counts["validatedCount"] == counts["receivedCount"]
+            else "parsed"
+            if counts["parsedCount"] == counts["receivedCount"]
+            else "received"
+        )
+        item = {
+            **key,
+            "schemaVersion": 1,
+            "label": definition.get("label", product_id),
+            "cadence": definition.get("cadence", "unsupported"),
+            "state": state,
+            **counts,
+            "entityEventCount": sum(
+                int(entry.get("eventCount", 0)) for entry in artifact_list
+            ),
+            "manifestChecksum": _manifest_checksum(artifact_list),
+            "artifacts": artifact_list,
+            "parserVersion": PARSER_VERSION,
+            "updatedAt": now,
+            "version": version + 1,
+        }
+        try:
+            kwargs: Dict[str, Any] = {"Item": item}
+            if existing:
+                kwargs.update(
+                    {
+                        "ConditionExpression": "#version = :expectedVersion",
+                        "ExpressionAttributeNames": {"#version": "version"},
+                        "ExpressionAttributeValues": {":expectedVersion": version},
+                    }
+                )
+            else:
+                kwargs["ConditionExpression"] = (
+                    "attribute_not_exists(marketDate) AND attribute_not_exists(productKey)"
+                )
+            table.put_item(**kwargs)
+            return item
+        except ClientError as write_error:
+            if not _conditional_failure(write_error):
+                raise
+    raise RuntimeError(f"Unable to update product manifest for {market_date}/{product_id}")
+
+
+def persist_snapshot_intelligence(
+    snapshot: Dict[str, Any],
+    dynamodb: Any,
+    *,
+    content_sha256: Optional[str] = None,
+) -> int:
+    events = build_entity_events(snapshot, content_sha256=content_sha256)
+    product_id = str(
+        snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
+    )
+    definition = product_definition(product_id)
+    # Tracker HTML frequently contains charts but not the published Trade
+    # table. Do not issue an indexed manifest for that auxiliary artifact; the
+    # PDF parser must provide at least one structured Trade signal.
+    tracker_without_signals = definition.get("authorities", {}).get("trade") and not any(
+        event.get("eventType") == "trade_signal" and event.get("signalValue")
+        for event in events
+    )
+    update_product_manifest(
+        snapshot,
+        dynamodb,
+        stage="received",
+        content_sha256=content_sha256,
+    )
+    update_product_manifest(
+        snapshot,
+        dynamodb,
+        stage="parsed",
+        content_sha256=content_sha256,
+    )
+    if tracker_without_signals:
+        return 0
+    update_product_manifest(
+        snapshot,
+        dynamodb,
+        stage="validated",
+        content_sha256=content_sha256,
+        event_count=len(events),
+    )
+    persist_entity_events(events, dynamodb)
+    update_product_manifest(
+        snapshot,
+        dynamodb,
+        stage="indexed",
+        content_sha256=content_sha256,
+        event_count=len(events),
+    )
+    return len(events)
+
+
+def persist_snapshot_failure(
+    snapshot: Dict[str, Any],
+    dynamodb: Any,
+    *,
+    content_sha256: Optional[str] = None,
+    error: Exception | str,
+) -> Dict[str, Any]:
+    return update_product_manifest(
+        snapshot,
+        dynamodb,
+        stage="failed",
+        content_sha256=content_sha256,
+        error=str(error),
+    )
