@@ -4155,6 +4155,8 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
         cryptoCount: item.cryptoCount,
         rankingCount: item.rankingCount,
         itemCount: item.itemCount,
+        signalCount: item.signalCount,
+        chartCount: item.chartCount,
       },
       article: item.article,
       htmlSource: item.htmlSource,

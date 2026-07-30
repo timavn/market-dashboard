@@ -6,8 +6,10 @@ from __future__ import annotations
 import base64
 import json
 import os
+import struct
 import sys
 import unittest
+import zlib
 from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -27,6 +29,44 @@ import parse_hedgeye_email_html as email_parser
 
 
 GMAIL_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "gmail"
+
+
+def market_situation_signal_png(
+    selections=(2, 2, 1, 0),
+    *,
+    width=600,
+    height=240,
+) -> bytes:
+    pixels = [bytearray([255, 255, 255] * width) for _ in range(height)]
+    colors = ((0, 128, 0), (255, 165, 0), (255, 0, 0))
+    centers = (0.412, 0.585, 0.758)
+    box_width = 108
+    for row_index, selection_index in enumerate(selections):
+        center_x = round(width * centers[selection_index])
+        start_x = center_x - (box_width // 2)
+        start_y = 20 + (row_index * 50)
+        for y in range(start_y, start_y + 32):
+            for x in range(start_x, start_x + box_width):
+                offset = x * 3
+                pixels[y][offset:offset + 3] = bytes(colors[selection_index])
+
+    raw = b"".join(b"\x00" + bytes(row) for row in pixels)
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+
+    def chunk(kind, payload):
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
 
 
 def conditional_failure() -> ClientError:
@@ -2265,6 +2305,116 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(snapshot["snapshotType"], "investing-ideas")
         self.assertFalse(snapshot["data"]["checkpointAvailable"])
         self.assertEqual([row["ticker"] for row in snapshot["data"]["alerts"]], ["SXT", "SJM", "GTLB"])
+
+    def test_market_situation_report_is_classified_and_materialized_as_structured_signals(self):
+        subject = (
+            "MARKET SITUATION REPORT: July 30th 2026 | "
+            "Structurally Vulnerable Setup"
+        )
+        self.assertEqual(
+            ingestor.infer_report_type("message-body.html", subject),
+            "market-structure",
+        )
+
+        source_root = (
+            "https://d1yhils6iwh5l5.cloudfront.net/"
+            "charts/resized/158506/original"
+        )
+        html_body = f"""
+            <html><body>
+              <div>07/30/2026 06:30 AM EDT</div>
+              <div class="headline">{subject}</div>
+              <img class="chart"
+                   src="{source_root}/signals.png?src=email&amp;email=subscriber@example.com">
+              <img class="chart"
+                   src="{source_root}/term-structure.png?src=email&amp;email=subscriber@example.com">
+              <p>To access the full Market Situation Report -> Click Here</p>
+              <p>Short gamma and systematic selling leave the market structurally vulnerable.</p>
+              <p>Disclaimer: research use only.</p>
+            </body></html>
+        """
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 7, 30, 13, 30, tzinfo=timezone.utc),
+            s3_key="hedgeye-email/messages/2026-07-30/market-structure/message.html",
+            message_id="market-situation-2026-07-30",
+            subject=subject,
+            image_fetcher=lambda _url: market_situation_signal_png(),
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["snapshotType"], "market-structure")
+        self.assertEqual(snapshot["date"], "2026-07-30")
+        self.assertEqual(snapshot["signalCount"], 4)
+        self.assertEqual(snapshot["chartCount"], 2)
+        self.assertEqual(
+            [(signal["label"], signal["value"], signal["tone"]) for signal in snapshot["data"]["signals"]],
+            [
+                ("SPX Gamma Exposure", "Negative", "negative"),
+                ("Systematic Flow Risk", "Bearish", "negative"),
+                ("PV Band Risk/Reward", "Neutral", "neutral"),
+                ("Strategic Allocation", "Risk On", "positive"),
+            ],
+        )
+        self.assertEqual(
+            snapshot["data"]["signalMatrixImageUrl"],
+            f"{source_root}/signals.png",
+        )
+        self.assertNotIn("subscriber@example.com", json.dumps(snapshot))
+        self.assertIn(
+            "structurally vulnerable",
+            snapshot["article"]["summary"].lower(),
+        )
+
+    def test_market_situation_report_fails_closed_when_signal_matrix_is_incomplete(self):
+        html_body = """
+            <div>07/30/2026 06:30 AM EDT</div>
+            <img class="chart"
+                 src="https://d1yhils6iwh5l5.cloudfront.net/charts/signals.png">
+        """
+
+        with self.assertRaisesRegex(ValueError, "four verified selections"):
+            ingestor.parse_html_snapshot(
+                report_type="market-structure",
+                html_body=html_body,
+                received_at=datetime(2026, 7, 30, 13, 30, tzinfo=timezone.utc),
+                s3_key="market-structure/message.html",
+                message_id="incomplete-market-situation",
+                image_fetcher=lambda _url: market_situation_signal_png(
+                    selections=(2, 2, 1),
+                ),
+            )
+
+    def test_explicit_version_backfill_reclassifies_previously_unknown_market_situation_email(self):
+        legacy_item = {
+            "status": "UNSUPPORTED",
+            "attachmentId": "message-body-html-0",
+            "mimeType": "text/html",
+            "filename": "message-body.html",
+            "subject": (
+                "MARKET SITUATION REPORT: July 30th 2026 | "
+                "Structurally Vulnerable Setup"
+            ),
+            "reportType": "unknown",
+            "s3Bucket": "research",
+            "s3Key": "messages/market-situation.html",
+            "materializationAttemptVersion": "older-parser",
+        }
+
+        self.assertFalse(
+            ingestor._should_backfill_materialized_snapshot(
+                legacy_item,
+                allow_version_upgrade=False,
+            )
+        )
+        self.assertTrue(
+            ingestor._should_backfill_materialized_snapshot(
+                legacy_item,
+                allow_version_upgrade=True,
+            )
+        )
 
     def test_article_only_call_and_macro_show_emails_materialize_without_inventing_positions(self):
         cases = (

@@ -11,9 +11,13 @@ import json
 import math
 import os
 import re
+import struct
+import urllib.parse
+import urllib.request
+import zlib
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
@@ -40,6 +44,35 @@ DYNAMODB_TRANSACTION_MAX_OPERATIONS = 100
 DYNAMODB_TRANSACTION_CHUNK_SIZE = 20
 DYNAMODB_ITEM_MAX_BYTES = 400 * 1024
 DYNAMODB_TRANSACTION_MAX_BYTES = 4 * 1024 * 1024
+MARKET_SITUATION_IMAGE_HOST = "d1yhils6iwh5l5.cloudfront.net"
+MARKET_SITUATION_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+MARKET_SITUATION_SIGNAL_ROWS = (
+    (
+        "spxGammaExposure",
+        "SPX Gamma Exposure",
+        ("Positive", "Neutral", "Negative"),
+    ),
+    (
+        "systematicFlowRisk",
+        "Systematic Flow Risk",
+        ("Bullish", "Neutral", "Bearish"),
+    ),
+    (
+        "pvBandRiskReward",
+        "PV Band Risk/Reward",
+        ("Long", "Neutral", "Short"),
+    ),
+    (
+        "strategicAllocation",
+        "Strategic Allocation",
+        ("Risk On", "Neutral", "Risk Off"),
+    ),
+)
+MARKET_SITUATION_SIGNAL_COLORS = {
+    (0, 128, 0): (0, "positive"),
+    (255, 165, 0): (1, "neutral"),
+    (255, 0, 0): (2, "negative"),
+}
 
 
 TICKER_MAP = {
@@ -228,6 +261,236 @@ def _extract_chart_items(html_body: str) -> List[Dict[str, str]]:
             continue
         charts.append({"name": name, "url": url})
     return charts
+
+
+def _sanitize_research_image_url(url: str) -> Optional[str]:
+    """Keep the public source image while removing subscriber tracking data."""
+    try:
+        parsed = urllib.parse.urlsplit(html.unescape(str(url or "")).strip())
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or parsed.hostname != MARKET_SITUATION_IMAGE_HOST:
+        return None
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _fetch_market_situation_image(url: str) -> bytes:
+    sanitized_url = _sanitize_research_image_url(url)
+    if not sanitized_url:
+        raise ValueError("Market Situation image URL is not an approved Hedgeye source")
+    request = urllib.request.Request(
+        sanitized_url,
+        headers={"User-Agent": "market-dashboard-hermes/1.0"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > MARKET_SITUATION_IMAGE_MAX_BYTES:
+            raise ValueError("Market Situation image exceeds the ingestion size limit")
+        payload = response.read(MARKET_SITUATION_IMAGE_MAX_BYTES + 1)
+    if len(payload) > MARKET_SITUATION_IMAGE_MAX_BYTES:
+        raise ValueError("Market Situation image exceeds the ingestion size limit")
+    return payload
+
+
+def _paeth_predictor(left: int, above: int, upper_left: int) -> int:
+    estimate = left + above - upper_left
+    left_distance = abs(estimate - left)
+    above_distance = abs(estimate - above)
+    upper_left_distance = abs(estimate - upper_left)
+    if left_distance <= above_distance and left_distance <= upper_left_distance:
+        return left
+    if above_distance <= upper_left_distance:
+        return above
+    return upper_left
+
+
+def _decode_png_rows(payload: bytes) -> Tuple[int, int, int, List[bytearray]]:
+    """Decode the small RGB/RGBA PNG subset emitted by the report generator."""
+    if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("Market Situation signal matrix is not a PNG")
+
+    offset = 8
+    width = height = bit_depth = color_type = interlace = None
+    compressed = bytearray()
+    while offset + 12 <= len(payload):
+        chunk_length = struct.unpack(">I", payload[offset:offset + 4])[0]
+        chunk_type = payload[offset + 4:offset + 8]
+        chunk_start = offset + 8
+        chunk_end = chunk_start + chunk_length
+        if chunk_end + 4 > len(payload):
+            raise ValueError("Market Situation PNG is truncated")
+        chunk = payload[chunk_start:chunk_end]
+        if chunk_type == b"IHDR":
+            if len(chunk) != 13:
+                raise ValueError("Market Situation PNG has an invalid header")
+            width, height, bit_depth, color_type, compression, filtering, interlace = struct.unpack(
+                ">IIBBBBB",
+                chunk,
+            )
+            if compression != 0 or filtering != 0:
+                raise ValueError("Market Situation PNG uses an unsupported encoding")
+        elif chunk_type == b"IDAT":
+            compressed.extend(chunk)
+        elif chunk_type == b"IEND":
+            break
+        offset = chunk_end + 4
+
+    if (
+        not width
+        or not height
+        or width > 5000
+        or height > 2000
+        or width * height > 5_000_000
+        or bit_depth != 8
+        or color_type not in {2, 6}
+        or interlace != 0
+    ):
+        raise ValueError("Market Situation PNG format is unsupported")
+
+    bytes_per_pixel = 3 if color_type == 2 else 4
+    stride = width * bytes_per_pixel
+    decoded = zlib.decompress(bytes(compressed))
+    expected_length = height * (stride + 1)
+    if len(decoded) != expected_length:
+        raise ValueError("Market Situation PNG scanlines are incomplete")
+
+    rows: List[bytearray] = []
+    cursor = 0
+    previous = bytearray(stride)
+    for _ in range(height):
+        filter_type = decoded[cursor]
+        cursor += 1
+        raw = decoded[cursor:cursor + stride]
+        cursor += stride
+        row = bytearray(stride)
+        for index, value in enumerate(raw):
+            left = row[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+            above = previous[index]
+            upper_left = previous[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+            if filter_type == 0:
+                predictor = 0
+            elif filter_type == 1:
+                predictor = left
+            elif filter_type == 2:
+                predictor = above
+            elif filter_type == 3:
+                predictor = (left + above) // 2
+            elif filter_type == 4:
+                predictor = _paeth_predictor(left, above, upper_left)
+            else:
+                raise ValueError("Market Situation PNG uses an unsupported row filter")
+            row[index] = (value + predictor) & 0xFF
+        rows.append(row)
+        previous = row
+    return width, height, bytes_per_pixel, rows
+
+
+def _extract_market_situation_signals(payload: bytes) -> List[Dict[str, str]]:
+    width, height, bytes_per_pixel, rows = _decode_png_rows(payload)
+    row_hits: List[Dict[str, Any]] = []
+    minimum_pixels_per_scanline = max(20, width // 20)
+
+    for y, row in enumerate(rows):
+        counts: Dict[Tuple[int, int, int], int] = {}
+        x_sums: Dict[Tuple[int, int, int], int] = {}
+        for offset in range(0, len(row), bytes_per_pixel):
+            color = tuple(row[offset:offset + 3])
+            if color not in MARKET_SITUATION_SIGNAL_COLORS:
+                continue
+            counts[color] = counts.get(color, 0) + 1
+            x_sums[color] = x_sums.get(color, 0) + (offset // bytes_per_pixel)
+        total = sum(counts.values())
+        if total < minimum_pixels_per_scanline:
+            continue
+        dominant_color = max(counts, key=counts.get)
+        row_hits.append(
+            {
+                "y": y,
+                "count": counts[dominant_color],
+                "xSum": x_sums[dominant_color],
+                "color": dominant_color,
+            }
+        )
+
+    bands: List[Dict[str, Any]] = []
+    for hit in row_hits:
+        if (
+            not bands
+            or hit["y"] > bands[-1]["lastY"] + 1
+            or hit["color"] != bands[-1]["color"]
+        ):
+            bands.append(
+                {
+                    "firstY": hit["y"],
+                    "lastY": hit["y"],
+                    "count": hit["count"],
+                    "xSum": hit["xSum"],
+                    "color": hit["color"],
+                }
+            )
+        else:
+            bands[-1]["lastY"] = hit["y"]
+            bands[-1]["count"] += hit["count"]
+            bands[-1]["xSum"] += hit["xSum"]
+
+    minimum_band_pixels = max(500, int(width * height * 0.002))
+    signal_bands = [band for band in bands if band["count"] >= minimum_band_pixels]
+    if len(signal_bands) != len(MARKET_SITUATION_SIGNAL_ROWS):
+        raise ValueError(
+            "Market Situation signal matrix did not contain four verified selections"
+        )
+
+    signals = []
+    expected_centers = (0.412, 0.585, 0.758)
+    for row_definition, band in zip(MARKET_SITUATION_SIGNAL_ROWS, signal_bands):
+        signal_id, label, choices = row_definition
+        x_center = (band["xSum"] / band["count"]) / width
+        choice_index = min(
+            range(len(expected_centers)),
+            key=lambda index: abs(expected_centers[index] - x_center),
+        )
+        color_choice_index, tone = MARKET_SITUATION_SIGNAL_COLORS[band["color"]]
+        if choice_index != color_choice_index:
+            raise ValueError(
+                f"Market Situation {label} selection failed color/position verification"
+            )
+        signals.append(
+            {
+                "id": signal_id,
+                "label": label,
+                "value": choices[choice_index],
+                "tone": tone,
+            }
+        )
+    return signals
+
+
+def _extract_market_situation_summary(text: str) -> Optional[str]:
+    match = re.search(
+        r"To access the full Market Situation Report\s*[-=]*>\s*Click Here\s+(.+)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    summary = re.split(
+        r"(?:Disclaimer|Copyright|Unsubscribe|Click Here to Learn More)",
+        match.group(1),
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    summary = re.sub(
+        r"\(\s*VIEW LARGER IMAGE\s*\)",
+        " ",
+        summary,
+        flags=re.IGNORECASE,
+    )
+    summary = re.sub(r"\s+", " ", summary).strip()
+    if len(summary) > 2400:
+        sentence_end = summary.rfind(". ", 0, 2400)
+        summary = summary[:sentence_end + 1 if sentence_end >= 1200 else 2400].rstrip()
+    return summary or None
 
 
 def _extract_message_date(text: str, fallback: datetime) -> Tuple[str, str]:
@@ -1021,8 +1284,50 @@ def parse_html_snapshot(
     s3_key: str,
     message_id: str,
     subject: Optional[str] = None,
+    image_fetcher: Optional[Callable[[str], bytes]] = None,
 ) -> Optional[Dict[str, Any]]:
     text = _strip_tags(html_body)
+
+    if report_type == "market-structure":
+        charts = []
+        for item in _extract_chart_items(html_body):
+            sanitized_url = _sanitize_research_image_url(item["url"])
+            if sanitized_url:
+                charts.append({**item, "url": sanitized_url})
+        if not charts:
+            return None
+
+        signal_matrix = charts[0]
+        signal_image = (image_fetcher or _fetch_market_situation_image)(
+            signal_matrix["url"]
+        )
+        signals = _extract_market_situation_signals(signal_image)
+        snapshot = _base_snapshot(
+            snapshot_type="market-structure",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        snapshot["article"]["headline"] = (
+            snapshot["article"].get("headline") or subject
+        )
+        snapshot["article"]["summary"] = _extract_market_situation_summary(text)
+        snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
+        snapshot["article"]["charts"] = charts
+        snapshot["article"].pop("bodyText", None)
+        snapshot["article"].pop("teaser", None)
+        snapshot["signalCount"] = len(signals)
+        snapshot["chartCount"] = len(charts)
+        snapshot["data"] = {
+            "signals": signals,
+            "signalMatrixImageUrl": signal_matrix["url"],
+            "charts": charts,
+            "sourceAttribution": "Tier 1 Alpha · presented by Hedgeye",
+        }
+        return snapshot
 
     if report_type == "early-look":
         levels = _extract_levels_from_text(text)

@@ -4,18 +4,19 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import CFTCNetLongCard from './CFTCNetLongCard';
 import DollarLiquidityModels from './DollarLiquidityModels';
 import GlobalQuadsCard from './GlobalQuadsCard';
+import MarketSituationReportCard, {
+  getMarketSituationFreshness,
+} from './MarketSituationReportCard';
 import MarketVolumeTable from './MarketVolumeTable';
-import StyleFactorPerformanceCard from './StyleFactorPerformanceCard';
 import DataStatusChip from './DataStatusChip';
 
-const STYLE_STORAGE_KEY = 'styleFactorPerformanceData';
 const QUADS_STORAGE_KEY = 'quadForecast_v3';
 const ANALYTICS_REFRESH_MS = 15 * 60 * 1000;
 const CONTINUOUS_CRYPTO_SYMBOLS = new Set(['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP']);
 
 const PANEL_TITLES = {
   cftc: 'CFTC Positioning',
-  factors: 'Style Factors',
+  situation: 'Market Situation',
   quads: 'Global Quads',
   liquidity: 'Dollar Liquidity',
   volume: 'Volume',
@@ -220,25 +221,21 @@ const CftcPreview = ({ data }) => {
   );
 };
 
-const StylePreview = ({ record }) => {
-  const periods = ['1D', '1M', 'YTD'];
-  const rows = Object.entries(record.rows || {})
-    .filter(([key, value]) => key !== 'lastEditedAt' && value && typeof value === 'object')
-    .filter(([, value]) => periods.some((period) => isFiniteNumber(value[period])))
-    .slice(0, 5);
-  if (rows.length === 0) return <EmptyPreview>No manual factor readings entered</EmptyPreview>;
+const MarketSituationPreview = ({ snapshot }) => {
+  const rows = Array.isArray(snapshot?.data?.signals) ? snapshot.data.signals : [];
+  if (rows.length !== 4) return <EmptyPreview>No verified report signals available</EmptyPreview>;
   return (
-    <table className="efr-mini-table">
-      <thead><tr><th>Factor</th>{periods.map((period) => <th key={period}>{period}</th>)}</tr></thead>
+    <table className="efr-mini-table efr-mini-table--situation" aria-label="Market Situation signals">
+      <thead><tr><th>Signal</th><th>Reading</th></tr></thead>
       <tbody>
-        {rows.map(([label, values]) => (
-          <tr key={label}>
-            <td>{label}</td>
-            {periods.map((period) => (
-              <td key={period} className={isFiniteNumber(values[period]) && Number(values[period]) !== 0 ? (Number(values[period]) > 0 ? 'is-positive' : 'is-negative') : ''}>
-                {formatSigned(values[period], '%')}
-              </td>
-            ))}
+        {rows.map((signal) => (
+          <tr key={signal.id || signal.label}>
+            <td>{signal.label}</td>
+            <td>
+              <span className={`efr-situation-reading efr-situation-reading--${signal.tone || 'neutral'}`}>
+                {signal.value}
+              </span>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -302,15 +299,25 @@ const LiquidityPreview = ({ data }) => {
   );
 };
 
-const FullReferencePanel = ({ activePanel, onClose }) => {
+const FullReferencePanel = ({
+  activePanel,
+  onClose,
+  marketSituationState,
+}) => {
   const title = PANEL_TITLES[activePanel];
   const dialogRef = useRef(null);
   const panel = useMemo(() => {
     switch (activePanel) {
       case 'cftc':
         return <CFTCNetLongCard />;
-      case 'factors':
-        return <StyleFactorPerformanceCard />;
+      case 'situation':
+        return (
+          <MarketSituationReportCard
+            snapshot={marketSituationState.data}
+            loading={marketSituationState.loading}
+            error={marketSituationState.error}
+          />
+        );
       case 'quads':
         return <GlobalQuadsCard />;
       case 'liquidity':
@@ -320,7 +327,7 @@ const FullReferencePanel = ({ activePanel, onClose }) => {
       default:
         return null;
     }
-  }, [activePanel]);
+  }, [activePanel, marketSituationState]);
 
   useEffect(() => {
     if (!activePanel) return undefined;
@@ -378,14 +385,17 @@ const FullReferencePanel = ({ activePanel, onClose }) => {
 const RadarReferencePanels = () => {
   const [activePanel, setActivePanel] = useState(null);
   const [cftcState, setCftcState] = useState({ data: null, loading: true, error: null });
+  const [marketSituationState, setMarketSituationState] = useState({
+    data: null,
+    loading: true,
+    error: null,
+  });
   const [liquidityState, setLiquidityState] = useState({ data: null, loading: true, error: null });
   const [volumeMeta, setVolumeMeta] = useState({ sources: [], asOf: null, datasetStatus: null });
-  const [styleRecord, setStyleRecord] = useState(() => readManualRecord(STYLE_STORAGE_KEY));
   const [quadsRecord, setQuadsRecord] = useState(() => readManualRecord(QUADS_STORAGE_KEY));
   const lastTriggerRef = useRef(null);
 
   const refreshManualRecords = useCallback(() => {
-    setStyleRecord(readManualRecord(STYLE_STORAGE_KEY));
     setQuadsRecord(readManualRecord(QUADS_STORAGE_KEY));
   }, []);
 
@@ -394,12 +404,21 @@ const RadarReferencePanels = () => {
     const fetchReferenceData = async () => {
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
       setCftcState((current) => ({ ...current, loading: !current.data, error: null }));
+      setMarketSituationState((current) => ({
+        ...current,
+        loading: !current.data,
+        error: null,
+      }));
       setLiquidityState((current) => ({ ...current, loading: !current.data, error: null }));
 
-      const [cftcResult, liquidityResult] = await Promise.allSettled([
+      const [cftcResult, marketSituationResult, liquidityResult] = await Promise.allSettled([
         fetch(`${backendUrl}/api/hedgeye/snapshot/cftc-positioning`).then(async (response) => {
           const payload = await response.json();
           if (!response.ok) throw new Error(payload?.error || `CFTC request failed (${response.status})`);
+          return payload;
+        }),
+        MarketDataService.getHedgeyeSnapshot('market-structure').then((payload) => {
+          if (!payload) throw new Error('No Market Situation snapshot found');
           return payload;
         }),
         MarketDataService.getDollarLiquidityModels(),
@@ -409,6 +428,13 @@ const RadarReferencePanels = () => {
       setCftcState(cftcResult.status === 'fulfilled'
         ? { data: cftcResult.value, loading: false, error: null }
         : { data: null, loading: false, error: cftcResult.reason?.message || 'Unavailable' });
+      setMarketSituationState(marketSituationResult.status === 'fulfilled'
+        ? { data: marketSituationResult.value, loading: false, error: null }
+        : {
+          data: null,
+          loading: false,
+          error: marketSituationResult.reason?.message || 'Unavailable',
+        });
       setLiquidityState(liquidityResult.status === 'fulfilled'
         ? { data: liquidityResult.value, loading: false, error: null }
         : { data: null, loading: false, error: liquidityResult.reason?.message || 'Unavailable' });
@@ -443,6 +469,7 @@ const RadarReferencePanels = () => {
   }, [refreshManualRecords]);
 
   const cftcDate = cftcState.data?.date || cftcState.data?.asOf || null;
+  const marketSituationFreshness = getMarketSituationFreshness(marketSituationState.data);
   const liquidityDate =
     liquidityState.data?.models?.us?.latest?.date ||
     liquidityState.data?.models?.global?.latest?.date ||
@@ -505,13 +532,17 @@ const RadarReferencePanels = () => {
             <CftcPreview data={cftcState.data} />
           </PreviewCard>
           <PreviewCard
-            id="factors"
-            title="Style Factors"
-            status="manual"
-            statusDetail={styleRecord.lastEditedAt ? formatDate(styleRecord.lastEditedAt) : 'NO AS-OF'}
+            id="situation"
+            title="Market Situation"
+            status={marketSituationState.loading ? 'loading' : marketSituationFreshness.status}
+            statusLabel={marketSituationFreshness.label}
+            statusDetail={marketSituationFreshness.detail}
+            statusIssues={marketSituationState.error
+              ? [`Market Situation request: ${marketSituationState.error}`]
+              : []}
             onOpen={openPanel}
           >
-            <StylePreview record={styleRecord} />
+            <MarketSituationPreview snapshot={marketSituationState.data} />
           </PreviewCard>
           <PreviewCard
             id="quads"
@@ -555,6 +586,7 @@ const RadarReferencePanels = () => {
       <FullReferencePanel
         activePanel={activePanel}
         onClose={closePanel}
+        marketSituationState={marketSituationState}
       />
     </>
   );

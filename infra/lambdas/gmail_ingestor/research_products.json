@@ -283,9 +283,10 @@
     },
     {
       "id": "market-structure",
-      "label": "Market Structure",
+      "label": "Market Situation Report",
       "cadence": "event_driven",
       "matchTerms": [
+        "market situation report",
         "market structure"
       ],
             "parserModes": [

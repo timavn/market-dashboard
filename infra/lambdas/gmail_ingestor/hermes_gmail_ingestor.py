@@ -2393,6 +2393,7 @@ def backfill_html_snapshot(
                 event_count=entity_event_count,
             )
         materialization_extra = {
+            "reportType": snapshot["reportType"],
             "snapshotType": snapshot["snapshotType"],
             "snapshotDate": snapshot["date"],
             "snapshotSource": snapshot["source"],
@@ -2457,7 +2458,10 @@ def _should_backfill_materialized_snapshot(
     *,
     allow_version_upgrade: bool = False,
 ) -> bool:
-    if item.get("status") not in {"STORED", "DUPLICATE", "INDEXED"}:
+    status = str(item.get("status") or "")
+    if status not in {"STORED", "DUPLICATE", "INDEXED"} and not (
+        allow_version_upgrade and status == "UNSUPPORTED"
+    ):
         return False
     if not str(item.get("attachmentId") or "").startswith("message-body-"):
         return False
@@ -2468,6 +2472,13 @@ def _should_backfill_materialized_snapshot(
 
     report_type = str(item.get("snapshotType") or item.get("reportType") or "unknown")
     subject = str(item.get("subject") or "")
+    if allow_version_upgrade:
+        inferred_report_type = infer_report_type(
+            str(item.get("filename") or ""),
+            subject,
+        )
+        if inferred_report_type != "unknown":
+            report_type = inferred_report_type
     is_materializable = report_type in RESEARCH_EVENT_SNAPSHOT_TYPES or bool(
         re.search(r"\b\d+\s+Changes?:", subject, re.IGNORECASE)
     )
@@ -2847,6 +2858,13 @@ def process_message(
                 allow_version_upgrade=allow_version_backfill,
             ):
                 report_type = str(item.get("reportType") or "unknown")
+                if allow_version_backfill:
+                    inferred_report_type = infer_report_type(
+                        filename,
+                        str(item.get("subject") or ""),
+                    )
+                    if inferred_report_type != "unknown":
+                        report_type = inferred_report_type
                 backfilled = backfill_html_snapshot(
                     table=table,
                     message_id=message_id,

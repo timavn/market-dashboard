@@ -13,6 +13,7 @@ jest.mock('axios', () => ({ get: jest.fn() }));
 jest.mock('../../services/api/marketDataService', () => ({
   MarketDataService: {
     getDollarLiquidityModels: jest.fn(),
+    getHedgeyeSnapshot: jest.fn(),
     getMarketShareVolume: jest.fn(),
   },
 }));
@@ -169,7 +170,9 @@ describe('radar reference data guards', () => {
 
 describe('radar reference volume card', () => {
   beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-07-13T21:00:00.000Z').getTime());
     MarketDataService.getDollarLiquidityModels.mockResolvedValue({ models: {} });
+    MarketDataService.getHedgeyeSnapshot.mockResolvedValue(null);
     MarketDataService.getMarketShareVolume.mockReset();
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -178,6 +181,7 @@ describe('radar reference volume card', () => {
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     delete global.fetch;
   });
 
@@ -194,13 +198,57 @@ describe('radar reference volume card', () => {
     expect(within(referenceBar).queryByRole('heading', { name: 'Normal / Reference' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByText('Select any panel for the full source view')).not.toBeInTheDocument();
     const cards = within(referenceBar).getAllByRole('region');
+    const situation = screen.getByRole('region', { name: 'Market Situation' });
     const liquidity = screen.getByRole('region', { name: 'Dollar Liquidity' });
     const volume = screen.getByRole('region', { name: 'Volume' });
     expect(cards).toHaveLength(5);
+    expect(cards[1]).toBe(situation);
     expect(cards[3]).toBe(liquidity);
     expect(cards[4]).toBe(volume);
+    expect(within(referenceBar).queryByRole('region', { name: 'Style Factors' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Currencies' })).not.toBeInTheDocument();
     await within(volume).findByLabelText('UNAVAILABLE');
+  });
+
+  test('replaces manual Style Factors with the verified Market Situation signals', async () => {
+    MarketDataService.getHedgeyeSnapshot.mockResolvedValue({
+      date: '2026-07-13',
+      snapshotType: 'market-structure',
+      article: {
+        headline: 'MARKET SITUATION REPORT: STRUCTURALLY VULNERABLE SETUP',
+      },
+      data: {
+        signals: [
+          { id: 'gamma', label: 'SPX Gamma Exposure', value: 'Negative', tone: 'negative' },
+          { id: 'flow', label: 'Systematic Flow Risk', value: 'Bearish', tone: 'negative' },
+          { id: 'pv', label: 'PV Band Risk/Reward', value: 'Neutral', tone: 'neutral' },
+          { id: 'allocation', label: 'Strategic Allocation', value: 'Risk On', tone: 'positive' },
+        ],
+        signalMatrixImageUrl: 'https://d1yhils6iwh5l5.cloudfront.net/charts/signals.png',
+        charts: [],
+      },
+    });
+    MarketDataService.getMarketShareVolume.mockResolvedValue({
+      totalMarket: [],
+      totalExchange: [],
+      meta: { status: 'missing' },
+    });
+
+    render(<RadarReferencePanels />);
+
+    const panel = screen.getByRole('region', { name: 'Market Situation' });
+    expect(await within(panel).findByText('SPX Gamma Exposure')).toBeInTheDocument();
+    expect(within(panel).getByText('Negative')).toHaveClass('efr-situation-reading--negative');
+    expect(within(panel).getByText('Bearish')).toHaveClass('efr-situation-reading--negative');
+    expect(within(panel).getByText('Neutral')).toHaveClass('efr-situation-reading--neutral');
+    expect(within(panel).getByText('Risk On')).toHaveClass('efr-situation-reading--positive');
+    expect(within(panel).getByLabelText('AS OF · JUL 13, 2026'))
+      .toHaveAttribute('data-status', 'historical');
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Market Situation' }));
+    const dialog = screen.getByRole('dialog', { name: 'Market Situation' });
+    expect(within(dialog).getByText('Market Situation Report')).toBeInTheDocument();
+    expect(within(dialog).getByText('Published signal matrix')).toBeInTheDocument();
   });
 
   test('surfaces a provisional dataset with its as-of date', async () => {
