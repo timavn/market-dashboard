@@ -200,6 +200,124 @@ describe('getPortfolioSidebarBanner', () => {
 });
 
 describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
+  it('stays blue while the first portfolio snapshot is loading after connection discovery', () => {
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: null,
+      loading: true,
+      rtaPositions: null,
+      etfProSnapshot: null,
+      predictionMarketProviderStatus: null,
+    });
+
+    expect(status.status).toBe('stale');
+    expect(status.emoji).toBe('🔵');
+    expect(status.sources).toEqual([
+      expect.objectContaining({
+        id: 'ibkr',
+        detail: 'Checking connection…',
+      }),
+    ]);
+  });
+
+  it('returns red after loading settles with a real offline response', () => {
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: false, kind: 'gateway_offline' },
+      portfolioData: { dataSource: 'ibkr_offline' },
+      loading: false,
+      rtaPositions: null,
+      etfProSnapshot: null,
+      predictionMarketProviderStatus: null,
+    });
+
+    expect(status.status).toBe('inactive');
+    expect(status.emoji).toBe('🔴');
+  });
+
+  it('adds only the exact current interest validation state to portfolio status', () => {
+    const now = Date.now();
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio(),
+      loading: false,
+      interestValidation: {
+        source: 'ibkr_interest_validation',
+        available: true,
+        accountMatched: true,
+        requestedAccount: 'U25779973',
+        generatedAt: new Date(now).toISOString(),
+        modelStatus: 'learning',
+      },
+      selectedAccount: 'U25779973',
+      now,
+    });
+
+    expect(status.status).toBe('stale');
+    expect(status.emoji).toBe('🟡');
+    expect(status.sources.find((source) => source.id === 'interest-validation'))
+      .toEqual(expect.objectContaining({
+        label: 'Interest validation',
+        stateLabel: 'Learning',
+        detail: 'Learning',
+        detailRows: [],
+        status: 'stale',
+      }));
+  });
+
+  it('fails stale, wrong-account, and unavailable validation status closed', () => {
+    const now = Date.now();
+    const base = {
+      source: 'ibkr_interest_validation',
+      available: true,
+      accountMatched: true,
+      requestedAccount: 'U25779973',
+      generatedAt: new Date(now).toISOString(),
+      modelStatus: 'validated',
+    };
+
+    for (const interestValidation of [
+      { ...base, requestedAccount: 'U00000000' },
+      { ...base, generatedAt: new Date(now - (3 * 60 * 1000)).toISOString() },
+      { ...base, available: false },
+    ]) {
+      const status = getIbkrPortfolioStatusDot({
+        connection: { connected: true, kind: 'connected' },
+        portfolioData: livePortfolio(),
+        loading: false,
+        interestValidation,
+        selectedAccount: 'U25779973',
+        now,
+      });
+      expect(status.sources.find((source) => source.id === 'interest-validation'))
+        .toEqual(expect.objectContaining({
+          stateLabel: 'Unavailable',
+          detailRows: [],
+          status: 'defective',
+        }));
+      expect(status.status).toBe('inactive');
+      expect(status.emoji).toBe('🔴');
+    }
+  });
+
+  it('shows checking only when no current validation snapshot exists', () => {
+    const status = getIbkrPortfolioStatusDot({
+      connection: { connected: true, kind: 'connected' },
+      portfolioData: livePortfolio(),
+      loading: false,
+      interestValidation: null,
+      interestValidationLoading: true,
+      selectedAccount: 'U25779973',
+      now: Date.now(),
+    });
+
+    expect(status.sources.find((source) => source.id === 'interest-validation'))
+      .toEqual(expect.objectContaining({
+        stateLabel: 'Checking',
+        detailRows: [],
+        status: 'loading',
+      }));
+  });
+
   it('ignores fresh RTA and ETF Pro count differences for readiness status', () => {
     const today = currentDate();
     const status = getIbkrPortfolioStatusDot({

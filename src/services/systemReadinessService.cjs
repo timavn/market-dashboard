@@ -28,6 +28,13 @@ const DEFAULT_LAUNCH_AGENT_PATH = path.join(
   os.homedir(),
   'Library/LaunchAgents/com.market-dashboard.stack.plist',
 );
+const DEFAULT_CONTROLLER_STATE_FILE = path.join(
+  os.homedir(),
+  'Library/Application Support/market-dashboard/readiness-controller.json',
+);
+const DEFAULT_SYSTEM_READINESS_CACHE_MS = 5 * 60 * 1000;
+const MIN_SYSTEM_READINESS_CACHE_MS = 5 * 60 * 1000;
+const GIB = 1024 ** 3;
 
 const SERVICE_DEFINITIONS = new Map(
   (SERVICE_MANIFEST.services || []).map((service) => [String(service.id), service]),
@@ -59,9 +66,30 @@ const GMAIL_READINESS_MAX_AGE_MINUTES = Number(
   SERVICE_DEFINITIONS.get('gmail.ingestion')?.readinessMaxAgeMinutes,
 ) || 45;
 
+function hermesBridgeEnabled(env = process.env) {
+  const enabledValues = ['1', 'true', 'yes', 'on', 'enabled'];
+  const legacy = enabledValues
+    .includes(String(env.HERMES_BRIDGE_ENABLED || '').trim().toLowerCase());
+  const partitionEnabled = (name) => (
+    Object.prototype.hasOwnProperty.call(env, name)
+      ? enabledValues.includes(String(env[name] || '').trim().toLowerCase())
+      : legacy
+  );
+  return partitionEnabled('HERMES_OPERATIONS_BRIDGE_ENABLED')
+    || partitionEnabled('HERMES_PORTFOLIO_BRIDGE_ENABLED');
+}
+
 function errorMessage(result) {
   if (!result || result.status !== 'rejected') return null;
   return result.reason?.message || String(result.reason || 'Unknown error');
+}
+
+function isFreshTimestamp(value, now, maxAgeSeconds, maxFutureSeconds = 30) {
+  const observedMs = Date.parse(String(value || ''));
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ''));
+  if (!Number.isFinite(observedMs) || !Number.isFinite(nowMs)) return false;
+  const ageSecondsValue = (nowMs - observedMs) / 1000;
+  return ageSecondsValue >= -maxFutureSeconds && ageSecondsValue <= maxAgeSeconds;
 }
 
 function fulfilledValue(result) {
@@ -130,30 +158,264 @@ async function getLambdaActivity(cloudwatch, functionName, now, windowMinutes) {
     StartTime: new Date(now.getTime() - windowMinutes * 60 * 1000),
     EndTime: now,
     Period: 300,
-    Statistics: ['Sum'],
   };
   try {
-    const [invocationData, errorData] = await Promise.all([
-      cloudwatch.getMetricStatistics({ ...common, MetricName: 'Invocations' }).promise(),
-      cloudwatch.getMetricStatistics({ ...common, MetricName: 'Errors' }).promise(),
+    const [invocationData, errorData, durationData] = await Promise.all([
+      cloudwatch.getMetricStatistics({
+        ...common,
+        MetricName: 'Invocations',
+        Statistics: ['Sum'],
+      }).promise(),
+      cloudwatch.getMetricStatistics({
+        ...common,
+        MetricName: 'Errors',
+        Statistics: ['Sum'],
+      }).promise(),
+      cloudwatch.getMetricStatistics({
+        ...common,
+        MetricName: 'Duration',
+        Statistics: ['Maximum'],
+      }).promise(),
     ]);
     const invocations = (invocationData.Datapoints || [])
       .reduce((sum, point) => sum + Number(point.Sum || 0), 0);
     const errors = (errorData.Datapoints || [])
       .reduce((sum, point) => sum + Number(point.Sum || 0), 0);
-    const latestAt = [...(invocationData.Datapoints || []), ...(errorData.Datapoints || [])]
+    const maxDurationMs = (durationData.Datapoints || [])
+      .reduce((maximum, point) => Math.max(maximum, Number(point.Maximum || 0)), 0);
+    const latestAt = [
+      ...(invocationData.Datapoints || []),
+      ...(errorData.Datapoints || []),
+      ...(durationData.Datapoints || []),
+    ]
       .filter((point) => point.Timestamp)
       .sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp))[0]?.Timestamp || null;
     return {
       functionName,
       invocations,
       errors,
+      maxDurationMs,
+      timedOut: errors > 0 && maxDurationMs >= 295_000,
       latestAt: latestAt ? new Date(latestAt).toISOString() : null,
       windowMinutes,
     };
   } catch (error) {
     return { functionName, error: error.message, windowMinutes };
   }
+}
+
+function getHostCapacity({
+  targetPath = REPO_ROOT,
+  statfs = fs.statfsSync,
+} = {}) {
+  try {
+    const stats = statfs(targetPath);
+    const blockSize = Number(stats.bsize || stats.frsize || 0);
+    const blocks = Number(stats.blocks || 0);
+    const availableBlocks = Number(stats.bavail ?? stats.bfree ?? 0);
+    if (!(blockSize > 0) || !(blocks > 0) || availableBlocks < 0) {
+      throw new Error('Filesystem statistics were incomplete.');
+    }
+    const totalBytes = blockSize * blocks;
+    const freeBytes = blockSize * availableBlocks;
+    return {
+      available: true,
+      targetPath,
+      totalBytes,
+      freeBytes,
+      totalGiB: totalBytes / GIB,
+      freeGiB: freeBytes / GIB,
+      usedPercent: Math.max(0, Math.min(100, (1 - (freeBytes / totalBytes)) * 100)),
+      observedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      available: false,
+      targetPath,
+      error: error.message || String(error),
+      observedAt: new Date().toISOString(),
+    };
+  }
+}
+
+function getControllerState({
+  stateFile = process.env.HERMES_CONTROLLER_STATE_FILE || DEFAULT_CONTROLLER_STATE_FILE,
+  readFile = (file) => fs.readFileSync(file, 'utf8'),
+} = {}) {
+  try {
+    const parsed = JSON.parse(readFile(stateFile));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Controller state was not an object.');
+    }
+    return {
+      available: true,
+      stateFile,
+      ...parsed,
+      incidents: Array.isArray(parsed.incidents) ? parsed.incidents : [],
+      actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+      circuits: Array.isArray(parsed.circuits)
+        ? parsed.circuits
+        : (parsed.circuits && typeof parsed.circuits === 'object'
+          ? Object.values(parsed.circuits)
+          : []),
+    };
+  } catch (error) {
+    return {
+      available: false,
+      stateFile,
+      incidents: [],
+      actions: [],
+      circuits: [],
+      error: error.code === 'ENOENT'
+        ? 'Controller state has not been written yet.'
+        : (error.message || String(error)),
+      errorCode: error.code === 'ENOENT'
+        ? 'HERMES_CONTROLLER_STATE_MISSING'
+        : 'HERMES_CONTROLLER_STATE_INVALID',
+    };
+  }
+}
+
+function buildHostChecks({ capacity, controller, now }) {
+  let capacityCheck;
+  if (!capacity?.available) {
+    capacityCheck = makeCheck({
+      id: 'host.capacity',
+      label: 'Host disk capacity',
+      status: 'fail',
+      blocking: false,
+      owner: 'local-operations',
+      errorCode: 'HOST_CAPACITY_UNAVAILABLE',
+      summary: 'Host disk capacity could not be measured.',
+      detail: capacity?.error || null,
+      observedAt: capacity?.observedAt || now,
+      now,
+      impact: 'ENOSPC risk cannot be evaluated for dashboard state, logs, and checkpoints.',
+      recovery: {
+        kind: 'manual',
+        label: 'Inspect host storage manually. Do not delete non-dashboard files without operator approval.',
+      },
+    });
+  } else {
+    const freeGiB = Number(capacity.freeGiB || 0);
+    const usedPercent = Number(capacity.usedPercent || 0);
+    const status = freeGiB < 15 || usedPercent >= 98
+      ? 'fail'
+      : (freeGiB < 25 || usedPercent >= 90 ? 'warn' : 'pass');
+    capacityCheck = makeCheck({
+      id: 'host.capacity',
+      label: 'Host disk capacity',
+      status,
+      blocking: false,
+      owner: 'local-operations',
+      errorCode: status === 'pass' ? null : (status === 'fail'
+        ? 'HOST_DISK_CAPACITY_CRITICAL'
+        : 'HOST_DISK_CAPACITY_LOW'),
+      summary: `${freeGiB.toFixed(1)} GiB free; ${usedPercent.toFixed(1)}% used.`,
+      detail: status === 'pass'
+        ? 'Free capacity meets the 25 GiB operating target.'
+        : 'Only declared dashboard-owned logs may be pruned automatically.',
+      observedAt: capacity.observedAt || now,
+      now,
+      impact: status === 'pass'
+        ? null
+        : 'Low capacity can prevent atomic state writes, builds, checkpoints, and service recovery.',
+      recovery: status === 'pass' ? null : {
+        kind: 'manual',
+        label: 'Attribute disk usage and restore at least 25 GiB free. Approval is required for non-dashboard deletion.',
+      },
+      provenance: {
+        source: 'fs.statfs',
+        targetPath: capacity.targetPath,
+        freeBytes: capacity.freeBytes,
+        totalBytes: capacity.totalBytes,
+      },
+    });
+  }
+
+  if (!controller?.available) {
+    return [
+      capacityCheck,
+      makeCheck({
+        id: 'hermes.controller',
+        label: 'Hermes reliability controller',
+        status: 'warn',
+        blocking: false,
+        owner: 'automation-operations',
+        errorCode: controller?.errorCode || 'HERMES_CONTROLLER_STATE_MISSING',
+        summary: 'The supervised local reliability controller has not published valid state.',
+        detail: controller?.error || null,
+        observedAt: now,
+        now,
+        impact: 'Readiness remains visible, but eligible low-risk repairs are not being coordinated.',
+        recovery: {
+          kind: 'manual',
+          label: 'Start the repository-owned supervisor with the controller in shadow mode.',
+        },
+      }),
+    ];
+  }
+
+  const controllerObservedAt = controller.observedAt
+    || controller.updatedAt
+    || controller.lastPollAt
+    || null;
+  const controllerAgeSeconds = ageSeconds(controllerObservedAt, now);
+  const openCircuits = controller.circuits.filter((circuit) => (
+    !circuit?.closedAt
+    && (!circuit?.until || new Date(circuit.until) > now)
+  ));
+  const stale = controllerAgeSeconds == null || controllerAgeSeconds > 180;
+  const controllerStatus = String(controller.status || '').toLowerCase();
+  const degraded = ['degraded', 'error', 'failed'].includes(controllerStatus);
+  const circuitOpen = controllerStatus === 'circuit_open' || openCircuits.length > 0;
+  const status = stale || degraded
+    ? 'fail'
+    : (circuitOpen ? 'warn' : 'pass');
+  const controllerError = controller.lastError && typeof controller.lastError === 'object'
+    ? controller.lastError
+    : null;
+  return [
+    capacityCheck,
+    makeCheck({
+      id: 'hermes.controller',
+      label: 'Hermes reliability controller',
+      status,
+      blocking: false,
+      owner: 'automation-operations',
+      errorCode: status === 'pass'
+        ? null
+        : (stale
+          ? 'HERMES_CONTROLLER_STALE'
+          : (degraded
+            ? controllerError?.errorCode || controller.errorCode || 'HERMES_CONTROLLER_DEGRADED'
+            : 'HERMES_CONTROLLER_CIRCUIT_OPEN')),
+      summary: stale
+        ? 'Controller state is stale or missing an observation timestamp.'
+        : (degraded
+          ? `The controller cannot complete its readiness loop (${controllerStatus}).`
+          : `${String(controller.mode || 'shadow')} mode is active${openCircuits.length ? ` with ${openCircuits.length} open circuit(s)` : ''}.`),
+      detail: (controller.inFlightAction || controller.inFlight)
+        ? `Action in flight: ${(controller.inFlightAction || controller.inFlight).actionId || (controller.inFlightAction || controller.inFlight).id || 'unknown'}.`
+        : (controllerError?.detail || controller.error || null),
+      observedAt: controllerObservedAt,
+      nextDueAt: controller.nextRetryAt || null,
+      nextRetryAt: controller.nextRetryAt || null,
+      now,
+      impact: status === 'pass'
+        ? null
+        : 'Automated low-risk repair may be delayed or circuit-broken.',
+      recovery: status === 'pass' ? null : {
+        kind: 'manual',
+        label: 'Inspect controller incident history and leave approval-only actions for the operator.',
+      },
+      provenance: {
+        source: 'controller-state-file',
+        stateFile: controller.stateFile,
+        mode: controller.mode || null,
+      },
+    }),
+  ];
 }
 
 async function getServiceHeartbeat(
@@ -328,6 +590,12 @@ function getSupervisorProvenance({
       const expectedBridge = path.join(repoRoot, 'scripts/ops/hermes_snapshot_bridge.js');
       return [name, {
         pid: childPid,
+        enabled: typeof child?.enabled === 'boolean' ? child.enabled : null,
+        intentionallyDisabled: child?.intentionallyDisabled === true,
+        discoveryVerified: child?.discoveryVerified === true,
+        unexpectedPids: Array.isArray(child?.unexpectedPids)
+          ? child.unexpectedPids.map(value => Number(value)).filter(Number.isInteger)
+          : [],
         status: child?.status || null,
         running: processIsAlive(childPid),
         commandMatches: name === 'bridge' ? childCommand.includes(expectedBridge) : null,
@@ -342,6 +610,13 @@ function getSupervisorProvenance({
       stateFile,
       stateFound: true,
       instanceId: state?.startedAt || null,
+      bridgeEnabled: typeof state?.bridgeEnabled === 'boolean'
+        ? state.bridgeEnabled
+        : (typeof state?.children?.bridge?.enabled === 'boolean'
+          ? state.children.bridge.enabled
+          : (Object.prototype.hasOwnProperty.call(state?.children || {}, 'bridge')
+            ? true
+            : hermesBridgeEnabled())),
       pid: Number.isInteger(pid) ? pid : null,
       running: processIsAlive(pid),
       rootMatches,
@@ -559,6 +834,81 @@ function buildDashboardChecks({ uiResult, supervisor, runtime, launchAgent, now 
 
 function buildHermesBridgeCheck({ supervisor, now }) {
   const bridge = supervisor?.children?.bridge || null;
+  const bridgeEnabled = typeof supervisor?.bridgeEnabled === 'boolean'
+    ? supervisor.bridgeEnabled
+    : (typeof bridge?.enabled === 'boolean' ? bridge.enabled : hermesBridgeEnabled());
+  if (!bridgeEnabled) {
+    if (bridge?.running === true) {
+      return makeCheck({
+        id: 'dashboard.hermes-bridge',
+        label: 'Hermes snapshot bridge',
+        status: 'fail',
+        summary: 'A bridge process is still running while both outbound partitions are disabled.',
+        errorCode: 'HERMES_BRIDGE_DISABLED_PROCESS_PRESENT',
+        detail: bridge.pid ? `Unexpected bridge PID ${bridge.pid}.` : null,
+        observedAt: now,
+        now,
+        impact: 'Outbound telemetry writes may continue until the unexpected bridge process is stopped.',
+        recovery: {
+          kind: 'command',
+          label: 'Restart the repo-owned supervisor to enforce disabled bridge mode.',
+          command: 'npm run dev:restart -- --detach',
+        },
+        provenance: {
+          mode: 'disabled',
+          enabled: false,
+          intentionallyDisabled: true,
+          ...bridge,
+        },
+      });
+    }
+    const disabledStateVerified = supervisor?.stateFound === true
+      && supervisor?.running === true
+      && bridge?.intentionallyDisabled === true
+      && bridge?.discoveryVerified === true
+      && bridge?.status === 'disabled'
+      && !bridge?.lastErrorCode;
+    if (!disabledStateVerified) {
+      return makeCheck({
+        id: 'dashboard.hermes-bridge',
+        label: 'Hermes snapshot bridge',
+        status: 'fail',
+        summary: 'Disabled bridge mode could not verify that every outbound writer is stopped.',
+        errorCode: bridge?.lastErrorCode || 'HERMES_BRIDGE_DISABLED_STATE_UNVERIFIED',
+        detail: bridge?.unexpectedPids?.length > 0
+          ? `Unexpected exact bridge PIDs: ${bridge.unexpectedPids.join(', ')}.`
+          : null,
+        observedAt: now,
+        now,
+        impact: 'Outbound telemetry publishing cannot be confirmed idle.',
+        recovery: {
+          kind: 'command',
+          label: 'Restart the repo-owned supervisor to verify disabled bridge mode.',
+          command: 'npm run dev:restart -- --detach',
+        },
+        provenance: {
+          mode: 'disabled',
+          enabled: false,
+          intentionallyDisabled: true,
+          ...bridge,
+        },
+      });
+    }
+    return makeCheck({
+      id: 'dashboard.hermes-bridge',
+      label: 'Hermes snapshot bridge',
+      status: 'pass',
+      summary: 'Outbound operations and portfolio publishing are intentionally disabled; the bridge is idle.',
+      detail: 'Both bridge partition controls are false, so no local snapshot is written to AWS.',
+      observedAt: supervisor?.instanceId || null,
+      now,
+      provenance: {
+        mode: 'disabled',
+        enabled: false,
+        intentionallyDisabled: true,
+      },
+    });
+  }
   const heartbeatAge = ageSeconds(bridge?.lastHeartbeatAt, now);
   const bridgeDefinition = SERVICE_DEFINITIONS.get('dashboard.hermes-bridge')
     || SERVICE_DEFINITIONS.get('local-bridge');
@@ -788,19 +1138,30 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
   const liveAccounts = Array.isArray(portfolio?.accounts) ? portfolio.accounts.filter(Boolean) : [];
   const observedAt = portfolio?.observed_at || null;
   const socketVerifiedAt = portfolio?.socket_verified_at || null;
-  const observationAge = ageSeconds(observedAt, now);
-  const socketAge = ageSeconds(socketVerifiedAt, now);
+  const positionsObservedAt = portfolio?.positions_observed_at || null;
   const liveSessionVerified = portfolio?.ok === true
     && portfolio?.connected === true
     && portfolio?.status === 'live'
     && portfolio?.source === 'ibkr_live_session';
+  const acceptedPositionSources = new Set([
+    'ibkr_req_positions',
+    // Fresh account-update portfolio rows when Gateway Read-Only API mode
+    // accepts the socket but never completes reqPositions/positionsEnd.
+    'ibkr_req_account_updates',
+  ]);
+  const positionProvenanceVerified = portfolio?.from_cache === false
+    && acceptedPositionSources.has(portfolio?.position_source)
+    && positionsObservedAt === observedAt;
   const managedAccountsVerified = liveAccounts.length > 0
     && (accounts.length === 0 || accounts.every((account) => liveAccounts.includes(account)));
-  const socketFresh = observationAge != null
-    && socketAge != null
-    && observationAge <= 5 * 60
-    && socketAge <= 5 * 60;
-  const portfolioLive = connected && liveSessionVerified && managedAccountsVerified && socketFresh;
+  const socketFresh = isFreshTimestamp(observedAt, now, 5 * 60)
+    && isFreshTimestamp(socketVerifiedAt, now, 5 * 60)
+    && isFreshTimestamp(positionsObservedAt, now, 5 * 60);
+  const portfolioLive = connected
+    && liveSessionVerified
+    && positionProvenanceVerified
+    && managedAccountsVerified
+    && socketFresh;
   const portfolioCheck = portfolioLive
     ? makeCheck({
         id: 'ibkr.portfolio',
@@ -818,6 +1179,9 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
           accountCount: liveAccounts.length,
           positionCount: positions.length,
           socketVerifiedAt,
+          positionsObservedAt,
+          positionSource: portfolio.position_source,
+          fromCache: portfolio.from_cache,
         },
         now,
       })
@@ -830,18 +1194,22 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
             ? `The live-session position endpoint did not answer${errorMessage(portfolioResult) ? `: ${errorMessage(portfolioResult)}` : '.'}`
             : (!liveSessionVerified
               ? 'The position response was not verified as a current IB live session.'
-              : (!managedAccountsVerified
-                ? 'The verified live session did not cover every managed account.'
-                : 'The live-session socket verification is older than five minutes.'))),
+              : (!positionProvenanceVerified
+                ? 'The position rows were not returned by a fresh IBKR positions or account-updates response.'
+                : (!managedAccountsVerified
+                  ? 'The verified live session did not cover every managed account.'
+                  : 'The live-session socket or position observation is stale or future-dated.')))),
         errorCode: !connected
           ? 'IBKR_PORTFOLIO_UNAVAILABLE'
           : (!portfolio
             ? 'IBKR_LIVE_SESSION_UNAVAILABLE'
             : (!liveSessionVerified
               ? 'IBKR_LIVE_SESSION_UNVERIFIED'
-              : (!managedAccountsVerified
-                ? 'IBKR_LIVE_ACCOUNTS_UNVERIFIED'
-                : 'IBKR_LIVE_SESSION_STALE'))),
+              : (!positionProvenanceVerified
+                ? 'IBKR_LIVE_POSITION_PROVENANCE_UNVERIFIED'
+                : (!managedAccountsVerified
+                  ? 'IBKR_LIVE_ACCOUNTS_UNVERIFIED'
+                  : 'IBKR_LIVE_SESSION_STALE')))),
         observedAt,
         lastSuccessAt: liveSessionVerified ? observedAt : null,
         impact: 'Portfolio values must not be trusted or used for decisions.',
@@ -852,6 +1220,9 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
           accountCount: liveAccounts.length,
           positionCount: positions.length,
           socketVerifiedAt,
+          positionsObservedAt,
+          positionSource: portfolio.position_source || null,
+          fromCache: portfolio.from_cache ?? null,
         } : null,
       });
 
@@ -942,8 +1313,30 @@ function buildResearchChecks({
 }) {
   const rta = fulfilledValue(rtaResult);
   const etf = fulfilledValue(etfResult);
-  const rtaCacheStale = rta?._readinessCache?.status === 'stale';
-  const etfCacheStale = etf?._readinessCache?.status === 'stale';
+  const rtaCacheStatus = String(rta?._readinessCache?.status || '').toLowerCase();
+  const etfCacheStatus = String(etf?._readinessCache?.status || '').toLowerCase();
+  const rtaCacheStale = rtaCacheStatus === 'stale';
+  const etfCacheStale = etfCacheStatus === 'stale';
+  const optimisticCacheStatuses = new Set(['checkpoint', 'revalidating']);
+  const rtaAuthoritativeStatus = String(
+    rta?.dataAvailability?.authoritativeRevalidationStatus
+      || rta?.authoritativeRevalidationStatus
+      || '',
+  ).toLowerCase();
+  const etfAuthoritativeStatus = String(
+    etf?.dataAvailability?.authoritativeRevalidationStatus
+      || etf?.meta?.authoritativeRevalidationStatus
+      || etf?.authoritativeRevalidationStatus
+      || '',
+  ).toLowerCase();
+  const rtaAuthoritativeFailed = rtaAuthoritativeStatus === 'failed';
+  const etfAuthoritativeFailed = etfAuthoritativeStatus === 'failed';
+  const rtaAuthoritativePending = optimisticCacheStatuses.has(rtaCacheStatus)
+    || rtaAuthoritativeStatus === 'pending';
+  const etfAuthoritativePending = optimisticCacheStatuses.has(etfCacheStatus)
+    || etfAuthoritativeStatus === 'pending';
+  const rtaAuthoritativeUnverified = rtaAuthoritativePending || rtaAuthoritativeFailed;
+  const etfAuthoritativeUnverified = etfAuthoritativePending || etfAuthoritativeFailed;
   const workflowCacheStale = workflow?._readinessCache?.status === 'stale';
   const rtaWarnings = [...new Set([
     ...(Array.isArray(rta?.dataQuality?.warnings) ? rta.dataQuality.warnings : []),
@@ -986,6 +1379,7 @@ function buildResearchChecks({
   const rtaContentDate = rta?.dataAvailability?.contentDate
     || (rtaContentAt ? String(rtaContentAt).slice(0, 10) : null);
   const rtaStructurallyAvailable = !rtaCacheStale
+    && !rtaAuthoritativeUnverified
     && rta?.available === true
     && rta?.dataQuality?.status !== 'error';
   const rtaStructuralErrorCode = rta?.dataQuality?.invalidEvents?.[0]?.code
@@ -1051,14 +1445,24 @@ function buildResearchChecks({
       blocking: false,
       errorCode: rtaCacheStale
         ? 'RTA_RESPONSE_CACHE_STALE'
+        : rtaAuthoritativeFailed
+          ? 'RTA_AUTHORITATIVE_REVALIDATION_FAILED'
+        : rtaAuthoritativePending
+          ? 'RTA_AUTHORITATIVE_REVALIDATION_PENDING'
         : rtaStructuralErrorCode || 'RTA_PROJECTION_UNAVAILABLE',
       dependsOn: rtaStructuralErrorCode || rtaCacheStale || gmailPassed ? [] : ['gmail.ingestion'],
       message: rta
         ? (rtaCacheStale
           ? 'RTA refresh failed; only a stale cached response is available.'
+          : rtaAuthoritativeFailed
+            ? 'RTA authoritative revalidation failed; the current manual checkpoint is not an authoritative readiness result.'
+          : rtaAuthoritativePending
+            ? 'RTA authoritative revalidation is still pending.'
           : `RTA positions are unavailable${rtaWarnings.length ? `: ${rtaWarnings.join(' ')}` : '.'}`)
         : `RTA check failed${errorMessage(rtaResult) ? `: ${errorMessage(rtaResult)}` : '.'}`,
-      detail: rta?.dataAvailability?.reason || null,
+      detail: rta?.dataAvailability?.authoritativeRevalidationReason
+        || rta?.dataAvailability?.reason
+        || null,
       impact: 'RTA long/short positioning cannot be displayed reliably.',
       recovery: {
         kind: 'command',
@@ -1086,7 +1490,9 @@ function buildResearchChecks({
     || null;
   const businessAge = businessDaysSince(snapshotDate, now);
   const etfPipeline = researchPipelineState(etf);
-  const etfStructurallyAvailable = !etfCacheStale && Boolean(etfBook);
+  const etfStructurallyAvailable = !etfCacheStale
+    && !etfAuthoritativeUnverified
+    && Boolean(etfBook);
   let etfCheck;
   if (etfStructurallyAvailable && activeEtfAvailable && etfPipeline.healthy) {
     etfCheck = makeCheck({
@@ -1136,14 +1542,27 @@ function buildResearchChecks({
       blocking: false,
       errorCode: etfCacheStale
         ? 'ETF_PRO_RESPONSE_CACHE_STALE'
+        : etfAuthoritativeFailed
+          ? 'ETF_PRO_AUTHORITATIVE_REVALIDATION_FAILED'
+        : etfAuthoritativePending
+          ? 'ETF_PRO_AUTHORITATIVE_REVALIDATION_PENDING'
         : etf?.dataAvailability?.errorCode || etf?.meta?.errorCode || 'ETF_PRO_BOOK_UNAVAILABLE',
       dependsOn: etf?.meta?.blockedByIngestion && !gmailPassed ? ['gmail.ingestion'] : [],
       message: !etf
         ? `ETF Pro check failed${errorMessage(etfResult) ? `: ${errorMessage(etfResult)}` : '.'}`
         : (etfCacheStale
           ? 'ETF Pro refresh failed; only a stale cached response is available.'
+          : etfAuthoritativeFailed
+            ? 'ETF Pro authoritative revalidation failed; the current manual checkpoint is not an authoritative readiness result.'
+          : etfAuthoritativePending
+            ? 'ETF Pro authoritative revalidation is still pending.'
           : `ETF Pro has no structurally valid active or last-known-good book${snapshotDate ? ` for ${snapshotDate}` : ''}.`),
-      detail: etf?.dataAvailability?.reason || etf?.meta?.reason || etf?.meta?.headline || null,
+      detail: etf?.dataAvailability?.authoritativeRevalidationReason
+        || etf?.meta?.authoritativeRevalidationReason
+        || etf?.dataAvailability?.reason
+        || etf?.meta?.reason
+        || etf?.meta?.headline
+        || null,
       observedAt: etf?.dataAvailability?.pipelineObservedAt || etf?.meta?.parsedAt || snapshotDate,
       now,
       impact: 'ETF Pro positions and changes are unavailable.',
@@ -1224,17 +1643,49 @@ function createSystemReadinessService({
   readSupervisorProvenance = getSupervisorProvenance,
   readRuntimeProvenance = getRuntimeProvenance,
   readLaunchAgentProvenance = getLaunchAgentProvenance,
+  readHostCapacity = getHostCapacity,
+  readControllerState = getControllerState,
   now: nowProvider = () => new Date(),
+  cacheNow = () => Date.now(),
 }) {
   let cached = null;
   let inFlight = null;
-  const cacheMs = Math.max(0, Number(process.env.SYSTEM_READINESS_CACHE_MS || 15_000));
+  const configuredCacheMs = Number(process.env.SYSTEM_READINESS_CACHE_MS);
+  const cacheMs = Math.max(
+    MIN_SYSTEM_READINESS_CACHE_MS,
+    Number.isFinite(configuredCacheMs)
+      ? configuredCacheMs
+      : DEFAULT_SYSTEM_READINESS_CACHE_MS,
+  );
 
   async function collectUncached() {
     const now = nowProvider();
     const supervisor = readSupervisorProvenance();
     const runtime = readRuntimeProvenance();
     const launchAgent = readLaunchAgentProvenance();
+    let hostCapacity;
+    try {
+      hostCapacity = readHostCapacity();
+    } catch (error) {
+      hostCapacity = {
+        available: false,
+        error: error.message || String(error),
+        observedAt: now.toISOString(),
+      };
+    }
+    let controllerState;
+    try {
+      controllerState = readControllerState();
+    } catch (error) {
+      controllerState = {
+        available: false,
+        incidents: [],
+        actions: [],
+        circuits: [],
+        error: error.message || String(error),
+        errorCode: 'HERMES_CONTROLLER_STATE_INVALID',
+      };
+    }
     const [uiResult, livezResult, readyzResult, statusResult, eventsResult, currentPredictionResult, workflowResult, rtaResult, etfResult] = await Promise.allSettled([
       probeLocalUrl('http://127.0.0.1:3000/', { timeoutMs: 2_000 }),
       sidecarRequest('/livez', { timeoutMs: 1500 }),
@@ -1248,7 +1699,7 @@ function createSystemReadinessService({
     ]);
 
     const portfolioResult = await Promise.allSettled([
-      sidecarRequest('/portfolio/live-positions', { timeoutMs: 5_000 }),
+      sidecarRequest('/portfolio/live-positions', { timeoutMs: 45_000 }),
     ]).then(([result]) => result);
 
     const workflow = fulfilledValue(workflowResult) || {};
@@ -1309,13 +1760,22 @@ function createSystemReadinessService({
         error: error.message || String(error),
       };
     }
-    const gmailMetrics = gmailHeartbeatStore?.available === true
-      ? null
-      : await readLambdaActivity(cloudwatch, gmailFunction, now, GMAIL_READINESS_MAX_AGE_MINUTES);
+    const gmailMetrics = await readLambdaActivity(
+      cloudwatch,
+      gmailFunction,
+      now,
+      GMAIL_READINESS_MAX_AGE_MINUTES,
+    );
+    const researchPipelineCoverage = await researchPipelineCoveragePromise;
+    // External readiness probes can take long enough for their observations to
+    // be newer than the collection start time. Evaluate freshness against the
+    // time all evidence is in hand so a genuinely current live observation is
+    // not rejected as future-dated.
+    const evaluationNow = nowProvider();
     const workerSignalByKey = new Map(workerSignals.map((signal) => [signal.definition.key, signal]));
     const recentRuns = Array.isArray(director.recentRuns) ? director.recentRuns : [];
     const workerChecks = workerDefinitions.map((definition) => {
-      const due = isHermesDueNow(now, definition.key);
+      const due = isHermesDueNow(evaluationNow, definition.key);
       const signal = workerSignalByKey.get(definition.key) || {};
       const snapshot = (director.workers || []).find((worker) => worker.key === definition.key) || definition;
       const matchingRun = recentRuns.find((run) => run.worker === definition.key);
@@ -1336,7 +1796,7 @@ function createSystemReadinessService({
       return evaluateHermesWorker({
         worker: enriched,
         heartbeat: signal.heartbeat,
-        now,
+        now: evaluationNow,
         maxAgeMinutes: due
           ? DEFAULT_WORKER_THRESHOLDS_MINUTES[definition.key]
           : 7 * 24 * 60,
@@ -1378,37 +1838,18 @@ function createSystemReadinessService({
             tableName: gmailHeartbeatStore?.tableName || DEFAULT_SERVICE_HEARTBEAT_TABLE,
           },
         })
-      : !gmailHeartbeatStore?.heartbeat
-        ? serviceFailureCheck({
-          id: 'gmail.ingestion',
-          label: 'Gmail authentication and ingestion',
-          message: `No per-service heartbeat was found for gmail:${String(gmailAccount).toLowerCase()}.`,
-          errorCode: 'GMAIL_HEARTBEAT_MISSING',
-          lastSuccessAt: inbox?.lastSuccessAt || inbox?.lastUpdated || null,
-          impact: 'Email-driven dashboard data is not being refreshed.',
-          recovery: {
-            kind: 'command',
-            label: 'Retry the configured Gmail incremental poll, then refresh readiness.',
-            command: 'Retry the configured Gmail incremental poll',
-          },
-          provenance: {
-            source: 'service-heartbeat-table',
-            serviceId: gmailHeartbeatStore.serviceId || `gmail:${String(gmailAccount).toLowerCase()}`,
-            tableName: gmailHeartbeatStore.tableName || DEFAULT_SERVICE_HEARTBEAT_TABLE,
-          },
-        })
-        : evaluateGmailIngestion({
+      : evaluateGmailIngestion({
           account: gmailAccount,
           metrics: gmailMetrics,
           heartbeat: gmailHeartbeatStore?.heartbeat || null,
           inbox,
-          now,
+          now: evaluationNow,
           maxAgeMinutes: GMAIL_READINESS_MAX_AGE_MINUTES,
         });
 
     const currentPredictionPayload = fulfilledValue(currentPredictionResult);
     const predictionDisplayCheck = currentPredictionPayload
-      ? evaluatePredictionMarketDisplay({ payload: currentPredictionPayload, now })
+      ? evaluatePredictionMarketDisplay({ payload: currentPredictionPayload, now: evaluationNow })
       : serviceFailureCheck({
           id: 'prediction.display',
           label: 'Prediction-market live display',
@@ -1421,7 +1862,7 @@ function createSystemReadinessService({
         });
     const executionPayload = currentPredictionPayload || fulfilledValue(eventsResult);
     const predictionExecutionCheck = executionPayload
-      ? evaluatePredictionMarketExecution({ payload: executionPayload, now })
+      ? evaluatePredictionMarketExecution({ payload: executionPayload, now: evaluationNow })
       : serviceFailureCheck({
           id: 'prediction.ibkrExecution',
           label: 'Prediction-market IBKR execution catalog',
@@ -1440,21 +1881,37 @@ function createSystemReadinessService({
       status: 'pass',
       blocking: true,
       summary: `Express API is responding (PID ${process.pid}, uptime ${Math.floor(process.uptime())}s).`,
-      observedAt: now,
-      now,
+      observedAt: evaluationNow,
+      now: evaluationNow,
       provenance: runtime,
     });
-    const dashboardChecks = buildDashboardChecks({ uiResult, supervisor, runtime, launchAgent, now });
-    const bridgeCheck = buildHermesBridgeCheck({ supervisor, now });
-    const sidecarChecks = buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolioResult, now });
-    const researchPipelineCoverage = await researchPipelineCoveragePromise;
+    const dashboardChecks = buildDashboardChecks({
+      uiResult,
+      supervisor,
+      runtime,
+      launchAgent,
+      now: evaluationNow,
+    });
+    const bridgeCheck = buildHermesBridgeCheck({ supervisor, now: evaluationNow });
+    const sidecarChecks = buildSidecarChecks({
+      livezResult,
+      readyzResult,
+      statusResult,
+      portfolioResult,
+      now: evaluationNow,
+    });
     const researchChecks = buildResearchChecks({
       rtaResult,
       etfResult,
       workflow,
       gmailCheck,
       researchPipelineCoverage,
-      now,
+      now: evaluationNow,
+    });
+    const hostChecks = buildHostChecks({
+      capacity: hostCapacity,
+      controller: controllerState,
+      now: evaluationNow,
     });
 
     const report = buildSystemReadiness([
@@ -1471,20 +1928,50 @@ function createSystemReadinessService({
         checks: [predictionDisplayCheck, predictionExecutionCheck],
       },
       { id: 'research', label: 'Research data', checks: researchChecks },
-    ], { now });
+      { id: 'host', label: 'Host and reliability controller', checks: hostChecks },
+    ], { now: evaluationNow });
     return {
       ...report,
       researchProductMatrix: researchPipelineCoverage,
+      controller: {
+        available: controllerState.available === true,
+        buildFingerprint: controllerState.buildFingerprint || null,
+        mode: controllerState.mode || null,
+        enabledActionIds: Array.isArray(controllerState.enabledActionIds)
+          ? controllerState.enabledActionIds
+          : [],
+        status: controllerState.status || null,
+        shadowSoakStartedAt: controllerState.shadowSoakStartedAt || null,
+        observedAt: controllerState.observedAt
+          || controllerState.updatedAt
+          || controllerState.lastPollAt
+          || null,
+        inFlightAction: controllerState.inFlightAction || controllerState.inFlight || null,
+        nextRetryAt: controllerState.nextRetryAt || null,
+        circuits: controllerState.circuits || [],
+      },
+      incidentHistory: (controllerState.incidents || []).slice(-50),
+      actionHistory: (controllerState.actions || []).slice(-50),
+      suppressionReasons: [
+        ...(report.suppressedSymptoms || []),
+        ...(Array.isArray(controllerState.suppressions) ? controllerState.suppressions : []),
+      ].slice(-100),
     };
   }
 
-  async function collect({ refresh = false } = {}) {
-    if (!refresh && cached && Date.now() - cached.savedAt < cacheMs) return cached.value;
+  async function runCollection() {
     if (inFlight) return inFlight;
     inFlight = collectUncached()
       .then((value) => {
-        cached = { value, savedAt: Date.now() };
+        cached = { value, error: null, savedAt: cacheNow() };
         return value;
+      })
+      .catch((error) => {
+        // Failed probes consume the same budget as successful probes. Retaining
+        // the failure prevents a broken dependency from creating a request
+        // storm while still failing closed for every caller.
+        cached = { value: null, error, savedAt: cacheNow() };
+        throw error;
       })
       .finally(() => {
         inFlight = null;
@@ -1492,18 +1979,41 @@ function createSystemReadinessService({
     return inFlight;
   }
 
-  return { collect };
+  async function collect() {
+    // Public callers, including `?refresh=1`, share this hard minimum interval.
+    // A UI request must never turn the expensive AWS/database probes into an
+    // unbounded request-driven workload.
+    if (cached && cacheNow() - cached.savedAt < cacheMs) {
+      if (cached.error) throw cached.error;
+      return cached.value;
+    }
+    return runCollection();
+  }
+
+  async function collectForVerification() {
+    // This method is wired only to the allowlisted, rate-limited repair service.
+    // It intentionally bypasses a fresh cache so post-repair eligibility checks
+    // are based on a new authoritative observation.
+    return runCollection();
+  }
+
+  return { collect, collectForVerification };
 }
 
 module.exports = {
+  DEFAULT_CONTROLLER_STATE_FILE,
   DEFAULT_LAUNCH_AGENT_PATH,
   DEFAULT_SERVICE_HEARTBEAT_TABLE,
+  DEFAULT_SYSTEM_READINESS_CACHE_MS,
   DEFAULT_WORKER_THRESHOLDS_MINUTES,
+  MIN_SYSTEM_READINESS_CACHE_MS,
   businessDaysSince,
   buildDashboardChecks,
   buildHermesBridgeCheck,
   collectHermesWorkerSignals,
   getLambdaActivity,
+  getHostCapacity,
+  getControllerState,
   getLaunchAgentProvenance,
   getServiceHeartbeat,
   getRuntimeProvenance,
@@ -1512,6 +2022,7 @@ module.exports = {
   probeUrl,
   serviceHeartbeatErrorCode,
   buildSidecarChecks,
+  buildHostChecks,
   buildResearchPipelineCheck,
   buildResearchChecks,
   createSystemReadinessService,

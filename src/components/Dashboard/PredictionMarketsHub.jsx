@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Droplet, RefreshCw, Scale, X } from 'lucide-react';
+import { BarChart3, Droplet, Scale } from 'lucide-react';
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { MarketDataService } from '../../services/api/marketDataService';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
 import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
@@ -43,6 +44,15 @@ const formatPrice = (value) => {
   if (parsed == null) return '—';
   if (parsed >= 0 && parsed <= 1) return `${Math.round(parsed * 100)}¢`;
   return formatNumber(parsed, { maximumFractionDigits: 2 });
+};
+
+const formatCompactNumber = (value) => {
+  const parsed = finite(value);
+  if (parsed == null) return '—';
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(parsed);
 };
 
 const formatDateTime = (value) => {
@@ -127,15 +137,6 @@ export function normalizeLivePositionsPayload(payload) {
   };
 }
 
-function MarketMetric({ label, value }) {
-  return (
-    <div className="pm-hub-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function getOverviewEntry(payload, path) {
   let current = payload?.markets || payload || {};
   for (const key of path) current = current?.[key];
@@ -148,71 +149,275 @@ function normalizeSummary(entry) {
   const freshnessStatus = normalizeStatus(summary?.freshness?.status || summary?.freshness);
   const source = normalizeStatus(summary?.source || summary?.provider || summary?.sourceApi);
   const unavailable = /(unavailable|error|offline|stale|cache|mock|seed|fallback|failed)/;
-  const available = Boolean(summary) && !unavailable.test(status) && !unavailable.test(freshnessStatus) && !unavailable.test(source) && summary?._cache?.stale !== true;
-  if (!available) return { available: false, message: entry?.error || entry?.message || 'No verified current market is available.' };
-
-  const book = summary?.representativeBook || summary?.book || summary?.market || summary?.topContract || {};
-  const yesBid = firstValue(book.yesBid, book.yes_bid, summary.yesBid, summary.yes_bid);
-  const yesAsk = firstValue(book.yesAsk, book.yes_ask, summary.yesAsk, summary.yes_ask);
-  const directSpread = firstValue(book.spread, summary.spread);
-  const calculatedSpread = finite(yesAsk) != null && finite(yesBid) != null
-    ? finite(yesAsk) - finite(yesBid)
-    : null;
-  const signalName = firstValue(summary.signal?.name, summary.signalAvailability?.label);
-  const signalStatus = firstValue(summary.signal?.status, summary.signalAvailability?.status, summary.signalStatus, summary.contextStatus);
+  const lines = (Array.isArray(summary?.lines) ? summary.lines : []).map((line) => {
+    const yesBid = finite(line?.yesBid ?? line?.yes_bid);
+    const yesAsk = finite(line?.yesAsk ?? line?.yes_ask);
+    const noBid = finite(line?.noBid ?? line?.no_bid);
+    const noAsk = finite(line?.noAsk ?? line?.no_ask);
+    const sortValue = finite(line?.sortValue);
+    const volume24h = finite(line?.volume24h);
+    if (
+      !line?.label ||
+      yesBid == null ||
+      yesAsk == null ||
+      noBid == null ||
+      noAsk == null ||
+      yesBid < 0 ||
+      yesAsk > 1 ||
+      yesAsk < yesBid ||
+      noBid < 0 ||
+      noAsk > 1 ||
+      noAsk < noBid
+    ) return null;
+    return {
+      ticker: line.ticker || null,
+      label: String(line.label),
+      yesBid,
+      yesAsk,
+      noBid,
+      noAsk,
+      sortValue,
+      volume24h,
+    };
+  }).filter(Boolean);
+  const available = Boolean(summary) &&
+    lines.length > 0 &&
+    !unavailable.test(status) &&
+    !unavailable.test(freshnessStatus) &&
+    !unavailable.test(source) &&
+    summary?._cache?.stale !== true;
+  if (!available) {
+    return {
+      available: false,
+      message: entry?.error || entry?.message || 'No verified current lines are available.',
+      signal: summary?.signal || null,
+    };
+  }
 
   return {
     available: true,
-    event: firstValue(summary.eventTitle, summary.title, summary.event?.title, summary.eventTicker, summary.event?.ticker, '—'),
-    contract: firstValue(book.title, book.ticker, summary.contractTicker, summary.marketTicker, '—'),
-    closeTime: firstValue(summary.closeTime, summary.event?.closeTime, summary.expirationTime),
-    yesBid,
-    yesAsk,
-    bidSize: firstValue(book.yesBidSize, book.yes_bid_size, summary.yesBidSize, summary.yes_bid_size),
-    askSize: firstValue(book.yesAskSize, book.yes_ask_size, summary.yesAskSize, summary.yes_ask_size),
-    spread: directSpread ?? calculatedSpread,
-    completeBooks: firstValue(summary.completeBookCount, summary.completeBooks, summary.marketCount),
-    volume: firstValue(summary.volume24h, summary.volume_24h, summary.volume, summary.aggregateVolume),
-    openInterest: firstValue(summary.openInterest, summary.open_interest, summary.aggregateOpenInterest),
-    freshnessStatus: firstValue(summary.freshness?.label, summary.freshness?.status, typeof summary.freshness === 'string' ? summary.freshness : null),
-    freshnessAt: firstValue(summary.freshness?.updatedAt, summary.freshness?.fetchedAt, summary.asOf, summary.updatedAt, entry?.fetchedAt),
-    signal: signalName && signalStatus ? `${signalName} · ${signalStatus}` : firstValue(signalName, signalStatus, 'Unavailable'),
+    lines,
+    lineCount: finite(summary.lineCount) ?? lines.length,
+    checkedAt: firstValue(summary.freshness?.fetchedAt, summary.fetchedAt, entry?.fetchedAt),
+    signal: summary.signal || null,
+    chart: summary.chart || null,
+    reference: summary.reference || null,
+    selection: summary.selection || null,
   };
 }
 
-function SummaryBody({ summary }) {
+function formatSignalPercent(value) {
+  const parsed = finite(value);
+  return parsed == null ? '—' : `${parsed.toFixed(2)}%`;
+}
+
+function ReferenceMarker({ reference }) {
+  if (normalizeStatus(reference?.status) !== 'available' || finite(reference?.value) == null) return null;
+  const forecast = reference.kind === 'forecast';
+  return (
+    <div className={`pm-hub-reference-marker ${forecast ? 'forecast' : 'underlying'}`}>
+      <span />
+      <strong>
+        {reference.label} {formatNumber(reference.value, {
+          maximumFractionDigits: forecast ? 2 : 2,
+          minimumFractionDigits: forecast ? 2 : 0,
+        })}{forecast ? '%' : ''}
+      </strong>
+    </div>
+  );
+}
+
+function LinesTable({ summary, limit = 7 }) {
   if (!summary.available) {
     return <div className="pm-hub-local-unavailable">{summary.message}</div>;
   }
+  const start = Math.max(0, Math.floor((summary.lines.length - limit) / 2));
+  const visibleLines = summary.lines.slice(start, start + limit);
+  const referenceValue = normalizeStatus(summary.reference?.status) === 'available'
+    ? finite(summary.reference?.value)
+    : null;
+  const markerAfterIndex = referenceValue == null
+    ? null
+    : visibleLines.findIndex((line, index) => {
+      const next = visibleLines[index + 1];
+      return line.sortValue != null &&
+        line.sortValue <= referenceValue &&
+        (!next || next.sortValue == null || next.sortValue > referenceValue);
+    });
+  const markerBeforeFirst = referenceValue != null &&
+    visibleLines[0]?.sortValue != null &&
+    referenceValue < visibleLines[0].sortValue;
   return (
-    <>
-      <div className="pm-hub-event-title">{summary.event}</div>
-      <div className="pm-hub-contract-title">{summary.contract}</div>
-      <div className="pm-hub-metrics-grid">
-        <MarketMetric label="Closes" value={formatDateTime(summary.closeTime)} />
-        <MarketMetric label="YES bid / ask" value={`${formatPrice(summary.yesBid)} / ${formatPrice(summary.yesAsk)}`} />
-        <MarketMetric label="Native depth" value={`${formatNumber(summary.bidSize)} / ${formatNumber(summary.askSize)}`} />
-        <MarketMetric label="Spread" value={formatPrice(summary.spread)} />
-        <MarketMetric label="Complete books" value={formatNumber(summary.completeBooks)} />
-        <MarketMetric label="24h volume" value={formatNumber(summary.volume)} />
-        <MarketMetric label="Open interest" value={formatNumber(summary.openInterest)} />
-        <MarketMetric label="Signal data" value={String(summary.signal)} />
+    <div className="pm-hub-lines">
+      <div className="pm-hub-lines-heading">
+        <span>Current line</span>
+        <span>YES bid</span>
+        <span>YES ask</span>
+        <span>NO bid</span>
+        <span>NO ask</span>
+        <span>24h vol</span>
       </div>
-      <div className="pm-hub-freshness">
-        Freshness: {summary.freshnessStatus || '—'}{summary.freshnessAt ? ` · ${formatDateTime(summary.freshnessAt)}` : ''}
+      {markerBeforeFirst && <ReferenceMarker reference={summary.reference} />}
+      {visibleLines.map((line, index) => (
+        <React.Fragment key={line.ticker || line.label}>
+          <div className="pm-hub-line">
+            <strong>{line.label}</strong>
+            <span>{formatPrice(line.yesBid)}</span>
+            <span>{formatPrice(line.yesAsk)}</span>
+            <span>{formatPrice(line.noBid)}</span>
+            <span>{formatPrice(line.noAsk)}</span>
+            <span>{formatCompactNumber(line.volume24h)}</span>
+          </div>
+          {markerAfterIndex === index && <ReferenceMarker reference={summary.reference} />}
+        </React.Fragment>
+      ))}
+      <div className="pm-hub-lines-asof">
+        {summary.lineCount > visibleLines.length ? `${visibleLines.length} of ${summary.lineCount} live lines · ` : ''}
+        {summary.selection?.label ? `${summary.selection.label} · ` : ''}
+        Checked {summary.checkedAt ? formatDateTime(summary.checkedAt) : 'just now'}
       </div>
-    </>
+    </div>
+  );
+}
+
+function ChartTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+  return (
+    <div className="pm-hub-chart-tooltip">
+      <span>{new Date(point.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+      <strong>{formatPrice(point.close)}</strong>
+    </div>
+  );
+}
+
+function IntradayChart({ chart }) {
+  const status = normalizeStatus(chart?.status);
+  const source = normalizeStatus(chart?.source);
+  const forbidden = /(unavailable|error|offline|stale|cache|mock|seed|fallback|failed)/;
+  const points = (Array.isArray(chart?.points) ? chart.points : [])
+    .map((point) => ({
+      timestamp: finite(point?.timestamp),
+      close: finite(point?.close),
+    }))
+    .filter((point) => (
+      point.timestamp != null &&
+      point.close != null &&
+      point.close >= 0 &&
+      point.close <= 1
+    ));
+  const available = status === 'available' &&
+    source === 'kalshi_trade_api_v2' &&
+    !forbidden.test(status) &&
+    points.length > 0;
+
+  if (!available) {
+    return (
+      <div className="pm-hub-chart pm-hub-chart-unavailable">
+        <span>1D direct venue chart</span>
+        <strong>{chart?.reason || 'No current direct venue price history is available.'}</strong>
+      </div>
+    );
+  }
+
+  const values = points.map((point) => point.close);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const padding = Math.max((max - min) * 0.16, 0.025);
+  const domain = [Math.max(0, min - padding), Math.min(1, max + padding)];
+  return (
+    <div className="pm-hub-chart">
+      <div className="pm-hub-chart-meta">
+        <span>Live 1D · {chart.label || 'Representative contract'}</span>
+        <strong>{formatPrice(points[points.length - 1].close)}</strong>
+      </div>
+      <div className="pm-hub-chart-canvas" aria-label={`Live 1-day chart for ${chart.label || chart.ticker}`}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points} margin={{ top: 7, right: 5, left: 0, bottom: 0 }}>
+            <XAxis
+              dataKey="timestamp"
+              axisLine={false}
+              tickLine={false}
+              minTickGap={38}
+              tick={{ fill: '#94a3b8', fontSize: 8 }}
+              tickFormatter={(value) => new Date(value).toLocaleTimeString('en-US', { hour: 'numeric' })}
+            />
+            <YAxis
+              orientation="right"
+              domain={domain}
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: '#94a3b8', fontSize: 8 }}
+              tickFormatter={(value) => `${Math.round(value * 100)}¢`}
+              width={29}
+            />
+            <Tooltip content={<ChartTooltip />} />
+            <Line type="monotone" dataKey="close" stroke="#2563eb" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="pm-hub-chart-asof">Direct Kalshi price history · through {formatDateTime(chart.latestAt)}</div>
+    </div>
+  );
+}
+
+function HedgeyeReference({ signal }) {
+  const status = normalizeStatus(signal?.status);
+  const details = signal?.details || {};
+  const available = status === 'available';
+  return (
+    <div className="pm-hub-hedgeye">
+      <div className="pm-hub-hedgeye-heading">
+        <span>{signal?.name || 'Hedgeye reference'}</span>
+        <small>{available ? 'Source matched' : 'Unavailable'}</small>
+      </div>
+      {!available ? (
+        <p>{signal?.reason || 'No source-matched Hedgeye reference is available.'}</p>
+      ) : Array.isArray(details.scenarios) && details.scenarios.length > 0 ? (
+        <>
+          <div className="pm-hub-hedgeye-meta">
+            <strong>{details.forecastMonth || signal.requiredMonth || 'Current CPI release'}</strong>
+            <span>{details.metric || details.outlook || 'Inflation Nowcast'}</span>
+          </div>
+          <div className="pm-hub-nowcast-scenarios">
+            {details.scenarios.map((scenario) => (
+              <span key={scenario.key || scenario.label}>
+                <small>{scenario.label}</small>
+                <strong>{formatSignalPercent(scenario.value)}</strong>
+              </span>
+            ))}
+          </div>
+        </>
+      ) : finite(details.lrr) != null && finite(details.hrr) != null ? (
+        <div className="pm-hub-risk-range">
+          <span><small>LRR</small><strong>{formatNumber(details.lrr, { maximumFractionDigits: 2 })}</strong></span>
+          <span><small>HRR</small><strong>{formatNumber(details.hrr, { maximumFractionDigits: 2 })}</strong></span>
+          <span><small>Trend</small><strong>{details.trend || '—'}</strong></span>
+          <span><small>As of</small><strong>{details.date || signal.asOf || '—'}</strong></span>
+        </div>
+      ) : (
+        <p>Source matched, but no displayable Hedgeye values were supplied.</p>
+      )}
+    </div>
   );
 }
 
 function MarketSummaryCard({ title, icon, entry, onOpen, children }) {
+  const summary = normalizeSummary(entry);
   return (
     <section className="pm-hub-summary-card" aria-label={`${title} market summary`}>
       <button type="button" className="pm-hub-summary-open" onClick={onOpen}>
         <span className="pm-hub-summary-title">{icon}{title}</span>
-        <span>Open workbench →</span>
       </button>
-      {children || <SummaryBody summary={normalizeSummary(entry)} />}
+      <IntradayChart chart={summary.chart} />
+      <div className="pm-hub-summary-lower">
+        {children || (
+        <>
+          <LinesTable summary={summary} />
+          <HedgeyeReference signal={summary.signal} />
+        </>
+        )}
+      </div>
     </section>
   );
 }
@@ -220,38 +425,23 @@ function MarketSummaryCard({ title, icon, entry, onOpen, children }) {
 function WtiSummaryRows({ entry, onOpen }) {
   const daily = normalizeSummary(entry?.daily);
   const weekly = normalizeSummary(entry?.weekly);
+  const signal = daily.signal?.status === 'available' ? daily.signal : weekly.signal;
   return (
-    <div className="pm-hub-wti-rows">
-      {[
-        ['Daily', 'daily', daily],
-        ['Weekly', 'weekly', weekly],
-      ].map(([label, cadence, summary]) => (
-        <button type="button" className="pm-hub-wti-row" key={cadence} onClick={() => onOpen(cadence)}>
-          <span className="pm-hub-wti-row-heading">
-            <strong className="pm-hub-wti-row-label">{label}</strong>
-            <span>Open {label.toLowerCase()} workbench →</span>
-          </span>
-          {summary.available ? (
-            <>
-              <span className="pm-hub-wti-event-title">{summary.event}</span>
-              <span className="pm-hub-wti-contract-title">{summary.contract}</span>
-              <span className="pm-hub-wti-metrics-grid">
-                <span><small>Closes</small><strong>{formatDateTime(summary.closeTime)}</strong></span>
-                <span><small>YES bid / ask</small><strong>{formatPrice(summary.yesBid)} / {formatPrice(summary.yesAsk)}</strong></span>
-                <span><small>YES native depth</small><strong>{formatNumber(summary.bidSize)} / {formatNumber(summary.askSize)}</strong></span>
-                <span><small>Spread</small><strong>{formatPrice(summary.spread)}</strong></span>
-                <span><small>Complete books</small><strong>{formatNumber(summary.completeBooks)}</strong></span>
-                <span><small>24h volume</small><strong>{formatNumber(summary.volume)}</strong></span>
-                <span><small>Open interest</small><strong>{formatNumber(summary.openInterest)}</strong></span>
-                <span><small>Signal data</small><strong>{String(summary.signal)}</strong></span>
-              </span>
-              <span className="pm-hub-wti-freshness">
-                Freshness: {summary.freshnessStatus || '—'}{summary.freshnessAt ? ` · ${formatDateTime(summary.freshnessAt)}` : ''}
-              </span>
-            </>
-          ) : <span className="pm-hub-wti-row-unavailable">{summary.message}</span>}
-        </button>
-      ))}
+    <div className="pm-hub-wti-stack">
+      <div className="pm-hub-wti-rows">
+        {[
+          ['Daily', 'daily', daily],
+          ['Weekly', 'weekly', weekly],
+        ].map(([label, cadence, summary]) => (
+          <div className="pm-hub-wti-row" key={cadence}>
+            <button type="button" className="pm-hub-wti-row-heading" onClick={() => onOpen(cadence)}>
+              <strong className="pm-hub-wti-row-label">{label}</strong>
+            </button>
+            <LinesTable summary={summary} limit={4} />
+          </div>
+        ))}
+      </div>
+      <HedgeyeReference signal={signal} />
     </div>
   );
 }
@@ -344,20 +534,11 @@ function PredictionMarketsOverview({ positionsState, onSelectMarket, onSelectWti
   const markets = state.data?.markets || {};
   return (
     <main className="pm-hub-overview" data-testid="prediction-markets-overview">
-      <div className="pm-hub-overview-heading">
-        <div>
-          <h1>Prediction Markets Overview</h1>
-          <p>Direct market facts and verified-live portfolio exposure. No ranking or recommendation.</p>
-        </div>
-        <button type="button" className="pm-hub-refresh" onClick={load} disabled={state.status === 'loading' || state.refreshing} aria-label="Refresh prediction markets overview">
-          <RefreshCw size={14} aria-hidden="true" /> Refresh
-        </button>
-      </div>
       {state.status === 'unavailable' && <div className="pm-hub-overview-error">Market summaries are unavailable: {state.error}</div>}
       <div className="pm-hub-summary-grid" aria-busy={state.status === 'loading' || state.refreshing}>
         <MarketSummaryCard title="CPI" icon={<Scale size={16} />} entry={getOverviewEntry(state.data, ['cpi'])} onOpen={() => onSelectMarket('cpi')} />
         <MarketSummaryCard title="S&P 500 Close" icon={<BarChart3 size={16} />} entry={getOverviewEntry(state.data, ['spx'])} onOpen={() => onSelectMarket('spx')} />
-        <MarketSummaryCard title="WTI" icon={<Droplet size={16} />} entry={getOverviewEntry(state.data, ['wti'])} onOpen={() => onSelectMarket('wti')}>
+        <MarketSummaryCard title="WTI" icon={<Droplet size={16} />} entry={getOverviewEntry(state.data, ['wti', 'daily'])} onOpen={() => onSelectMarket('wti')}>
           <WtiSummaryRows entry={markets.wti} onOpen={(cadence) => { onSelectWtiCadence(cadence); onSelectMarket('wti'); }} />
         </MarketSummaryCard>
       </div>
@@ -449,30 +630,24 @@ export default function PredictionMarketsHub({
   const childFallback = useMemo(() => <LoadingIndicator label={`Loading ${selectedView.toUpperCase()} workbench...`} size="sm" />, [selectedView]);
   return (
     <div className="prediction-markets-hub" data-testid="prediction-markets-hub">
-      <header className="pm-hub-header">
-        <div className="pm-hub-header-left">
-          <div>
-            <div className="pm-hub-eyebrow">Prediction Markets</div>
-            <nav className="pm-hub-selector" aria-label="Prediction market view">
-              {PREDICTION_MARKET_VIEWS.map((view) => (
-                <button
-                  type="button"
-                  key={view}
-                  className={selectedView === view ? 'active' : ''}
-                  aria-current={selectedView === view ? 'page' : undefined}
-                  onClick={() => onActiveMarketChange?.(view)}
-                >
-                  {view === 'spx' ? 'SPX' : view === 'wti' ? 'WTI' : view === 'cpi' ? 'CPI' : 'Overview'}
-                </button>
-              ))}
-            </nav>
-          </div>
-        </div>
-        <button type="button" className="pm-hub-close" onClick={onClose} aria-label="Close Prediction Markets"><X size={20} /></button>
-      </header>
+      {selectedView !== 'overview' && (
+        <header className="pm-hub-header">
+          <button
+            type="button"
+            className="pm-hub-back"
+            onClick={() => onActiveMarketChange?.('overview')}
+          >
+            <span aria-hidden="true">←</span> All markets
+          </button>
+        </header>
+      )}
       <div className="pm-hub-content">
         {selectedView === 'overview' && (
-          <PredictionMarketsOverview positionsState={positionsState} onSelectMarket={onActiveMarketChange} onSelectWtiCadence={onWtiCadenceChange} />
+          <PredictionMarketsOverview
+            positionsState={positionsState}
+            onSelectMarket={onActiveMarketChange}
+            onSelectWtiCadence={onWtiCadenceChange}
+          />
         )}
         {selectedView === 'wti' && (
           <Suspense fallback={childFallback}>

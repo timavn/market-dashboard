@@ -8,12 +8,23 @@
       "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/MarketDashboardServiceHeartbeats"
     },
     {
+      "Sid": "ReadPredictionCatalogV2",
+      "Effect": "Allow",
+      "Action": "dynamodb:Query",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketCatalogV2"
+    },
+    {
       "Sid": "ReconcilePredictionCatalogV2",
       "Effect": "Allow",
       "Action": [
-        "dynamodb:Query",
-        "dynamodb:TransactWriteItems"
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem"
       ],
+      "Condition": {
+        "ForAnyValue:StringEquals": {
+          "dynamodb:EnclosingOperation": "TransactWriteItems"
+        }
+      },
       "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketCatalogV2"
     },
     {
@@ -21,6 +32,30 @@
       "Effect": "Allow",
       "Action": "dynamodb:Query",
       "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchEventLedgerV2"
+    },
+    {
+      "Sid": "ReadRtaRebuildSources",
+      "Effect": "Allow",
+      "Action": "dynamodb:Scan",
+      "Resource": [
+        "arn:aws:dynamodb:us-west-1:915328198276:table/HermesEmailIngestLedger",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot"
+      ]
+    },
+    {
+      "Sid": "WriteRtaMaterializations",
+      "Effect": "Allow",
+      "Action": "dynamodb:PutItem",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot"
+    },
+    {
+      "Sid": "ReadRtaLegacyArtifacts",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::market-dashboard-csv-data/hedgeye-email/messages/*"
     },
     {
       "Sid": "ReadPortfolioResearchIntelligence",

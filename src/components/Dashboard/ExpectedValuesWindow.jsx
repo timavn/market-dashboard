@@ -3,6 +3,7 @@ import { Title, Text, Card } from '@tremor/react';
 import expectedValuesData from '../../constants/expectedValuesData';
 import quadProbabilityScenarioData from '../../constants/quadProbabilityScenarios';
 import PopoverSelect from '../common/PopoverSelect';
+import PortfolioQuadExposureCard from './PortfolioQuadExposureCard';
 import './ExpectedValuesWindow.css';
 
 const {
@@ -598,7 +599,10 @@ const RegimeCheatSheetPanel = () => (
 
 const OverlayRankingTable = ({ rows }) => (
   <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-700">
-    <table className="min-w-[655px] w-full text-left text-[10px]">
+    <table
+      className="min-w-[655px] w-full text-left text-[10px]"
+      aria-label="Quad probability overlay rankings"
+    >
       <thead className="bg-gray-50 text-[9px] uppercase tracking-[0.1em] text-gray-500 dark:bg-gray-900 dark:text-gray-400">
         <tr>
           <th className="px-2 py-1">Rank</th>
@@ -740,7 +744,18 @@ const evDropdownButtonClassName = 'mt-1 h-[30px] rounded-md border-gray-300 bg-w
 const evDropdownMenuClassName = 'rounded-md border-gray-300 bg-white text-xs shadow-xl dark:border-gray-600 dark:bg-gray-900';
 const evDropdownOptionClassName = 'px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100';
 
-const ExpectedValuesWindow = ({ show, right, width, theme, zIndex = 1200 }) => {
+const ExpectedValuesWindow = ({
+  show,
+  right,
+  width,
+  theme,
+  zIndex = 1200,
+  portfolioData = null,
+  portfolioLoading = false,
+  portfolioRefreshing = false,
+  portfolioError = null,
+  selectedAccount = '',
+}) => {
   const defaultScenario = findScenario(DEFAULT_QUAD_PROBABILITY_SCENARIO_ID);
   const defaultPeriod = findPeriod(defaultScenario, DEFAULT_QUAD_PROBABILITY_PERIOD_ID);
   const [scenarioId, setScenarioId] = useState(defaultScenario.id);
@@ -772,6 +787,15 @@ const ExpectedValuesWindow = ({ show, right, width, theme, zIndex = 1200 }) => {
   const totalIsOff = Math.abs((probabilitySummary.totalPct || 0) - 100) >= 0.1;
   const topQuad = probabilitySummary.topQuads[0];
   const secondQuad = probabilitySummary.topQuads[1];
+  const selectedPeriodIndex = selectedScenario?.periods?.findIndex(
+    (period) => period.id === selectedPeriod.id
+  ) ?? -1;
+  const previousPeriod = selectedPeriodIndex > 0
+    ? selectedScenario.periods[selectedPeriodIndex - 1]
+    : null;
+  const previousQuad = previousPeriod
+    ? normalizeQuadProbabilities(previousPeriod.probabilities).topQuads[0]
+    : null;
 
   const applyScenarioPeriod = (nextScenarioId, nextPeriodId) => {
     const nextScenario = findScenario(nextScenarioId);
@@ -815,6 +839,7 @@ const ExpectedValuesWindow = ({ show, right, width, theme, zIndex = 1200 }) => {
         <div className="ev-window-layout">
           <aside className="ev-window-sidebar custom-scrollbar">
             <Card className="ev-control-card dark:bg-gray-800">
+              <Title className="mb-2 text-sm dark:text-white">Decision Inputs</Title>
               <div className="ev-control-stack">
                 <label className="ev-control-label text-gray-500 dark:text-gray-400">
                   Scenario
@@ -955,6 +980,18 @@ const ExpectedValuesWindow = ({ show, right, width, theme, zIndex = 1200 }) => {
           </aside>
 
           <main className="ev-window-main custom-scrollbar">
+            <PortfolioQuadExposureCard
+              portfolioData={portfolioData}
+              isLoading={portfolioLoading}
+              isRefreshing={portfolioRefreshing}
+              error={portfolioError}
+              currentQuad={topQuad}
+              previousQuad={previousQuad}
+              currentPeriodLabel={selectedPeriod.label}
+              previousPeriodLabel={previousPeriod?.label || ''}
+              selectedAccount={selectedAccount}
+            />
+
             <Card className="dark:bg-gray-800">
               <div className="mb-3">
                 <Title className="text-xl dark:text-white">Quad Probability Overlay</Title>

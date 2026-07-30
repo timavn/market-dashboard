@@ -183,6 +183,39 @@ describe('risk range publication envelope', () => {
     expect(gated.supplementalRanges.UST10Y).toMatchObject({ decisionEligible: false });
   });
 
+  test('accepts the equivalent parser-v3 checksum after DynamoDB normalizes integral decimals', () => {
+    const rows = [
+      primary('SPX', '2026-07-21', { lrr: 6000, hrr: 6100 }),
+      primary('VIX', '2026-07-21', { lrr: 18.5, hrr: 21.5 }),
+    ];
+    const envelope = buildRiskRangeEnvelope(rows, {
+      now: new Date('2026-07-21T17:00:00Z'),
+      minPrimaryCount: 1,
+    });
+    const manifest = {
+      publicationDate: '2026-07-21',
+      manifestType: 'primary',
+      completionState: 'complete',
+      count: 2,
+      checksum: riskRangeManifestChecksum(rows, '2026-07-21', {
+        numericFormat: 'python-float-v3',
+      }),
+      parserVersion: 'risk-range-email-v3',
+    };
+
+    const gated = applyPersistedManifestGate(envelope, rows, manifest, {
+      expectedDate: '2026-07-21',
+      pendingDate: null,
+      afterDeadline: true,
+    });
+
+    expect(gated).toMatchObject({
+      available: true,
+      status: 'current',
+      manifest: { persistedManifestVerified: true },
+    });
+  });
+
   test('reports failed after deadline when the persisted manifest is missing or corrupt', () => {
     const rows = [
       primary('SPX', '2026-07-21'),

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -45,7 +46,32 @@ QUOTE_WAIT_SEC = float(os.environ.get("IBKR_QUOTE_WAIT_SEC", "1.0"))
 PNL_WAIT_SEC = float(os.environ.get("IBKR_PNL_WAIT_SEC", "2.0"))
 DISCOVER_DETAILS_TIMEOUT_SEC = float(os.environ.get("IBKR_DISCOVER_DETAILS_TIMEOUT_SEC", "2.5"))
 PORTFOLIO_SYNC_TIMEOUT_SEC = float(os.environ.get("IBKR_PORTFOLIO_SYNC_TIMEOUT_SEC", "2.5"))
-POSITIONS_REQUEST_TIMEOUT_SEC = float(os.environ.get("IBKR_POSITIONS_REQUEST_TIMEOUT_SEC", "4.0"))
+POSITIONS_REQUEST_TIMEOUT_SEC = float(
+    os.environ.get("IBKR_POSITIONS_REQUEST_TIMEOUT_SEC", "4.0")
+)
+LIVE_POSITIONS_REQUEST_TIMEOUT_SEC = min(
+    8.0,
+    max(
+        0.1,
+        float(
+            os.environ.get(
+                "IBKR_LIVE_POSITIONS_REQUEST_TIMEOUT_SEC",
+                "8.0",
+            )
+        ),
+    ),
+)
+POSITIONS_CONNECT_TIMEOUT_SEC = min(
+    5.0,
+    max(
+        1.0,
+        float(os.environ.get("IBKR_POSITIONS_CONNECT_TIMEOUT_SEC", "4.0")),
+    ),
+)
+POSITIONS_CANCEL_GRACE_SEC = float(os.environ.get("IBKR_POSITIONS_CANCEL_GRACE_SEC", "0.5"))
+POSITIONS_SNAPSHOT_CLIENT_ID = int(
+    os.environ.get("IBKR_POSITIONS_SNAPSHOT_CLIENT_ID", str(IB_CLIENT_ID + 150))
+)
 LIVE_SESSION_VERIFY_TIMEOUT_SEC = float(os.environ.get("IBKR_LIVE_SESSION_VERIFY_TIMEOUT_SEC", "2.5"))
 FUNDING_ACCOUNT_UPDATE_TIMEOUT_SEC = float(
     os.environ.get("IBKR_FUNDING_ACCOUNT_UPDATE_TIMEOUT_SEC", "5.0")
@@ -155,11 +181,246 @@ PRIMARY_SOCKET_HEARTBEAT_MAX_AGE_SEC = max(
     0.1,
     float(os.environ.get("IBKR_PRIMARY_SOCKET_HEARTBEAT_MAX_AGE_SEC", "1.0")),
 )
+INTEREST_OBSERVATION_BROKER_TIME_MAX_AGE_SEC = max(
+    1.0,
+    float(
+        os.environ.get(
+            "IBKR_INTEREST_OBSERVATION_BROKER_TIME_MAX_AGE_SEC",
+            "30.0",
+        )
+    ),
+)
+INTEREST_OBSERVATION_BROKER_TIME_MAX_FUTURE_SEC = max(
+    0.0,
+    float(
+        os.environ.get(
+            "IBKR_INTEREST_OBSERVATION_BROKER_TIME_MAX_FUTURE_SEC",
+            "5.0",
+        )
+    ),
+)
 
 ib = IB()
 funding_ib = IB()
 reference_marks_ib = IB()
+positions_ib = IB()
 positions_snapshot_lock = asyncio.Lock()
+positions_snapshot_task: Optional[asyncio.Task] = None
+
+
+async def req_positions_bounded(
+    session: IB,
+    *,
+    timeout_sec: float = POSITIONS_REQUEST_TIMEOUT_SEC,
+) -> List[Any]:
+    """Request positions without letting cancel cleanup hold callers forever.
+
+    ``asyncio.wait_for`` waits for the cancelled awaitable to finish. ib_insync
+    ``reqPositionsAsync`` can ignore cancellation while Gateway is wedged, which
+    previously pinned ``positions_snapshot_lock`` and made every subsequent
+    ``/portfolio/live-positions`` call return ``positions_request_busy``.
+    """
+    awaitable = session.reqPositionsAsync()
+    task = asyncio.ensure_future(awaitable)
+    try:
+        done, _pending = await asyncio.wait({task}, timeout=timeout_sec)
+        if done:
+            return task.result()
+    except Exception:
+        if not task.done():
+            task.cancel()
+        raise
+
+    try:
+        cancel = getattr(session, "cancelPositions", None)
+        if callable(cancel):
+            cancel()
+        else:
+            client = getattr(session, "client", None)
+            client_cancel = getattr(client, "cancelPositions", None)
+            if callable(client_cancel):
+                client_cancel()
+    except Exception:
+        pass
+    task.cancel()
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=POSITIONS_CANCEL_GRACE_SEC)
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+        pass
+    raise asyncio.TimeoutError(
+        f"IBKR positions request timed out after {timeout_sec:.1f}s"
+    )
+
+
+def serialize_live_position(account: str, contract: Any, quantity: float, avg_cost: float) -> Dict[str, Any]:
+    return {
+        "account": account,
+        "conId": int(contract.conId) if getattr(contract, "conId", None) else None,
+        "symbol": getattr(contract, "symbol", None) or None,
+        "localSymbol": getattr(contract, "localSymbol", None) or None,
+        "secType": getattr(contract, "secType", None) or None,
+        "exchange": getattr(contract, "exchange", None) or None,
+        "currency": getattr(contract, "currency", None) or None,
+        "position": float(quantity),
+        "avgCost": float(avg_cost),
+    }
+
+
+def create_positions_snapshot_session() -> IB:
+    """Factory retained for tests that override the positions session."""
+    return positions_ib
+
+
+async def ensure_positions_connected(
+    positions_session: Optional[IB] = None,
+) -> Dict[str, Any]:
+    """Connect the isolated positions snapshot session (no quote/stream load)."""
+    session = positions_session or positions_ib
+    try:
+        if session.isConnected():
+            return {"ok": True, "status": "connected"}
+    except Exception as exc:
+        try:
+            session.disconnect()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "status": "error",
+            "message": f"Dedicated IBKR positions client state is unavailable: {exc}",
+        }
+
+    try:
+        await asyncio.wait_for(
+            session.connectAsync(
+                IB_HOST,
+                IB_PORT,
+                clientId=POSITIONS_SNAPSHOT_CLIENT_ID,
+                timeout=min(CONNECT_TIMEOUT, POSITIONS_CONNECT_TIMEOUT_SEC),
+                readonly=True,
+            ),
+            timeout=POSITIONS_CONNECT_TIMEOUT_SEC,
+        )
+        if session.isConnected():
+            return {"ok": True, "status": "connected"}
+        try:
+            session.disconnect()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "status": "tws_offline",
+            "message": "The dedicated IBKR positions socket did not connect.",
+        }
+    except (ConnectionRefusedError, ConnectionError, TimeoutError, asyncio.TimeoutError, OSError) as exc:
+        try:
+            session.disconnect()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "status": "tws_offline",
+            "message": (
+                f"Dedicated IBKR positions client could not reach "
+                f"{IB_HOST}:{IB_PORT}: {exc}"
+            ),
+        }
+    except Exception as exc:
+        try:
+            session.disconnect()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "status": "error",
+            "message": f"Dedicated IBKR positions client failed to connect: {exc}",
+        }
+
+
+async def fetch_positions_via_ephemeral_session(
+    accounts: List[str],
+    *,
+    timeout_sec: float = LIVE_POSITIONS_REQUEST_TIMEOUT_SEC,
+) -> List[Dict[str, Any]]:
+    """Request positions explicitly on the dedicated positions_ib client.
+
+    Uses a persistent secondary IB session (like funding_ib) instead of
+    the quote-heavy primary session. ``reqPositionsAsync`` completes only after
+    a new broker ``positionEnd`` response, so no ib_insync position cache is
+    consulted or restamped.
+    """
+    session = create_positions_snapshot_session()
+    health = await ensure_positions_connected(session)
+    if not health.get("ok"):
+        raise RuntimeError(
+            health.get("message") or "Dedicated IBKR positions client is unavailable."
+        )
+    managed = [str(account) for account in session.managedAccounts() if account]
+    if not managed:
+        raise RuntimeError(
+            "The positions snapshot session returned no managed accounts."
+        )
+    if set(managed) != set(accounts):
+        raise RuntimeError(
+            "The dedicated positions session does not cover the verified "
+            "managed-account set."
+        )
+    fresh_positions = await req_positions_bounded(
+        session,
+        timeout_sec=timeout_sec,
+    )
+    if not session.isConnected():
+        raise RuntimeError(
+            "The dedicated positions session disconnected during reqPositions."
+        )
+    return [
+        serialize_live_position(
+            position.account,
+            position.contract,
+            float(position.position),
+            float(position.avgCost),
+        )
+        for position in fresh_positions
+    ]
+
+
+async def request_fresh_positions_snapshot(
+    accounts: List[str],
+    *,
+    timeout_sec: float = LIVE_POSITIONS_REQUEST_TIMEOUT_SEC,
+) -> Dict[str, Any]:
+    """Share only an in-flight broker request between concurrent callers.
+
+    A completed task is never reused. Concurrent SYS/readiness/bridge callers
+    can await the same newly requested broker response instead of either
+    restamping cached rows or failing with ``positions_request_busy``.
+    """
+    global positions_snapshot_task
+
+    async with positions_snapshot_lock:
+        if positions_snapshot_task is None or positions_snapshot_task.done():
+            async def capture() -> Dict[str, Any]:
+                positions = await fetch_positions_via_ephemeral_session(
+                    accounts,
+                    timeout_sec=timeout_sec,
+                )
+                return {
+                    "positions": positions,
+                    "observedAt": now_iso(),
+                }
+
+            positions_snapshot_task = asyncio.create_task(capture())
+        task = positions_snapshot_task
+
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if task.done():
+            async with positions_snapshot_lock:
+                if positions_snapshot_task is task:
+                    positions_snapshot_task = None
+
+
 funding_snapshot_lock = asyncio.Lock()
 reference_marks_snapshot_lock = asyncio.Lock()
 reference_close_cache: Dict[str, Dict[int, Dict[str, Any]]] = {}
@@ -381,6 +642,11 @@ async def lifespan(_app: FastAPI):
     if reference_marks_ib.isConnected():
         try:
             reference_marks_ib.disconnect()
+        except Exception:
+            pass
+    if positions_ib.isConnected():
+        try:
+            positions_ib.disconnect()
         except Exception:
             pass
 
@@ -1145,6 +1411,106 @@ async def request_fresh_account_execution_signature(
     return tuple(sorted(signature))
 
 
+async def request_fresh_account_execution_evidence(
+    funding_session: IB,
+    account: str,
+) -> Dict[str, Any]:
+    """Read account-filtered executions without consulting ib_insync caches."""
+    try:
+        fills = await asyncio.wait_for(
+            funding_session.reqExecutionsAsync(
+                ExecutionFilter(acctCode=account)
+            ),
+            timeout=FUNDING_EXECUTIONS_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError as exc:
+        raise FundingEvidenceError(
+            "The fresh account-filtered IBKR executions request timed out.",
+            "EXECUTIONS_TIMEOUT",
+        ) from exc
+    except Exception as exc:
+        raise FundingEvidenceError(
+            f"Fresh account-filtered IBKR executions are unavailable: {exc}",
+            "EXECUTIONS_UNAVAILABLE",
+        ) from exc
+    if fills is None:
+        raise FundingEvidenceError(
+            "The fresh account-filtered IBKR executions request returned no result.",
+            "EXECUTIONS_UNAVAILABLE",
+        )
+
+    rows: List[Dict[str, Any]] = []
+    for fill in list(fills):
+        execution = getattr(fill, "execution", None)
+        execution_account = str(
+            getattr(execution, "acctNumber", "") or ""
+        ).strip()
+        if not execution_account:
+            raise FundingEvidenceError(
+                "A freshly returned IBKR execution omitted its account.",
+                "EXECUTION_ACCOUNT_MISSING",
+            )
+        if execution_account != account:
+            raise FundingEvidenceError(
+                "The account-filtered IBKR execution response included another account.",
+                "EXECUTION_ACCOUNT_MISMATCH",
+            )
+        execution_id = str(
+            getattr(execution, "execId", "") or ""
+        ).strip()
+        if not execution_id:
+            raise FundingEvidenceError(
+                "A freshly returned IBKR execution omitted its execution ID.",
+                "EXECUTION_EVIDENCE_INVALID",
+            )
+
+        row: Dict[str, Any] = {"execId": execution_id}
+        contract = getattr(fill, "contract", None)
+        con_id = int(getattr(contract, "conId", 0) or 0)
+        if con_id > 0:
+            row["conId"] = con_id
+        execution_time = (
+            getattr(fill, "time", None)
+            or getattr(execution, "time", None)
+        )
+        if execution_time is not None:
+            row["executionTime"] = (
+                iso_timestamp(execution_time)
+                or str(execution_time).strip()
+            )
+        side = str(getattr(execution, "side", "") or "").strip()
+        if side:
+            row["side"] = side
+        shares = finite_float(getattr(execution, "shares", None))
+        if shares is not None:
+            row["shares"] = shares
+        price = finite_float(getattr(execution, "price", None))
+        if price is not None:
+            row["price"] = price
+        rows.append(row)
+
+    rows.sort(key=lambda row: row["execId"])
+    if len({row["execId"] for row in rows}) != len(rows):
+        raise FundingEvidenceError(
+            "The fresh IBKR execution response contained duplicate execution IDs.",
+            "EXECUTION_EVIDENCE_INVALID",
+        )
+    return {
+        "asOf": now_iso(),
+        "count": len(rows),
+        "rows": rows,
+        "signature": tuple(
+            json.dumps(
+                row,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            for row in rows
+        ),
+    }
+
+
 def position_quantity_signature(positions: List[Any]) -> tuple:
     rows = []
     for position in positions:
@@ -1223,6 +1589,199 @@ def liquid_hours_session_state(
     return True if session_pattern.fullmatch(hours) else None
 
 
+def parse_us_equity_liquid_hours(
+    liquid_hours: Any,
+) -> Dict[date, Optional[datetime]]:
+    """Parse IBKR RTH rows into broker-calendar session close timestamps."""
+    if not isinstance(liquid_hours, str) or not liquid_hours.strip():
+        raise FundingEvidenceError(
+            "IBKR omitted the US-equity liquid-hours calendar.",
+            "MARKET_SESSION_SCHEDULE_INVALID",
+        )
+
+    ny_zone = ZoneInfo("America/New_York")
+    schedule: Dict[date, Optional[datetime]] = {}
+    for raw_row in liquid_hours.split(";"):
+        row = raw_row.strip()
+        if not row:
+            continue
+        row_date_text, separator, hours = row.partition(":")
+        if (
+            not separator
+            or len(row_date_text) != 8
+            or not row_date_text.isdigit()
+        ):
+            raise FundingEvidenceError(
+                "IBKR returned an invalid US-equity liquid-hours row.",
+                "MARKET_SESSION_SCHEDULE_INVALID",
+            )
+        try:
+            row_date = datetime.strptime(
+                row_date_text,
+                "%Y%m%d",
+            ).date()
+        except ValueError as exc:
+            raise FundingEvidenceError(
+                "IBKR returned an invalid US-equity liquid-hours date.",
+                "MARKET_SESSION_SCHEDULE_INVALID",
+            ) from exc
+        if row_date in schedule:
+            raise FundingEvidenceError(
+                "IBKR returned duplicate US-equity liquid-hours dates.",
+                "MARKET_SESSION_SCHEDULE_AMBIGUOUS",
+            )
+
+        hours = hours.strip()
+        if hours.upper() == "CLOSED":
+            schedule[row_date] = None
+            continue
+        if liquid_hours_session_state(
+            f"{row_date_text}:{hours}",
+            row_date,
+        ) is not True:
+            raise FundingEvidenceError(
+                "IBKR returned invalid US-equity liquid hours.",
+                "MARKET_SESSION_SCHEDULE_INVALID",
+            )
+
+        final_range = hours.split(",")[-1]
+        _open_text, range_separator, close_text = final_range.partition("-")
+        if not range_separator:
+            raise FundingEvidenceError(
+                "IBKR returned an invalid US-equity session range.",
+                "MARKET_SESSION_SCHEDULE_INVALID",
+            )
+        close_date = row_date
+        close_time_text = close_text
+        if ":" in close_text:
+            close_date_text, close_time_text = close_text.rsplit(":", 1)
+            try:
+                close_date = datetime.strptime(
+                    close_date_text,
+                    "%Y%m%d",
+                ).date()
+            except ValueError as exc:
+                raise FundingEvidenceError(
+                    "IBKR returned an invalid US-equity session close date.",
+                    "MARKET_SESSION_SCHEDULE_INVALID",
+                ) from exc
+        if (
+            len(close_time_text) != 4
+            or not close_time_text.isdigit()
+        ):
+            raise FundingEvidenceError(
+                "IBKR returned an invalid US-equity session close time.",
+                "MARKET_SESSION_SCHEDULE_INVALID",
+            )
+        close_hour = int(close_time_text[:2])
+        close_minute = int(close_time_text[2:])
+        if close_hour > 23 or close_minute > 59:
+            raise FundingEvidenceError(
+                "IBKR returned an invalid US-equity session close time.",
+                "MARKET_SESSION_SCHEDULE_INVALID",
+            )
+        schedule[row_date] = datetime(
+            close_date.year,
+            close_date.month,
+            close_date.day,
+            close_hour,
+            close_minute,
+            tzinfo=ny_zone,
+        )
+
+    if not schedule:
+        raise FundingEvidenceError(
+            "IBKR returned an empty US-equity liquid-hours calendar.",
+            "MARKET_SESSION_SCHEDULE_INVALID",
+        )
+    return schedule
+
+
+def build_interest_forecast_calendar(
+    market_calendar: Dict[str, Any],
+    *,
+    broker_time: datetime,
+    prior_completed_session: date,
+) -> Dict[str, Any]:
+    """Derive an issuance window only from verified IBKR calendar rows."""
+    schedule = parse_us_equity_liquid_hours(
+        market_calendar.get("liquidHours")
+    )
+    broker_ny = broker_time.astimezone(
+        ZoneInfo("America/New_York")
+    )
+    broker_date = broker_ny.date()
+    current_session_close = schedule.get(broker_date)
+    current_session_scheduled = market_calendar.get(
+        "currentSessionScheduled"
+    )
+    parsed_current_scheduled = current_session_close is not None
+    if (
+        broker_date not in schedule
+        or not isinstance(current_session_scheduled, bool)
+        or current_session_scheduled != parsed_current_scheduled
+    ):
+        raise FundingEvidenceError(
+            "IBKR returned inconsistent current-session calendar evidence.",
+            "MARKET_SESSION_SCHEDULE_AMBIGUOUS",
+        )
+
+    next_session_date = next(
+        (
+            session_date
+            for session_date in sorted(schedule)
+            if session_date > broker_date
+            and schedule[session_date] is not None
+        ),
+        None,
+    )
+    current_session_complete = bool(
+        current_session_close is not None
+        and broker_ny >= current_session_close
+    )
+    eligible = bool(
+        current_session_complete
+        and next_session_date is not None
+    )
+    latest_completed_session = (
+        broker_date
+        if current_session_complete
+        else prior_completed_session
+    )
+    return {
+        "eligible": eligible,
+        "sessionDate": (
+            broker_date.isoformat()
+            if current_session_scheduled
+            else None
+        ),
+        "accrualDays": (
+            (next_session_date - broker_date).days
+            if next_session_date is not None
+            and current_session_scheduled
+            else None
+        ),
+        "nextSessionDate": (
+            next_session_date.isoformat()
+            if next_session_date is not None
+            else None
+        ),
+        "currentSessionCloseAt": (
+            iso_timestamp(current_session_close)
+            if current_session_close is not None
+            else None
+        ),
+        "currentSessionComplete": current_session_complete,
+        "priorCompletedSessionDate": (
+            prior_completed_session.isoformat()
+        ),
+        "latestCompletedSessionDate": (
+            latest_completed_session.isoformat()
+        ),
+        "verification": "ibkr_liquid_hours_and_broker_time",
+    }
+
+
 async def request_us_equity_market_calendar(
     funding_session: IB,
     settlement_date: date,
@@ -1289,6 +1848,7 @@ async def request_us_equity_market_calendar(
     return {
         "contract": getattr(detail, "contract"),
         "currentSessionScheduled": current_session_scheduled,
+        "liquidHours": getattr(detail, "liquidHours"),
     }
 
 
@@ -2865,6 +3425,172 @@ async def build_short_position_reference_evidence(
     return evidence
 
 
+INTEREST_OBSERVATION_NO_STORE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    "Pragma": "no-cache",
+}
+
+
+def interest_observation_unavailable(
+    message: str,
+    *,
+    code: str,
+    account: Optional[str] = None,
+    status_code: int = 503,
+    socket_verified_at: Optional[str] = None,
+    timing: Optional[Dict[str, Any]] = None,
+) -> JSONResponse:
+    payload: Dict[str, Any] = {
+        "ok": False,
+        "connected": False,
+        "status": "unavailable",
+        "source": "unavailable",
+        "account": account,
+        "from_cache": False,
+        "errorCode": code,
+        "message": message,
+        "detail": message,
+        "observed_at": now_iso(),
+    }
+    if socket_verified_at:
+        payload["socket_verified_at"] = socket_verified_at
+    if timing is not None:
+        payload["timing"] = timing
+    return JSONResponse(
+        payload,
+        status_code=status_code,
+        headers=INTEREST_OBSERVATION_NO_STORE_HEADERS,
+    )
+
+
+def require_funding_socket_connected(funding_session: IB) -> None:
+    try:
+        connected = bool(funding_session.isConnected())
+    except Exception as exc:
+        raise FundingEvidenceError(
+            f"The dedicated IBKR observation socket state is unavailable: {exc}",
+            "INTEREST_OBSERVATION_DISCONNECTED",
+        ) from exc
+    if not connected:
+        raise FundingEvidenceError(
+            "The dedicated IBKR observation socket disconnected.",
+            "INTEREST_OBSERVATION_DISCONNECTED",
+        )
+
+
+def require_fresh_interest_broker_time(
+    value: Any,
+    *,
+    observed_at: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    normalized = iso_timestamp(value)
+    if not normalized:
+        raise FundingEvidenceError(
+            "IBKR socket verification returned an invalid timestamp.",
+            "SOCKET_TIMESTAMP_INVALID",
+        )
+    broker_time = datetime.fromisoformat(
+        normalized.replace("Z", "+00:00")
+    )
+    local_observed_at = observed_at or datetime.now(timezone.utc)
+    age_seconds = (local_observed_at - broker_time).total_seconds()
+    if age_seconds > INTEREST_OBSERVATION_BROKER_TIME_MAX_AGE_SEC:
+        raise FundingEvidenceError(
+            "IBKR socket verification returned stale broker time.",
+            "BROKER_TIME_STALE",
+        )
+    if age_seconds < -INTEREST_OBSERVATION_BROKER_TIME_MAX_FUTURE_SEC:
+        raise FundingEvidenceError(
+            "IBKR socket verification returned broker time too far in the future.",
+            "BROKER_TIME_FUTURE",
+        )
+    return {
+        "brokerTime": broker_time,
+        "socketVerifiedAt": normalized,
+        "localObservedAt": local_observed_at,
+        "ageSeconds": round(age_seconds, 3),
+    }
+
+
+def interest_observation_account_signature(
+    summary: Dict[str, Any],
+    positions: List[Any],
+    execution_signature: tuple,
+) -> str:
+    payload = {
+        "summary": summary,
+        "positions": position_quantity_signature(positions),
+        "executions": execution_signature,
+    }
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def interest_observation_summary(
+    summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    explicit_z_segment = (
+        summary.get("cashSegmentZVerification") == "explicit_zero"
+    )
+    return {
+        "baseCurrency": summary["baseCurrency"],
+        "NetLiquidation": summary["NetLiquidation"],
+        "TotalCashValue-S": summary["TotalCashValue-S"],
+        "TotalCashValue-C": summary["TotalCashValue-C"],
+        "TotalCashValue-Z": (
+            summary["TotalCashValue-Z"]
+            if explicit_z_segment
+            else None
+        ),
+        "MaintMarginReq-C": summary["MaintMarginReq-C"],
+        "AccruedCash-S": summary["AccruedCash-S"],
+        "FxCashBalance": summary["FxCashBalance"],
+        "SettledCashByDate-S": summary["SettledCashByDate-S"],
+        "SettledCashByDate-C": summary["SettledCashByDate-C"],
+        "SettledCashByDate-Z": (
+            summary["SettledCashByDate-Z"]
+            if explicit_z_segment
+            else None
+        ),
+    }
+
+
+def interest_short_positions(
+    reference_evidence: List[Dict[str, Any]],
+    *,
+    snapshot_timestamp: str,
+) -> List[Dict[str, Any]]:
+    rows = [
+        {
+            "conId": row["conId"],
+            "symbol": row.get("symbol"),
+            "currency": row["currency"],
+            "quantity": row["quantity"],
+            "priorClose": row["referenceClose"],
+            "priorCloseSource": row["referenceCloseSource"],
+            "priorCloseSessionDate": row["referenceCloseSessionDate"],
+            "priorCloseObservedAt": row["referenceCloseObservedAt"],
+            "snapshotTimestamp": snapshot_timestamp,
+        }
+        for row in reference_evidence
+    ]
+    return sorted(rows, key=lambda row: row["conId"])
+
+
+def evidence_sha256(payload: Dict[str, Any]) -> str:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def funding_unavailable(
     message: str,
     *,
@@ -4032,28 +4758,64 @@ async def portfolio_live_positions() -> JSONResponse:
 
     try:
         socket_verification = await verify_primary_socket()
-        gateway_time = socket_verification["gatewayTime"]
-        accounts = [str(account) for account in ib.managedAccounts() if account]
-        if not accounts:
+        connection_generation = socket_verification["connectionGeneration"]
+        accounts_before = [
+            str(account) for account in ib.managedAccounts() if account
+        ]
+        if not accounts_before:
             raise RuntimeError("The verified IB session returned no managed accounts.")
-        account_set = set(accounts)
-        positions = []
-        for position in ib.positions():
-            if position.account not in account_set:
-                continue
-            contract = position.contract
-            positions.append(
+        position_source = "ibkr_req_positions"
+        try:
+            capture = await request_fresh_positions_snapshot(
+                accounts_before,
+                timeout_sec=LIVE_POSITIONS_REQUEST_TIMEOUT_SEC,
+            )
+            positions = capture["positions"]
+            positions_observed_at = capture["observedAt"]
+        except asyncio.TimeoutError:
+            return JSONResponse(
                 {
-                    "account": position.account,
-                    "conId": int(contract.conId) if contract.conId else None,
-                    "symbol": contract.symbol or None,
-                    "localSymbol": contract.localSymbol or None,
-                    "secType": contract.secType or None,
-                    "exchange": contract.exchange or None,
-                    "currency": contract.currency or None,
-                    "position": float(position.position),
-                    "avgCost": float(position.avgCost),
-                }
+                    "ok": False,
+                    "status": "positions_request_timeout",
+                    "message": (
+                        "The fresh IBKR positions request timed out after "
+                        f"{LIVE_POSITIONS_REQUEST_TIMEOUT_SEC:.1f}s."
+                    ),
+                    "source": "unavailable",
+                    "position_source": "unavailable",
+                    "from_cache": False,
+                    "positions": [],
+                    "observed_at": now_iso(),
+                },
+                status_code=503,
+            )
+        post_positions_verification = await verify_primary_socket()
+        if (
+            post_positions_verification["connectionGeneration"]
+            != connection_generation
+        ):
+            raise RuntimeError(
+                "The IBKR connection generation changed during the fresh "
+                "positions request."
+            )
+        accounts = [str(account) for account in ib.managedAccounts() if account]
+        if not accounts or set(accounts) != set(accounts_before):
+            raise RuntimeError(
+                "The IBKR managed-account set changed during the fresh "
+                "positions request."
+            )
+        account_set = set(accounts)
+        unexpected_accounts = sorted(
+            {
+                str(position["account"])
+                for position in positions
+                if str(position["account"]) not in account_set
+            }
+        )
+        if unexpected_accounts:
+            raise RuntimeError(
+                "The fresh IBKR positions response included accounts outside the "
+                f"verified managed-account set: {', '.join(unexpected_accounts)}."
             )
     except asyncio.TimeoutError:
         return JSONResponse(
@@ -4080,18 +4842,20 @@ async def portfolio_live_positions() -> JSONResponse:
             status_code=503,
         )
 
-    observed_at = now_iso()
     return JSONResponse(
         {
             "ok": True,
             "status": "live",
             "connected": True,
             "source": "ibkr_live_session",
+            "position_source": position_source,
+            "from_cache": False,
             "accounts": accounts,
             "positions": positions,
             "position_count": len(positions),
-            "socket_verified_at": gateway_time.isoformat() if hasattr(gateway_time, "isoformat") else str(gateway_time),
-            "observed_at": observed_at,
+            "socket_verified_at": post_positions_verification["socketVerifiedAt"],
+            "positions_observed_at": positions_observed_at,
+            "observed_at": positions_observed_at,
         }
     )
 
@@ -4445,6 +5209,354 @@ async def portfolio_live_account_summary(account: Optional[str] = Query(None)) -
             "fetched_at": observed_at,
         }
     )
+
+
+@app.get("/portfolio/interest-observation")
+async def portfolio_interest_observation(
+    account: Optional[str] = Query(None),
+) -> JSONResponse:
+    """Return a double-read, non-cached IBKR cash-interest observation."""
+    requested_account = (
+        str(account).strip()
+        if isinstance(account, str) and str(account).strip()
+        else None
+    )
+    request_started = time.monotonic()
+    timings: Dict[str, Any] = {}
+    socket_verified_at: Optional[str] = None
+
+    if not requested_account:
+        return interest_observation_unavailable(
+            "An exact IBKR account is required for an interest observation.",
+            code="ACCOUNT_REQUIRED",
+            status_code=409,
+            timing={"total_ms": elapsed_ms(request_started)},
+        )
+
+    # The dedicated client cannot safely overlap account-update callbacks.
+    # Reject rather than queue so abandoned HTTP requests cannot build up.
+    if funding_snapshot_lock.locked():
+        return interest_observation_unavailable(
+            "A live IBKR funding or interest observation is already in progress.",
+            code="INTEREST_OBSERVATION_BUSY",
+            account=requested_account,
+            status_code=409,
+            timing={"total_ms": elapsed_ms(request_started)},
+        )
+
+    async with funding_snapshot_lock:
+        funding_session = funding_ib
+        phase_started = time.monotonic()
+        health = await ensure_funding_connected(funding_session)
+        timings["connect_ms"] = elapsed_ms(phase_started)
+        if not health.get("ok"):
+            return interest_observation_unavailable(
+                health.get("message")
+                or "The dedicated IBKR observation client is not connected.",
+                code="GATEWAY_UNAVAILABLE",
+                account=requested_account,
+                timing={**timings, "total_ms": elapsed_ms(request_started)},
+            )
+
+        try:
+            require_funding_socket_connected(funding_session)
+            phase_started = time.monotonic()
+            gateway_time = await asyncio.wait_for(
+                funding_session.reqCurrentTimeAsync(),
+                timeout=LIVE_SESSION_VERIFY_TIMEOUT_SEC,
+            )
+            socket_observed_datetime = datetime.now(timezone.utc)
+            broker_verification = require_fresh_interest_broker_time(
+                gateway_time,
+                observed_at=socket_observed_datetime,
+            )
+            timings["socket_ms"] = elapsed_ms(phase_started)
+            socket_verified_at = broker_verification["socketVerifiedAt"]
+            socket_observed_at = iso_timestamp(socket_observed_datetime)
+            require_funding_socket_connected(funding_session)
+
+            managed_accounts = [
+                str(value).strip()
+                for value in funding_session.managedAccounts()
+                if str(value).strip()
+            ]
+            if not managed_accounts:
+                raise FundingEvidenceError(
+                    "The verified IB session returned no managed accounts.",
+                    "MANAGED_ACCOUNTS_MISSING",
+                )
+            if len(set(managed_accounts)) != len(managed_accounts):
+                raise FundingEvidenceError(
+                    "The verified IB session returned duplicate managed accounts.",
+                    "MANAGED_ACCOUNTS_DUPLICATE",
+                )
+            if requested_account not in managed_accounts:
+                raise FundingEvidenceError(
+                    f"Account {requested_account} is not managed by the verified live IB session.",
+                    "ACCOUNT_NOT_MANAGED",
+                )
+            acct = requested_account
+            broker_time = broker_verification["brokerTime"]
+            verified_ny_date = broker_time.astimezone(
+                ZoneInfo("America/New_York")
+            ).date()
+
+            first_read_started = time.monotonic()
+            first_account_rows = await request_fresh_account_updates_multi(
+                funding_session,
+                acct,
+            )
+            require_funding_socket_connected(funding_session)
+            first_summary = build_funding_summary(
+                first_account_rows,
+                verified_ny_date,
+            )
+            first_positions = await request_fresh_supported_stock_positions(
+                funding_session,
+                acct,
+            )
+            require_positions_in_base_currency(
+                first_positions,
+                first_summary["baseCurrency"],
+            )
+            first_positions_observed_at = now_iso()
+            first_executions = (
+                await request_fresh_account_execution_evidence(
+                    funding_session,
+                    acct,
+                )
+            )
+            require_funding_socket_connected(funding_session)
+            first_signature = interest_observation_account_signature(
+                first_summary,
+                first_positions,
+                first_executions["signature"],
+            )
+            timings["first_read_ms"] = elapsed_ms(first_read_started)
+
+            market_calendar = await request_us_equity_market_calendar(
+                funding_session,
+                verified_ny_date,
+                timings,
+            )
+            prior_completed_session = (
+                await request_latest_completed_us_equity_session(
+                    funding_session,
+                    market_calendar["contract"],
+                    verified_ny_date,
+                    timings,
+                )
+            )
+            require_funding_socket_connected(funding_session)
+
+            short_reference_evidence = (
+                await build_short_position_reference_evidence(
+                    funding_session,
+                    first_positions,
+                    verified_ny_date,
+                    timings,
+                )
+            )
+            if any(
+                row.get("referenceCloseSessionDate")
+                != prior_completed_session.isoformat()
+                for row in short_reference_evidence
+            ):
+                raise FundingEvidenceError(
+                    "A short prior close does not match the verified prior completed US-equity session.",
+                    "SHORT_PRIOR_CLOSE_SESSION_MISMATCH",
+                )
+            require_funding_socket_connected(funding_session)
+
+            second_read_started = time.monotonic()
+            second_account_rows = await request_fresh_account_updates_multi(
+                funding_session,
+                acct,
+            )
+            require_funding_socket_connected(funding_session)
+            second_summary = build_funding_summary(
+                second_account_rows,
+                verified_ny_date,
+            )
+            second_positions = await request_fresh_supported_stock_positions(
+                funding_session,
+                acct,
+            )
+            require_positions_in_base_currency(
+                second_positions,
+                second_summary["baseCurrency"],
+            )
+            second_positions_observed_at = now_iso()
+            second_executions = (
+                await request_fresh_account_execution_evidence(
+                    funding_session,
+                    acct,
+                )
+            )
+            require_funding_socket_connected(funding_session)
+            second_signature = interest_observation_account_signature(
+                second_summary,
+                second_positions,
+                second_executions["signature"],
+            )
+            timings["second_read_ms"] = elapsed_ms(second_read_started)
+            if first_signature != second_signature:
+                raise FundingEvidenceError(
+                    "Account values, settlement ladders, positions, or executions changed during interest observation.",
+                    "INTEREST_OBSERVATION_CHANGED",
+                )
+
+            account_values_observed_at = iso_timestamp(
+                second_account_rows[-1].get("received_at")
+            )
+            if not account_values_observed_at:
+                raise FundingEvidenceError(
+                    "The fresh account update omitted its receipt timestamp.",
+                    "ACCOUNT_UPDATE_TIMESTAMP_MISSING",
+                )
+
+            summary_payload = interest_observation_summary(
+                second_summary
+            )
+            settlement_ladders = {
+                "securities": summary_payload["SettledCashByDate-S"],
+                "commodities": summary_payload["SettledCashByDate-C"],
+                "z": summary_payload["SettledCashByDate-Z"],
+            }
+            short_positions = interest_short_positions(
+                short_reference_evidence,
+                snapshot_timestamp=second_positions_observed_at,
+            )
+            execution_evidence = {
+                "asOf": second_executions["asOf"],
+                "count": second_executions["count"],
+                "rows": second_executions["rows"],
+            }
+            forecast = build_interest_forecast_calendar(
+                market_calendar,
+                broker_time=broker_time,
+                prior_completed_session=prior_completed_session,
+            )
+            market_calendar_payload = {
+                "verifiedNyDate": verified_ny_date.isoformat(),
+                "currentSessionScheduled": market_calendar[
+                    "currentSessionScheduled"
+                ],
+                "currentSessionCloseAt": forecast[
+                    "currentSessionCloseAt"
+                ],
+                "currentSessionComplete": forecast[
+                    "currentSessionComplete"
+                ],
+                "priorCompletedSessionDate": forecast[
+                    "priorCompletedSessionDate"
+                ],
+                "latestCompletedSessionDate": (
+                    forecast["latestCompletedSessionDate"]
+                ),
+                "nextSessionDate": forecast["nextSessionDate"],
+                "liquidHours": market_calendar["liquidHours"],
+                "source": "ibkr_contract_details_and_historical_schedule",
+            }
+            hashed_evidence = {
+                "account": acct,
+                "summary": summary_payload,
+                "settlement_ladders": settlement_ladders,
+                "positions": position_quantity_signature(second_positions),
+                "short_positions": short_positions,
+                "execution_evidence": execution_evidence,
+                "market_calendar": market_calendar_payload,
+                "forecast": forecast,
+            }
+            require_funding_socket_connected(funding_session)
+            final_broker_verification = (
+                require_fresh_interest_broker_time(
+                    gateway_time,
+                    observed_at=datetime.now(timezone.utc),
+                )
+            )
+            observed_at = now_iso()
+            timings["total_ms"] = elapsed_ms(request_started)
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "connected": True,
+                    "status": "live",
+                    "source": "ibkr_live_interest_observation",
+                    "account": acct,
+                    "observed_at": observed_at,
+                    "socket_verified_at": socket_verified_at,
+                    "socket_observed_at": socket_observed_at,
+                    "account_values_observed_at": (
+                        account_values_observed_at
+                    ),
+                    "positions_observed_at": (
+                        second_positions_observed_at
+                    ),
+                    "executions_observed_at": second_executions["asOf"],
+                    "from_cache": False,
+                    "freshness": {
+                        "status": "fresh",
+                        "broker_time_age_seconds": (
+                            final_broker_verification["ageSeconds"]
+                        ),
+                        "broker_time_max_age_seconds": (
+                            INTEREST_OBSERVATION_BROKER_TIME_MAX_AGE_SEC
+                        ),
+                        "account_reads": 2,
+                        "position_reads": 2,
+                        "execution_reads": 2,
+                        "first_positions_observed_at": (
+                            first_positions_observed_at
+                        ),
+                    },
+                    "summary": summary_payload,
+                    "settlement_ladders": settlement_ladders,
+                    "market_calendar": market_calendar_payload,
+                    "forecast": forecast,
+                    "short_positions": short_positions,
+                    "execution_evidence": execution_evidence,
+                    "evidence_hash": evidence_sha256(hashed_evidence),
+                    "timing": timings,
+                },
+                headers=INTEREST_OBSERVATION_NO_STORE_HEADERS,
+            )
+        except asyncio.TimeoutError:
+            disconnect_funding_session(funding_session)
+            return interest_observation_unavailable(
+                "The live IBKR interest observation timed out.",
+                code="INTEREST_OBSERVATION_TIMEOUT",
+                account=requested_account,
+                socket_verified_at=socket_verified_at,
+                timing={**timings, "total_ms": elapsed_ms(request_started)},
+            )
+        except FundingEvidenceError as exc:
+            disconnect_funding_session(funding_session)
+            conflict_codes = {
+                "ACCOUNT_NOT_MANAGED",
+                "ACCOUNT_UPDATE_ACCOUNT_MISMATCH",
+                "EXECUTION_ACCOUNT_MISMATCH",
+                "INTEREST_OBSERVATION_CHANGED",
+                "MANAGED_ACCOUNTS_DUPLICATE",
+                "POSITION_ACCOUNT_MISMATCH",
+            }
+            return interest_observation_unavailable(
+                str(exc),
+                code=exc.code,
+                account=requested_account,
+                status_code=409 if exc.code in conflict_codes else 503,
+                socket_verified_at=socket_verified_at,
+                timing={**timings, "total_ms": elapsed_ms(request_started)},
+            )
+        except Exception as exc:
+            disconnect_funding_session(funding_session)
+            return interest_observation_unavailable(
+                f"The live IBKR interest observation failed: {exc}",
+                code="INTEREST_OBSERVATION_FAILED",
+                account=requested_account,
+                socket_verified_at=socket_verified_at,
+                timing={**timings, "total_ms": elapsed_ms(request_started)},
+            )
 
 
 @app.get("/portfolio/live-funding")
@@ -5196,7 +6308,7 @@ async def historical(body: HistoricalRequest) -> JSONResponse:
 
 async def fetch_positions_snapshot(acct: str) -> Dict[str, Any]:
     try:
-        await asyncio.wait_for(ib.reqPositionsAsync(), timeout=POSITIONS_REQUEST_TIMEOUT_SEC)
+        await req_positions_bounded(ib)
     except asyncio.TimeoutError:
         return {
             "ok": False,

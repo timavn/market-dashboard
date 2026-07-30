@@ -1,27 +1,65 @@
 import { SIZING_CONSTANTS } from '../utils/signalWeightedPositionSizing';
 
-const PROCESS_AS_OF = '2026-07-18';
+const PROCESS_AS_OF = '2026-07-27';
 
-const CANONICAL_POSITION_SIZING_RULES = [
+const SIGNAL_AND_RANGE_RULES = [
   'signal.trade.duration',
   'signal.trend.duration',
-  'lifecycle.trend_break_trade_holds',
-  'lifecycle.trade_break',
   'entry.long.range_half',
   'entry.short.range_half',
-  'risk.beta_band',
-  'risk.atr_cap',
   'data.signal_independence',
   'range.normalization',
   'structure.directional_streaks',
   'record.extension',
+];
+
+const POSITION_LIFECYCLE_RULES = [
+  'lifecycle.trend_break_trade_holds',
+  'lifecycle.trade_break',
+  'lifecycle.reversal',
+];
+
+const POSITION_SIZING_RULES = [
+  'risk.beta_band',
+  'risk.atr_cap',
   'sizing.conviction',
   'sizing.target_rounding',
   'lifecycle.open_at_min',
   'lifecycle.incremental_steps',
   'data.optional_strength_missing',
-  'lifecycle.reversal',
+];
+
+const DATA_CONTROL_RULES = [
   'data.execution_gate',
+];
+
+const ALL_CANONICAL_PROCESS_RULES = [
+  ...SIGNAL_AND_RANGE_RULES,
+  ...POSITION_LIFECYCLE_RULES,
+  ...POSITION_SIZING_RULES,
+  ...DATA_CONTROL_RULES,
+];
+
+export const PROCESS_METHOD_IDS = [
+  'signals-and-risk-ranges',
+  'position-sizing',
+  'stops-exits-and-reversals',
+  'macro-regime-and-quad-overlay',
+  'security-selection-and-pods',
+  'portfolio-construction-and-diversification',
+  'data-controls-and-execution',
+  'validation-and-change-control',
+];
+
+const PROCESS_METHOD_DEPENDENCIES = [
+  { documentId: 'signals-and-risk-ranges', version: '0.1' },
+  { documentId: 'position-sizing', version: '1.1' },
+  { documentId: 'stops-exits-and-reversals', version: '0.1' },
+  { documentId: 'macro-regime-and-quad-overlay', version: '0.1' },
+  { documentId: 'security-selection-and-pods', version: '0.1' },
+  { documentId: 'portfolio-construction-and-diversification', version: '0.1' },
+  { documentId: 'data-controls-and-execution', version: '0.1' },
+  { documentId: 'validation-and-change-control', version: '0.1' },
 ];
 
 export const PROCESS_DOCUMENTS = [
@@ -29,17 +67,20 @@ export const PROCESS_DOCUMENTS = [
     id: 'the-process',
     route: '#/process',
     type: 'master',
-    title: 'The Process',
+    section: 'process',
+    parentId: null,
+    editable: true,
+    title: 'Process',
     subtitle: 'Portfolio Management Framework',
     version: '0.1',
     status: 'Draft',
     asOf: PROCESS_AS_OF,
     published: true,
-    dependencies: [{ documentId: 'position-sizing', version: '1.1' }],
+    dependencies: [...PROCESS_METHOD_DEPENDENCIES],
     canonicalRuleIds: [],
     researchRuleIds: [],
     referencedRuleIds: [
-      ...CANONICAL_POSITION_SIZING_RULES,
+      ...ALL_CANONICAL_PROCESS_RULES,
       'signal.tail.authority',
       'macro.quad.authority',
       'risk.hard_stop.policy',
@@ -48,106 +89,184 @@ export const PROCESS_DOCUMENTS = [
     ],
   },
   {
-    id: 'position-sizing',
-    route: '#/process/methods/position-sizing',
-    type: 'technical-note',
-    title: 'Position Sizing',
-    subtitle: 'Technical Note',
-    version: '1.1',
-    status: 'Canonical',
+    id: 'methods-index',
+    route: '#/process/methods',
+    type: 'index',
+    section: 'methods',
+    parentId: null,
+    editable: true,
+    title: 'Methods',
+    subtitle: 'Process Methods',
+    version: '0.1',
+    status: 'Draft',
     asOf: PROCESS_AS_OF,
     published: true,
-    dependencies: [],
-    canonicalRuleIds: [...CANONICAL_POSITION_SIZING_RULES],
+    dependencies: [...PROCESS_METHOD_DEPENDENCIES],
+    canonicalRuleIds: [],
     researchRuleIds: [],
-    referencedRuleIds: [...CANONICAL_POSITION_SIZING_RULES],
+    referencedRuleIds: [
+      ...ALL_CANONICAL_PROCESS_RULES,
+      'signal.tail.authority',
+      'macro.quad.authority',
+      'risk.hard_stop.policy',
+      'portfolio.limits',
+      'selection.pods',
+    ],
   },
   {
     id: 'signals-and-risk-ranges',
-    route: null,
-    type: 'technical-note',
+    route: '#/process/methods/signals-and-risk-ranges',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
     title: 'Signals and Risk Ranges',
-    subtitle: 'Technical Note',
-    version: '0.0',
-    status: 'Planned',
+    subtitle: 'Method',
+    version: '0.1',
+    status: 'Draft',
     asOf: PROCESS_AS_OF,
-    published: false,
+    published: true,
     dependencies: [],
-    canonicalRuleIds: [],
+    canonicalRuleIds: [...SIGNAL_AND_RANGE_RULES],
     researchRuleIds: ['signal.tail.authority'],
     referencedRuleIds: [
-      'signal.trade.duration',
-      'signal.trend.duration',
-      'lifecycle.trend_break_trade_holds',
-      'lifecycle.trade_break',
-      'entry.long.range_half',
-      'entry.short.range_half',
+      ...SIGNAL_AND_RANGE_RULES,
       'signal.tail.authority',
     ],
   },
   {
-    id: 'stops-exits-and-reversals',
-    route: null,
-    type: 'technical-note',
-    title: 'Stops, Exits, and Reversals',
-    subtitle: 'Technical Note',
-    version: '0.0',
-    status: 'Planned',
+    id: 'position-sizing',
+    route: '#/process/methods/position-sizing',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
+    title: 'Position Sizing',
+    subtitle: 'Method',
+    version: '1.1',
+    status: 'Canonical',
     asOf: PROCESS_AS_OF,
-    published: false,
-    dependencies: [{ documentId: 'signals-and-risk-ranges', version: '0.0' }],
-    canonicalRuleIds: [],
+    published: true,
+    dependencies: [{ documentId: 'signals-and-risk-ranges', version: '0.1' }],
+    canonicalRuleIds: [...POSITION_SIZING_RULES],
+    researchRuleIds: [],
+    referencedRuleIds: [
+      ...SIGNAL_AND_RANGE_RULES,
+      ...POSITION_LIFECYCLE_RULES,
+      ...POSITION_SIZING_RULES,
+      ...DATA_CONTROL_RULES,
+    ],
+  },
+  {
+    id: 'stops-exits-and-reversals',
+    route: '#/process/methods/stops-exits-and-reversals',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
+    title: 'Stops, Exits, and Reversals',
+    subtitle: 'Method',
+    version: '0.1',
+    status: 'Draft',
+    asOf: PROCESS_AS_OF,
+    published: true,
+    dependencies: [{ documentId: 'signals-and-risk-ranges', version: '0.1' }],
+    canonicalRuleIds: [...POSITION_LIFECYCLE_RULES],
     researchRuleIds: ['risk.hard_stop.policy'],
     referencedRuleIds: [
-      'lifecycle.trend_break_trade_holds',
-      'lifecycle.trade_break',
+      ...POSITION_LIFECYCLE_RULES,
       'risk.hard_stop.policy',
     ],
   },
   {
     id: 'macro-regime-and-quad-overlay',
-    route: null,
-    type: 'technical-note',
+    route: '#/process/methods/macro-regime-and-quad-overlay',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
     title: 'Macro Regime and Quad Overlay',
-    subtitle: 'Technical Note',
-    version: '0.0',
-    status: 'Planned',
+    subtitle: 'Method',
+    version: '0.1',
+    status: 'Draft',
     asOf: PROCESS_AS_OF,
-    published: false,
+    published: true,
     dependencies: [],
     canonicalRuleIds: [],
     researchRuleIds: ['macro.quad.authority'],
     referencedRuleIds: ['macro.quad.authority'],
   },
   {
-    id: 'portfolio-construction-and-diversification',
-    route: null,
-    type: 'technical-note',
-    title: 'Portfolio Construction and Diversification',
-    subtitle: 'Technical Note',
-    version: '0.0',
-    status: 'Planned',
+    id: 'security-selection-and-pods',
+    route: '#/process/methods/security-selection-and-pods',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
+    title: 'Security Selection and Pods',
+    subtitle: 'Method',
+    version: '0.1',
+    status: 'Deferred',
     asOf: PROCESS_AS_OF,
-    published: false,
+    published: true,
+    dependencies: [],
+    canonicalRuleIds: [],
+    researchRuleIds: ['selection.pods'],
+    referencedRuleIds: ['selection.pods'],
+  },
+  {
+    id: 'portfolio-construction-and-diversification',
+    route: '#/process/methods/portfolio-construction-and-diversification',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
+    title: 'Portfolio Construction and Diversification',
+    subtitle: 'Method',
+    version: '0.1',
+    status: 'Draft',
+    asOf: PROCESS_AS_OF,
+    published: true,
     dependencies: [{ documentId: 'position-sizing', version: '1.1' }],
     canonicalRuleIds: [],
     researchRuleIds: ['portfolio.limits'],
     referencedRuleIds: ['risk.beta_band', 'risk.atr_cap', 'portfolio.limits'],
   },
   {
-    id: 'security-selection-and-pods',
-    route: null,
-    type: 'technical-note',
-    title: 'Security Selection and Pods',
-    subtitle: 'Technical Note',
-    version: '0.0',
-    status: 'Deferred',
+    id: 'data-controls-and-execution',
+    route: '#/process/methods/data-controls-and-execution',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
+    title: 'Data Controls and Execution',
+    subtitle: 'Method',
+    version: '0.1',
+    status: 'Draft',
     asOf: PROCESS_AS_OF,
-    published: false,
+    published: true,
+    dependencies: [],
+    canonicalRuleIds: [...DATA_CONTROL_RULES],
+    researchRuleIds: [],
+    referencedRuleIds: [...DATA_CONTROL_RULES],
+  },
+  {
+    id: 'validation-and-change-control',
+    route: '#/process/methods/validation-and-change-control',
+    type: 'method',
+    section: 'methods',
+    parentId: 'methods-index',
+    editable: true,
+    title: 'Validation and Change Control',
+    subtitle: 'Method',
+    version: '0.1',
+    status: 'Draft',
+    asOf: PROCESS_AS_OF,
+    published: true,
     dependencies: [],
     canonicalRuleIds: [],
-    researchRuleIds: ['selection.pods'],
-    referencedRuleIds: ['selection.pods'],
+    researchRuleIds: [],
+    referencedRuleIds: [],
   },
 ];
 
@@ -157,8 +276,8 @@ export const PROCESS_RULES = [
     title: 'Trade duration',
     category: 'signals',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'Trade is the published directional signal with a duration of three weeks or less.',
     parameters: { maximumDurationWeeks: 3 },
   },
@@ -167,8 +286,8 @@ export const PROCESS_RULES = [
     title: 'Trend duration',
     category: 'signals',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'Trend is the published directional signal with a duration of three months or more.',
     parameters: { minimumDurationMonths: 3 },
   },
@@ -177,8 +296,8 @@ export const PROCESS_RULES = [
     title: 'Trend break while Trade holds',
     category: 'lifecycle',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'stops-exits-and-reversals',
+    ownerVersion: '0.1',
     statement: 'When Trend breaks but Trade remains aligned, an existing position is reduced immediately to MIN.',
     parameters: {
       condition: { trend: 'broken', trade: 'aligned' },
@@ -191,8 +310,8 @@ export const PROCESS_RULES = [
     title: 'Trade break',
     category: 'lifecycle',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'stops-exits-and-reversals',
+    ownerVersion: '0.1',
     statement: 'When Trade breaks, the existing position is exited to zero regardless of Trend.',
     parameters: {
       condition: { trade: 'broken', trend: 'any' },
@@ -205,8 +324,8 @@ export const PROCESS_RULES = [
     title: 'Long entry location',
     category: 'entry',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'A long may open or add only in the bottom half of the current LRR–HRR.',
     parameters: {
       side: 'long',
@@ -220,8 +339,8 @@ export const PROCESS_RULES = [
     title: 'Short entry location',
     category: 'entry',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'A short may open or add only in the top half of the current LRR–HRR.',
     parameters: {
       side: 'short',
@@ -269,8 +388,8 @@ export const PROCESS_RULES = [
     title: 'Independent Trade and Trend inputs',
     category: 'data-controls',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'Trade comes only from the published tracker direction and Trend only from the published risk-range direction; neither may be copied from the other.',
     parameters: { tradeSource: 'published-tracker', trendSource: 'published-risk-range', inferenceAllowed: false },
   },
@@ -279,8 +398,8 @@ export const PROCESS_RULES = [
     title: 'Normalized range position',
     category: 'entry',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'Spot is normalized within LRR–HRR; wrong-half and out-of-range prices remain visible but cannot authorize an open or add.',
     parameters: { longMaximum: 0.5, shortMinimum: 0.5, boundariesInclusive: true, wrongLocationAction: 'NO_OPEN_OR_ADD' },
   },
@@ -289,8 +408,8 @@ export const PROCESS_RULES = [
     title: 'Directional risk-range streaks',
     category: 'position-sizing',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'HH/HL streaks support longs and LH/LL streaks support shorts; each endpoint streak is capped at five and resets independently on a tie or missing edition.',
     parameters: { long: ['HH', 'HL'], short: ['LH', 'LL'], maximum: SIZING_CONSTANTS.MAX_STREAK, independentReset: true },
   },
@@ -299,8 +418,8 @@ export const PROCESS_RULES = [
     title: 'Prior traded-price record extension',
     category: 'position-sizing',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'signals-and-risk-ranges',
+    ownerVersion: '0.1',
     statement: 'Long record extension requires current HRR above the strictly prior traded-price ATH; short extension requires current LRR below the strictly prior traded-price ATL.',
     parameters: { long: 'HRR>PRIOR_ATH', short: 'LRR<PRIOR_ATL', historyCutoff: 'STRICTLY_PRIOR_TO_RANGE_EDITION' },
   },
@@ -368,8 +487,8 @@ export const PROCESS_RULES = [
     title: 'Reversal sequence',
     category: 'lifecycle',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'stops-exits-and-reversals',
+    ownerVersion: '0.1',
     statement: 'A reversal exits the held side first; the opposite side is a new candidate and must independently satisfy signal and entry-location rules.',
     parameters: { exitHeldSideFirst: true, oppositeSideRequiresIndependentEligibility: true },
   },
@@ -378,8 +497,8 @@ export const PROCESS_RULES = [
     title: 'Executable output gate',
     category: 'data-controls',
     status: 'canonical',
-    ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerDocumentId: 'data-controls-and-execution',
+    ownerVersion: '0.1',
     statement: 'Actionable dollars and quantity require fresh verified IBKR quote, NLV, supported instrument metadata, and dated research provenance; output remains read-only.',
     parameters: { provider: 'IBKR', researchProvenanceRequired: true, instrumentVerificationRequired: true, readOnly: true, orderTransmissionAllowed: false },
   },
@@ -389,7 +508,7 @@ export const PROCESS_RULES = [
     category: 'signals',
     status: 'research',
     ownerDocumentId: 'signals-and-risk-ranges',
-    ownerVersion: '0.0',
+    ownerVersion: '0.1',
     statement: 'Tail remains research-only until its exact authority is approved.',
     parameters: { authority: 'unresolved' },
   },
@@ -399,7 +518,7 @@ export const PROCESS_RULES = [
     category: 'macro-regime',
     status: 'research',
     ownerDocumentId: 'macro-regime-and-quad-overlay',
-    ownerVersion: '0.0',
+    ownerVersion: '0.1',
     statement: 'The Quad overlay remains descriptive until its role as context, ranking input, size modifier, or eligibility gate is approved.',
     parameters: { authority: 'unresolved' },
   },
@@ -409,7 +528,7 @@ export const PROCESS_RULES = [
     category: 'stops-and-exits',
     status: 'research',
     ownerDocumentId: 'stops-exits-and-reversals',
-    ownerVersion: '0.0',
+    ownerVersion: '0.1',
     statement: 'Hard-stop placement and behavior remain unresolved pending approval of the technical note.',
     parameters: { authority: 'unresolved' },
   },
@@ -419,7 +538,7 @@ export const PROCESS_RULES = [
     category: 'portfolio-construction',
     status: 'research',
     ownerDocumentId: 'portfolio-construction-and-diversification',
-    ownerVersion: '0.0',
+    ownerVersion: '0.1',
     statement: 'Gross, net, correlation, sleeve, cash, and diversification limits remain descriptive until approved.',
     parameters: { authority: 'unresolved' },
   },
@@ -429,7 +548,7 @@ export const PROCESS_RULES = [
     category: 'security-selection',
     status: 'research',
     ownerDocumentId: 'security-selection-and-pods',
-    ownerVersion: '0.0',
+    ownerVersion: '0.1',
     statement: 'Pods remain research-only until real inputs, calculations, and decision authority are defined.',
     parameters: { authority: 'unresolved' },
   },
@@ -437,7 +556,17 @@ export const PROCESS_RULES = [
 
 export const PUBLISHED_PROCESS_DOCUMENTS = PROCESS_DOCUMENTS.filter(({ published }) => published);
 
+export const PROCESS_METHOD_DOCUMENTS = PROCESS_METHOD_IDS
+  .map((id) => PROCESS_DOCUMENTS.find((document) => document.id === id))
+  .filter(Boolean);
+
 export const getPublishedProcessDocuments = () => PUBLISHED_PROCESS_DOCUMENTS;
+
+export const getProcessMethodDocuments = () => PROCESS_METHOD_DOCUMENTS;
+
+export const getProcessChildDocuments = (parentId) => (
+  PROCESS_DOCUMENTS.filter((document) => document.parentId === parentId)
+);
 
 export const getProcessDocument = (id) => (
   PROCESS_DOCUMENTS.find((document) => document.id === id) || null
@@ -477,11 +606,25 @@ export const validateProcessRegistry = (
     if (!document.id || !document.type || !document.version || !document.status || !document.asOf) {
       errors.push(`Document ${document.id || '<unknown>'} is missing required metadata.`);
     }
+    if (!document.section || typeof document.editable !== 'boolean' || !Object.prototype.hasOwnProperty.call(document, 'parentId')) {
+      errors.push(`Document ${document.id || '<unknown>'} is missing hierarchy metadata.`);
+    }
     if (document.published && !document.route) {
       errors.push(`Published document ${document.id} must have a route.`);
     }
     if (!document.published && document.route) {
       errors.push(`Unpublished document ${document.id} cannot have a publication route.`);
+    }
+    if (document.parentId) {
+      const parentDocument = documentById.get(document.parentId);
+      if (!parentDocument) {
+        errors.push(`Document ${document.id} names missing parent ${document.parentId}.`);
+      } else if (document.parentId === document.id) {
+        errors.push(`Document ${document.id} cannot be its own parent.`);
+      }
+    }
+    if (document.type === 'method' && document.parentId !== 'methods-index') {
+      errors.push(`Method ${document.id} must belong to the Methods index.`);
     }
 
     (document.dependencies || []).forEach((dependency) => {

@@ -29,6 +29,46 @@ describe('USD correlation provider service', () => {
     expect(second).toBe(first);
     expect(third).toBe(first);
     expect(first.sourceStatus).toBe('current');
+    expect(first.fxvlSnapshot).toBeNull();
+  });
+
+  test('attaches a verified FXVL snapshot when the CME producer succeeds', async () => {
+    const fxvlSnapshot = {
+      lastPx: 5.75,
+      source: 'cme',
+      availability: 'historical',
+      freshness: 'historical',
+      quoteMode: 'end-of-day',
+      asOf: '2026-07-24T21:00:00.000Z',
+    };
+    const fetchFxvlSnapshot = jest.fn(async () => fxvlSnapshot);
+    const service = createUsdCorrelationService({
+      fetchHistory: async () => makeHistory(),
+      fetchFxvlSnapshot,
+      now: () => new Date('2026-05-15T22:00:00Z'),
+    });
+
+    await expect(service.getSnapshot()).resolves.toMatchObject({
+      sourceStatus: 'current',
+      fxvlSnapshot,
+    });
+    expect(fetchFxvlSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  test('keeps correlations current when FXVL fetch fails closed', async () => {
+    const service = createUsdCorrelationService({
+      fetchHistory: async () => makeHistory(),
+      fetchFxvlSnapshot: async () => {
+        throw new Error('CME unauthorized');
+      },
+      now: () => new Date('2026-05-15T22:00:00Z'),
+      logger: { warn: jest.fn() },
+    });
+
+    await expect(service.getSnapshot()).resolves.toMatchObject({
+      sourceStatus: 'current',
+      fxvlSnapshot: null,
+    });
   });
 
   test('surfaces provider failures without producing data', async () => {

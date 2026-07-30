@@ -208,6 +208,8 @@ export function getPortfolioSidebarBanner({ portfolioData, selectedAccount }) {
 
 const IBKR_PORTFOLIO_FRESH_MS = 60 * 1000;
 const IBKR_PORTFOLIO_STALE_MS = 5 * 60 * 1000;
+const INTEREST_VALIDATION_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
+const INTEREST_VALIDATION_FUTURE_TOLERANCE_MS = 5 * 1000;
 const PREDICTION_MARKET_STATUS_LABELS = {
   connected: 'Connected',
   connected_no_contracts: 'IBKR connected, no event contracts discovered',
@@ -222,7 +224,7 @@ const PREDICTION_MARKET_STATUS_LABELS = {
   unknown: 'Unknown',
 };
 
-function getIbkrPortfolioFreshness(updatedAt) {
+export function getIbkrPortfolioFreshness(updatedAt, now = Date.now()) {
   if (!updatedAt) {
     return 'defective';
   }
@@ -234,7 +236,8 @@ function getIbkrPortfolioFreshness(updatedAt) {
     return 'defective';
   }
 
-  const ageMs = Date.now() - updated.getTime();
+  const currentTime = now instanceof Date ? now.getTime() : Number(now);
+  const ageMs = currentTime - updated.getTime();
   if (ageMs <= IBKR_PORTFOLIO_FRESH_MS) {
     return 'current';
   }
@@ -625,6 +628,55 @@ function getAggregateStatusFromSources(baseStatus, sources) {
   return 'active';
 }
 
+function buildInterestValidationStatusSource({
+  interestValidation,
+  loading = false,
+  selectedAccount,
+  now = Date.now(),
+}) {
+  const modelStatus = String(
+    interestValidation?.modelStatus || interestValidation?.status || '',
+  ).trim().toLowerCase();
+  const generatedAt = Date.parse(String(interestValidation?.generatedAt || ''));
+  const currentTime = now instanceof Date ? now.getTime() : Number(now);
+  const ageMs = currentTime - generatedAt;
+  const requestedAccount = String(
+    interestValidation?.requestedAccount || '',
+  ).trim();
+  const currentAccount = String(selectedAccount || '').trim();
+  const operational = (
+    interestValidation?.source === 'ibkr_interest_validation'
+    && interestValidation?.available === true
+    && interestValidation?.accountMatched === true
+    && currentAccount
+    && requestedAccount === currentAccount
+    && ['provisional', 'learning', 'validated'].includes(modelStatus)
+    && Number.isFinite(generatedAt)
+    && Number.isFinite(currentTime)
+    && ageMs >= -INTEREST_VALIDATION_FUTURE_TOLERANCE_MS
+    && ageMs <= INTEREST_VALIDATION_STATUS_MAX_AGE_MS
+  );
+
+  let stateLabel = 'Unavailable';
+  let status = 'defective';
+  if (operational) {
+    stateLabel = modelStatus.charAt(0).toUpperCase() + modelStatus.slice(1);
+    status = modelStatus === 'validated' ? 'current' : 'stale';
+  } else if (loading) {
+    stateLabel = 'Checking';
+    status = 'loading';
+  }
+
+  return {
+    id: 'interest-validation',
+    label: 'Interest validation',
+    stateLabel,
+    detail: stateLabel,
+    detailRows: [],
+    status,
+  };
+}
+
 /**
  * Status dot props aligned with dashboard StatusDot (green / blue / red emojis).
  */
@@ -635,8 +687,12 @@ export function getIbkrPortfolioStatusDot({
   rtaPositions,
   etfProSnapshot,
   predictionMarketProviderStatus,
+  interestValidation,
+  interestValidationLoading = false,
+  selectedAccount,
+  now = Date.now(),
 }) {
-  if (loading && !connection) {
+  if (loading && !portfolioData) {
     return {
       status: 'stale',
       emoji: '🔵',
@@ -647,10 +703,13 @@ export function getIbkrPortfolioStatusDot({
   }
 
   const updatedAt =
+    portfolioData?.socketVerifiedAt ||
+    portfolioData?.dataQuality?.fetchedAt ||
+    portfolioData?.funding?.observedAt ||
     portfolioData?.accountSummary?.lastUpdated ||
     portfolioData?.lastUpdated ||
     null;
-  const portfolioFreshness = getIbkrPortfolioFreshness(updatedAt);
+  const portfolioFreshness = getIbkrPortfolioFreshness(updatedAt, now);
   const dataQuality = portfolioData?.dataQuality || {};
   const missingMarketValueCount = Number(dataQuality.missingMarketValueCount || 0);
   const unavailableMarketValueCount = Number(
@@ -881,6 +940,19 @@ export function getIbkrPortfolioStatusDot({
     },
   ];
 
+  const shouldIncludeInterestValidation = (
+    interestValidation != null
+    || interestValidationLoading === true
+  );
+  if (shouldIncludeInterestValidation) {
+    sources.push(buildInterestValidationStatusSource({
+      interestValidation,
+      loading: interestValidationLoading,
+      selectedAccount,
+      now,
+    }));
+  }
+
   if (connection?.statusRefreshDelayed) {
     sources.push({
       id: 'provider-status-refresh-delayed',
@@ -896,17 +968,21 @@ export function getIbkrPortfolioStatusDot({
     });
   }
 
-  const shouldIncludeDependencies = (
-    rtaPositions !== undefined ||
-    etfProSnapshot !== undefined ||
-    predictionMarketProviderStatus !== undefined
-  );
-  if (shouldIncludeDependencies) {
-    sources.push(
-      buildRtaStatusSource({ portfolioData, rtaPositions }),
-      buildEtfProStatusSource({ portfolioData, etfProSnapshot }),
-      buildPredictionMarketStatusSource(predictionMarketProviderStatus),
-    );
+  const dependencySources = [];
+  if (rtaPositions != null) {
+    dependencySources.push(buildRtaStatusSource({ portfolioData, rtaPositions }));
+  }
+  if (etfProSnapshot != null) {
+    dependencySources.push(buildEtfProStatusSource({ portfolioData, etfProSnapshot }));
+  }
+  if (predictionMarketProviderStatus != null) {
+    dependencySources.push(buildPredictionMarketStatusSource(predictionMarketProviderStatus));
+  }
+  if (dependencySources.length > 0) {
+    sources.push(...dependencySources);
+    aggregateStatus = getAggregateStatusFromSources(aggregateStatus, sources);
+    emoji = aggregateStatus === 'active' ? '🟢' : aggregateStatus === 'stale' ? '🟡' : '🔴';
+  } else if (shouldIncludeInterestValidation) {
     aggregateStatus = getAggregateStatusFromSources(aggregateStatus, sources);
     emoji = aggregateStatus === 'active' ? '🟢' : aggregateStatus === 'stale' ? '🟡' : '🔴';
   }

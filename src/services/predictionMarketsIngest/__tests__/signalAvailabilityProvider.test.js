@@ -26,7 +26,17 @@ describe('prediction-market Overview signal availability', () => {
       useCache: false,
     });
 
-    expect(available).toEqual(expect.objectContaining({ status: 'available', requiredDate: '2026-07-22' }));
+    expect(available).toEqual(expect.objectContaining({
+      status: 'available',
+      requiredDate: '2026-07-22',
+      details: {
+        ticker: 'WTIC',
+        date: '2026-07-22',
+        lrr: 80,
+        hrr: 86,
+        trend: null,
+      },
+    }));
     expect(invalid).toEqual(expect.objectContaining({ status: 'unavailable', requiredDate: '2026-07-21' }));
   });
 
@@ -34,7 +44,15 @@ describe('prediction-market Overview signal availability', () => {
     const snapshot = {
       date: '2026-07-14',
       publishedAt: '2026-07-14T15:51:00.000Z',
-      data: { forecastMonth: 'July 2026' },
+      data: {
+        forecastMonth: 'July 2026',
+        metric: 'Headline CPI YoY',
+        scenarios: [
+          { key: 'downside', label: 'Downside', value: 2.7 },
+          { key: 'base', label: 'Base Case', value: 2.8 },
+          { key: 'upside', label: 'Upside', value: 2.9 },
+        ],
+      },
     };
     const available = await getOverviewSignalAvailability({
       market: 'cpi',
@@ -45,7 +63,17 @@ describe('prediction-market Overview signal availability', () => {
       event: { ticker: 'KXCPIYOY-26AUG' },
     }, { dynamodb: dynamodbMock({ snapshots: [snapshot] }), now: Date.parse('2026-07-21T18:00:00Z'), useCache: false });
 
-    expect(available).toEqual(expect.objectContaining({ status: 'available', requiredMonth: '2026-07' }));
+    expect(available).toEqual(expect.objectContaining({
+      status: 'available',
+      requiredMonth: '2026-07',
+      details: expect.objectContaining({
+        forecastMonth: 'July 2026',
+        metric: 'Headline CPI YoY',
+        scenarios: expect.arrayContaining([
+          expect.objectContaining({ key: 'base', value: 2.8 }),
+        ]),
+      }),
+    }));
     expect(mismatch).toEqual(expect.objectContaining({ status: 'unavailable', sourceMonth: '2026-07' }));
   });
 });

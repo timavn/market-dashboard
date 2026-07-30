@@ -1,365 +1,505 @@
-import React from 'react';
+import React, { act } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import SystemReadinessPanel from '../SystemReadinessPanel';
+import SystemReadinessPanel, { normalizeHedgeyeProducts } from '../SystemReadinessPanel';
 import { MarketDataService } from '../../../services/api/marketDataService';
 
 let mockTheme = 'light';
 
 jest.mock('../../../services/api/marketDataService', () => ({
-  MarketDataService: {
-    getSystemReadiness: jest.fn(),
-    runSystemReadinessRepair: jest.fn(),
-  },
+  MarketDataService: { getSystemStatus: jest.fn(), getHedgeyeFreshness: jest.fn() },
 }));
 
 jest.mock('../../../context/ThemeContext', () => ({
   useTheme: () => ({ theme: mockTheme }),
 }));
 
-function readinessPayload({
-  status = 'ready',
-  ready = status === 'ready',
+const onlineServices = [
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    status: 'online',
+    details: [
+      { id: 'api-server', label: 'API server', status: 'online' },
+      { id: 'react-ui', label: 'React UI', status: 'online' },
+    ],
+  },
+  {
+    id: 'market-data',
+    label: 'Market data',
+    status: 'online',
+    details: [
+      { id: 'primary-provider', label: 'Primary provider', status: 'online' },
+      { id: 'fresh-quote', label: 'Fresh quote', status: 'online' },
+    ],
+  },
+  {
+    id: 'live-portfolio',
+    label: 'Live portfolio',
+    status: 'online',
+    details: [
+      { id: 'ibkr-sidecar', label: 'IBKR sidecar', status: 'online' },
+      { id: 'gateway-session', label: 'Gateway session', status: 'online' },
+      { id: 'managed-account', label: 'Managed account', status: 'online' },
+      { id: 'fresh-session', label: 'Fresh session', status: 'online' },
+    ],
+  },
+  {
+    id: 'hermes-gmail',
+    label: 'Hermes / Gmail',
+    status: 'online',
+    details: [
+      { id: 'hermes-analyst', label: 'Hermes Analyst', status: 'online' },
+      { id: 'hermes-developer', label: 'Hermes Developer', status: 'online' },
+      { id: 'hermes-security', label: 'Hermes Security', status: 'online' },
+      { id: 'gmail-ingestion', label: 'Gmail Ingestion', status: 'online' },
+    ],
+  },
+];
+
+function statusPayload({
   checkedAt = new Date().toISOString(),
-  checks,
-  capabilities,
-  rootCauses,
-  researchProductMatrix,
+  services = onlineServices,
+} = {}) {
+  return { checkedAt, overall: 'online', services };
+}
+
+function productsPayload({
+  checkedAt = new Date().toISOString(),
+  status = 'fresh',
 } = {}) {
   return {
-    version: 1,
-    status,
-    ready,
-    checkedAt,
-    summary: {},
-    ...(capabilities ? { capabilities } : {}),
-    ...(rootCauses ? { rootCauses } : {}),
-    ...(researchProductMatrix ? { researchProductMatrix } : {}),
-    groups: [
-      {
-        id: 'local-stack',
-        label: 'Local stack',
-        checks: checks || [
-          {
-            id: 'api',
-            label: 'Dashboard API',
-            status: 'pass',
-            blocking: true,
-            summary: 'Express answered the readiness request.',
-            observedAt: checkedAt,
-            ageSeconds: 1,
-          },
-          {
-            id: 'sidecar',
-            label: 'IBKR sidecar',
-            status: 'pass',
-            blocking: true,
-            summary: 'Sidecar is live and responsive.',
-            observedAt: checkedAt,
-            ageSeconds: 2,
-          },
-        ],
-      },
-    ],
+    meta: { timestamp: checkedAt },
+    dataTypes: {
+      'risk-ranges': { status, date: '2026-07-29' },
+      'early-look': { status, date: '2026-07-29' },
+      'bitcoin-trend-tracker': { status, date: '2026-07-29' },
+      'momo-tracker': { status, date: '2026-07-29' },
+      'signal-strength': { status, date: '2026-07-29' },
+      'portfolio-solutions': { status, date: '2026-07-29' },
+      'the-macro-show': { status, date: '2026-07-29' },
+      'the-call': { status, date: '2026-07-29' },
+      'real-time-alert': { status, date: '2026-07-29' },
+      volume: { status, date: '2026-07-29' },
+      'market-structure': { status, date: '2026-07-29' },
+      'cftc-positioning': { status, date: '2026-07-29' },
+      'etf-pro': { status, date: '2026-07-29' },
+      'inflation-nowcast': { status, date: '2026-07-29' },
+    },
   };
 }
 
 describe('SystemReadinessPanel', () => {
   beforeEach(() => {
     mockTheme = 'light';
-    MarketDataService.getSystemReadiness.mockReset();
-    MarketDataService.runSystemReadinessRepair.mockReset();
+    MarketDataService.getSystemStatus.mockReset();
+    MarketDataService.getHedgeyeFreshness.mockReset();
+    MarketDataService.getHedgeyeFreshness.mockResolvedValue(productsPayload());
   });
 
-  test('renders a verified ready checklist and reports aggregate status to the rail', async () => {
-    const onStatusChange = jest.fn();
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload());
-
-    render(
-      <SystemReadinessPanel
-        open
-        onClose={jest.fn()}
-        onStatusChange={onStatusChange}
-      />,
-    );
-
-    const dialog = await screen.findByRole('dialog', { name: 'System readiness' });
-    expect(await within(dialog).findByText('Ready')).toBeInTheDocument();
-    expect(within(dialog).getByRole('heading', { name: 'Local stack' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('heading', { name: 'Dashboard API' })).toBeInTheDocument();
-    expect(within(dialog).getByText('2 checks')).toBeInTheDocument();
-    expect(within(dialog).getByText('2 passed')).toBeInTheDocument();
-    expect(MarketDataService.getSystemReadiness).toHaveBeenCalledWith({ refresh: false });
-    await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith('ready'));
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
-  test('maps an unrecognized check to a blocking failure instead of trusting a ready aggregate', async () => {
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload({
-      checks: [
-        {
-          id: 'gmail',
-          label: 'Gmail authentication',
-          status: 'mystery',
-          blocking: false,
-          summary: '',
-        },
-      ],
-    }));
-
-    render(<SystemReadinessPanel open onClose={jest.fn()} />);
-
-    const check = await screen.findByRole('article', { name: 'Gmail authentication' });
-    expect(screen.getByText('Blocked')).toBeInTheDocument();
-    expect(check).toHaveAttribute('data-status', 'fail');
-    expect(check).toHaveAttribute('data-blocking', 'true');
-    expect(within(check).getByText('Unrecognized readiness status: mystery.')).toBeInTheDocument();
-  });
-
-  test('shows impact and exact recovery instructions for a degraded dependency', async () => {
-    const checkedAt = new Date().toISOString();
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload({
-      status: 'degraded',
-      ready: false,
-      checkedAt,
-      checks: [
-        {
-          id: 'hermes',
-          label: 'Hermes workers',
-          status: 'warn',
-          blocking: false,
-          summary: 'Latest worker heartbeat is outside its cadence.',
-          detail: 'Quant Developer last ran six days ago.',
-          observedAt: checkedAt,
-          ageSeconds: 518400,
-          impact: 'Automated monitoring is unavailable.',
-          recovery: {
-            kind: 'command',
-            label: 'Run Hermes diagnostics',
-            command: 'npm run verify:workflow',
-          },
-        },
-      ],
-    }));
-
-    render(<SystemReadinessPanel open onClose={jest.fn()} />);
-
-    expect(await screen.findByText('Degraded')).toBeInTheDocument();
-    expect(screen.getByText('Automated monitoring is unavailable.')).toBeInTheDocument();
-    expect(screen.getByText('Run Hermes diagnostics')).toBeInTheDocument();
-    expect(screen.getByText('npm run verify:workflow')).toBeInTheDocument();
-  });
-
-  test('uses capabilities so an ancillary failure degrades instead of blocking core operation', async () => {
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload({
-      status: 'degraded',
-      ready: false,
-      capabilities: [{
-        id: 'automation.hermes',
-        label: 'Hermes and Gmail automation',
-        description: 'Scheduled jobs are completing.',
-        status: 'degraded',
-        blocking: false,
-        checkIds: ['hermes-analyst', 'hermes-developer'],
-        rootCauseIds: ['HERMES_SCHEDULE_STALE'],
-      }],
-      rootCauses: [{
-        id: 'HERMES_SCHEDULE_STALE',
-        errorCode: 'HERMES_SCHEDULE_STALE',
-        checkId: 'hermes-analyst',
-        label: 'Hermes scheduling',
-        status: 'fail',
-        summary: 'No scheduled invocation was observed.',
-        owner: 'automation-operations',
-        capabilityIds: ['automation.hermes'],
-        affectedCheckIds: ['hermes-analyst', 'hermes-developer'],
-      }],
-      checks: [
-        {
-          id: 'hermes-analyst',
-          label: 'Hermes analyst',
-          status: 'fail',
-          blocking: true,
-          summary: 'No scheduled invocation was observed.',
-          errorCode: 'HERMES_SCHEDULE_STALE',
-          owner: 'automation-operations',
-          capabilityIds: ['automation.hermes'],
-        },
-        {
-          id: 'hermes-developer',
-          label: 'Hermes developer',
-          status: 'fail',
-          blocking: true,
-          summary: 'No scheduled invocation was observed.',
-          errorCode: 'HERMES_SCHEDULE_STALE',
-          owner: 'automation-operations',
-          capabilityIds: ['automation.hermes'],
-        },
-      ],
-    }));
-
-    render(<SystemReadinessPanel open onClose={jest.fn()} />);
-
-    expect(await screen.findByText('Degraded')).toBeInTheDocument();
-    expect(screen.queryByText('Blocked')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Capabilities' })).toBeInTheDocument();
-    expect(screen.getByText('Hermes and Gmail automation')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'What needs attention' }))
-      .getByText('HERMES_SCHEDULE_STALE')).toBeInTheDocument();
-    expect(screen.getByText('Owner: automation-operations · affects 2 checks')).toBeInTheDocument();
-    const affectedChecks = screen.getByRole('list', { name: 'Hermes scheduling affected checks' });
-    expect(within(affectedChecks).getByText('Hermes analyst')).toBeInTheDocument();
-    expect(within(affectedChecks).getByText('Hermes developer')).toBeInTheDocument();
-    expect(screen.getByText('1 root cause')).toBeInTheDocument();
-  });
-
-  test('renders the cadence-aware research product matrix and degrades without blocking live portfolio', async () => {
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload({
-      status: 'ready',
-      ready: true,
-      researchProductMatrix: {
-        schemaVersion: 1,
-        marketDate: '2026-07-21',
-        status: 'failed',
-        collectionErrors: [],
-        products: [
-          {
-            id: 'risk-ranges',
-            label: 'Risk Ranges',
-            cadence: 'market_day_0800',
-            due: true,
-            status: 'missing',
-            stages: { received: false, parsed: false, validated: false, indexed: false },
-            detail: 'Risk Ranges are due but no artifact was received.',
-            errorCode: 'RESEARCH_PRODUCT_DUE_MISSING',
-          },
-          {
-            id: 'the-call',
-            label: 'The Call',
-            cadence: 'event_driven',
-            due: false,
-            status: 'not_due',
-            stages: { received: false, parsed: false, validated: false, indexed: false },
-            detail: 'No publication is due.',
-          },
-          {
-            id: 'signal-strength',
-            label: 'Signal Strength',
-            cadence: 'event_driven',
-            due: true,
-            status: 'indexed',
-            publicationDate: '2026-07-21',
-            observedAt: new Date().toISOString(),
-            stages: { received: true, parsed: true, validated: true, indexed: true },
-            detail: 'All stages complete.',
-          },
-        ],
+  test('normalizes the product endpoint statuses without ambiguous greens', () => {
+    const normalized = normalizeHedgeyeProducts({
+      meta: { timestamp: new Date().toISOString() },
+      dataTypes: {
+        'risk-ranges': { status: 'invalid' },
+        'early-look': { status: 'current' },
+        'bitcoin-trend-tracker': { status: 'stale' },
       },
-    }));
-
-    render(<SystemReadinessPanel open onClose={jest.fn()} />);
-
-    expect(await screen.findByText('Degraded')).toBeInTheDocument();
-    const matrix = screen.getByRole('region', { name: 'Research product pipeline' });
-    expect(within(matrix).getByText('Market date 2026-07-21')).toBeInTheDocument();
-    expect(within(matrix).getByText('Risk Ranges')).toBeInTheDocument();
-    expect(within(matrix).getByText('Missing')).toBeInTheDocument();
-    expect(within(matrix).getByText('The Call')).toBeInTheDocument();
-    expect(within(matrix).getByText('Not due')).toBeInTheDocument();
-    expect(within(matrix).getByText('Signal Strength')).toBeInTheDocument();
-    expect(within(matrix).getByText('Indexed')).toBeInTheDocument();
-    expect(screen.queryByText('Blocked')).not.toBeInTheDocument();
-  });
-
-  test('runs only an automatic repair action exposed by the readiness contract', async () => {
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload({
-      status: 'blocked',
-      ready: false,
-      checks: [{
-        id: 'ui',
-        label: 'Dashboard UI',
-        status: 'fail',
-        blocking: true,
-        summary: 'UI is not listening.',
-        owner: 'local-operations',
-        recovery: {
-          kind: 'command',
-          label: 'Start missing services.',
-          command: 'npm start',
-          automatic: true,
-          actionId: 'start-local-stack',
-        },
-      }],
-    }));
-    MarketDataService.runSystemReadinessRepair.mockResolvedValue({
-      message: 'The safe local recovery was started.',
     });
 
-    render(<SystemReadinessPanel open onClose={jest.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Run safe repair' }));
-
-    await waitFor(() => expect(MarketDataService.runSystemReadinessRepair)
-      .toHaveBeenCalledWith('start-local-stack'));
-    expect(await screen.findByText('The safe local recovery was started.')).toBeInTheDocument();
+    expect(normalized.find(({ id }) => id === 'risk-ranges').status).toBe('offline');
+    expect(normalized.find(({ id }) => id === 'early-look').status).toBe('online');
+    expect(normalized.find(({ id }) => id === 'bitcoin-trend-tracker').status).toBe('attention');
+    expect(normalized.find(({ id }) => id === 'momo-tracker').status).toBe('unknown');
   });
 
-  test('manual refresh sends the cache-bypass flag', async () => {
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload());
-    render(<SystemReadinessPanel open onClose={jest.fn()} />);
-    await screen.findByText('Ready');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh checks' }));
-
-    await waitFor(() => expect(MarketDataService.getSystemReadiness).toHaveBeenCalledWith({ refresh: true }));
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
-  });
-
-  test('clears a prior ready state and blocks the rail when refresh fails', async () => {
-    const onStatusChange = jest.fn();
-    MarketDataService.getSystemReadiness
-      .mockResolvedValueOnce(readinessPayload())
-      .mockRejectedValueOnce(new Error('API connection refused'));
-
-    render(
-      <SystemReadinessPanel
-        open
-        onClose={jest.fn()}
-        onStatusChange={onStatusChange}
-      />,
+  test('does not request or render status while closed, then loads once when opened', async () => {
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
+    const { rerender } = render(
+      <SystemReadinessPanel open={false} onClose={jest.fn()} />,
     );
-    await screen.findByText('Ready');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh checks' }));
+    expect(MarketDataService.getSystemStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Systems' })).not.toBeInTheDocument();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('API connection refused');
-    expect(screen.queryByText('Ready')).not.toBeInTheDocument();
-    expect(screen.getByText('Blocked')).toBeInTheDocument();
-    expect(screen.getByText('npm start')).toBeInTheDocument();
-    await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith('blocked'));
+    rerender(<SystemReadinessPanel open onClose={jest.fn()} />);
+
+    expect(await screen.findByRole('dialog', { name: 'Systems' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(5));
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+    expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Products')).toBeInTheDocument();
   });
 
-  test('rejects a stale readiness response instead of rendering old passes', async () => {
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload({
-      checkedAt: new Date(Date.now() - (10 * 60 * 1000)).toISOString(),
+  test('closing during a request cannot leave or restore a transient rail state', async () => {
+    let resolveRequest;
+    const pendingRequest = new Promise((resolve) => {
+      resolveRequest = resolve;
+    });
+    const onStatusChange = jest.fn();
+    MarketDataService.getSystemStatus.mockReturnValue(pendingRequest);
+
+    const { rerender } = render(
+      <SystemReadinessPanel open onClose={jest.fn()} onStatusChange={onStatusChange} />,
+    );
+    await waitFor(() => expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1));
+    expect(onStatusChange).toHaveBeenLastCalledWith('unknown');
+
+    rerender(
+      <SystemReadinessPanel open={false} onClose={jest.fn()} onStatusChange={onStatusChange} />,
+    );
+    await act(async () => {
+      resolveRequest(statusPayload());
+      await pendingRequest;
+    });
+
+    expect(onStatusChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog', { name: 'Systems' })).not.toBeInTheDocument();
+  });
+
+  test('shows core service results without waiting for the slower Products check', async () => {
+    let resolveProducts;
+    const pendingProducts = new Promise((resolve) => {
+      resolveProducts = resolve;
+    });
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
+    MarketDataService.getHedgeyeFreshness.mockReturnValue(pendingProducts);
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(4));
+    expect(screen.getByRole('button', { name: 'Expand Products' })).toBeInTheDocument();
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.getByTitle('Refresh systems')).toBeDisabled();
+
+    await act(async () => {
+      resolveProducts(productsPayload());
+      await pendingProducts;
+    });
+
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(5));
+    expect(screen.getByTitle('Refresh systems')).not.toBeDisabled();
+  });
+
+  test('renders five concise categories and treats a peripheral outage as attention', async () => {
+    const onStatusChange = jest.fn();
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({
+      services: onlineServices.map((service) => {
+        if (service.id === 'live-portfolio') {
+          return { ...service, status: 'offline', reason: 'Gateway signed out' };
+        }
+        if (service.id === 'hermes-gmail') {
+          return { ...service, status: 'unknown', reason: 'Verification unavailable' };
+        }
+        return service;
+      }),
+    }));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} onStatusChange={onStatusChange} />);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Systems' });
+    await within(dialog).findByText('Offline');
+    expect(within(within(dialog).getByRole('list', { name: 'Current system status' }))
+      .getAllByRole('listitem')).toHaveLength(5);
+    expect(within(dialog).getByText('Dashboard')).toBeInTheDocument();
+    expect(within(dialog).getByText('Market data')).toBeInTheDocument();
+    expect(within(dialog).getByText('Live portfolio')).toBeInTheDocument();
+    expect(within(dialog).getByText('Hermes / Gmail')).toBeInTheDocument();
+    expect(within(dialog).getByText('API + UI')).toBeInTheDocument();
+    expect(within(dialog).getByText('Quotes + freshness')).toBeInTheDocument();
+    expect(within(dialog).getByText('IBKR session')).toBeInTheDocument();
+    expect(within(dialog).getByText('Agents + ingestion')).toBeInTheDocument();
+    expect(within(dialog).getByText('Products')).toBeInTheDocument();
+    expect(within(dialog).getByText('Hedgeye research feeds')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Gateway signed out')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Verification unavailable')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Morning operations checklist')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('What needs attention')).not.toBeInTheDocument();
+    await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith('attention'));
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+    expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
+  });
+
+  test('expands one concise checklist at a time without another request', async () => {
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({
+      services: onlineServices.map((service) => (
+        service.id === 'live-portfolio'
+          ? {
+            ...service,
+            status: 'offline',
+            reason: 'IB Gateway is disconnected.',
+            details: [
+              { id: 'ibkr-sidecar', status: 'online' },
+              {
+                id: 'gateway-session',
+                status: 'offline',
+                reason: 'IB Gateway is disconnected.',
+              },
+              {
+                id: 'managed-account',
+                status: 'offline',
+                reason: 'No managed IBKR account is available.',
+              },
+              {
+                id: 'fresh-session',
+                status: 'unknown',
+                reason: 'Live portfolio session is unverified.',
+              },
+            ],
+          }
+          : service
+      )),
+    }));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Expand Live portfolio checklist',
+    }));
+
+    const portfolioChecklist = screen.getByRole('list', {
+      name: 'Live portfolio checklist',
+    });
+    expect(within(portfolioChecklist).getAllByRole('listitem')).toHaveLength(4);
+    expect(within(portfolioChecklist).getByText('IBKR sidecar')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getByText('Dashboard-to-IBKR bridge')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getByText('Gateway session')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getByText('Authenticated gateway link')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getByText('Managed account')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getByText('Position account access')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getByText('Fresh session')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getByText('Recent verified update')).toBeInTheDocument();
+    expect(within(portfolioChecklist).getAllByText('Online')).toHaveLength(1);
+    expect(within(portfolioChecklist).getAllByText('Offline')).toHaveLength(2);
+    expect(within(portfolioChecklist).getAllByText('Unknown')).toHaveLength(1);
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Expand Dashboard checklist',
+    }));
+
+    expect(screen.queryByRole('list', { name: 'Live portfolio checklist' }))
+      .not.toBeInTheDocument();
+    const dashboardChecklist = screen.getByRole('list', { name: 'Dashboard checklist' });
+    expect(within(dashboardChecklist).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(dashboardChecklist).getByText('API server')).toBeInTheDocument();
+    expect(within(dashboardChecklist).getByText('React UI')).toBeInTheDocument();
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+    expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Products' }));
+    expect(screen.queryByRole('list', { name: 'Dashboard checklist' })).not.toBeInTheDocument();
+    expect(screen.getByRole('list', {
+      name: 'Hedgeye products pulled by the dashboard',
+    })).toBeInTheDocument();
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+    expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not reload when its status callback changes identity during a parent render', async () => {
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
+
+    function UnstableCallbackHost() {
+      const [railStatus, setRailStatus] = React.useState('unknown');
+      return (
+        <>
+          <span data-testid="rail-status">{railStatus}</span>
+          <SystemReadinessPanel
+            open
+            onClose={jest.fn()}
+            onStatusChange={(status) => setRailStatus(status)}
+          />
+        </>
+      );
+    }
+
+    render(<UnstableCallbackHost />);
+    await waitFor(() => expect(screen.getByTestId('rail-status')).toHaveTextContent('online'));
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Expand Hermes / Gmail checklist',
+    }));
+
+    const hermesChecklist = screen.getByRole('list', { name: 'Hermes / Gmail checklist' });
+    expect(within(hermesChecklist).getByText('Hermes Analyst')).toBeInTheDocument();
+    expect(within(hermesChecklist).getByText('Hermes Developer')).toBeInTheDocument();
+    expect(within(hermesChecklist).getByText('Hermes Security')).toBeInTheDocument();
+    expect(within(hermesChecklist).getByText('Gmail Ingestion')).toBeInTheDocument();
+    expect(within(hermesChecklist).getAllByText('Online')).toHaveLength(4);
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+    expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
+  });
+
+  test('renders timestamp dates in America/Los_Angeles without UTC day rollover', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-30T05:30:00.000Z'));
+    const checkedAt = '2026-07-30T05:30:00.000Z';
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({ checkedAt }));
+    MarketDataService.getHedgeyeFreshness.mockResolvedValue(productsPayload({ checkedAt }));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText('2026-07-29')).toHaveLength(5);
+    expect(screen.queryByText('2026-07-30')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Expand Hermes / Gmail checklist',
+    }));
+    const hermesChecklist = screen.getByRole('list', { name: 'Hermes / Gmail checklist' });
+    expect(within(hermesChecklist).getAllByText('2026-07-29')).toHaveLength(4);
+  });
+
+  test('reports offline to the rail only when the dashboard core is offline', async () => {
+    const onStatusChange = jest.fn();
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({
+      services: onlineServices.map((service) => (
+        service.id === 'dashboard'
+          ? { ...service, status: 'offline', reason: 'API unavailable' }
+          : service
+      )),
+    }));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} onStatusChange={onStatusChange} />);
+
+    await screen.findByText('Offline');
+    await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith('offline'));
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+  });
+
+  test('reports Products problems as rail attention, never a core outage', async () => {
+    const onStatusChange = jest.fn();
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
+    MarketDataService.getHedgeyeFreshness.mockResolvedValue(productsPayload({
+      status: 'stale',
+    }));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} onStatusChange={onStatusChange} />);
+
+    await waitFor(() => expect(screen.getByText('Attention')).toBeInTheDocument());
+    await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith('attention'));
+    expect(onStatusChange).not.toHaveBeenCalledWith('offline');
+    expect(screen.getByTitle('Refresh systems')).not.toBeDisabled();
+  });
+
+  test('maps missing and unrecognized service results to Unknown', async () => {
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({
+      services: [{ id: 'dashboard', status: 'mystery' }],
     }));
 
     render(<SystemReadinessPanel open onClose={jest.fn()} />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Readiness response is stale');
-    expect(screen.queryByRole('heading', { name: 'Dashboard API' })).not.toBeInTheDocument();
-    expect(screen.getByText('Blocked')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(4));
+    expect(screen.queryByText('Offline')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
   });
 
-  test('uses the dark theme and closes from Escape', async () => {
+  test('refreshes only on command', async () => {
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
+    render(<SystemReadinessPanel open onClose={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+    expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTitle('Refresh systems'));
+
+    await waitFor(() => expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+  });
+
+  test('clears prior online results when refresh fails', async () => {
+    MarketDataService.getSystemStatus
+      .mockResolvedValueOnce(statusPayload())
+      .mockRejectedValueOnce(new Error('API connection refused'));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+    expect(screen.getAllByText('Online')).toHaveLength(5);
+
+    fireEvent.click(screen.getByTitle('Refresh systems'));
+
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+    expect(screen.getAllByText('Unknown')).toHaveLength(4);
+    expect(screen.getAllByText('Online')).toHaveLength(1);
+    expect(screen.queryByText('API connection refused')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+  });
+
+  test('keeps the checked snapshot visible until the user refreshes', async () => {
+    jest.useFakeTimers();
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
+    const onStatusChange = jest.fn();
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} onStatusChange={onStatusChange} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getAllByText('Online')).toHaveLength(5);
+
+    act(() => {
+      jest.advanceTimersByTime(5 * 60 * 1000);
+    });
+
+    expect(screen.getAllByText('Online')).toHaveLength(5);
+    expect(screen.queryByText('Status expired')).not.toBeInTheDocument();
+    expect(onStatusChange).toHaveBeenLastCalledWith('online');
+    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects stale responses instead of displaying old green statuses', async () => {
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({
+      checkedAt: new Date(Date.now() - (2 * 60 * 1000)).toISOString(),
+    }));
+    MarketDataService.getHedgeyeFreshness.mockRejectedValue(new Error('Unavailable'));
+
+    render(<SystemReadinessPanel open onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+    expect(screen.queryByText('Online')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Unknown')).toHaveLength(5);
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+  });
+
+  test('uses the dark theme and keeps the panel open on Escape', async () => {
     mockTheme = 'dark';
     const onClose = jest.fn();
-    MarketDataService.getSystemReadiness.mockResolvedValue(readinessPayload());
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
 
     render(<SystemReadinessPanel open onClose={onClose} />);
-    const dialog = await screen.findByRole('dialog', { name: 'System readiness' });
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: 'Systems' });
     expect(dialog).toHaveClass('sr-panel--dark');
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
 
     fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('closes on an outside click but not a click inside the panel', async () => {
+    const onClose = jest.fn();
+    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
+
+    render(<SystemReadinessPanel open onClose={onClose} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Systems' });
+    await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
+
+    fireEvent.mouseDown(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.mouseDown(document.body);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
 });

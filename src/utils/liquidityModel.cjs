@@ -1,10 +1,15 @@
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 
 const DEFAULT_START_DATE = '2000-01-01';
 const DEFAULT_GDP_LAG_MONTHS = 1;
 const HISTORY_LIMIT = 180;
+let defaultAxiosClient;
+
+function getDefaultAxiosClient() {
+  if (!defaultAxiosClient) defaultAxiosClient = require('axios');
+  return defaultAxiosClient;
+}
 
 const WEIGHTS = {
   m2_growth_1m: 0.10,
@@ -284,8 +289,9 @@ function sourceMeta(source, status, error) {
   };
 }
 
-async function fetchFredCsv(seriesId, axiosClient = axios) {
-  const response = await axiosClient.get('https://fred.stlouisfed.org/graph/fredgraph.csv', {
+async function fetchFredCsv(seriesId, axiosClient) {
+  const client = axiosClient || getDefaultAxiosClient();
+  const response = await client.get('https://fred.stlouisfed.org/graph/fredgraph.csv', {
     params: { id: seriesId },
     timeout: 20000,
     responseType: 'text',
@@ -340,7 +346,7 @@ function splitCsvLine(line) {
 async function loadSource(source, options = {}) {
   const {
     baseDir = process.cwd(),
-    axiosClient = axios,
+    axiosClient,
     now = new Date(),
     loadSeriesOverride,
   } = options;
@@ -715,7 +721,7 @@ async function buildLiquidityModels(options = {}) {
   const baseOptions = {
     startDate: options.startDate || DEFAULT_START_DATE,
     baseDir: options.baseDir || process.cwd(),
-    axiosClient: options.axiosClient || axios,
+    axiosClient: options.axiosClient,
     loadSeriesOverride: options.loadSeriesOverride,
     now,
   };

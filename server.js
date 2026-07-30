@@ -1,4 +1,23 @@
 require('dotenv').config();
+if (process.env.MARKET_DASHBOARD_AWS_PROFILE_LOCKED === 'true') {
+  for (const key of [
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_SECURITY_TOKEN',
+    'AWS_ROLE_ARN',
+    'AWS_ROLE_SESSION_NAME',
+    'AWS_WEB_IDENTITY_TOKEN_FILE',
+    'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+    'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+    'AWS_SHARED_CREDENTIALS_FILE',
+    'AWS_CONFIG_FILE',
+  ]) {
+    delete process.env[key];
+  }
+}
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -34,7 +53,6 @@ const {
 } = require('./src/utils/etfProEmailSnapshot.cjs');
 const {
   comparePayloadOrder: compareEtfPayloadOrder,
-  resolveEtfProPayloadFromSources,
 } = require('./src/utils/etfProResolver.cjs');
 const {
   HEDGEYE_BUCKET,
@@ -58,10 +76,28 @@ const {
 } = require('./src/utils/rtaLedgerMaterialization.cjs');
 const {
   buildEtfProPayloadsFromResearchEvents,
+  filterLegacyRejectionsByCompleteCanonicalSources,
+  filterIssuesAfterAuthoritativeCheckpoint,
   materializeRtaResearchEvents,
   mergeRtaMaterializations,
+  partitionEtfProLegacyCoverage,
 } = require('./src/utils/researchEventLedger.cjs');
-const { validateRtaCheckpoint } = require('./src/utils/rtaCheckpoint.cjs');
+const {
+  applyRtaCanonicalComparisonGate,
+  resolveEtfProCanonicalComparison,
+} = require('./src/utils/researchComparisonSafety.cjs');
+const {
+  failClosedHealthFromCache,
+  requireAuthoritativeCacheValue,
+} = require('./src/utils/authoritativeResearchCache.cjs');
+const {
+  resolveRtaReplayCutoff,
+  validateRtaCheckpoint,
+} = require('./src/utils/rtaCheckpoint.cjs');
+const {
+  checkpointToEtfProFullBookPayload,
+  validateEtfProCheckpoint,
+} = require('./src/utils/etfProCheckpoint.cjs');
 const {
   applyPersistedManifestGate,
   buildRiskRangeEnvelope,
@@ -80,6 +116,11 @@ const {
   getLambdaActivity,
   getServiceHeartbeat,
 } = require('./src/services/systemReadinessService.cjs');
+const {
+  collectAutomationHeartbeatEvidence,
+  createSystemStatusService,
+  createUnavailableSystemStatus,
+} = require('./src/services/systemStatusService.cjs');
 const {
   resolveGmailPollHealth,
 } = require('./src/utils/gmailPollHealth.cjs');
@@ -101,10 +142,20 @@ const {
   createUsdCorrelationService,
 } = require('./src/services/usdCorrelationService.cjs');
 const {
+  createFxvlSnapshotService,
+} = require('./src/services/fxvlSnapshotService.cjs');
+const {
   fetchFlexStatement,
   getReconciliation: getFlexReconciliation,
   publicConfigStatus: getFlexPublicConfigStatus,
 } = require('./src/services/ibkrFlexService.cjs');
+const {
+  getIbkrInterestValidationHistory,
+  getIbkrInterestValidationStatus,
+  runIbkrInterestValidation,
+  startIbkrInterestValidation,
+  stopIbkrInterestValidation,
+} = require('./src/services/ibkrInterestValidationService.cjs');
 const { getFreshCachedQuote } = require('./src/services/providers/quoteCachePolicy.cjs');
 const {
   instrumentCacheKey,
@@ -123,6 +174,15 @@ const {
 } = require('./src/services/volatilitySnapshotService.cjs');
 const { scanAllPages } = require('./src/utils/dynamoScanAllPages.cjs');
 const { createAsyncTtlCache } = require('./src/utils/serverResponseCache.cjs');
+const {
+  createCheckpointFirstResearchResponse,
+  failClosedResearchRefresh,
+  setCheckpointFirstNoStoreHeader,
+} = require('./src/utils/checkpointFirstResearchResponse.cjs');
+const {
+  buildEtfProCheckpointFirstResponse: buildFastEtfProCheckpointResponse,
+  buildRtaCheckpointFirstResponse: buildFastRtaCheckpointResponse,
+} = require('./src/utils/researchCheckpointFastPath.cjs');
 const {
   DEFAULT_SOURCE: SECURITY_RISK_METRICS_SOURCE,
   REASONS: SECURITY_RISK_METRICS_REASONS,
@@ -180,6 +240,14 @@ const cloudwatch = new CloudWatch();
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const PORTFOLIO_UPLOAD_BUCKET = 'market-dashboard-csv-data';
+const configuredResearchRefreshTimeoutMs = Number(
+  process.env.RESEARCH_AUTHORITATIVE_REFRESH_TIMEOUT_MS,
+);
+const RESEARCH_AUTHORITATIVE_REFRESH_TIMEOUT_MS = Number.isFinite(
+  configuredResearchRefreshTimeoutMs,
+)
+  ? Math.min(120_000, Math.max(5_000, configuredResearchRefreshTimeoutMs))
+  : 60_000;
 
 // These caches are deliberately limited to non-live research/status data. Live
 // IBKR, portfolio, and quote routes retain their existing freshness policies.
@@ -189,6 +257,12 @@ const researchEventLedgerCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, m
 const etfProSnapshotHistoryCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
 const s3ArtifactCache = createAsyncTtlCache({ ttlMs: ONE_DAY_MS, maxEntries: 1_000 });
 const gmailPollHealthCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
+const checkpointFirstResearchResponse = createCheckpointFirstResearchResponse({
+  cache: researchResponseCache,
+  ttlMs: FIVE_MINUTES_MS,
+  refreshAheadMs: 4 * 60 * 1000,
+  refreshTimeoutMs: RESEARCH_AUTHORITATIVE_REFRESH_TIMEOUT_MS,
+});
 
 function setDataCacheHeaders(res, cacheResult) {
   const ageSeconds = Math.max(0, Math.floor((cacheResult.ageMs || 0) / 1000));
@@ -202,6 +276,15 @@ function setDataCacheHeaders(res, cacheResult) {
 
 async function sendCachedJson(res, cacheKey, loader) {
   const cacheResult = await researchResponseCache.get(cacheKey, loader);
+  setDataCacheHeaders(res, cacheResult);
+  return res.json(cacheResult.value);
+}
+
+async function sendCheckpointFirstJson(res, options) {
+  // Browser/proxy caching would hide a newly completed fail-closed background
+  // revalidation. Keep the bounded authoritative cache on the server only.
+  setCheckpointFirstNoStoreHeader(res);
+  const cacheResult = await checkpointFirstResearchResponse.get(options);
   setDataCacheHeaders(res, cacheResult);
   return res.json(cacheResult.value);
 }
@@ -481,7 +564,10 @@ async function getCachedHermesLedgerItems() {
   const cacheResult = await hermesLedgerCache.get('all', () => scanAllPages(dynamodb, {
     TableName: HERMES_EMAIL_LEDGER_TABLE,
   }));
-  return cacheResult.value;
+  return requireAuthoritativeCacheValue(cacheResult, {
+    errorCode: 'HERMES_LEDGER_CACHE_STALE',
+    source: HERMES_EMAIL_LEDGER_TABLE,
+  });
 }
 
 async function getResearchEventLedgerItems(productKey) {
@@ -504,6 +590,12 @@ async function getResearchEventLedgerItems(productKey) {
       } while (exclusiveStartKey);
       return items;
     });
+    if (cacheResult.status === 'stale') {
+      return {
+        items: [],
+        error: 'RESEARCH_EVENT_LEDGER_CACHE_STALE',
+      };
+    }
     return { items: cacheResult.value || [], error: null };
   } catch (error) {
     // During migration the retained Gmail ledger/S3 archive remains a complete,
@@ -539,7 +631,10 @@ async function getCachedHermesArtifactText(item) {
     const obj = await s3.getObject(params).promise();
     return obj.Body?.toString('utf8') || '';
   });
-  return cacheResult.value;
+  return requireAuthoritativeCacheValue(cacheResult, {
+    errorCode: 'HERMES_ARTIFACT_CACHE_STALE',
+    source: `Hermes artifact ${key}`,
+  });
 }
 
 async function getHermesEtfProEmailPayloads() {
@@ -658,7 +753,7 @@ async function getGmailPollHealth() {
         || 'market-dashboard-gmail-v2-every-15m',
     });
   });
-  return cacheResult.value;
+  return failClosedHealthFromCache(cacheResult);
 }
 
 async function getResolvedEtfProPayload() {
@@ -673,21 +768,42 @@ async function getResolvedEtfProPayload() {
     .filter((payload) => Array.isArray(payload?.rows) && payload.rows.length > 0);
   const emailPayload = pickNewestPayload(materializedPayloads);
   const v2Payloads = buildEtfProPayloadsFromResearchEvents(eventLedgerResult.items);
-  const v2SourceIds = new Set(v2Payloads.sourceMessageIds);
-  const isCoveredByV2 = (payload) => {
-    const sourceId = payload?.meta?.sourceMessageId;
-    return Boolean(sourceId && v2SourceIds.has(sourceId));
-  };
-  const migratedFullBooks = legacyPayloads.fullBooks.filter((payload) => !isCoveredByV2(payload));
-  const migratedActions = legacyPayloads.actions.filter((payload) => !isCoveredByV2(payload));
-  const canonicalPayloadCount = v2Payloads.fullBooks.length + v2Payloads.actions.length +
+  const manualCheckpointRecord = loadLocalEtfProCheckpoint();
+  const manualCheckpoint = manualCheckpointRecord?.checkpoint || null;
+  const manualCheckpointValidation = manualCheckpointRecord?.checkpointValidation || null;
+  const manualCheckpointTrust = manualCheckpoint
+    ? { ...manualCheckpoint, checkpointValidation: manualCheckpointValidation }
+    : null;
+  const manualFullBook = manualCheckpointValidation?.valid
+    ? checkpointToEtfProFullBookPayload(manualCheckpoint)
+    : null;
+  const authoritativeCheckpointTime = manualFullBook?.meta?.asOf || null;
+  const canonicalFullBooks = [
+    ...v2Payloads.fullBooks,
+    ...(manualFullBook ? [manualFullBook] : []),
+  ];
+  const canonicalCoverage = partitionEtfProLegacyCoverage({
+    canonicalPayloads: {
+      ...v2Payloads,
+      fullBooks: canonicalFullBooks,
+    },
+    legacyPayloads,
+    authoritativeCheckpointTime,
+  });
+  const migratedFullBooks = canonicalCoverage.uncoveredFullBooks;
+  const migratedActions = canonicalCoverage.uncoveredActions;
+  const replayPayloadCount = canonicalFullBooks.length + v2Payloads.actions.length +
     migratedFullBooks.length + migratedActions.length;
-  // V2 is canonical per source message. The immutable Gmail/S3 archive fills
-  // only migration gaps; daily materializations are a final compatibility
-  // fallback when neither immutable event source has a usable payload.
-  const hermesPayloads = canonicalPayloadCount > 0
+  // A content-hash-verified manual official checkpoint is an explicit
+  // canonical coverage floor. ResearchEventLedgerV2 actions strictly newer
+  // than that floor remain canonical for subsequent changes.
+  const canonicalPayloads = {
+    fullBooks: canonicalFullBooks,
+    actions: v2Payloads.actions,
+  };
+  const hermesPayloads = replayPayloadCount > 0
     ? {
-      fullBooks: [...v2Payloads.fullBooks, ...migratedFullBooks],
+      fullBooks: [...canonicalFullBooks, ...migratedFullBooks],
       actions: [...v2Payloads.actions, ...migratedActions],
     }
     : {
@@ -695,21 +811,36 @@ async function getResolvedEtfProPayload() {
       actions: materializedPayloads.filter(isEtfProActionPayload),
     };
   const { etfproDir, latestPath, payload: localPayload } = loadLocalEtfProPayload();
-  let resolvedPayload = resolveEtfProPayloadFromSources({
+  const migrationRejections = filterLegacyRejectionsByCompleteCanonicalSources(
+    legacyPayloads.rejected,
+    v2Payloads.completeSourceMessageIds,
+  );
+  const eventRejections = filterIssuesAfterAuthoritativeCheckpoint(
+    [...v2Payloads.rejected, ...migrationRejections],
+    authoritativeCheckpointTime,
+  );
+  const canonicalCoverageGaps = canonicalCoverage.coverageGaps;
+  let resolvedPayload = resolveEtfProCanonicalComparison({
+    canonicalPayloads,
+    referencePayloads: hermesPayloads,
     localPayload,
-    emailPayload: canonicalPayloadCount > 0 ? null : emailPayload,
-    hermesPayloads,
+    emailPayload: replayPayloadCount > 0 ? null : emailPayload,
     ingestionHealth,
+    canonicalLedgerError: eventLedgerResult.error,
+    canonicalRejections: eventRejections,
+    canonicalCoverageGaps,
+    authoritativeCheckpoint: manualCheckpointTrust,
   });
-  const migrationRejections = legacyPayloads.rejected.filter((item) =>
-    !item.sourceMessageId || !v2SourceIds.has(item.sourceMessageId));
-  const eventRejections = [...v2Payloads.rejected, ...migrationRejections];
   if (resolvedPayload) {
     resolvedPayload = {
       ...resolvedPayload,
       meta: {
         ...(resolvedPayload.meta || {}),
-        researchEventSource: v2Payloads.selectedEventCount > 0
+        researchEventSource: manualFullBook
+          ? (v2Payloads.selectedEventCount > 0
+            ? 'manual-official-checkpoint-with-research-event-ledger-v2'
+            : 'manual-official-checkpoint')
+          : v2Payloads.selectedEventCount > 0
           ? (migratedFullBooks.length + migratedActions.length > 0
             ? 'research-event-ledger-v2-with-legacy-migration'
             : 'research-event-ledger-v2')
@@ -717,43 +848,10 @@ async function getResolvedEtfProPayload() {
         researchEventCount: v2Payloads.selectedEventCount,
         legacyMigrationPayloadCount: migratedFullBooks.length + migratedActions.length,
         researchEventLedgerError: eventLedgerResult.error,
-      },
-    };
-  }
-  if (resolvedPayload && eventRejections.length > 0) {
-    const archivedRowCount = Number(
-      resolvedPayload.meta?.archivedRowCount || resolvedPayload.rows?.length || 0,
-    );
-    const warnings = eventRejections.map((item) =>
-      `ETF Pro source ${item.sourceMessageId || item.eventKey || 'unknown'} failed canonical replay (${item.code}).`);
-    resolvedPayload = {
-      ...resolvedPayload,
-      available: false,
-      rows: [],
-      actionRows: [],
-      changes: null,
-      longCount: null,
-      shortCount: null,
-      dataQuality: {
-        ...(resolvedPayload.dataQuality || {}),
-        status: 'error',
-        warnings: [...new Set([...(resolvedPayload.dataQuality?.warnings || []), ...warnings])],
-        researchEventFailures: eventRejections,
-      },
-      dataAvailability: {
-        ...(resolvedPayload.dataAvailability || {}),
-        structuralStatus: 'invalid',
-        reason: 'One or more canonical ETF Pro research events could not be replayed.',
-      },
-      meta: {
-        ...(resolvedPayload.meta || {}),
-        available: false,
-        structurallyAvailable: false,
-        blockedByResearchEventReplay: true,
-        archivedRowCount,
-        rowCount: 0,
-        longCount: null,
-        shortCount: null,
+        manualCheckpointId: manualCheckpoint?.id || null,
+        manualCheckpointValidation,
+        supersededCanonicalCoverageGapCount:
+          canonicalCoverage.supersededCoverageGaps?.length || 0,
       },
     };
   }
@@ -765,15 +863,19 @@ async function getResolvedEtfProPayload() {
     localPayload,
     emailPayload,
     hermesPayloads,
+    canonicalPayloads,
     ingestionHealth,
     eventLedgerResult,
     eventRejections,
+    manualCheckpoint: manualCheckpointTrust,
   };
 }
 
-async function fetchHermesRtaSnapshots(windowDays) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - windowDays);
+async function fetchHermesRtaSnapshots(windowDays, { authoritativeCheckpointTime = null } = {}) {
+  const cutoff = new Date(resolveRtaReplayCutoff({
+    windowDays,
+    checkpointTime: authoritativeCheckpointTime,
+  }));
   const [items, eventLedgerResult] = await Promise.all([
     getCachedHermesLedgerItems(),
     getResearchEventLedgerItems('real-time-alert'),
@@ -787,7 +889,7 @@ async function fetchHermesRtaSnapshots(windowDays) {
     return !Number.isFinite(eventTime) || eventTime >= cutoff.getTime();
   }));
   return {
-    ...mergeRtaMaterializations(v2, legacy),
+    ...mergeRtaMaterializations(v2, legacy, { authoritativeCheckpointTime }),
     eventLedgerError: eventLedgerResult.error,
   };
 }
@@ -812,6 +914,29 @@ function loadLocalRtaBenchmark() {
   }
 }
 
+function loadLocalEtfProCheckpoint() {
+  const checkpointPath = path.join(
+    __dirname,
+    'data',
+    'hedgeye',
+    'etfpro',
+    'latest-checkpoint.json',
+  );
+  if (!fs.existsSync(checkpointPath)) return null;
+  try {
+    const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
+    const checkpointValidation = validateEtfProCheckpoint(checkpoint);
+    return {
+      checkpoint,
+      sourceFile: checkpointPath,
+      checkpointValidation,
+    };
+  } catch (error) {
+    console.warn('[ETF Pro] Failed to read local checkpoint:', error.message);
+    return null;
+  }
+}
+
 async function getEtfProEmailSnapshots() {
   const cacheResult = await etfProSnapshotHistoryCache.get('all', () => scanAllPages(dynamodb, {
       TableName: 'HedgeyeDailySnapshot',
@@ -820,7 +945,11 @@ async function getEtfProEmailSnapshots() {
         ':type': 'etf-pro',
       },
     }));
-  return (cacheResult.value || [])
+  const snapshots = requireAuthoritativeCacheValue(cacheResult, {
+    errorCode: 'ETF_PRO_SNAPSHOT_HISTORY_CACHE_STALE',
+    source: 'HedgeyeDailySnapshot ETF Pro history',
+  });
+  return (snapshots || [])
     .filter((item) => item?.snapshotType === 'etf-pro' && item?.date)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) ||
       String(a.scrapedAt || '').localeCompare(String(b.scrapedAt || '')));
@@ -2826,6 +2955,27 @@ function validSecurityRiskMetricsSymbol(symbol) {
   return /^[A-Z0-9][A-Z0-9.^=/_-]{0,31}$/.test(symbol);
 }
 
+function parseSecurityRiskAssetTypes(raw) {
+  const out = {};
+  if (raw == null || raw === '') return out;
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    Object.entries(raw).forEach(([symbol, assetType]) => {
+      const key = String(symbol || '').trim().toUpperCase();
+      const value = String(assetType || '').trim().toLowerCase();
+      if (key && value) out[key] = value;
+    });
+    return out;
+  }
+  const text = Array.isArray(raw) ? raw.join(',') : String(raw);
+  text.split(',').forEach((pair) => {
+    const [symbolPart, ...typeParts] = pair.split(':');
+    const key = String(symbolPart || '').trim().toUpperCase();
+    const value = typeParts.join(':').trim().toLowerCase();
+    if (key && value) out[key] = value;
+  });
+  return out;
+}
+
 function summarizeSecurityRiskMetricsCache(statuses) {
   const usable = statuses.filter(Boolean);
   if (usable.length === 0) return 'unavailable';
@@ -2847,6 +2997,10 @@ app.get('/api/security-risk-metrics', async (req, res) => {
   const forceRefresh = ['1', 'true'].includes(
     String(req.query.forceRefresh || '').trim().toLowerCase(),
   );
+  const includeVolSeries = ['1', 'true'].includes(
+    String(req.query.includeVolSeries || '').trim().toLowerCase(),
+  );
+  const assetTypeBySymbol = parseSecurityRiskAssetTypes(req.query.assetTypes);
 
   res.set('Cache-Control', 'no-store');
   res.set('X-Data-Use', 'historical-research-only');
@@ -2944,6 +3098,8 @@ app.get('/api/security-risk-metrics', async (req, res) => {
       benchmarkBars: benchmarkHistory?.bars || [],
       source: SECURITY_RISK_METRICS_SOURCE,
       provenance,
+      assetType: assetTypeBySymbol[symbol] || 'equity',
+      includeVolSeries: includeVolSeries && symbols.length === 1,
     });
 
     if (!benchmarkHistory) {
@@ -3226,7 +3382,34 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
       do {
         const snapResult = await dynamodb.scan({
           TableName: 'HedgeyeDailySnapshot',
-          ExclusiveStartKey
+          ExclusiveStartKey,
+          // Freshness only needs compact metadata. Pulling every snapshot's
+          // embedded research payload made this small status view transfer the
+          // entire table on each request.
+          ProjectionExpression: [
+            '#snapshotType',
+            '#date',
+            '#scrapedAt',
+            '#riskRangeCount',
+            '#metricsCount',
+            '#stockCount',
+            '#cryptoCount',
+            '#rankingCount',
+            '#itemCount',
+            '#changeCount',
+          ].join(', '),
+          ExpressionAttributeNames: {
+            '#snapshotType': 'snapshotType',
+            '#date': 'date',
+            '#scrapedAt': 'scrapedAt',
+            '#riskRangeCount': 'riskRangeCount',
+            '#metricsCount': 'metricsCount',
+            '#stockCount': 'stockCount',
+            '#cryptoCount': 'cryptoCount',
+            '#rankingCount': 'rankingCount',
+            '#itemCount': 'itemCount',
+            '#changeCount': 'changeCount',
+          },
         }).promise();
 
         for (const item of snapResult.Items || []) {
@@ -3266,37 +3449,17 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
       const latestSnapshot = latestByType[snapshotType];
 
       if (latestSnapshot) {
-        // Calculate item count based on snapshot type
-        let itemCount = 0;
-
-        if (latestSnapshot.data) {
-          // Use explicit count fields if available
-          if (latestSnapshot.riskRangeCount) {
-            itemCount = latestSnapshot.riskRangeCount;
-          } else if (latestSnapshot.metricsCount) {
-            // CFTC Positioning uses metricsCount
-            itemCount = latestSnapshot.metricsCount;
-          } else if (latestSnapshot.stockCount) {
-            itemCount = latestSnapshot.stockCount;
-          } else if (latestSnapshot.cryptoCount) {
-            itemCount = latestSnapshot.cryptoCount;
-          } else if (latestSnapshot.rankingCount) {
-            itemCount = latestSnapshot.rankingCount;
-          } else if (latestSnapshot.itemCount) {
-            itemCount = latestSnapshot.itemCount;
-          } else if (latestSnapshot.changeCount) {
-            itemCount = latestSnapshot.changeCount;
-          } else if (Array.isArray(latestSnapshot.data.stocks)) {
-            itemCount = latestSnapshot.data.stocks.length;
-          } else if (Array.isArray(latestSnapshot.data.rankings)) {
-            itemCount = latestSnapshot.data.rankings.length;
-          } else if (Array.isArray(latestSnapshot.data)) {
-            // CFTC data is an array of metrics
-            itemCount = latestSnapshot.data.length;
-          } else if (typeof latestSnapshot.data === 'object') {
-            itemCount = Object.keys(latestSnapshot.data).length;
-          }
-        }
+        const explicitCount = [
+          latestSnapshot.riskRangeCount,
+          latestSnapshot.metricsCount,
+          latestSnapshot.stockCount,
+          latestSnapshot.cryptoCount,
+          latestSnapshot.rankingCount,
+          latestSnapshot.itemCount,
+          latestSnapshot.changeCount,
+        ].find((value) => value !== null && value !== undefined && value !== '');
+        const numericCount = Number(explicitCount);
+        const itemCount = Number.isFinite(numericCount) ? numericCount : 0;
 
         results[snapshotType] = {
           status: getFreshnessStatus(latestSnapshot.date),
@@ -3761,6 +3924,11 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
 
 // Hedgeye ETF Pro endpoint - serves the latest Gmail action snapshot or local workbook snapshot.
 // Also computes day-over-day changes (adds/removes) for Longs and Shorts when local rows are available.
+function buildEtfProCheckpointFirstResponse() {
+  const checkpointRecord = loadLocalEtfProCheckpoint();
+  return buildFastEtfProCheckpointResponse(checkpointRecord?.checkpoint || null);
+}
+
 async function buildEtfProResponse() {
   const { payload: parsed, etfproDir, latestPath, localPayload, emailPayload } = await getResolvedEtfProPayload();
   if (!parsed) {
@@ -3773,7 +3941,11 @@ async function buildEtfProResponse() {
     };
     throw error;
   }
-  if (parsed.available === false && parsed.meta?.blockedByIngestion) {
+  if (parsed.available === false && (
+    parsed.meta?.blockedByIngestion
+    || parsed.meta?.blockedByCanonicalSource
+    || parsed.meta?.blockedByResearchEventReplay
+  )) {
     return parsed;
   }
 
@@ -3834,7 +4006,13 @@ async function buildEtfProResponse() {
 
 app.get('/api/hedgeye/etfpro', async (req, res) => {
   try {
-    return await sendCachedJson(res, 'etf-pro', buildEtfProResponse);
+    return await sendCheckpointFirstJson(res, {
+      key: 'etf-pro',
+      checkpointValue: buildEtfProCheckpointFirstResponse(),
+      loadAuthoritative: buildEtfProResponse,
+      onRefreshError: (error, currentValue) =>
+        failClosedResearchRefresh(currentValue, error),
+    });
   } catch (error) {
     console.error('[API] Error in /api/hedgeye/etfpro:', error);
     if (error.statusCode === 404) {
@@ -3887,7 +4065,8 @@ app.post('/api/hedgeye/etfpro', (req, res) => {
     fs.writeFileSync(latestPath, json);
     console.log(`[API] POST /api/hedgeye/etfpro wrote ${datedPath} (${rows.length} rows, snapshotDate=${snapshotDate})`);
 
-    researchResponseCache.delete('etf-pro');
+    checkpointFirstResearchResponse.invalidate('etf-pro');
+    researchResponseCache.delete('readiness:etf-pro');
     researchResponseCache.delete('changelog');
     researchResponseCache.delete('analytics-daily-brief');
     researchResponseCache.delete('workflow-status');
@@ -3994,13 +4173,22 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
   }
 });
 
+function buildRtaCheckpointFirstResponse() {
+  const rtaBenchmark = loadLocalRtaBenchmark();
+  return buildFastRtaCheckpointResponse(rtaBenchmark);
+}
+
 async function buildRealTimeAlertPositionsResponse() {
   const windowDays = 90;
+  const rtaBenchmark = loadLocalRtaBenchmark();
+  const authoritativeCheckpointTime = rtaBenchmark?.checkpointValidation?.valid
+    ? rtaBenchmark.asOf
+    : null;
   // ResearchEventLedgerV2 is canonical for migrated messages. The immutable
   // Gmail/S3 archive fills only uncovered source-message gaps; daily snapshots
   // remain rebuildable projections and never replace either event source.
   const [materialized, ingestionHealth] = await Promise.all([
-    fetchHermesRtaSnapshots(windowDays),
+    fetchHermesRtaSnapshots(windowDays, { authoritativeCheckpointTime }),
     getGmailPollHealth().catch((error) => ({
       status: 'unhealthy',
       healthy: false,
@@ -4012,7 +4200,6 @@ async function buildRealTimeAlertPositionsResponse() {
       source: 'service-heartbeat-table',
     })),
   ]);
-  const rtaBenchmark = loadLocalRtaBenchmark();
 
   const summary = summarizeRealTimeAlertPositions(materialized.snapshots, {
     windowDays,
@@ -4077,6 +4264,11 @@ async function buildRealTimeAlertPositionsResponse() {
     v2EventCount: materialized.v2EventCount,
     legacyMigrationEventCount: materialized.legacyEventCount,
     researchEventLedgerError: materialized.eventLedgerError,
+    canonicalCoverageGapCount: materialized.canonicalCoverageGaps?.length || 0,
+    canonicalCoverageGaps: materialized.canonicalCoverageGaps || [],
+    supersededCanonicalCoverageGapCount:
+      materialized.supersededCanonicalCoverageGaps?.length || 0,
+    supersededRejectedMessageCount: materialized.supersededRejections?.length || 0,
     rejectedMessageCount: materialized.rejected.length,
     reconstructionInput: materialized.v2EventCount > 0
       ? 'research-event-ledger-v2-with-legacy-migration'
@@ -4097,46 +4289,25 @@ async function buildRealTimeAlertPositionsResponse() {
       source: ingestionHealth.source || 'service-heartbeat-table',
     },
   };
-  const structurallyAvailable = summary.available === true
-    && summary.dataQuality?.status !== 'error';
-  const pipelineHealthy = ingestionHealth.healthy === true;
-  const contentDate = summary.lastUpdated
-    ? String(summary.lastUpdated).slice(0, 10)
-    : null;
-  const structuralErrorCode = summary.dataQuality?.invalidEvents?.[0]?.code || null;
-  summary.current = structurallyAvailable && pipelineHealthy;
-  summary.comparisonSafe = structurallyAvailable && pipelineHealthy;
-  summary.referenceOnly = structurallyAvailable && !pipelineHealthy;
-  summary.dataAvailability = {
-    structuralStatus: structurallyAvailable ? 'verified' : 'invalid',
-    ingestionStatus: ingestionHealth.status || 'unknown',
-    ingestionVerified: ingestionHealth.verified === true,
-    current: summary.current,
-    comparisonSafe: summary.comparisonSafe,
-    referenceOnly: summary.referenceOnly,
-    latestContentAt: summary.lastUpdated || null,
-    contentDate,
-    pipelineObservedAt: ingestionHealth.observedAt || null,
-    pipelineLastSuccessAt: ingestionHealth.lastSuccessAt || null,
-    errorCode: structurallyAvailable
-      ? (pipelineHealthy
-        ? null
-        : ingestionHealth.errorCode || 'GMAIL_HEARTBEAT_UNVERIFIED')
-      : structuralErrorCode || 'RTA_PROJECTION_UNAVAILABLE',
-    reason: structurallyAvailable
-      ? (pipelineHealthy
-        ? null
-        : ingestionHealth.reason || 'Gmail ingestion health could not be verified.')
-      : 'RTA position reconstruction failed structural validation.',
-  };
-  return summary;
+  return applyRtaCanonicalComparisonGate(summary, {
+    ingestionHealth,
+    canonicalLedgerError: materialized.eventLedgerError,
+    canonicalCoverageGaps: materialized.canonicalCoverageGaps,
+    authoritativeCheckpoint: rtaBenchmark,
+  });
 }
 
 app.get('/api/hedgeye/real-time-alert/positions', async (req, res) => {
   const startTime = Date.now();
   try {
     console.log('[API] /api/hedgeye/real-time-alert/positions called');
-    const response = await sendCachedJson(res, 'rta-positions:90', buildRealTimeAlertPositionsResponse);
+    const response = await sendCheckpointFirstJson(res, {
+      key: 'rta-positions:90',
+      checkpointValue: buildRtaCheckpointFirstResponse(),
+      loadAuthoritative: buildRealTimeAlertPositionsResponse,
+      onRefreshError: (error, currentValue) =>
+        failClosedResearchRefresh(currentValue, error),
+    });
     console.log(`[API] /api/hedgeye/real-time-alert/positions completed in ${Date.now() - startTime}ms`);
     return response;
   } catch (error) {
@@ -6010,6 +6181,78 @@ app.get('/api/portfolio/exposure/reconciliation', (req, res) => {
   }
 });
 
+app.get('/api/ibkr/interest-validation/status', (req, res) => {
+  try {
+    res.json(getIbkrInterestValidationStatus({
+      account: req.query.account,
+    }));
+  } catch (error) {
+    console.error('[API] Error in /api/ibkr/interest-validation/status:', error);
+    res.status(500).json({
+      source: 'ibkr_interest_validation',
+      available: false,
+      status: 'unavailable',
+      error: {
+        code: 'interest_validation_status_error',
+        message: 'IBKR interest validation status is unavailable.',
+      },
+      guard: {
+        available: false,
+        mode: 'off',
+        appliedReserve: null,
+      },
+    });
+  }
+});
+
+app.get('/api/ibkr/interest-validation/history', (req, res) => {
+  try {
+    res.json(getIbkrInterestValidationHistory({
+      limit: req.query.limit,
+    }));
+  } catch (error) {
+    console.error('[API] Error in /api/ibkr/interest-validation/history:', error);
+    res.status(500).json({
+      source: 'ibkr_interest_validation',
+      predictions: [],
+      actuals: [],
+      misses: [],
+      error: 'IBKR interest validation history is unavailable.',
+    });
+  }
+});
+
+app.post('/api/ibkr/interest-validation/run', async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    const result = await runIbkrInterestValidation({
+      trigger: 'manual',
+      force: true,
+    });
+    res.json({
+      ...result,
+      durationMs: Date.now() - startedAt,
+    });
+  } catch (error) {
+    console.error('[API] Error in /api/ibkr/interest-validation/run:', error);
+    res.status(503).json({
+      source: 'ibkr_interest_validation',
+      available: false,
+      status: 'unavailable',
+      durationMs: Date.now() - startedAt,
+      error: {
+        code: 'interest_validation_run_error',
+        message: 'Verified IBKR interest inputs are unavailable.',
+      },
+      guard: {
+        available: false,
+        mode: 'off',
+        appliedReserve: null,
+      },
+    });
+  }
+});
+
 app.get('/api/options', (req, res) => {
   res.json(generateOptionsData());
 });
@@ -6306,8 +6549,12 @@ app.get('/api/usd/currency-pairs', async (req, res) => {
   }
 });
 
+const fxvlSnapshotService = createFxvlSnapshotService({
+  fetchPairHistory: (symbol) => fetchYahooDailyClosesSeries(symbol, '2y'),
+});
 const usdCorrelationService = createUsdCorrelationService({
   fetchHistory: (symbol) => fetchYahooDailyClosesSeries(symbol, '2y'),
+  fetchFxvlSnapshot: () => fxvlSnapshotService.getSnapshot(),
 });
 
 // Get USD correlations from current daily market history.
@@ -6578,14 +6825,20 @@ const systemReadinessService = createSystemReadinessService({
   },
   getHermesInboxStatus,
   buildRtaResponse: async () => {
-    const cache = await researchResponseCache.get('rta-positions:90', buildRealTimeAlertPositionsResponse);
+    const cache = await researchResponseCache.get(
+      'readiness:rta-positions:90',
+      buildRealTimeAlertPositionsResponse,
+    );
     return {
       ...cache.value,
       _readinessCache: { status: cache.status, ageMs: cache.ageMs || 0 },
     };
   },
   buildEtfResponse: async () => {
-    const cache = await researchResponseCache.get('etf-pro', buildEtfProResponse);
+    const cache = await researchResponseCache.get(
+      'readiness:etf-pro',
+      buildEtfProResponse,
+    );
     return {
       ...cache.value,
       _readinessCache: { status: cache.status, ageMs: cache.ageMs || 0 },
@@ -6595,16 +6848,190 @@ const systemReadinessService = createSystemReadinessService({
   cloudwatch,
   listWorkerDefinitions,
 });
-const systemReadinessRepairService = createSystemReadinessRepairService({ lambdaClient: lambda });
+
+async function readDashboardStatusEvidence() {
+  if (process.env.NODE_ENV === 'production') {
+    const indexPath = path.join(__dirname, 'build', 'index.html');
+    try {
+      fs.accessSync(indexPath, fs.constants.R_OK);
+      return {
+        apiAvailable: true,
+        uiAvailable: fs.statSync(indexPath).isFile(),
+        uiVerified: true,
+      };
+    } catch (_error) {
+      return {
+        apiAvailable: true,
+        uiAvailable: false,
+        uiVerified: true,
+      };
+    }
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 350);
+  try {
+    const response = await fetch('http://127.0.0.1:3000/', {
+      headers: { Accept: 'text/html' },
+      signal: controller.signal,
+    });
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (response.body && typeof response.body.cancel === 'function') {
+      await response.body.cancel().catch(() => {});
+    }
+    return {
+      apiAvailable: true,
+      uiAvailable: response.ok && contentType.includes('text/html'),
+      uiVerified: true,
+    };
+  } catch (error) {
+    const timedOut = error?.name === 'AbortError';
+    return {
+      apiAvailable: true,
+      uiAvailable: timedOut ? null : false,
+      uiVerified: !timedOut,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function readMarketDataStatusEvidence() {
+  const nowMs = Date.now();
+  const providerStatus = getProviderStatusSnapshot();
+  const cachedProviderEvidence = [...quotesCache.values()]
+    .filter((entry) => (
+      entry
+      && Number.isFinite(Number(entry.timestamp))
+      && nowMs - Number(entry.timestamp) >= 0
+      && nowMs - Number(entry.timestamp) <= Math.min(CACHE_TTL, 60_000)
+    ))
+    .map((entry) => ({
+      observedAt: new Date(Number(entry.timestamp)).toISOString(),
+      metadata: buildQuoteMetadata(entry.data),
+    }))
+    .filter(({ metadata }) => (
+      metadata.usable === true
+      && ['ibkr', 'yahoo'].includes(String(metadata.source || '').toLowerCase())
+      && (
+        String(metadata.source || '').toLowerCase() !== 'ibkr'
+        || providerStatus?.ibkr?.connected === true
+      )
+    ))
+    .sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt))[0];
+
+  if (cachedProviderEvidence) {
+    return {
+      verified: true,
+      available: true,
+      observedAt: cachedProviderEvidence.observedAt,
+      source: cachedProviderEvidence.metadata.source,
+    };
+  }
+
+  const lastIbkrQuoteAt = providerStatus?.ibkr?.lastQuoteAt;
+  if (
+    providerStatus?.ibkr?.connected === true
+    && lastIbkrQuoteAt
+    && nowMs - Date.parse(lastIbkrQuoteAt) >= 0
+    && nowMs - Date.parse(lastIbkrQuoteAt) <= 60_000
+  ) {
+    return {
+      verified: true,
+      available: true,
+      observedAt: lastIbkrQuoteAt,
+      source: 'ibkr',
+    };
+  }
+
+  if (providerStatus?.market?.lastWarning === 'no_quote_available') {
+    return {
+      verified: true,
+      available: false,
+      reason: 'Market-data providers are unavailable.',
+    };
+  }
+
+  return {
+    verified: false,
+    available: null,
+  };
+}
+
+async function readAutomationStatusEvidence() {
+  const expectedWorkerKeys = ['quant-analyst', 'quant-developer', 'security'];
+  const configuredWorkers = new Map(
+    listWorkerDefinitions().map((definition) => [definition.key, definition]),
+  );
+  const records = expectedWorkerKeys.map((key) => {
+    const definition = configuredWorkers.get(key) || {};
+    return {
+      serviceId: definition.heartbeatServiceId || `hermes:${key}`,
+      label: definition.name || `Hermes ${key}`,
+      scheduleId: definition.scheduleId || null,
+      maxAgeMinutes: definition.readinessMaxAgeMinutes || 45,
+    };
+  });
+  const gmailAccount = String(
+    process.env.HERMES_GMAIL_ACCOUNT || 'timsmithaviation@gmail.com',
+  ).trim().toLowerCase();
+  records.push({
+    serviceId: `gmail:${gmailAccount}`,
+    label: 'Gmail ingestion',
+    scheduleId: process.env.HERMES_GMAIL_SCHEDULE_ID
+      || GMAIL_SERVICE_DEFINITION?.aws?.scheduleId
+      || 'market-dashboard-gmail-v2-every-15m',
+    maxAgeMinutes: Number(
+      process.env.GMAIL_HEARTBEAT_MAX_AGE_MINUTES
+      || GMAIL_SERVICE_DEFINITION?.readinessMaxAgeMinutes
+      || 45,
+    ),
+  });
+
+  // Heartbeat reads are intentionally independent of the startup S3
+  // HeadBucket check. The local runtime may be allowed to read DynamoDB even
+  // when unrelated upload-bucket access is unavailable.
+  return collectAutomationHeartbeatEvidence({
+    records,
+    readHeartbeat: (serviceId) => getServiceHeartbeat(dynamodb, serviceId),
+  });
+}
+
+const systemStatusService = createSystemStatusService({
+  readDashboardEvidence: readDashboardStatusEvidence,
+  readMarketDataEvidence: readMarketDataStatusEvidence,
+  readLivePortfolioEvidence: () => sidecarRequest('/status', { timeoutMs: 600 }),
+  readAutomationEvidence: readAutomationStatusEvidence,
+});
+
+const systemReadinessRepairService = createSystemReadinessRepairService({
+  lambdaClient: lambda,
+  collectReadiness: () => systemReadinessService.collectForVerification(),
+});
+
+// Lightweight, on-demand status for the SYS flyout. Each dependency is
+// independently bounded by systemStatusService; this route never invokes the
+// full operational-readiness collector.
+app.get('/api/system-status', async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    return res.json(await systemStatusService.collect());
+  } catch (error) {
+    console.warn('[API] Lightweight system status failed:', error.message);
+    return res.json(createUnavailableSystemStatus());
+  }
+});
 
 // Full operational readiness. Unlike /api/health, this verifies the live
 // dependencies required for a trustworthy dashboard and never serves stale
 // success after a collector failure.
-app.get('/api/system-readiness', async (req, res) => {
+app.get('/api/system-readiness', async (_req, res) => {
   const startedAt = Date.now();
   res.setHeader('Cache-Control', 'no-store');
   try {
-    const report = await systemReadinessService.collect({ refresh: req.query.refresh === '1' });
+    // `refresh=1` remains accepted for backward compatibility, but public
+    // requests always share the readiness service's hard collection budget.
+    const report = await systemReadinessService.collect();
     return res.json({
       ...report,
       durationMs: Date.now() - startedAt,
@@ -6638,6 +7065,10 @@ app.post('/api/system-readiness/actions/:actionId', async (req, res) => {
     const result = await systemReadinessRepairService.run(req.params.actionId, {
       remoteAddress: req.socket?.remoteAddress,
     });
+    if (req.params.actionId === 'rebuild-research-projections') {
+      checkpointFirstResearchResponse.invalidate('rta-positions:90');
+      researchResponseCache.delete('readiness:rta-positions:90');
+    }
     return res.status(202).json(result);
   } catch (error) {
     const statusCode = Number(error.statusCode) || 500;
@@ -7233,6 +7664,14 @@ const server = app.listen(PORT, HOST, async () => {
     }).catch((err) => {
       console.warn('[PM Reconciler] startup failed:', err.message);
     });
+    startIbkrInterestValidation().then((status) => {
+      console.log(
+        `[IBKR Interest Validation] startup ${status.status}`
+        + ` (${status.enabled ? 'enabled' : 'disabled'})`,
+      );
+    }).catch((err) => {
+      console.warn('[IBKR Interest Validation] startup failed:', err.message);
+    });
   }
 
   // Validate AWS credentials after server starts
@@ -7522,6 +7961,7 @@ const shutdown = (signal) => {
   const done = () => process.exit(0);
   try {
     stopCpiCatalogReconciler();
+    stopIbkrInterestValidation();
     ibkrStreamBridge.stopIbkrStreamBridge();
     wss.clients.forEach((c) => { try { c.terminate(); } catch (_) {} });
     server.close(done);

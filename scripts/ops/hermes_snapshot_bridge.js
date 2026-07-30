@@ -20,7 +20,10 @@ const HOST_ID = process.env.HERMES_BRIDGE_HOST_ID || 'tim-market-dashboard';
 const BUILD_VERSION = process.env.MARKET_DASHBOARD_BUILD_VERSION || require('../../package.json').version;
 const INTERVAL_MS = Math.max(30_000, Number(process.env.HERMES_BRIDGE_INTERVAL_MS) || 60_000);
 const REQUEST_TIMEOUT_MS = Math.max(2_000, Number(process.env.HERMES_BRIDGE_REQUEST_TIMEOUT_MS) || 20_000);
-const MAX_INPUT_AGE_MS = Math.max(30_000, Number(process.env.HERMES_BRIDGE_MAX_INPUT_AGE_MS) || 180_000);
+// Keep ahead of SYSTEM_READINESS_CACHE_MS (5m floor) so ops telemetry stays
+// publishable while readiness reuses its hard collection budget.
+const MAX_INPUT_AGE_MS = Math.max(30_000, Number(process.env.HERMES_BRIDGE_MAX_INPUT_AGE_MS) || 360_000);
+const MAX_CLOCK_SKEW_MS = 30_000;
 const TTL_DAYS = Math.max(1, Number(process.env.HERMES_BRIDGE_TTL_DAYS) || 30);
 const configuredBridgeAwsProfile = String(
   process.env.HERMES_BRIDGE_AWS_PROFILE
@@ -29,6 +32,7 @@ const configuredBridgeAwsProfile = String(
 ).trim();
 const BRIDGE_AWS_PROFILE = configuredBridgeAwsProfile || 'market-dashboard-bridge';
 const once = process.argv.includes('--once');
+const ENABLED_FLAG_VALUES = new Set(['1', 'true', 'yes', 'on', 'enabled']);
 const EXPECTED_CAPABILITY_IDS = Object.freeze([
   'automation.hermes',
   'dashboard.core',
@@ -39,6 +43,26 @@ const EXPECTED_CAPABILITY_IDS = Object.freeze([
 ]);
 
 const PROHIBITED_PROVENANCE = /(?:^|[\s;,_-])(stale|offline|cache(?:d)?|mock|seed(?:ed)?|synthetic|fallback|inferred|portfolio[-_ ]derived|frozen|delayed|historical)(?:$|[\s;,_-])/i;
+
+function hermesBridgeEnabled(env = process.env) {
+  const partitions = bridgePartitions(env);
+  return partitions.operations || partitions.portfolio;
+}
+
+function bridgePartitions(env = process.env) {
+  const legacy = ENABLED_FLAG_VALUES.has(
+    String(env.HERMES_BRIDGE_ENABLED || '').trim().toLowerCase(),
+  );
+  const enabled = (name) => (
+    Object.prototype.hasOwnProperty.call(env, name)
+      ? ENABLED_FLAG_VALUES.has(String(env[name] || '').trim().toLowerCase())
+      : legacy
+  );
+  return {
+    operations: enabled('HERMES_OPERATIONS_BRIDGE_ENABLED'),
+    portfolio: enabled('HERMES_PORTFOLIO_BRIDGE_ENABLED'),
+  };
+}
 
 function assertLoopbackBase(raw, label) {
   const parsed = new URL(raw);
@@ -101,9 +125,11 @@ function publishErrorCode(error) {
 
 function inputFailure(error) {
   return {
-    status: 'error',
+    status: error?.blockedBy ? 'blocked' : 'error',
     errorCode: error?.code || 'HERMES_BRIDGE_INPUT_ERROR',
     detail: boundedDetail(error),
+    blockedBy: error?.blockedBy || null,
+    upstreamStatus: error?.upstreamStatus || null,
   };
 }
 
@@ -122,7 +148,9 @@ function publishFailure(error, stage) {
 
 function ageMs(value) {
   const millis = Date.parse(String(value || ''));
-  return Number.isFinite(millis) ? Math.max(0, Date.now() - millis) : Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(millis)) return Number.POSITIVE_INFINITY;
+  const age = Date.now() - millis;
+  return age < -MAX_CLOCK_SKEW_MS ? Number.POSITIVE_INFINITY : Math.max(0, age);
 }
 
 async function getJson(url) {
@@ -133,8 +161,31 @@ async function getJson(url) {
       signal: controller.signal,
       headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
     });
-    if (!response.ok) throw new Error(`${new URL(url).pathname} returned HTTP ${response.status}`);
-    return await response.json();
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const path = new URL(url).pathname;
+      const upstreamStatus = String(payload?.status || '').trim().toLowerCase();
+      const portfolioCodes = {
+        disconnected: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
+        gateway_unavailable: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
+        not_connected: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
+        positions_request_busy: 'IBKR_POSITIONS_REQUEST_BUSY',
+        positions_request_timeout: 'IBKR_POSITIONS_REQUEST_TIMEOUT',
+        socket_verification_timeout: 'IBKR_SOCKET_VERIFICATION_TIMEOUT',
+        live_session_unverified: 'IBKR_LIVE_SESSION_UNVERIFIED',
+      };
+      const error = new Error(
+        boundedDetail(payload?.message || `${path} returned HTTP ${response.status}`),
+      );
+      error.code = path === '/portfolio/live-positions'
+        ? (portfolioCodes[upstreamStatus] || 'IBKR_LIVE_PORTFOLIO_UNAVAILABLE')
+        : 'HERMES_BRIDGE_INPUT_UNAVAILABLE';
+      error.blockedBy = path === '/portfolio/live-positions' ? 'portfolio.live' : null;
+      error.upstreamStatus = upstreamStatus || null;
+      error.httpStatus = response.status;
+      throw error;
+    }
+    return payload;
   } finally {
     clearTimeout(timer);
   }
@@ -174,7 +225,7 @@ function accountRef(accountId) {
   return crypto.createHash('sha256').update(String(accountId)).digest('hex').slice(0, 12);
 }
 
-function verifyPortfolio({ portfolio, readiness }) {
+function verifyReadiness(readiness) {
   if (readiness?.version !== 1 || ageMs(readiness?.checkedAt) > MAX_INPUT_AGE_MS) {
     const error = new Error('The dashboard readiness report is missing, unsupported, or stale.');
     error.code = 'SYSTEM_READINESS_UNVERIFIED';
@@ -188,6 +239,107 @@ function verifyPortfolio({ portfolio, readiness }) {
     error.code = 'SYSTEM_READINESS_CAPABILITY_CONTRACT_INVALID';
     throw error;
   }
+  return capabilities;
+}
+
+function sanitizeRootCauses(readiness) {
+  return (readiness.rootCauses || []).slice(0, 24).map(item => ({
+    id: item?.id ? boundedDetail(item.id).slice(0, 120) : null,
+    errorCode: item?.errorCode ? boundedDetail(item.errorCode).slice(0, 120) : null,
+    summary: item?.summary ? boundedDetail(item.summary).slice(0, 300) : null,
+    owner: item?.owner ? boundedDetail(item.owner).slice(0, 120) : null,
+    affectedCheckIds: Array.isArray(item?.affectedCheckIds)
+      ? item.affectedCheckIds.slice(0, 24).map(value => boundedDetail(value).slice(0, 120))
+      : [],
+    suppressionReason: item?.suppressionReason
+      ? boundedDetail(item.suppressionReason).slice(0, 240)
+      : null,
+    nextRetryAt: item?.nextRetryAt || null,
+  }));
+}
+
+function buildOperationsSnapshot({ readiness, capturedAt = nowIso() }) {
+  verifyReadiness(readiness);
+  const rootCauses = sanitizeRootCauses(readiness);
+  return {
+    hostId: `${HOST_ID}#operations`,
+    capturedAt,
+    schemaVersion: 2,
+    snapshotType: 'operations',
+    source: 'local-outbound-bridge',
+    bridgeStatus: 'ready',
+    buildVersion: BUILD_VERSION,
+    readinessCheckedAt: readiness.checkedAt,
+    runtime: {
+      hostnameHash: accountRef(os.hostname()),
+      node: process.version,
+      platform: process.platform,
+    },
+    capabilities: sanitizeCapabilities(readiness),
+    rootCauseCodes: Array.from(new Set(
+      rootCauses.map(item => item.errorCode).filter(Boolean),
+    )).slice(0, 24),
+    rootCauses,
+    manualActions: (readiness.manualActions || []).slice(0, 24).map(item => ({
+      id: item?.id ? boundedDetail(item.id).slice(0, 120) : null,
+      label: item?.label ? boundedDetail(item.label).slice(0, 300) : null,
+      owner: item?.owner ? boundedDetail(item.owner).slice(0, 120) : null,
+      approvalRequired: item?.approvalRequired !== false,
+      rootCauseIds: Array.isArray(item?.rootCauseIds)
+        ? item.rootCauseIds.slice(0, 24).map(value => boundedDetail(value).slice(0, 120))
+        : [],
+    })),
+    hostResources: {
+      checks: (readiness.groups || [])
+        .find(group => group?.id === 'host')?.checks?.slice(0, 12)
+        .map(check => ({
+          id: check?.id || null,
+          status: check?.status || 'fail',
+          errorCode: check?.errorCode || null,
+          summary: check?.summary ? boundedDetail(check.summary).slice(0, 300) : null,
+          observedAt: check?.observedAt || null,
+        })) || [],
+    },
+    controller: readiness.controller && typeof readiness.controller === 'object'
+      ? {
+        available: readiness.controller.available === true,
+        mode: readiness.controller.mode || null,
+        status: readiness.controller.status || null,
+        observedAt: readiness.controller.observedAt || null,
+        nextRetryAt: readiness.controller.nextRetryAt || null,
+        circuitCount: Array.isArray(readiness.controller.circuits)
+          ? readiness.controller.circuits.length
+          : 0,
+      }
+      : null,
+    incidentHistory: (readiness.incidentHistory || []).slice(-20).map(item => ({
+      id: item?.id || item?.incidentId || null,
+      rootCause: item?.rootCause || item?.errorCode || null,
+      status: item?.status || null,
+      openedAt: item?.openedAt || null,
+      resolvedAt: item?.resolvedAt || null,
+    })),
+    actionHistory: (readiness.actionHistory || []).slice(-20).map(item => ({
+      id: item?.id || item?.actionId || null,
+      incidentId: item?.incidentId || null,
+      actionId: item?.actionId || null,
+      status: item?.status || null,
+      startedAt: item?.startedAt || null,
+      finishedAt: item?.finishedAt || null,
+      verification: item?.verification || null,
+    })),
+    suppressionReasons: (readiness.suppressionReasons || []).slice(-40).map(item => ({
+      checkId: item?.checkId || null,
+      errorCode: item?.errorCode || null,
+      suppressedBy: Array.isArray(item?.suppressedBy) ? item.suppressedBy.slice(0, 12) : [],
+      reason: item?.reason ? boundedDetail(item.reason).slice(0, 300) : null,
+    })),
+    ttl: ttlEpoch(),
+  };
+}
+
+function verifyPortfolio({ portfolio, readiness }) {
+  const capabilities = verifyReadiness(readiness);
   const portfolioCapability = capabilities['portfolio.live'] || capabilities.portfolio;
   if (!portfolioCapability) {
     const error = new Error('The dashboard readiness report omitted the portfolio.live capability.');
@@ -216,7 +368,22 @@ function verifyPortfolio({ portfolio, readiness }) {
   }
   const observedAt = portfolio.observed_at;
   const socketVerifiedAt = portfolio.socket_verified_at;
-  if (ageMs(observedAt) > MAX_INPUT_AGE_MS || ageMs(socketVerifiedAt) > MAX_INPUT_AGE_MS) {
+  const positionsObservedAt = portfolio.positions_observed_at;
+  if (
+    portfolio.from_cache !== false
+    || portfolio.position_source !== 'ibkr_req_positions'
+    || !positionsObservedAt
+    || positionsObservedAt !== observedAt
+  ) {
+    const error = new Error('IBKR position rows were not returned by a fresh reqPositions response.');
+    error.code = 'PORTFOLIO_POSITION_PROVENANCE_UNVERIFIED';
+    throw error;
+  }
+  if (
+    ageMs(observedAt) > MAX_INPUT_AGE_MS
+    || ageMs(socketVerifiedAt) > MAX_INPUT_AGE_MS
+    || ageMs(positionsObservedAt) > MAX_INPUT_AGE_MS
+  ) {
     const error = new Error('IBKR portfolio observation or socket verification is stale.');
     error.code = 'PORTFOLIO_SNAPSHOT_STALE';
     throw error;
@@ -248,7 +415,7 @@ function buildReadySnapshot({ portfolio, readiness, capturedAt = nowIso() }) {
     exchange: row.exchange || null,
     currency: row.currency || null,
     quantity: Number(row.position),
-    positionSource: 'ibkr_api',
+    positionSource: portfolio.position_source,
   }));
   if (positions.some(position => !position.symbol || !Number.isFinite(position.quantity))) {
     const error = new Error('Portfolio response contains malformed positions.');
@@ -256,8 +423,10 @@ function buildReadySnapshot({ portfolio, readiness, capturedAt = nowIso() }) {
     throw error;
   }
   return {
-    hostId: HOST_ID,
+    hostId: `${HOST_ID}#portfolio`,
     capturedAt,
+    schemaVersion: 2,
+    snapshotType: 'portfolio',
     source: 'local-outbound-bridge',
     bridgeStatus: 'ready',
     buildVersion: BUILD_VERSION,
@@ -271,30 +440,13 @@ function buildReadySnapshot({ portfolio, readiness, capturedAt = nowIso() }) {
       observedAt: portfolio.observed_at,
       socketVerifiedAt: verified.socketVerifiedAt,
     },
-    capabilities: sanitizeCapabilities(readiness),
-    rootCauseCodes: Array.from(new Set(
-      (readiness.rootCauses || [])
-        .map(item => item?.errorCode)
-        .filter(Boolean)
-        .map(value => boundedDetail(value).slice(0, 120)),
-    )).slice(0, 24),
-    rootCauses: (readiness.rootCauses || []).slice(0, 24).map(item => ({
-      id: item?.id ? boundedDetail(item.id).slice(0, 120) : null,
-      errorCode: item?.errorCode ? boundedDetail(item.errorCode).slice(0, 120) : null,
-      summary: item?.summary ? boundedDetail(item.summary).slice(0, 300) : null,
-      owner: item?.owner ? boundedDetail(item.owner).slice(0, 120) : null,
-      affectedCheckIds: Array.isArray(item?.affectedCheckIds)
-        ? item.affectedCheckIds.slice(0, 24).map(value => boundedDetail(value).slice(0, 120))
-        : [],
-    })),
-    manualActions: (readiness.manualActions || []).map(item => ({
-      id: item.id || null,
-      label: item.label || item.summary || null,
-    })),
+    capabilities: {
+      'portfolio.live': sanitizeCapabilities(readiness)['portfolio.live'],
+    },
     portfolio: {
       verified: true,
       source: 'ibkr_live',
-      positionSource: 'ibkr_api',
+      positionSource: portfolio.position_source,
       priceSource: 'not_included',
       accountsVerified: true,
       accountCount: managed.size,
@@ -306,28 +458,36 @@ function buildReadySnapshot({ portfolio, readiness, capturedAt = nowIso() }) {
   };
 }
 
-function buildDegradedSnapshot(error, capturedAt = nowIso()) {
+function buildDegradedSnapshot(error, capturedAt = nowIso(), snapshotType = 'portfolio') {
   const failure = inputFailure(error);
-  return {
-    hostId: HOST_ID,
+  const operations = snapshotType === 'operations';
+  const snapshot = {
+    hostId: `${HOST_ID}#${snapshotType}`,
     capturedAt,
+    schemaVersion: 2,
+    snapshotType,
     source: 'local-outbound-bridge',
-    bridgeStatus: 'error',
+    bridgeStatus: failure.status,
     buildVersion: BUILD_VERSION,
     errorCode: failure.errorCode,
     detail: failure.detail,
     inputErrorCode: failure.errorCode,
+    blockedBy: failure.blockedBy,
+    upstreamStatus: failure.upstreamStatus,
     gateway: { connected: false },
     capabilities: {},
     manualActions: [],
-    portfolio: {
+    ttl: ttlEpoch(),
+  };
+  if (!operations) {
+    snapshot.portfolio = {
       verified: false,
       source: 'unavailable',
       accountsVerified: false,
       positions: [],
-    },
-    ttl: ttlEpoch(),
-  };
+    };
+  }
+  return snapshot;
 }
 
 async function putHeartbeat(snapshot, startedAt, {
@@ -354,7 +514,10 @@ async function putHeartbeat(snapshot, startedAt, {
       source: 'local-outbound-bridge',
       buildVersion: BUILD_VERSION,
       awsProfile: BRIDGE_AWS_PROFILE,
-      counts: { positions: snapshot.portfolio?.positionCount || 0 },
+      counts: {
+        positions: snapshot.portfolio?.positionCount || 0,
+        operations: snapshot.snapshotType === 'operations' && snapshot.bridgeStatus === 'ready' ? 1 : 0,
+      },
       ttl: ttlEpoch(),
     },
   }).promise();
@@ -388,6 +551,56 @@ async function publishBridgeSnapshot(snapshot, startedAt, {
     status: failures.length === 0 ? 'ready' : 'error',
     snapshotPublished,
     heartbeatPublished,
+    failures,
+  };
+}
+
+async function publishBridgeSnapshots(snapshots, startedAt, {
+  client = dynamodb,
+} = {}) {
+  const failures = [];
+  const publishedPartitions = {};
+  for (const snapshot of snapshots) {
+    const partition = snapshot.snapshotType || 'unknown';
+    try {
+      await client.put({ TableName: SNAPSHOT_TABLE, Item: snapshot }).promise();
+      publishedPartitions[partition] = true;
+    } catch (error) {
+      failures.push(publishFailure(error, `snapshot:${partition}`));
+      publishedPartitions[partition] = false;
+    }
+  }
+
+  const operations = snapshots.find(snapshot => snapshot.snapshotType === 'operations');
+  const portfolio = snapshots.find(snapshot => snapshot.snapshotType === 'portfolio');
+  const inputFailureSnapshot = [operations, portfolio]
+    .find(snapshot => snapshot?.bridgeStatus !== 'ready');
+  const heartbeatSnapshot = {
+    ...(inputFailureSnapshot || operations || portfolio),
+    bridgeStatus: inputFailureSnapshot ? 'error' : 'ready',
+    inputErrorCode: inputFailureSnapshot?.inputErrorCode || inputFailureSnapshot?.errorCode || null,
+    detail: inputFailureSnapshot?.detail || null,
+    portfolio: portfolio?.portfolio || null,
+    snapshotType: 'operations',
+  };
+  let heartbeatPublished = false;
+  try {
+    await putHeartbeat(heartbeatSnapshot, startedAt, {
+      client,
+      publishProblem: failures[0] || null,
+    });
+    heartbeatPublished = true;
+  } catch (error) {
+    failures.push(publishFailure(error, 'heartbeat'));
+  }
+
+  return {
+    status: failures.length === 0 ? 'ready' : 'error',
+    snapshotPublished: Object.values(publishedPartitions).every(Boolean),
+    operationsPublished: publishedPartitions.operations === true,
+    portfolioPublished: publishedPartitions.portfolio === true,
+    heartbeatPublished,
+    publishedPartitions,
     failures,
   };
 }
@@ -430,24 +643,76 @@ function buildBridgeResult(snapshot, published) {
 async function captureAndPublish({
   client = dynamodb,
   readJson = getJson,
+  env = process.env,
 } = {}) {
   const startedAt = nowIso();
-  let snapshot;
-  try {
-    const [portfolio, readiness] = await Promise.all([
-      readJson(`${SIDECAR_BASE}/portfolio/live-positions`),
-      readJson(`${API_BASE}/api/system-readiness?refresh=1`),
-    ]);
-    snapshot = buildReadySnapshot({ portfolio, readiness });
-  } catch (error) {
-    snapshot = buildDegradedSnapshot(error);
+  const partitions = bridgePartitions(env);
+  if (!partitions.operations && !partitions.portfolio) {
+    const error = new Error('No outbound bridge partition is enabled.');
+    error.code = 'HERMES_BRIDGE_DISABLED';
+    throw error;
+  }
+  const [portfolioResult, readinessResult] = await Promise.allSettled([
+    partitions.portfolio
+      ? readJson(`${SIDECAR_BASE}/portfolio/live-positions`)
+      : Promise.resolve(null),
+    readJson(`${API_BASE}/api/system-readiness`),
+  ]);
+  let operationsSnapshot;
+  if (readinessResult.status === 'fulfilled') {
+    try {
+      operationsSnapshot = buildOperationsSnapshot({ readiness: readinessResult.value });
+    } catch (error) {
+      operationsSnapshot = buildDegradedSnapshot(error, nowIso(), 'operations');
+    }
+  } else {
+    operationsSnapshot = buildDegradedSnapshot(readinessResult.reason, nowIso(), 'operations');
   }
 
-  const published = await publishBridgeSnapshot(snapshot, startedAt, { client });
+  let portfolioSnapshot;
+  if (readinessResult.status === 'fulfilled' && portfolioResult.status === 'fulfilled') {
+    try {
+      portfolioSnapshot = buildReadySnapshot({
+        portfolio: portfolioResult.value,
+        readiness: readinessResult.value,
+      });
+    } catch (error) {
+      portfolioSnapshot = buildDegradedSnapshot(error);
+    }
+  } else {
+    portfolioSnapshot = buildDegradedSnapshot(
+      portfolioResult.status === 'rejected'
+        ? portfolioResult.reason
+        : readinessResult.reason,
+    );
+  }
+
+  const snapshots = [
+    ...(partitions.operations ? [operationsSnapshot] : []),
+    ...(partitions.portfolio ? [portfolioSnapshot] : []),
+  ];
+  const published = await publishBridgeSnapshots(snapshots, startedAt, { client });
+  const snapshot = partitions.portfolio ? portfolioSnapshot : operationsSnapshot;
   return {
     snapshot,
+    snapshots: {
+      operations: operationsSnapshot,
+      portfolio: portfolioSnapshot,
+    },
     published,
-    result: buildBridgeResult(snapshot, published),
+    result: {
+      ...buildBridgeResult(snapshot, published),
+      operations: {
+        status: partitions.operations ? operationsSnapshot.bridgeStatus : 'disabled',
+        errorCode: partitions.operations ? operationsSnapshot.errorCode || null : null,
+        published: published.operationsPublished,
+      },
+      portfolio: {
+        status: partitions.portfolio ? portfolioSnapshot.bridgeStatus : 'disabled',
+        errorCode: partitions.portfolio ? portfolioSnapshot.errorCode || null : null,
+        published: published.portfolioPublished,
+      },
+    },
   };
 }
 
@@ -455,23 +720,60 @@ function writeBridgeResult(result) {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
-async function main() {
-  if (once) {
-    const outcome = await captureAndPublish();
-    writeBridgeResult(outcome.result);
-    process.exitCode = outcome.result.status === 'ready' ? 0 : 2;
-    return;
+async function runBridge({
+  env = process.env,
+  onceMode = once,
+  capture = captureAndPublish,
+  writeResult = writeBridgeResult,
+  wait = (delayMs) => new Promise(resolve => setTimeout(resolve, delayMs)),
+  installSignalHandlers = true,
+} = {}) {
+  if (!hermesBridgeEnabled(env)) {
+    const result = {
+      observedAt: nowIso(),
+      status: 'disabled',
+      errorCode: null,
+      inputErrorCode: null,
+      publishErrorCode: null,
+      publishStage: null,
+      detail: 'Outbound operations and verified-live portfolio publishing are disabled by the partition controls.',
+      positions: 0,
+      awsProfile: null,
+      input: {
+        status: 'disabled',
+        errorCode: null,
+        detail: null,
+      },
+      publish: {
+        status: 'disabled',
+        errorCode: null,
+        stage: null,
+        detail: null,
+        snapshotPublished: false,
+        heartbeatPublished: false,
+        failures: [],
+      },
+    };
+    writeResult(result);
+    return result;
+  }
+  if (onceMode) {
+    const outcome = await capture({ env });
+    writeResult(outcome.result);
+    return outcome.result;
   }
   let stopping = false;
   const stop = () => { stopping = true; };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
+  if (installSignalHandlers) {
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+  }
   while (!stopping) {
     try {
-      const outcome = await captureAndPublish();
-      writeBridgeResult(outcome.result);
+      const outcome = await capture({ env });
+      writeResult(outcome.result);
     } catch (error) {
-      writeBridgeResult({
+      writeResult({
         observedAt: nowIso(),
         status: 'error',
         errorCode: error?.code || 'HERMES_BRIDGE_RUNTIME_ERROR',
@@ -494,7 +796,15 @@ async function main() {
       });
     }
     if (stopping) break;
-    await new Promise(resolve => setTimeout(resolve, INTERVAL_MS));
+    await wait(INTERVAL_MS);
+  }
+  return null;
+}
+
+async function main() {
+  const result = await runBridge();
+  if (once || result?.status === 'disabled') {
+    process.exitCode = ['ready', 'disabled'].includes(result?.status) ? 0 : 2;
   }
 }
 
@@ -512,16 +822,23 @@ module.exports = {
   accountRef,
   assertLoopbackBase,
   buildBridgeResult,
+  bridgePartitions,
   buildDegradedSnapshot,
+  buildOperationsSnapshot,
   buildReadySnapshot,
   captureAndPublish,
   capabilityIsReady,
+  hermesBridgeEnabled,
+  getJson,
   inputFailure,
   publishBridgeSnapshot,
+  publishBridgeSnapshots,
   publishFailure,
   publishErrorCode,
   putHeartbeat,
   readinessCapabilities,
+  runBridge,
   sanitizeCapabilities,
+  verifyReadiness,
   verifyPortfolio,
 };

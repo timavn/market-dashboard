@@ -823,6 +823,7 @@ def persist_snapshot_intelligence(
     dynamodb: Any,
     *,
     content_sha256: Optional[str] = None,
+    finalize: bool = True,
 ) -> int:
     events = build_entity_events(snapshot, content_sha256=content_sha256)
     product_id = str(
@@ -858,14 +859,31 @@ def persist_snapshot_intelligence(
         event_count=len(events),
     )
     persist_entity_events(events, dynamodb)
-    update_product_manifest(
+    if finalize:
+        finalize_snapshot_intelligence(
+            snapshot,
+            dynamodb,
+            content_sha256=content_sha256,
+            event_count=len(events),
+        )
+    return len(events)
+
+
+def finalize_snapshot_intelligence(
+    snapshot: Dict[str, Any],
+    dynamodb: Any,
+    *,
+    content_sha256: Optional[str] = None,
+    event_count: int = 0,
+) -> Dict[str, Any]:
+    """Mark an artifact indexed only after its primary projection succeeds."""
+    return update_product_manifest(
         snapshot,
         dynamodb,
         stage="indexed",
         content_sha256=content_sha256,
-        event_count=len(events),
+        event_count=event_count,
     )
-    return len(events)
 
 
 def persist_snapshot_failure(

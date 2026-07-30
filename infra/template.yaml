@@ -3,6 +3,11 @@ Transform: AWS::Serverless-2016-10-31
 Description: Market Dashboard readiness, Gmail ingestion, and consolidated Hermes workers.
 
 Parameters:
+  CloudWatchdogScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Enable the independent read-only watchdog only through staged activation.
   GmailScheduleState:
     Type: String
     Default: DISABLED
@@ -28,6 +33,11 @@ Parameters:
     Default: DISABLED
     AllowedValues: [ENABLED, DISABLED]
     Description: Alarm actions and missing-heartbeat evaluation enable after canary observation.
+  ReservedConcurrencyState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Opt in only after the account concurrency quota can preserve ten unreserved executions.
   AlertEmail:
     Type: String
     Default: timsmithaviation@gmail.com
@@ -64,11 +74,11 @@ Parameters:
 
 Conditions:
   OperationalAlarmsEnabled: !Equals [!Ref OperationalAlarmsState, ENABLED]
+  ReservedConcurrencyEnabled: !Equals [!Ref ReservedConcurrencyState, ENABLED]
 
 Globals:
   Function:
     Runtime: python3.12
-    Architectures: [arm64]
     Tracing: Active
     Environment:
       Variables:
@@ -274,9 +284,10 @@ Resources:
       CodeUri: lambdas/gmail_ingestor/
       Handler: hermes_gmail_ingestor.lambda_handler
       Description: Cursor-based, immutable Hedgeye Gmail ingestion with typed auth state.
+      Architectures: [arm64]
       MemorySize: 512
       Timeout: 300
-      ReservedConcurrentExecutions: 1
+      ReservedConcurrentExecutions: !If [ReservedConcurrencyEnabled, 1, !Ref AWS::NoValue]
       Environment:
         Variables:
           GMAIL_OAUTH_SECRET_NAME: !Ref GmailOAuthSecretName
@@ -284,6 +295,7 @@ Resources:
           HERMES_GMAIL_QUERY: label:Hedgeye newer_than:365d
           HERMES_LEDGER_TABLE: !Ref GmailLedgerTableName
           HERMES_S3_BUCKET: !Ref RawArtifactBucketName
+          HEDGEYE_DAILY_SNAPSHOT_TABLE: !Ref HedgeyeDailySnapshotTableName
           RESEARCH_EVENT_LEDGER_TABLE: !Ref ResearchEventLedgerV2
           RESEARCH_ENTITY_EVENTS_TABLE: !Ref ResearchEntityEventsV1
           RESEARCH_PRODUCT_MANIFEST_TABLE: !Ref ResearchProductManifestsV1
@@ -351,7 +363,7 @@ Resources:
       Architectures: [x86_64]
       MemorySize: 2048
       Timeout: 900
-      ReservedConcurrentExecutions: 2
+      ReservedConcurrentExecutions: !If [ReservedConcurrencyEnabled, 2, !Ref AWS::NoValue]
       Environment:
         Variables:
           HERMES_LEDGER_TABLE: !Ref GmailLedgerTableName
@@ -396,14 +408,16 @@ Resources:
       CodeUri: lambdas/hermes_worker/
       Handler: hermes_worker.lambda_handler
       Description: Consolidated Hermes monitoring workers consuming verified outbound snapshots.
+      Architectures: [arm64]
       MemorySize: 256
       Timeout: 60
-      ReservedConcurrentExecutions: 3
+      ReservedConcurrentExecutions: !If [ReservedConcurrencyEnabled, 3, !Ref AWS::NoValue]
       Environment:
         Variables:
           HERMES_INPUT_SNAPSHOT_TABLE: !Ref HermesInputSnapshotTable
           HERMES_AGENT_RUNS_TABLE: !Ref HermesAgentRunsTableName
           HERMES_ALERTS_TABLE: !Ref HermesAlertsTableName
+          HERMES_OPERATIONS_TOPIC_ARN: !Ref OperationsTopic
           HERMES_BRIDGE_HOST_ID: !Ref BridgeHostId
           HERMES_MAX_SNAPSHOT_AGE_SECONDS: 180
       EventInvokeConfig:
@@ -424,7 +438,20 @@ Resources:
               Resource:
                 - !GetAtt ServiceHeartbeatTable.Arn
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HermesAgentRunsTableName}
-                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HermesAlertsTableName}
+            - Sid: ManageOwnedHermesAlerts
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HermesAlertsTableName}
+              Condition:
+                ForAllValues:StringLike:
+                  dynamodb:LeadingKeys:
+                    - quant-analyst#runtime-health#*
+                    - quant-developer#runtime-health#*
+                    - security#runtime-health#*
+                'Null':
+                  dynamodb:LeadingKeys: 'false'
             - Effect: Allow
               Action: cloudwatch:PutMetricData
               Resource: '*'
@@ -434,6 +461,104 @@ Resources:
             - Effect: Allow
               Action: sqs:SendMessage
               Resource: !GetAtt RuntimeFailureQueue.Arn
+            - Sid: PublishHermesAlertLifecycle
+              Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref OperationsTopic
+
+  HermesCloudWatchdogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: market-dashboard-hermes-cloud-watchdog-v1
+      CodeUri: lambdas/hermes_watchdog/
+      Handler: hermes_watchdog.lambda_handler
+      Description: Independent read-only cloud control-plane and heartbeat watchdog.
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 120
+      Environment:
+        Variables:
+          WATCHDOG_STACK_NAME: market-dashboard-readiness-v2
+          WATCHDOG_RULE_ID: market-dashboard-hermes-cloud-watchdog-v1
+          WATCHDOG_SERVICE_ID: hermes:cloud-watchdog
+          HERMES_ALERTS_TABLE: !Ref HermesAlertsTableName
+          HERMES_OPERATIONS_TOPIC_ARN: !Ref OperationsTopic
+          RUNTIME_FAILURE_QUEUE_URL: !Ref RuntimeFailureQueue
+          RUNTIME_FAILURE_QUEUE_NAME: !GetAtt RuntimeFailureQueue.QueueName
+          GMAIL_SCHEDULE_ID: market-dashboard-gmail-v2-every-15m
+          GMAIL_HEARTBEAT_SERVICE_ID: gmail:timsmithaviation@gmail.com
+          QUANT_ANALYST_SCHEDULE_ID: market-dashboard-hermes-quant-analyst-v2
+          QUANT_ANALYST_HEARTBEAT_SERVICE_ID: hermes:quant-analyst
+          QUANT_DEVELOPER_SCHEDULE_ID: market-dashboard-hermes-quant-developer-v2
+          QUANT_DEVELOPER_HEARTBEAT_SERVICE_ID: hermes:quant-developer
+          SECURITY_SCHEDULE_ID: market-dashboard-hermes-security-v2
+          SECURITY_HEARTBEAT_SERVICE_ID: hermes:security
+          GMAIL_FUNCTION_NAME: !Ref GmailIngestorFunction
+          PDF_PROCESSOR_FUNCTION_NAME: !Ref HedgeyePdfProcessorFunction
+          HERMES_WORKER_FUNCTION_NAME: !Ref HermesWorkerFunction
+          WATCHDOG_FUNCTION_NAME: market-dashboard-hermes-cloud-watchdog-v1
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ReadExactReadinessStack
+              Effect: Allow
+              Action: cloudformation:DescribeStacks
+              Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/market-dashboard-readiness-v2/*
+            - Sid: ReadExactOwnedSchedules
+              Effect: Allow
+              Action: scheduler:GetSchedule
+              Resource:
+                - !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-gmail-v2-every-15m
+                - !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-hermes-quant-analyst-v2
+                - !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-hermes-quant-developer-v2
+                - !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-hermes-security-v2
+            - Sid: ReadTypedServiceHeartbeats
+              Effect: Allow
+              Action: dynamodb:Query
+              Resource: !GetAtt ServiceHeartbeatTable.Arn
+            - Sid: WriteTypedWatchdogHeartbeat
+              Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt ServiceHeartbeatTable.Arn
+              Condition:
+                ForAllValues:StringEquals:
+                  dynamodb:LeadingKeys:
+                    - hermes:cloud-watchdog
+                'Null':
+                  dynamodb:LeadingKeys: 'false'
+            - Sid: WriteOwnedWatchdogAlerts
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HermesAlertsTableName}
+              Condition:
+                ForAllValues:StringLike:
+                  dynamodb:LeadingKeys:
+                    - cloud-watchdog#runtime-health#*
+                'Null':
+                  dynamodb:LeadingKeys: 'false'
+            - Sid: ReadExactRuntimeFailureQueue
+              Effect: Allow
+              Action: sqs:GetQueueAttributes
+              Resource: !GetAtt RuntimeFailureQueue.Arn
+            - Sid: ReadNativeOperationalMetrics
+              Effect: Allow
+              Action: cloudwatch:GetMetricData
+              # CloudWatch GetMetricData does not support resource-level ARNs;
+              # the Lambda issues only exact namespace/dimension queries.
+              Resource: '*'
+            - Sid: WriteReadinessMetrics
+              Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: MarketDashboard/Readiness
+            - Sid: PublishWatchdogAlertLifecycle
+              Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref OperationsTopic
 
   SchedulerInvokeRole:
     Type: AWS::IAM::Role
@@ -456,6 +581,29 @@ Resources:
                 Resource:
                   - !GetAtt GmailIngestorFunction.Arn
                   - !GetAtt HermesWorkerFunction.Arn
+
+  HermesCloudWatchdogRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: market-dashboard-hermes-cloud-watchdog-v1
+      Description: Independent five-minute read-only cloud reliability watchdog.
+      ScheduleExpression: rate(5 minutes)
+      State: !Ref CloudWatchdogScheduleState
+      Targets:
+        - Arn: !GetAtt HermesCloudWatchdogFunction.Arn
+          Id: hermes-cloud-watchdog
+          Input: '{"source":"aws-events","ruleId":"market-dashboard-hermes-cloud-watchdog-v1"}'
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 300
+            MaximumRetryAttempts: 0
+
+  HermesCloudWatchdogInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HermesCloudWatchdogFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt HermesCloudWatchdogRule.Arn
 
   GmailPollSchedule:
     Type: AWS::Scheduler::Schedule
@@ -691,6 +839,46 @@ Resources:
       AlarmActions: [!Ref OperationsTopic]
       OKActions: [!Ref OperationsTopic]
 
+  CloudWatchdogHeartbeatMissingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-cloud-watchdog-heartbeat-missing-v2
+      AlarmDescription: The independent cloud watchdog stopped emitting typed heartbeats.
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Heartbeat
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:cloud-watchdog
+      Statistic: Sum
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
+
+  CloudWatchdogUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-hermes-cloud-watchdog-unhealthy-v2
+      AlarmDescription: The independent cloud watchdog detected a cloud reliability root cause.
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      Namespace: MarketDashboard/Readiness
+      MetricName: Healthy
+      Dimensions:
+        - Name: ServiceId
+          Value: hermes:cloud-watchdog
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OperationsTopic]
+      OKActions: [!Ref OperationsTopic]
+
 Outputs:
   ServiceHeartbeatTableName:
     Value: !Ref ServiceHeartbeatTable
@@ -706,6 +894,10 @@ Outputs:
     Value: !Ref ResearchProductManifestsV1
   HermesWorkerFunctionName:
     Value: !Ref HermesWorkerFunction
+  HermesCloudWatchdogFunctionName:
+    Value: !Ref HermesCloudWatchdogFunction
+  HermesCloudWatchdogRuleArn:
+    Value: !GetAtt HermesCloudWatchdogRule.Arn
   OperationsTopicArn:
     Value: !Ref OperationsTopic
   RuntimeFailureQueueUrl:

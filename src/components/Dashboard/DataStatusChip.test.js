@@ -32,15 +32,39 @@ describe('DataStatusChip', () => {
     expect(screen.queryByText('AS OF JUL 10')).not.toBeInTheDocument();
   });
 
-  it('maps indicator glyphs to live, stale, and error', () => {
+  it('maps indicator colors to live, stale, asof, and error', () => {
     const { rerender } = render(<DataStatusChip status="live" indicatorOnly />);
     expect(screen.getByLabelText('LIVE')).toHaveAttribute('data-indicator', 'live');
 
+    rerender(<DataStatusChip status="delayed" indicatorOnly />);
+    expect(screen.getByLabelText('DELAYED')).toHaveAttribute('data-indicator', 'stale');
+
+    rerender(<DataStatusChip status="stale" indicatorOnly />);
+    expect(screen.getByLabelText('DELAYED')).toHaveAttribute('data-indicator', 'stale');
+
+    rerender(<DataStatusChip status="mixed" indicatorOnly />);
+    expect(screen.getByLabelText('MIXED / DELAYED')).toHaveAttribute('data-indicator', 'stale');
+
+    rerender(<DataStatusChip status="historical" indicatorOnly />);
+    expect(screen.getByLabelText('AS OF')).toHaveAttribute('data-indicator', 'asof');
+
     rerender(<DataStatusChip status="manual" indicatorOnly />);
-    expect(screen.getByLabelText('MANUAL')).toHaveAttribute('data-indicator', 'stale');
+    expect(screen.getByLabelText('MANUAL')).toHaveAttribute('data-indicator', 'asof');
+
+    rerender(<DataStatusChip status="loading" indicatorOnly />);
+    expect(screen.getByLabelText('LOADING')).toHaveAttribute('data-indicator', 'asof');
 
     rerender(<DataStatusChip status="unavailable" indicatorOnly />);
     expect(screen.getByLabelText('UNAVAILABLE')).toHaveAttribute('data-indicator', 'error');
+
+    rerender(<DataStatusChip status="offline" indicatorOnly />);
+    expect(screen.getByLabelText('OFFLINE')).toHaveAttribute('data-indicator', 'error');
+  });
+
+  it('renders a plain color circle with no inner symbols', () => {
+    const { container } = render(<DataStatusChip status="historical" indicatorOnly />);
+    expect(container.querySelector('svg circle')).toBeInTheDocument();
+    expect(container.querySelector('svg path')).not.toBeInTheDocument();
   });
 
   it('never silently treats an unknown state as live', () => {

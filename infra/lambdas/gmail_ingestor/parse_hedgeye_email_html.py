@@ -16,6 +16,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from boto3.dynamodb.types import TypeSerializer
+from botocore.exceptions import ClientError
 
 
 RISK_RANGE_MANIFEST_TABLE = os.environ.get(
@@ -30,7 +31,15 @@ RISK_RANGE_HISTORY_TABLE = os.environ.get(
     "RISK_RANGE_HISTORY_TABLE",
     "RiskRangeData",
 )
-RISK_RANGE_PARSER_VERSION = "risk-range-email-v2"
+HEDGEYE_DAILY_SNAPSHOT_TABLE = os.environ.get(
+    "HEDGEYE_DAILY_SNAPSHOT_TABLE",
+    "HedgeyeDailySnapshot",
+)
+RISK_RANGE_PARSER_VERSION = "risk-range-email-v3"
+DYNAMODB_TRANSACTION_MAX_OPERATIONS = 100
+DYNAMODB_TRANSACTION_CHUNK_SIZE = 20
+DYNAMODB_ITEM_MAX_BYTES = 400 * 1024
+DYNAMODB_TRANSACTION_MAX_BYTES = 4 * 1024 * 1024
 
 
 TICKER_MAP = {
@@ -84,6 +93,48 @@ TICKER_MAP = {
     "SILVER": "SILVER",
     "BITCOIN": "BITCOIN",
 }
+
+
+class RiskRangePublicationError(ValueError):
+    """A primary Risk Range publication cannot be written safely."""
+
+    error_code = "RISK_RANGE_PUBLICATION_INVALID"
+
+
+class RiskRangeDuplicateConflictError(RiskRangePublicationError):
+    """Two source rows resolve to one ticker but disagree on published values."""
+
+    error_code = "RISK_RANGE_DUPLICATE_TICKER_CONFLICT"
+
+
+class RiskRangeTransactionLimitError(RiskRangePublicationError):
+    """The atomic primary publication would exceed DynamoDB's operation limit."""
+
+    error_code = "RISK_RANGE_TRANSACTION_LIMIT_EXCEEDED"
+
+
+class RiskRangeTransactionWriteError(RiskRangePublicationError):
+    """DynamoDB rejected an otherwise preflighted publication chunk."""
+
+    error_code = "RISK_RANGE_TRANSACTION_WRITE_FAILED"
+
+
+class RiskRangePublicationVerificationError(RiskRangePublicationError):
+    """A staged primary publication could not be read back exactly."""
+
+    error_code = "RISK_RANGE_PUBLICATION_VERIFICATION_FAILED"
+
+
+class RiskRangeStalePublicationError(RiskRangePublicationError):
+    """An older primary publication must not replace the current same-day book."""
+
+    error_code = "RISK_RANGE_STALE_PUBLICATION_REJECTED"
+
+
+class RiskRangePublicationOrderError(RiskRangePublicationError):
+    """Publication ordering or identity could not be proven safely."""
+
+    error_code = "RISK_RANGE_PUBLICATION_ORDER_UNVERIFIED"
 
 
 def _strip_tags(value: str) -> str:
@@ -309,6 +360,14 @@ def _extract_main_summary(text: str) -> Optional[str]:
         return None
     normalized = re.sub(r"\s+", " ", summary).strip()
     return normalized[:40_000] or None
+
+
+def _has_positive_article_evidence(snapshot: Dict[str, Any]) -> bool:
+    article = snapshot.get("article") or {}
+    return any(
+        len(re.sub(r"\s+", " ", str(article.get(field) or "")).strip()) >= 5
+        for field in ("headline", "teaser", "summary")
+    )
 
 
 def _extract_symbol_list(raw_text: str) -> List[str]:
@@ -815,6 +874,35 @@ def _normalize_ticker(label: str) -> str:
     return TICKER_MAP.get(cleaned, cleaned)
 
 
+def _risk_range_row_signature(row: Dict[str, Any]) -> Tuple[Decimal, Decimal, str, Optional[Decimal]]:
+    previous_close = row.get("prevClose")
+    return (
+        Decimal(str(row["lrr"])),
+        Decimal(str(row["hrr"])),
+        str(row.get("trend") or "").strip().upper(),
+        Decimal(str(previous_close)) if previous_close is not None else None,
+    )
+
+
+def _add_risk_range_row(
+    data: Dict[str, Dict[str, Any]],
+    ticker_label: str,
+    row: Dict[str, Any],
+) -> None:
+    ticker = _normalize_ticker(ticker_label)
+    if not ticker:
+        raise RiskRangePublicationError("Risk Range row has no normalized ticker")
+    existing = data.get(ticker)
+    if existing is None:
+        data[ticker] = row
+        return
+    if _risk_range_row_signature(existing) == _risk_range_row_signature(row):
+        return
+    raise RiskRangeDuplicateConflictError(
+        f"Conflicting duplicate Risk Range row for {ticker}"
+    )
+
+
 def _extract_levels_from_text(text: str) -> Dict[str, Dict[str, Any]]:
     data: Dict[str, Dict[str, Any]] = {}
     section = _extract_first(
@@ -840,12 +928,12 @@ def _extract_levels_from_text(text: str) -> Dict[str, Dict[str, Any]]:
         hrr = float(match.group(3).replace(",", ""))
         trend = match.group(4).upper()
         ticker = _normalize_ticker(name)
-        data[ticker] = {
+        _add_risk_range_row(data, ticker, {
             "lrr": lrr,
             "hrr": hrr,
             "trend": trend,
             "originalName": name,
-        }
+        })
 
     return data
 
@@ -865,13 +953,13 @@ def _extract_risk_range_table(html_body: str) -> Dict[str, Dict[str, Any]]:
         lrr = float(match.group(4).replace(",", ""))
         hrr = float(match.group(5).replace(",", ""))
         prev_close = float(match.group(6).replace(",", ""))
-        data[ticker] = {
+        _add_risk_range_row(data, ticker, {
             "lrr": lrr,
             "hrr": hrr,
             "trend": trend,
             "prevClose": prev_close,
             "originalName": name,
-        }
+        })
 
     return data
 
@@ -980,8 +1068,6 @@ def parse_html_snapshot(
         longs = _extract_symbols(longs_raw)
         shorts = _extract_symbols(shorts_raw)
         neutrals = _extract_symbols(neutral_raw)
-        if not longs and not shorts and not neutrals:
-            return None
         snapshot = _base_snapshot(
             snapshot_type="the-call",
             report_type=report_type,
@@ -991,6 +1077,18 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
+        structured_positions_available = bool(longs or shorts or neutrals)
+        if not structured_positions_available:
+            snapshot["positionDataStatus"] = "unavailable"
+            snapshot["data"] = {
+                "longs": None,
+                "shorts": None,
+                "neutrals": None,
+            }
+            snapshot["article"]["summary"] = _extract_main_summary(text)
+            if not _has_positive_article_evidence(snapshot):
+                return None
+            return snapshot
         snapshot["positionCount"] = len(longs) + len(shorts) + len(neutrals)
         snapshot["data"] = {
             "longs": longs,
@@ -1007,8 +1105,6 @@ def parse_html_snapshot(
         longs = _clean_macro_show_items(_split_exact_items(bullish_raw))
         shorts = _clean_macro_show_items(_split_exact_items(bearish_raw))
         neutrals = _clean_macro_show_items(_split_exact_items(neutral_raw))
-        if not longs and not shorts and not neutrals:
-            return None
         snapshot = _base_snapshot(
             snapshot_type="the-macro-show",
             report_type=report_type,
@@ -1018,6 +1114,18 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
+        structured_positions_available = bool(longs or shorts or neutrals)
+        if not structured_positions_available:
+            snapshot["positionDataStatus"] = "unavailable"
+            snapshot["data"] = {
+                "longs": None,
+                "shorts": None,
+                "neutrals": None,
+            }
+            snapshot["article"]["summary"] = _extract_main_summary(text)
+            if not _has_positive_article_evidence(snapshot):
+                return None
+            return snapshot
         snapshot["positionCount"] = len(longs) + len(shorts) + len(neutrals)
         snapshot["data"] = {
             "longs": longs,
@@ -1263,32 +1371,306 @@ def _decimalize(value: Any) -> Any:
     return value
 
 
+def _publication_order(value: Any) -> Optional[int]:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    elapsed = parsed.astimezone(timezone.utc) - datetime(
+        1970,
+        1,
+        1,
+        tzinfo=timezone.utc,
+    )
+    return (
+        ((elapsed.days * 24 * 60 * 60) + elapsed.seconds) * 1_000_000
+        + elapsed.microseconds
+    )
+
+
+def _article_only_snapshot(snapshot: Dict[str, Any]) -> bool:
+    return (
+        snapshot.get("snapshotType") in {"the-call", "the-macro-show"}
+        and snapshot.get("positionDataStatus") == "unavailable"
+    )
+
+
+def _put_non_risk_snapshot(
+    table: Any,
+    item: Dict[str, Any],
+    *,
+    article_only: bool,
+) -> None:
+    if not article_only:
+        table.put_item(Item=item)
+        return
+    try:
+        table.put_item(
+            Item=item,
+            ConditionExpression=(
+                "attribute_not_exists(#date) "
+                "OR ("
+                "#positionDataStatus = :unavailable "
+                "AND attribute_not_exists(#positionCount)"
+                ")"
+            ),
+            ExpressionAttributeNames={
+                "#date": "date",
+                "#positionDataStatus": "positionDataStatus",
+                "#positionCount": "positionCount",
+            },
+            ExpressionAttributeValues={":unavailable": "unavailable"},
+        )
+    except ClientError as error:
+        if (
+            error.response.get("Error", {}).get("Code")
+            == "ConditionalCheckFailedException"
+        ):
+            # The immutable artifact and entity index retain this article. A
+            # structured same-day position snapshot remains authoritative.
+            return
+        raise
+
+
+def _manifest_compare_and_swap(
+    existing: Optional[Dict[str, Any]],
+    *,
+    incoming_order: int,
+    incoming_source_message_id: Optional[str],
+) -> Tuple[str, Dict[str, str], Dict[str, Any]]:
+    names: Dict[str, str] = {}
+    values: Dict[str, Any] = {}
+    if not existing:
+        names.update({
+            "#publicationDate": "publicationDate",
+            "#manifestType": "manifestType",
+        })
+        return (
+            "attribute_not_exists(#publicationDate) "
+            "AND attribute_not_exists(#manifestType)",
+            names,
+            values,
+        )
+
+    existing_source = str(existing.get("sourceMessageId") or "").strip() or None
+    try:
+        existing_order = (
+            int(existing["publicationOrder"])
+            if existing.get("publicationOrder") is not None
+            else _publication_order(existing.get("completedAt"))
+        )
+    except (TypeError, ValueError, OverflowError):
+        existing_order = None
+    same_source = bool(
+        incoming_source_message_id
+        and incoming_source_message_id == existing_source
+    )
+    if existing_order is None:
+        raise RiskRangePublicationOrderError(
+            "Existing Risk Range publication order could not be verified"
+        )
+    if existing_order > incoming_order:
+        raise RiskRangeStalePublicationError(
+            "Older Risk Range publication cannot replace the current manifest"
+        )
+    if existing_order == incoming_order and not same_source:
+        raise RiskRangePublicationOrderError(
+            "Risk Range publications have an ambiguous equal timestamp"
+        )
+
+    clauses = []
+    for index, field in enumerate(
+        (
+            "sourceMessageId",
+            "completedAt",
+            "checksum",
+            "completionState",
+            "publicationOrder",
+        )
+    ):
+        name_token = f"#expectedField{index}"
+        names[name_token] = field
+        expected_value = existing.get(field)
+        if expected_value is None:
+            clauses.append(f"attribute_not_exists({name_token})")
+        else:
+            value_token = f":expectedValue{index}"
+            values[value_token] = expected_value
+            clauses.append(f"{name_token} = {value_token}")
+    return " AND ".join(clauses), names, values
+
+
+def _monotonic_put_condition(
+    *,
+    publication_order: int,
+) -> Tuple[str, Dict[str, str], Dict[str, Any]]:
+    names = {"#publicationOrder": "publicationOrder"}
+    values: Dict[str, Any] = {":incomingPublicationOrder": publication_order}
+    clauses = [
+        "attribute_not_exists(#publicationOrder)",
+        "#publicationOrder <= :incomingPublicationOrder",
+    ]
+    return f"({' OR '.join(clauses)})", names, values
+
+
+def _is_exact_primary_manifest_replay(
+    existing: Optional[Dict[str, Any]],
+    incoming: Dict[str, Any],
+) -> bool:
+    """Treat the atomic completion manifest as the idempotency receipt."""
+    if not existing:
+        return False
+    receipt_fields = (
+        "publicationDate",
+        "manifestType",
+        "completionState",
+        "count",
+        "checksum",
+        "parserVersion",
+        "source",
+        "sourceMessageId",
+        "sourceArtifact",
+        "publishedAt",
+        "completedAt",
+        "publicationOrder",
+    )
+    return all(existing.get(field) == incoming.get(field) for field in receipt_fields)
+
+
+def _serialized_item(
+    serializer: TypeSerializer,
+    item: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        key: serializer.serialize(value)
+        for key, value in item.items()
+        if value is not None
+    }
+
+
+def _serialized_values(
+    serializer: TypeSerializer,
+    values: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        key: serializer.serialize(value)
+        for key, value in values.items()
+    }
+
+
+def _projection_matches(
+    actual: Optional[Dict[str, Any]],
+    expected: Dict[str, Any],
+    fields: Tuple[str, ...],
+) -> bool:
+    return bool(actual) and all(actual.get(field) == expected.get(field) for field in fields)
+
+
+def _verify_risk_range_projections(
+    db: Any,
+    daily_item: Dict[str, Any],
+    rows: List[Tuple[str, Dict[str, Any], Dict[str, Any]]],
+) -> int:
+    daily = db.Table(HEDGEYE_DAILY_SNAPSHOT_TABLE).get_item(
+        Key={
+            "date": daily_item["date"],
+            "snapshotType": daily_item["snapshotType"],
+        },
+        ConsistentRead=True,
+    ).get("Item")
+    if not _projection_matches(
+        daily,
+        daily_item,
+        (
+            "date",
+            "snapshotType",
+            "publicationOrder",
+            "sourceMessageId",
+            "riskRangeCount",
+            "data",
+        ),
+    ):
+        raise RiskRangePublicationVerificationError(
+            "Risk Range daily projection did not match its staged publication"
+        )
+
+    verified = 1
+    current_table = db.Table(RISK_RANGE_DATA_TABLE)
+    history_table = db.Table(RISK_RANGE_HISTORY_TABLE)
+    row_fields = (
+        "date",
+        "ticker",
+        "lrr",
+        "hrr",
+        "trend",
+        "publicationOrder",
+        "sourceMessageId",
+    )
+    for ticker, current_item, history_item in rows:
+        current = current_table.get_item(
+            Key={"date": current_item["date"], "ticker": ticker},
+            ConsistentRead=True,
+        ).get("Item")
+        if not _projection_matches(current, current_item, row_fields):
+            raise RiskRangePublicationVerificationError(
+                f"Risk Range current projection verification failed for {ticker}"
+            )
+        history = history_table.get_item(
+            Key={"ticker": ticker, "date": history_item["date"]},
+            ConsistentRead=True,
+        ).get("Item")
+        if not _projection_matches(history, history_item, row_fields):
+            raise RiskRangePublicationVerificationError(
+                f"Risk Range history projection verification failed for {ticker}"
+            )
+        verified += 2
+    return verified
+
+
 def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
-    snap_table = db.Table("HedgeyeDailySnapshot")
+    snap_table = db.Table(HEDGEYE_DAILY_SNAPSHOT_TABLE)
     item = _decimalize(snapshot)
     item["ttl"] = int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
-    snap_table.put_item(Item=item)
 
     if snapshot["snapshotType"] not in {"early-look", "risk-ranges"}:
+        _put_non_risk_snapshot(
+            snap_table,
+            item,
+            article_only=_article_only_snapshot(snapshot),
+        )
         return
 
     history_table = db.Table("RiskRangeData")
     ts = snapshot["scrapedAt"]
     normalized_rows = []
-    for ticker, row in snapshot.get("data", {}).items():
+    rows_by_ticker: Dict[str, Dict[str, Any]] = {}
+    for ticker_label, row in snapshot.get("data", {}).items():
+        _add_risk_range_row(rows_by_ticker, ticker_label, row)
+    if snapshot["snapshotType"] == "risk-ranges":
+        item["data"] = _decimalize(rows_by_ticker)
+        item["riskRangeCount"] = len(rows_by_ticker)
+
+    for ticker, row in rows_by_ticker.items():
         lrr = Decimal(str(row["lrr"]))
         hrr = Decimal(str(row["hrr"]))
         if not lrr.is_finite() or not hrr.is_finite() or lrr >= hrr:
-            raise ValueError(f"Invalid risk range for {ticker}: lrr={lrr}, hrr={hrr}")
-        if not str(row.get("trend") or "").strip():
-            raise ValueError(f"Invalid risk range for {ticker}: trend is missing")
+            raise RiskRangePublicationError(
+                f"Invalid risk range for {ticker}: lrr={lrr}, hrr={hrr}"
+            )
+        trend = str(row.get("trend") or "").strip().upper()
+        if not trend:
+            raise RiskRangePublicationError(
+                f"Invalid risk range for {ticker}: trend is missing"
+            )
         current_item = {
             "date": snapshot["date"],
             "ticker": ticker,
             "name": row.get("originalName"),
             "lrr": lrr,
             "hrr": hrr,
-            "trend": row["trend"],
+            "trend": trend,
             "updatedAt": ts,
             "source": f"hedgeye-{snapshot['snapshotType']}-email",
             "ttl": int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60)),
@@ -1303,7 +1685,7 @@ def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
             "date": snapshot["date"],
             "lrr": lrr,
             "hrr": hrr,
-            "trend": row["trend"],
+            "trend": trend,
             "timestamp": ts,
             "source": f"hedgeye-{snapshot['snapshotType']}-email",
         }
@@ -1314,12 +1696,30 @@ def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
     # Early Look is explicitly supplemental. It is retained in history but
     # never mutates the primary current-book table or marks a day complete.
     if snapshot["snapshotType"] == "early-look":
+        snap_table.put_item(Item=item)
         for _, _, history_item in normalized_rows:
             history_table.put_item(Item=history_item)
         return
 
-    if len(normalized_rows) > 49:
-        raise ValueError("Risk Range publication exceeds the 100-item DynamoDB transaction limit")
+    if not normalized_rows:
+        raise RiskRangePublicationError(
+            "Primary Risk Range publication contains no valid rows"
+        )
+    publication_order = _publication_order(ts)
+    if publication_order is None:
+        raise RiskRangePublicationOrderError(
+            "Risk Range publication timestamp could not be verified"
+        )
+    source_message_id = (
+        str(snapshot.get("gmailMessageId") or "").strip() or None
+    )
+    item["publicationOrder"] = publication_order
+    item["sourceMessageId"] = source_message_id
+    for _, current_item, history_item in normalized_rows:
+        current_item["publicationOrder"] = publication_order
+        current_item["sourceMessageId"] = source_message_id
+        history_item["publicationOrder"] = publication_order
+        history_item["sourceMessageId"] = source_message_id
 
     checksum_payload = [
         {
@@ -1341,36 +1741,267 @@ def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
         "checksum": checksum,
         "parserVersion": RISK_RANGE_PARSER_VERSION,
         "source": "hedgeye-risk-ranges-email",
-        "sourceMessageId": snapshot.get("gmailMessageId"),
+        "sourceMessageId": source_message_id,
         "sourceArtifact": snapshot.get("htmlSource"),
         "publishedAt": snapshot.get("publishedAt"),
         "completedAt": ts,
+        "publicationOrder": publication_order,
     }
+    manifest_table = db.Table(RISK_RANGE_MANIFEST_TABLE)
+    try:
+        existing_manifest = manifest_table.get_item(
+            Key={
+                "publicationDate": snapshot["date"],
+                "manifestType": "primary",
+            },
+            ConsistentRead=True,
+        ).get("Item")
+    except ClientError as error:
+        raise RiskRangePublicationOrderError(
+            "Current Risk Range manifest could not be verified"
+        ) from error
+    if _is_exact_primary_manifest_replay(existing_manifest, manifest):
+        # A complete manifest is written only after every projection has been
+        # read back. It is the idempotency receipt for this immutable message.
+        return
+    manifest_cas, manifest_cas_names, manifest_cas_values = (
+        _manifest_compare_and_swap(
+            existing_manifest,
+            incoming_order=publication_order,
+            incoming_source_message_id=source_message_id,
+        )
+    )
     serializer = TypeSerializer()
+    monotonic_condition, monotonic_names, monotonic_values = (
+        _monotonic_put_condition(
+            publication_order=publication_order,
+        )
+    )
 
-    def serialize(item_value: Dict[str, Any]) -> Dict[str, Any]:
-        return {key: serializer.serialize(value) for key, value in item_value.items() if value is not None}
-
-    transaction_items = []
-    for _, current_item, history_item in normalized_rows:
-        transaction_items.extend([
-            {
-                "Put": {
-                    "TableName": RISK_RANGE_DATA_TABLE,
-                    "Item": serialize(current_item),
-                }
-            },
-            {
-                "Put": {
-                    "TableName": RISK_RANGE_HISTORY_TABLE,
-                    "Item": serialize(history_item),
-                }
-            },
-        ])
-    transaction_items.append({
-        "Put": {
-            "TableName": RISK_RANGE_MANIFEST_TABLE,
-            "Item": serialize(manifest),
+    def guarded_put(table_name: str, item_value: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "Put": {
+                "TableName": table_name,
+                "Item": _serialized_item(serializer, item_value),
+                "ConditionExpression": monotonic_condition,
+                "ExpressionAttributeNames": dict(monotonic_names),
+                "ExpressionAttributeValues": _serialized_values(
+                    serializer,
+                    monotonic_values,
+                ),
+            }
         }
-    })
-    db.meta.client.transact_write_items(TransactItems=transaction_items)
+
+    projection_writes = [
+        guarded_put(HEDGEYE_DAILY_SNAPSHOT_TABLE, item)
+    ]
+    for _, current_item, history_item in normalized_rows:
+        projection_writes.extend([
+            guarded_put(RISK_RANGE_DATA_TABLE, current_item),
+            guarded_put(RISK_RANGE_HISTORY_TABLE, history_item),
+        ])
+
+    for operation in projection_writes:
+        serialized = operation["Put"]["Item"]
+        item_size = len(
+            json.dumps(serialized, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        )
+        if item_size >= DYNAMODB_ITEM_MAX_BYTES:
+            raise RiskRangeTransactionLimitError(
+                "Risk Range publication contains a projection at or above 400 KiB"
+            )
+
+    attempt_id = hashlib.sha256(
+        (
+            f"{snapshot['date']}|{source_message_id or ''}|"
+            f"{publication_order}|{checksum}"
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    expected_projection_count = len(projection_writes)
+    build_version = str(os.environ.get("BUILD_VERSION") or "development")
+    preparing_manifest = {
+        **manifest,
+        "completionState": "preparing",
+        "attemptId": attempt_id,
+        "expectedProjectionCount": expected_projection_count,
+        "verifiedProjectionCount": 0,
+        "buildVersion": build_version,
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    preparing_manifest = {
+        key: value for key, value in preparing_manifest.items() if value is not None
+    }
+
+    manifest_condition_names = {**monotonic_names, **manifest_cas_names}
+    manifest_condition_values = {**monotonic_values, **manifest_cas_values}
+    try:
+        manifest_table.put_item(
+            Item=preparing_manifest,
+            ConditionExpression=f"{monotonic_condition} AND ({manifest_cas})",
+            ExpressionAttributeNames=manifest_condition_names,
+            ExpressionAttributeValues=manifest_condition_values,
+        )
+    except ClientError as error:
+        service_code = str(
+            (error.response or {}).get("Error", {}).get("Code") or "DynamoDbError"
+        )
+        if service_code == "ConditionalCheckFailedException":
+            raise RiskRangeStalePublicationError(
+                "Risk Range publication lost its manifest compare-and-swap guard"
+            ) from error
+        raise RiskRangeTransactionWriteError(
+            f"Risk Range preparing manifest failed ({service_code})"
+        ) from error
+
+    failed_chunk: Optional[int] = None
+    try:
+        for offset in range(0, len(projection_writes), DYNAMODB_TRANSACTION_CHUNK_SIZE):
+            chunk_index = offset // DYNAMODB_TRANSACTION_CHUNK_SIZE
+            chunk = projection_writes[
+                offset : offset + DYNAMODB_TRANSACTION_CHUNK_SIZE
+            ]
+            chunk_size = len(
+                json.dumps(chunk, sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            )
+            if (
+                len(chunk) > DYNAMODB_TRANSACTION_MAX_OPERATIONS
+                or chunk_size >= DYNAMODB_TRANSACTION_MAX_BYTES
+            ):
+                raise RiskRangeTransactionLimitError(
+                    "Risk Range publication chunk exceeds DynamoDB transaction limits"
+                )
+            failed_chunk = chunk_index
+            client_request_token = hashlib.sha256(
+                f"{attempt_id}:{chunk_index}".encode("utf-8")
+            ).hexdigest()[:32]
+            db.meta.client.transact_write_items(
+                TransactItems=chunk,
+                ClientRequestToken=client_request_token,
+            )
+        failed_chunk = None
+        verified_projection_count = _verify_risk_range_projections(
+            db,
+            item,
+            normalized_rows,
+        )
+    except ClientError as error:
+        response = error.response or {}
+        service_code = str(
+            response.get("Error", {}).get("Code") or "DynamoDbError"
+        )
+        cancellation_codes = [
+            str(reason.get("Code") or "None")
+            for reason in response.get("CancellationReasons") or []
+            if isinstance(reason, dict)
+        ]
+        reason_suffix = (
+            f"; cancellation codes: {','.join(cancellation_codes)}"
+            if cancellation_codes
+            else ""
+        )
+        failed_manifest = {
+            **preparing_manifest,
+            "completionState": "failed",
+            "failedAt": datetime.now(timezone.utc).isoformat(),
+            "errorCode": "RISK_RANGE_TRANSACTION_WRITE_FAILED",
+            "failedChunk": failed_chunk,
+        }
+        try:
+            manifest_table.put_item(
+                Item={
+                    key: value
+                    for key, value in failed_manifest.items()
+                    if value is not None
+                },
+                ConditionExpression="#attemptId = :attemptId",
+                ExpressionAttributeNames={"#attemptId": "attemptId"},
+                ExpressionAttributeValues={":attemptId": attempt_id},
+            )
+        except ClientError:
+            pass
+        if "ConditionalCheckFailed" in cancellation_codes:
+            raise RiskRangeStalePublicationError(
+                "Risk Range publication lost its monotonic projection guard"
+            ) from error
+        raise RiskRangeTransactionWriteError(
+            f"Risk Range publication chunk failed ({service_code}){reason_suffix}"
+        ) from error
+    except RiskRangePublicationError as error:
+        failed_manifest = {
+            **preparing_manifest,
+            "completionState": "failed",
+            "failedAt": datetime.now(timezone.utc).isoformat(),
+            "errorCode": error.error_code,
+            "failedChunk": failed_chunk,
+        }
+        try:
+            manifest_table.put_item(
+                Item={
+                    key: value
+                    for key, value in failed_manifest.items()
+                    if value is not None
+                },
+                ConditionExpression="#attemptId = :attemptId",
+                ExpressionAttributeNames={"#attemptId": "attemptId"},
+                ExpressionAttributeValues={":attemptId": attempt_id},
+            )
+        except ClientError:
+            pass
+        raise
+
+    complete_manifest = {
+        **manifest,
+        "attemptId": attempt_id,
+        "expectedProjectionCount": expected_projection_count,
+        "verifiedProjectionCount": verified_projection_count,
+        "buildVersion": build_version,
+        "verifiedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    complete_manifest = {
+        key: value for key, value in complete_manifest.items() if value is not None
+    }
+    try:
+        manifest_table.put_item(
+            Item=complete_manifest,
+            ConditionExpression=(
+                "#attemptId = :attemptId AND #completionState = :preparing"
+            ),
+            ExpressionAttributeNames={
+                "#attemptId": "attemptId",
+                "#completionState": "completionState",
+            },
+            ExpressionAttributeValues={
+                ":attemptId": attempt_id,
+                ":preparing": "preparing",
+            },
+        )
+    except ClientError as error:
+        service_code = str(
+            (error.response or {}).get("Error", {}).get("Code") or "DynamoDbError"
+        )
+        if service_code == "ConditionalCheckFailedException":
+            try:
+                current_manifest = manifest_table.get_item(
+                    Key={
+                        "publicationDate": snapshot["date"],
+                        "manifestType": "primary",
+                    },
+                    ConsistentRead=True,
+                ).get("Item")
+            except ClientError:
+                current_manifest = None
+            if _is_exact_primary_manifest_replay(
+                current_manifest,
+                complete_manifest,
+            ):
+                return
+            raise RiskRangeStalePublicationError(
+                "Risk Range publication lost its completion manifest guard"
+            ) from error
+        raise RiskRangeTransactionWriteError(
+            f"Risk Range completion manifest failed ({service_code})"
+        ) from error

@@ -217,6 +217,31 @@ describe('USDCorrelationMatrix', () => {
       .toEqual(['6M', '3M', '1M', '15D', '1D', 'CLOSE']);
   });
 
+  test('renders Yahoo G5 realized-vol fallback with an honest G5RV label', () => {
+    render(
+      <USDCorrelationMatrix
+        state={{
+          ...CORRELATION_STATE,
+          fxvlSnapshot: {
+            ...COMPLETE_FXVL,
+            source: 'yahoo',
+            sourceLabel: 'Yahoo G5 FX 1M realized vol',
+            measure: 'realized',
+            availability: 'historical',
+            freshness: 'historical',
+            quoteMode: 'end-of-day',
+            asOf: '2026-07-13T20:30:00.000Z',
+          },
+        }}
+        variant="radar"
+      />,
+    );
+
+    const row = screen.getByLabelText('G5RV G5 FX 1M realized vol as of JUL 13');
+    expect(row).toHaveTextContent('5.75');
+    expect(within(row).getByText('G5RV')).toBeInTheDocument();
+  });
+
   test.each([
     ['stale', { ...COMPLETE_FXVL, freshness: 'stale' }],
     ['incomplete', { ...COMPLETE_FXVL, month6Ago: null }],

@@ -3,6 +3,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import '@testing-library/jest-dom';
 import PortfolioDashboard from '../PortfolioDashboard';
 import { MarketDataService } from '../../../services/api/marketDataService';
+import { loadSelectedAccount } from '../../../constants/ibkrAccountStorage';
+import {
+  getIbkrConnectionDisplay,
+  getPreferredIbkrAccount,
+} from '../../../utils/ibkrConnectionStatus';
 
 jest.mock('../../../services/api/marketDataService', () => ({
   MarketDataService: {
@@ -10,6 +15,7 @@ jest.mock('../../../services/api/marketDataService', () => ({
     getPortfolio: jest.fn(),
     getPortfolioAccounts: jest.fn(),
     getPortfolioExposureReconciliation: jest.fn(),
+    getIbkrInterestValidationStatus: jest.fn(),
     getRealTimeAlertPositions: jest.fn(),
     getHedgeyeEtfPro: jest.fn(),
     getHedgeyeChangelog: jest.fn(),
@@ -47,6 +53,7 @@ jest.mock('../../../utils/dateFreshness', () => ({
 
 const mockUsdMacroDashboard = jest.fn();
 const mockPortfolioSidebarSnapshot = jest.fn();
+const mockPortfolioBreakdown = jest.fn();
 jest.mock('../USDMacroDashboard', () => (props) => {
   mockUsdMacroDashboard(props);
   return <div>USD Macro Dashboard</div>;
@@ -56,15 +63,19 @@ jest.mock('../portfolio/PortfolioSidebarSnapshot', () => (props) => {
   return <div>Portfolio Sidebar Snapshot</div>;
 });
 jest.mock('../WorkflowStatus', () => () => <div>Workflow Status</div>);
-jest.mock('../SystemReadinessPanel', () => ({ onClose }) => (
+jest.mock('../SystemReadinessPanel', () => ({ onClose, onStatusChange }) => (
   <div>
-    System Readiness Panel
-    <button type="button" onClick={onClose}>Close System Readiness</button>
+    Systems Panel
+    <button type="button" onClick={() => onStatusChange('attention')}>Report peripheral issue</button>
+    <button type="button" onClick={onClose}>Close Systems</button>
   </div>
 ));
 jest.mock('../SecuritiesUniverse', () => () => <div>Securities Universe</div>);
 jest.mock('../PerformanceTracking', () => () => <div>Performance Tracking</div>);
-jest.mock('../PortfolioBreakdown', () => () => <div>Portfolio Breakdown</div>);
+jest.mock('../PortfolioBreakdown', () => (props) => {
+  mockPortfolioBreakdown(props);
+  return <div>Portfolio Breakdown</div>;
+});
 jest.mock('../ExpectedValuesWindow', () => () => <div>Expected Values</div>);
 const mockPredictionMarketsHub = jest.fn();
 jest.mock('../PredictionMarketsHub', () => (props) => {
@@ -87,6 +98,19 @@ jest.mock('react-markdown', () => () => <div>Markdown</div>);
 
 const originalDocumentHidden = Object.getOwnPropertyDescriptor(document, 'hidden');
 
+const VERIFIED_COMPARISON = {
+  current: true,
+  comparisonSafe: true,
+  referenceOnly: false,
+  dataAvailability: {
+    structuralStatus: 'verified',
+    canonicalSourceVerified: true,
+    current: true,
+    comparisonSafe: true,
+    referenceOnly: false,
+  },
+};
+
 function seedDashboardApis() {
   MarketDataService.getMultiRegionQuotes.mockResolvedValue({
     currencies: [],
@@ -103,6 +127,12 @@ function seedDashboardApis() {
   });
   MarketDataService.getPortfolioAccounts.mockResolvedValue([]);
   MarketDataService.getPortfolioExposureReconciliation.mockResolvedValue({ status: 'unavailable' });
+  MarketDataService.getIbkrInterestValidationStatus.mockResolvedValue({
+    status: 'unavailable',
+    source: 'ibkr_interest_validation',
+    available: false,
+    guard: { available: false, appliedReserve: null },
+  });
   MarketDataService.getRealTimeAlertPositions.mockResolvedValue({
     available: false,
     longCount: null,
@@ -123,6 +153,11 @@ function seedDashboardApis() {
 
 describe('PortfolioDashboard prediction-markets sidebar', () => {
   beforeEach(() => {
+    loadSelectedAccount.mockReturnValue('U25779973');
+    getIbkrConnectionDisplay.mockReturnValue({ connected: true, kind: 'connected' });
+    getPreferredIbkrAccount.mockImplementation((_status, explicit) => (
+      explicit || 'U25779973'
+    ));
     seedDashboardApis();
     window.localStorage.clear();
   });
@@ -212,6 +247,171 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     ));
   });
 
+  test('starts portfolio, RTA, and ETF Pro without waiting for provider status', async () => {
+    let resolveProviderStatus;
+    MarketDataService.getProviderStatus.mockImplementationOnce(() => (
+      new Promise((resolve) => {
+        resolveProviderStatus = resolve;
+      })
+    ));
+
+    render(<PortfolioDashboard />);
+
+    await waitFor(() => expect(MarketDataService.getPortfolio).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(MarketDataService.getRealTimeAlertPositions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(MarketDataService.getHedgeyeEtfPro).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveProviderStatus({});
+      await Promise.resolve();
+    });
+  });
+
+  test('keeps the same verified portfolio mounted during refresh and clears it on failure', async () => {
+    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
+      showPortfolioMetrics: true,
+    }));
+    const livePortfolio = {
+      accountId: 'U25779973',
+      accountSummary: { netLiquidation: 100000, totalCashValue: 5000, currency: 'USD' },
+      summary: { totalValue: 100000 },
+      holdings: [{ symbol: 'SPY', quantity: 10, marketValue: 7000, price: 700 }],
+      dataSource: 'ibkr_api',
+      liveSessionVerified: true,
+      socketVerifiedAt: new Date().toISOString(),
+      fromCache: false,
+    };
+    let rejectRefresh;
+    MarketDataService.getPortfolio
+      .mockResolvedValueOnce(livePortfolio)
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => {
+        rejectRefresh = reject;
+      }));
+
+    render(<PortfolioDashboard />);
+    await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        portfolioData: livePortfolio,
+        loading: false,
+      })
+    ));
+
+    act(() => {
+      window.dispatchEvent(new Event('portfolioRefresh'));
+    });
+    await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        portfolioData: livePortfolio,
+        refreshing: true,
+      })
+    ));
+
+    await act(async () => {
+      rejectRefresh(new Error('IBKR refresh failed'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        portfolioData: null,
+        refreshing: false,
+      })
+    ));
+  });
+
+  test('clears the prior verified portfolio when refresh reports IBKR offline', async () => {
+    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
+      showPortfolioMetrics: true,
+    }));
+    const livePortfolio = {
+      accountId: 'U25779973',
+      accountSummary: { netLiquidation: 100000, totalCashValue: 5000, currency: 'USD' },
+      summary: { totalValue: 100000 },
+      holdings: [{ symbol: 'SPY', quantity: 10, marketValue: 7000, price: 700 }],
+      dataSource: 'ibkr_api',
+      liveSessionVerified: true,
+      socketVerifiedAt: new Date().toISOString(),
+      fromCache: false,
+    };
+    const offlinePortfolio = {
+      dataSource: 'ibkr_offline',
+      liveSessionVerified: false,
+      holdings: [],
+      accountSummary: null,
+      summary: { totalValue: 0 },
+      empty: true,
+    };
+    MarketDataService.getPortfolio
+      .mockResolvedValueOnce(livePortfolio)
+      .mockResolvedValue(offlinePortfolio);
+
+    render(<PortfolioDashboard />);
+    await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ portfolioData: livePortfolio })
+    ));
+
+    act(() => {
+      window.dispatchEvent(new Event('portfolioRefresh'));
+    });
+
+    await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        portfolioData: expect.objectContaining({
+          dataSource: 'ibkr_offline',
+          liveSessionVerified: false,
+        }),
+        refreshing: false,
+      })
+    ));
+  });
+
+  test('releases initial portfolio loading when a background refresh supersedes it', async () => {
+    let resolveInitialPortfolio;
+    let resolveBackgroundPortfolio;
+    const livePortfolio = {
+      accountSummary: { netLiquidation: 100000, totalCashValue: 5000, currency: 'USD' },
+      summary: { totalValue: 100000 },
+      holdings: [{ symbol: 'SPY', quantity: 10, marketValue: 7000, price: 700 }],
+      dataSource: 'ibkr_api',
+      liveSessionVerified: true,
+    };
+    MarketDataService.getPortfolio
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveInitialPortfolio = resolve;
+      }))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveBackgroundPortfolio = resolve;
+      }));
+    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
+      showPortfolioBreakdown: true,
+    }));
+
+    render(<PortfolioDashboard />);
+    await waitFor(() => expect(MarketDataService.getPortfolio).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      window.dispatchEvent(new Event('portfolioRefresh'));
+    });
+    await waitFor(() => expect(MarketDataService.getPortfolio).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolveBackgroundPortfolio(livePortfolio);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockPortfolioBreakdown).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        portfolioData: livePortfolio,
+        isLoading: false,
+      })
+    ));
+
+    await act(async () => {
+      resolveInitialPortfolio(livePortfolio);
+      await Promise.resolve();
+    });
+  });
+
   test('invalidates sidebar comparisons after refresh failures while retaining dated ETF Pro rows', async () => {
     window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
       showPortfolioMetrics: true,
@@ -222,6 +422,7 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     ];
     MarketDataService.getRealTimeAlertPositions
       .mockResolvedValueOnce({
+        ...VERIFIED_COMPARISON,
         available: true,
         longCount: 3,
         shortCount: 2,
@@ -230,6 +431,7 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
       .mockRejectedValueOnce(new Error('RTA refresh offline'));
     MarketDataService.getHedgeyeEtfPro
       .mockResolvedValueOnce({
+        ...VERIFIED_COMPARISON,
         available: true,
         longCount: 1,
         shortCount: 1,
@@ -239,12 +441,6 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
       .mockRejectedValueOnce(new Error('ETF Pro refresh offline'));
 
     render(<PortfolioDashboard />);
-
-    await act(async () => {
-      window.dispatchEvent(new Event('portfolioRefresh'));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
 
     await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -304,11 +500,6 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     });
 
     render(<PortfolioDashboard />);
-    await act(async () => {
-      window.dispatchEvent(new Event('portfolioRefresh'));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
 
     await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -322,6 +513,37 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
           comparisonAvailable: false,
           dataQuality: expect.objectContaining({ status: 'warning' }),
         }),
+      })
+    ));
+  });
+
+  test('does not mark responses with missing or inconsistent safety metadata comparison-available', async () => {
+    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
+      showPortfolioMetrics: true,
+    }));
+    MarketDataService.getRealTimeAlertPositions.mockResolvedValueOnce({
+      available: true,
+      longCount: 3,
+      shortCount: 2,
+      dataQuality: { status: 'ok', warnings: [] },
+    });
+    MarketDataService.getHedgeyeEtfPro.mockResolvedValueOnce({
+      ...VERIFIED_COMPARISON,
+      dataAvailability: {
+        ...VERIFIED_COMPARISON.dataAvailability,
+        canonicalSourceVerified: false,
+      },
+      available: true,
+      rows: [{ ticker: 'GLD', call: 'Long' }],
+      dataQuality: { status: 'ok', warnings: [] },
+    });
+
+    render(<PortfolioDashboard />);
+
+    await waitFor(() => expect(mockPortfolioSidebarSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        rtaPositions: expect.objectContaining({ comparisonAvailable: false }),
+        etfProSnapshot: expect.objectContaining({ comparisonAvailable: false }),
       })
     ));
   });
@@ -430,8 +652,8 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     const navigation = await screen.findByTestId('dashboard-rail-navigation');
     ['PODS', '+EV', 'NOTES', 'PORTFOLIO', 'SECURITIES', 'PRED', 'MKTS', 'ETF Pro', 'Call']
       .forEach((label) => expect(screen.getByText(label)).toBeInTheDocument());
-    const processButton = within(navigation).getByRole('button', { name: 'The Process' });
-    expect(processButton).toHaveTextContent('THE/PROCESS');
+    const processButton = within(navigation).getByRole('button', { name: 'Process' });
+    expect(processButton).toHaveTextContent('PROCESS');
     expect(within(navigation).getByRole('button', { name: 'Prediction Markets' })).toBeInTheDocument();
     expect(within(navigation).queryByRole('button', { name: 'SPX Close' })).not.toBeInTheDocument();
     expect(navigation).toHaveTextContent('SignalStrength');
@@ -439,7 +661,7 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     expect(screen.queryByTitle('Performance Tracking')).not.toBeInTheDocument();
     expect(within(navigation).queryAllByRole('img')).toHaveLength(0);
     expect(screen.getByText('ANALYTICS')).toBeInTheDocument();
-    expect(within(navigation).getByTitle('System Readiness')).toBeInTheDocument();
+    expect(within(navigation).getByTitle('Systems')).toBeInTheDocument();
     expect(screen.getByTitle('Open X (Twitter) List')).toBeInTheDocument();
   });
 
@@ -460,33 +682,45 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     expect(within(navigation).getByTitle('ETF Pro')).toBeInTheDocument();
     expect(within(navigation).getByTitle('Macro Show')).toBeInTheDocument();
     expect(within(navigation).getByTitle('Call')).toBeInTheDocument();
-    expect(within(navigation).getByTitle('System Readiness')).toBeInTheDocument();
-    expect(within(navigation).getByRole('button', { name: 'The Process' })).toHaveTextContent('THE PROCESS');
+    expect(within(navigation).getByTitle('Systems')).toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: 'Process' })).toHaveTextContent('PROCESS');
     expect(screen.queryByTitle('Analytics')).not.toBeInTheDocument();
   });
 
-  test('opens and persists the permanent System Readiness panel', async () => {
+  test('opens and persists the lightweight Systems panel', async () => {
     render(<PortfolioDashboard />);
 
-    const systemButton = await screen.findByTitle('System Readiness');
-    expect(systemButton).toHaveAttribute('data-readiness-status', 'checking');
+    const systemButton = await screen.findByTitle('Systems');
+    expect(systemButton).toHaveAttribute('data-readiness-status', 'unknown');
     fireEvent.click(systemButton);
 
-    expect(await screen.findByText('System Readiness Panel')).toBeInTheDocument();
+    expect(await screen.findByText('Systems Panel')).toBeInTheDocument();
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1')).showSystemReadiness).toBe(true));
     const stored = JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1'));
     expect(stored.sidebarPanelStack).toContain('system');
+    expect(screen.getByTestId('system-readiness-sheet')).toHaveStyle({
+      display: 'block',
+      top: '50%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      maxHeight: 'calc(100vh - 20px)',
+      borderRadius: '0.75rem',
+    });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close System Readiness' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Report peripheral issue' }));
+    expect(systemButton).toHaveAttribute('data-readiness-status', 'attention');
+    expect(systemButton).toHaveStyle({ borderColor: '#d97706' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Systems' }));
     expect(screen.getByTestId('system-readiness-sheet')).toHaveStyle({ display: 'none' });
   });
 
-  test('places The Process directly after Notes and delegates navigation', async () => {
+  test('places Process directly after Notes and delegates navigation', async () => {
     const onOpenProcess = jest.fn();
     render(<PortfolioDashboard onOpenProcess={onOpenProcess} />);
 
     const notesButton = await screen.findByTitle('Open Notes');
-    const processButton = screen.getByRole('button', { name: 'The Process' });
+    const processButton = screen.getByRole('button', { name: 'Process' });
     const navigation = screen.getByTestId('dashboard-rail-navigation');
     const buttons = within(navigation).getAllByRole('button');
 
@@ -495,11 +729,83 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     expect(onOpenProcess).toHaveBeenCalledTimes(1);
   });
 
+  test('keeps the dashboard mounted and inert while Process is open, then restores the rail', async () => {
+    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
+      showPortfolioMetrics: true,
+    }));
+    const onCloseProcess = jest.fn();
+    const { rerender } = render(
+      <PortfolioDashboard
+        processDocumentId="the-process"
+        onCloseProcess={onCloseProcess}
+        onNavigateProcess={jest.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId('process-overlay')).toBeInTheDocument();
+    expect(screen.getByText('USD Macro Dashboard')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-main-canvas')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('dashboard-main-canvas').inert).toBe(true);
+    expect(screen.getByRole('button', { name: 'Process' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(screen.getByTestId('dashboard-shell')).toHaveStyle({
+      '--dashboard-active-rail-width': '76px',
+    }));
+    await waitFor(() => expect(
+      JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1')).showPortfolioMetrics,
+    ).toBe(true));
+
+    fireEvent.click(screen.getByTestId('process-overlay-backdrop'));
+    expect(onCloseProcess).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <PortfolioDashboard
+        processDocumentId={null}
+        onCloseProcess={onCloseProcess}
+        onNavigateProcess={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.queryByTestId('process-overlay')).not.toBeInTheDocument());
+    expect(screen.getByTestId('dashboard-main-canvas')).not.toHaveAttribute('aria-hidden');
+    expect(screen.getByTestId('dashboard-main-canvas').inert).toBe(false);
+    await waitFor(() => expect(screen.getByTestId('dashboard-shell')).toHaveStyle({
+      '--dashboard-active-rail-width': 'calc((100vw - 16px) * (2/12) + 16px + 128px)',
+    }));
+    expect(screen.getByRole('button', { name: 'Process' })).toHaveFocus();
+  });
+
+  test('closes Process before another rail control performs its normal action', async () => {
+    const onCloseProcess = jest.fn();
+    const { rerender } = render(
+      <PortfolioDashboard
+        processDocumentId="the-process"
+        onCloseProcess={onCloseProcess}
+        onNavigateProcess={jest.fn()}
+      />,
+    );
+    await screen.findByTestId('process-overlay');
+
+    const systemControl = screen.getByTitle('Systems');
+    systemControl.focus();
+    fireEvent.click(systemControl);
+
+    expect(onCloseProcess).toHaveBeenCalledWith({ replace: true });
+    expect(await screen.findByText('Systems Panel')).toBeInTheDocument();
+    rerender(
+      <PortfolioDashboard
+        processDocumentId={null}
+        onCloseProcess={onCloseProcess}
+        onNavigateProcess={jest.fn()}
+      />,
+    );
+    expect(systemControl).toHaveFocus();
+  });
+
   test('retains the legacy process callback and clearly labels the source notes', async () => {
     const onOpenWhitePaper = jest.fn();
     render(<PortfolioDashboard onOpenWhitePaper={onOpenWhitePaper} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'The Process' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Process' }));
     expect(onOpenWhitePaper).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTitle('Open Notes'));
@@ -507,7 +813,7 @@ describe('PortfolioDashboard prediction-markets sidebar', () => {
     expect(screen.getByRole('button', { name: 'The Coach — Source Notes' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'The Playbook — Legacy' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop Losses — Legacy' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'The Process' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Process' })).toBeInTheDocument();
     fireEvent.click(legacyNotes);
 
     expect(await screen.findByText('Process Source Notes — Legacy')).toBeInTheDocument();

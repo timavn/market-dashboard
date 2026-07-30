@@ -265,6 +265,36 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertEqual(manifest["state"], "indexed")
         self.assertEqual(manifest["entityEventCount"], 0)
 
+    def test_indexed_stage_can_be_deferred_until_primary_projection_succeeds(self):
+        database = FakeDynamoDb()
+        item = snapshot(
+            "risk-ranges",
+            "risk-primary",
+            {"SPY": {"lrr": 6200, "hrr": 6300, "trend": "BULLISH"}},
+        )
+
+        count = intelligence.persist_snapshot_intelligence(
+            item,
+            database,
+            content_sha256="e" * 64,
+            finalize=False,
+        )
+
+        manifest = database.manifests.items[("2026-07-23", "risk-ranges")]
+        self.assertEqual(manifest["state"], "validated")
+        self.assertEqual(manifest["indexedCount"], 0)
+
+        intelligence.finalize_snapshot_intelligence(
+            item,
+            database,
+            content_sha256="e" * 64,
+            event_count=count,
+        )
+
+        manifest = database.manifests.items[("2026-07-23", "risk-ranges")]
+        self.assertEqual(manifest["state"], "indexed")
+        self.assertEqual(manifest["indexedCount"], 1)
+
     def test_chart_only_tracker_stops_at_parsed_without_trade_authority(self):
         database = FakeDynamoDb()
         item = snapshot(

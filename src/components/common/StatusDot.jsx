@@ -61,6 +61,22 @@ function aggregateStatus(status, sourceRows) {
 function getDisplayStatus(source, visibleRows = []) {
   const rawStatus = normalizeStatus(source?.status);
   const rawDetail = String(source?.localeString || '').toLowerCase();
+  const stateLabel = String(source?.stateLabel || '').trim();
+
+  if (stateLabel) {
+    if (rawStatus === 'active') {
+      return { label: stateLabel, className: 'text-emerald-700' };
+    }
+    if (rawStatus === 'stale' || rawStatus === 'delayed') {
+      return { label: stateLabel, className: 'text-[#ca8a04]' };
+    }
+    if (rawStatus === 'loading') {
+      return { label: stateLabel, className: 'text-slate-500' };
+    }
+    if (['inactive', 'defective', 'error', 'missing'].includes(rawStatus)) {
+      return { label: stateLabel, className: 'text-[#dc2626]' };
+    }
+  }
 
   if (rawStatus === 'loading' || /checking|loading|refreshing/.test(rawDetail)) {
     return { label: 'Checking', className: 'text-slate-500' };

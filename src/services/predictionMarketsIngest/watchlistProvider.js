@@ -1,6 +1,7 @@
 const { kalshiFetch } = require('./providers/kalshiClient');
 const { checkGatewayHealth } = require('./providers/ibkrProvider');
 const { sidecarRequest } = require('./providers/ibkrHttp');
+const { classifyQuoteAvailability } = require('../providers/multiRegionQuoteIntegrity.cjs');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const IBKR_QUOTE_MAX_AGE_MS = Number(process.env.PM_IBKR_QUOTE_MAX_AGE_MS || 60000);
@@ -12,6 +13,7 @@ const SPX_SETTLED_EVENT_PATTERN = new RegExp(`^${SPX_CLOSE_SERIES_TICKER}-\\d{2}
 const WTI_RECENT_SETTLED_DEFAULT_LIMIT = 13;
 const WTI_RECENT_SETTLED_MAX_LIMIT = 15;
 const WTI_SETTLED_DETAIL_SCAN_MAX = 50;
+const OVERVIEW_CHART_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const WTI_CADENCE_CONFIG = Object.freeze({
   daily: Object.freeze({
     cadence: 'daily',
@@ -1344,9 +1346,251 @@ function highestVolumeCompleteMarket(markets = []) {
     })[0] || null;
 }
 
-function overviewSummaryFromWorkbench(workbench, signalName, signalAvailability = null) {
+const OVERVIEW_LINE_LIMIT = 7;
+
+function overviewLineSortValue(market = {}) {
+  if (Number.isFinite(Number(market.geometry?.lowerBound))) return Number(market.geometry.lowerBound);
+  if (market.geometry?.kind === 'lower_tail') return Number.NEGATIVE_INFINITY;
+  if (Number.isFinite(Number(market.geometry?.threshold))) return Number(market.geometry.threshold);
+  if (Number.isFinite(Number(market.threshold))) return Number(market.threshold);
+  return Number.POSITIVE_INFINITY;
+}
+
+function overviewLineLabel(market = {}, seriesTicker = '') {
+  const formatLevel = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    const decimals = Math.abs(numeric % 1) > 0 ? 2 : 0;
+    const formatted = numeric.toLocaleString('en-US', { maximumFractionDigits: decimals });
+    if (String(seriesTicker).startsWith('KXCPI')) return `${formatted}%`;
+    if (String(seriesTicker).startsWith('KXWTI')) return `$${formatted}`;
+    return formatted;
+  };
+  const geometry = market.geometry || {};
+  if (geometry.kind === 'lower_tail') return `Below ${formatLevel(geometry.upperBound)}`;
+  if (geometry.kind === 'upper_tail') return `Above ${formatLevel(geometry.lowerBound ?? geometry.threshold)}`;
+  if (geometry.kind === 'bucket') {
+    return `${formatLevel(geometry.lowerBound)}–${formatLevel(geometry.upperBound)}`;
+  }
+  const threshold = geometry.threshold ?? market.threshold;
+  if (threshold != null && Number.isFinite(Number(threshold))) return `Above ${formatLevel(threshold)}`;
+  return market.title || market.ticker || 'Line unavailable';
+}
+
+function overviewLinePayload(market, workbench) {
+  return {
+    ticker: market.ticker,
+    label: overviewLineLabel(market, workbench.seriesTicker),
+    sortValue: overviewLineSortValue(market),
+    yesBid: market.yesBid,
+    yesAsk: market.yesAsk,
+    noBid: market.noBid,
+    noAsk: market.noAsk,
+    volume24h: market.volume24h,
+    openInterest: market.openInterest,
+  };
+}
+
+function overviewLinesFromWorkbench(workbench = {}, centerValue = null) {
+  const verified = (workbench.markets || [])
+    .filter((market) => {
+      const yesBid = Number(market.yesBid);
+      const yesAsk = Number(market.yesAsk);
+      return Number.isFinite(yesBid) &&
+        Number.isFinite(yesAsk) &&
+        yesBid >= 0 &&
+        yesAsk <= 1 &&
+        yesAsk >= yesBid &&
+        Number(market.yesBidSize) > 0 &&
+        Number(market.yesAskSize) > 0 &&
+        market.nativeBook?.complete !== false;
+    })
+    .sort((left, right) => {
+      const levelDelta = overviewLineSortValue(left) - overviewLineSortValue(right);
+      return Number.isFinite(levelDelta)
+        ? levelDelta
+        : String(left.title || left.ticker).localeCompare(String(right.title || right.ticker));
+    });
+  if (verified.length <= OVERVIEW_LINE_LIMIT) {
+    return verified.map((market) => overviewLinePayload(market, workbench));
+  }
+
+  const centerIndex = verified.reduce((bestIndex, market, index) => {
+    const currentDistance = centerValue == null
+      ? Math.abs(Number(market.yesAsk) - 0.5)
+      : Math.abs(overviewLineSortValue(market) - Number(centerValue));
+    const bestDistance = centerValue == null
+      ? Math.abs(Number(verified[bestIndex].yesAsk) - 0.5)
+      : Math.abs(overviewLineSortValue(verified[bestIndex]) - Number(centerValue));
+    if (currentDistance !== bestDistance) return currentDistance < bestDistance ? index : bestIndex;
+    return (market.volume24h || 0) > (verified[bestIndex].volume24h || 0) ? index : bestIndex;
+  }, 0);
+  const start = Math.max(0, Math.min(
+    verified.length - OVERVIEW_LINE_LIMIT,
+    centerIndex - Math.floor(OVERVIEW_LINE_LIMIT / 2),
+  ));
+  return verified
+    .slice(start, start + OVERVIEW_LINE_LIMIT)
+    .map((market) => overviewLinePayload(market, workbench));
+}
+
+function cpiForecastReference(signalAvailability = null) {
+  if (String(signalAvailability?.status || '').toLowerCase() !== 'available') return null;
+  const scenarios = Array.isArray(signalAvailability?.details?.scenarios)
+    ? signalAvailability.details.scenarios
+    : [];
+  const base = scenarios.find((scenario) => (
+    String(scenario?.key || scenario?.label || '').toLowerCase().includes('base')
+  ));
+  const value = finiteNumber(base?.value);
+  if (value == null) return null;
+  return {
+    status: 'available',
+    kind: 'forecast',
+    label: 'Hedgeye base case',
+    value,
+    source: signalAvailability.source || 'hedgeye_inflation_nowcast',
+    asOf: signalAvailability.asOf || null,
+  };
+}
+
+async function liveUnderlyingReference(market, deps, now = Date.now()) {
+  const config = market === 'spx'
+    ? {
+      label: 'S&P 500',
+      instrument: { symbol: 'SPX', secType: 'IND', exchange: 'CBOE', currency: 'USD' },
+    }
+    : {
+      label: 'WTI',
+      instrument: {
+        symbol: 'CL',
+        secType: 'FUT',
+        exchange: 'NYMEX',
+        currency: 'USD',
+        providerSymbol: 'CL=F',
+      },
+    };
+  try {
+    const quote = await deps.getQuote(config.instrument);
+    const availability = classifyQuoteAvailability(quote, { now });
+    if (availability !== 'current' || String(quote?.source || '').toLowerCase() !== 'ibkr') {
+      return {
+        status: 'unavailable',
+        kind: 'underlying',
+        label: config.label,
+        reason: 'Verified-live underlying price is unavailable.',
+      };
+    }
+    return {
+      status: 'available',
+      kind: 'underlying',
+      label: config.label,
+      value: Number(quote.price),
+      source: 'ibkr',
+      asOf: quote.timestamp || null,
+      availability,
+    };
+  } catch {
+    return {
+      status: 'unavailable',
+      kind: 'underlying',
+      label: config.label,
+      reason: 'Verified-live underlying price is unavailable.',
+    };
+  }
+}
+
+function candlePrice(candle = {}, key) {
+  return finiteNumber(
+    candle?.price?.[`${key}_dollars`] ??
+    candle?.price?.[key],
+  );
+}
+
+function normalizeOverviewCandles(candles = [], now = Date.now()) {
+  return (candles || [])
+    .map((candle) => {
+      const timestamp = finiteNumber(candle?.end_period_ts);
+      const close = candlePrice(candle, 'close');
+      if (
+        timestamp == null ||
+        close == null ||
+        close < 0 ||
+        close > 1 ||
+        timestamp * 1000 > now + 60 * 60 * 1000
+      ) return null;
+      return {
+        timestamp: timestamp * 1000,
+        close,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.timestamp - right.timestamp);
+}
+
+async function attachOverviewChart(summary, deps, now = Date.now()) {
+  const chartLine = (summary.lines || []).reduce((best, line) => {
+    if (!best) return line;
+    return Math.abs(line.yesAsk - 0.5) < Math.abs(best.yesAsk - 0.5) ? line : best;
+  }, null);
+  const unavailable = (reason) => ({
+    ...summary,
+    chart: {
+      status: 'unavailable',
+      reason,
+      range: '1d',
+      source: 'kalshi_trade_api_v2',
+      ticker: chartLine?.ticker || null,
+      label: chartLine?.label || null,
+      points: [],
+    },
+  });
+  if (!chartLine?.ticker || !summary.seriesTicker) {
+    return unavailable('No representative live contract is available for the 1-day chart.');
+  }
+
+  try {
+    const payload = await deps.kalshiFetch(
+      `/series/${encodeURIComponent(summary.seriesTicker)}/markets/${encodeURIComponent(chartLine.ticker)}/candlesticks`,
+      {
+        start_ts: Math.floor((now - DAY_MS) / 1000),
+        end_ts: Math.floor(now / 1000),
+        period_interval: 60,
+      },
+    );
+    const points = normalizeOverviewCandles(payload?.candlesticks, now);
+    const latestAt = points[points.length - 1]?.timestamp || null;
+    if (!latestAt || now - latestAt > OVERVIEW_CHART_MAX_AGE_MS) {
+      return unavailable('No current direct venue price history is available for this contract.');
+    }
+    return {
+      ...summary,
+      chart: {
+        status: 'available',
+        range: '1d',
+        source: 'kalshi_trade_api_v2',
+        ticker: chartLine.ticker,
+        label: chartLine.label,
+        fetchedAt: new Date(now).toISOString(),
+        latestAt: new Date(latestAt).toISOString(),
+        points,
+      },
+    };
+  } catch (error) {
+    return unavailable(error?.message || 'The direct venue 1-day chart is unavailable.');
+  }
+}
+
+function overviewSummaryFromWorkbench(
+  workbench,
+  signalName,
+  signalAvailability = null,
+  reference = null,
+) {
   const market = highestVolumeCompleteMarket(workbench.markets || []);
-  if (!market) {
+  const referenceValue = reference?.status === 'available' ? finiteNumber(reference.value) : null;
+  const lines = overviewLinesFromWorkbench(workbench, referenceValue);
+  if (!market || !lines.length) {
     const error = new Error(`${workbench.seriesTicker || 'Prediction market'} has no complete direct venue book`);
     error.code = 'OVERVIEW_BOOK_UNAVAILABLE';
     throw error;
@@ -1376,6 +1620,18 @@ function overviewSummaryFromWorkbench(workbench, signalName, signalAvailability 
     volume24h: workbench.venue?.volume24h ?? 0,
     volumeTotal: workbench.venue?.volumeTotal ?? 0,
     openInterest: workbench.venue?.openInterest ?? 0,
+    lines,
+    lineCount: (workbench.markets || []).length,
+    selection: {
+      method: referenceValue == null ? 'market_implied_center' : 'reference_centered',
+      label: referenceValue == null
+        ? 'Centered on the 50¢ prediction line'
+        : `Centered on ${reference.label}`,
+    },
+    reference: reference || {
+      status: 'unavailable',
+      reason: 'No verified reference is available.',
+    },
     freshness: {
       status: 'direct_snapshot',
       fetchedAt: workbench.fetchedAt || null,
@@ -1390,6 +1646,7 @@ function overviewSummaryFromWorkbench(workbench, signalName, signalAvailability 
       asOf: signalAvailability?.asOf || null,
       source: signalAvailability?.source || null,
       reason: signalAvailability?.reason || null,
+      details: signalAvailability?.details || null,
     },
     executable: false,
   };
@@ -1397,11 +1654,15 @@ function overviewSummaryFromWorkbench(workbench, signalName, signalAvailability 
 
 function normalizeDirectOverviewMarket(market = {}) {
   const book = directBinaryBook(market);
+  const tickerThreshold = String(market.ticker || '').match(/-T(-?\d+(?:\.\d+)?)$/i);
   return {
     ticker: market.ticker,
     eventTicker: market.event_ticker,
     title: market.title || market.subtitle || null,
     closeTime: market.close_time || null,
+    threshold: finiteNumber(market.floor_strike) ?? finiteNumber(tickerThreshold?.[1]),
+    cap: finiteNumber(market.cap_strike),
+    strikeType: market.strike_type || null,
     yesBid: book.yesPricesDirect ? book.yesBid : null,
     yesAsk: book.yesPricesDirect ? book.yesAsk : null,
     yesBidSize: book.yesBidSize,
@@ -1435,6 +1696,9 @@ async function getPredictionMarketsOverview(options = {}) {
   const deps = {
     kalshiFetch: options.kalshiFetch || kalshiFetch,
     checkGatewayHealth: options.checkGatewayHealth || checkGatewayHealth,
+    getQuote: options.getQuote || ((instrument) => (
+      require('../providers/compositeMarketDataProvider').getQuote(instrument)
+    )),
     getSignalAvailability: options.getSignalAvailability || (async ({ market }) => ({
       name: market === 'cpi' ? 'Hedgeye Inflation Nowcast' : market === 'spx' ? 'SPX Risk Range' : 'WTIC Risk Range',
       status: 'unavailable',
@@ -1443,6 +1707,8 @@ async function getPredictionMarketsOverview(options = {}) {
     now: options.now || Date.now,
   };
   const now = deps.now();
+  const spxReferencePromise = liveUnderlyingReference('spx', deps, now);
+  const wtiReferencePromise = liveUnderlyingReference('wti', deps, now);
   const signalFor = async (context) => {
     try {
       return await deps.getSignalAvailability(context);
@@ -1484,7 +1750,13 @@ async function getPredictionMarketsOverview(options = {}) {
         },
       };
       const signal = await signalFor({ market: 'cpi', event: workbench.event, seriesTicker: workbench.seriesTicker });
-      return overviewSummaryFromWorkbench(workbench, cpiConfig.hedgeyeSignal, signal);
+      const summary = overviewSummaryFromWorkbench(
+        workbench,
+        cpiConfig.hedgeyeSignal,
+        signal,
+        cpiForecastReference(signal),
+      );
+      return attachOverviewChart(summary, deps, now);
     },
     spx: async () => {
       const workbench = await getSpxCloseWorkbench({
@@ -1493,7 +1765,13 @@ async function getPredictionMarketsOverview(options = {}) {
         now: deps.now,
       });
       const signal = await signalFor({ market: 'spx', event: workbench.event, seriesTicker: workbench.seriesTicker });
-      return overviewSummaryFromWorkbench(workbench, 'SPX Risk Range', signal);
+      const summary = overviewSummaryFromWorkbench(
+        workbench,
+        'SPX Risk Range',
+        signal,
+        await spxReferencePromise,
+      );
+      return attachOverviewChart(summary, deps, now);
     },
     wtiDaily: async () => {
       const workbench = await getWtiWorkbench({
@@ -1503,7 +1781,13 @@ async function getPredictionMarketsOverview(options = {}) {
         now: deps.now,
       });
       const signal = await signalFor({ market: 'wti', cadence: 'daily', event: workbench.event, settlementMapping: workbench.settlementMapping, seriesTicker: workbench.seriesTicker });
-      return overviewSummaryFromWorkbench(workbench, 'WTIC Risk Range', signal);
+      const summary = overviewSummaryFromWorkbench(
+        workbench,
+        'WTIC Risk Range',
+        signal,
+        await wtiReferencePromise,
+      );
+      return attachOverviewChart(summary, deps, now);
     },
     wtiWeekly: async () => {
       const workbench = await getWtiWorkbench({
@@ -1513,7 +1797,13 @@ async function getPredictionMarketsOverview(options = {}) {
         now: deps.now,
       });
       const signal = await signalFor({ market: 'wti', cadence: 'weekly', event: workbench.event, settlementMapping: workbench.settlementMapping, seriesTicker: workbench.seriesTicker });
-      return overviewSummaryFromWorkbench(workbench, 'WTIC Risk Range', signal);
+      const summary = overviewSummaryFromWorkbench(
+        workbench,
+        'WTIC Risk Range',
+        signal,
+        await wtiReferencePromise,
+      );
+      return attachOverviewChart(summary, deps, now);
     },
   };
   const keys = Object.keys(tasks);

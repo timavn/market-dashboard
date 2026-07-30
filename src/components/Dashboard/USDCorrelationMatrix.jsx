@@ -45,7 +45,10 @@ const isCompleteCorrelationMetric = (metricCorrelations, metricRollingStats) => 
     .every((key) => Number.isFinite(Number(metricRollingStats?.[key])))
 );
 
-const isCmeFxvlSnapshot = (row) => /^cme(?:\b|[-_])/i.test(String(row?.source || '').trim());
+const isAttributedFxvlSnapshot = (row) => {
+  const source = String(row?.source || '').trim().toLowerCase();
+  return /^cme(?:\b|[-_])/.test(source) || /^yahoo(?:\b|[-_])/.test(source);
+};
 
 const hasValidFxvlAsOf = (row) => Boolean(toDateValue(row?.asOf));
 
@@ -54,7 +57,7 @@ const isCurrentFxvlSnapshot = (row) => {
   return row?.availability === 'available'
     && row?.freshness === 'current'
     && ['live', 'real-time', 'realtime', 'delayed'].includes(quoteMode)
-    && isCmeFxvlSnapshot(row)
+    && isAttributedFxvlSnapshot(row)
     && hasValidFxvlAsOf(row)
     && isCompleteVolatilityMetricRow(row);
 };
@@ -63,7 +66,7 @@ const isHistoricalFxvlSnapshot = (row) => (
   row?.availability === 'historical'
   && row?.freshness === 'historical'
   && row?.quoteMode === 'end-of-day'
-  && isCmeFxvlSnapshot(row)
+  && isAttributedFxvlSnapshot(row)
   && hasValidFxvlAsOf(row)
   && isCompleteVolatilityMetricRow(row)
 );
@@ -86,11 +89,83 @@ const MetricIcon = ({ symbol }) => {
           FX
         </span>
       );
+    case 'BRENT':
+      return (
+        <svg
+          className="usd-metric-oil"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path
+            d="M12 2.8C12 2.8 5.8 10.2 5.8 15.2a6.2 6.2 0 0 0 12.4 0C18.2 10.2 12 2.8 12 2.8Z"
+            fill="#111827"
+          />
+          <path
+            d="M9.2 13.4c.4-2.2 1.6-4.4 2.8-6.2 1.1 1.7 2.2 3.8 2.6 5.8-.7.3-1.7.5-2.6.5-.9 0-1.9-.2-2.8-.1Z"
+            fill="rgba(255,255,255,0.14)"
+          />
+        </svg>
+      );
     case 'CRB':
       return (
-        <span className="usd-metric-badge usd-metric-badge-crb" aria-hidden="true">
-          CRB
-        </span>
+        <svg
+          className="usd-metric-commodity"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+        >
+          {/* Wheat / grain sheaf — commodity basket proxy */}
+          <path
+            d="M12 21V9.5"
+            fill="none"
+            stroke="#6B4F1D"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+          <path
+            d="M12 11.2c-2.1-1.1-3.4-2.8-3.6-4.8 2.1.4 3.6 1.8 3.6 4.8Z"
+            fill="#C4A35A"
+            stroke="#8A6A2A"
+            strokeWidth="0.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 11.2c2.1-1.1 3.4-2.8 3.6-4.8-2.1.4-3.6 1.8-3.6 4.8Z"
+            fill="#D4B56A"
+            stroke="#8A6A2A"
+            strokeWidth="0.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 14.2c-2.3-.8-3.9-2.3-4.4-4.2 2.3.1 4 1.5 4.4 4.2Z"
+            fill="#B8944A"
+            stroke="#8A6A2A"
+            strokeWidth="0.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 14.2c2.3-.8 3.9-2.3 4.4-4.2-2.3.1-4 1.5-4.4 4.2Z"
+            fill="#C9A65A"
+            stroke="#8A6A2A"
+            strokeWidth="0.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 17c-2.4-.5-4.2-1.8-4.9-3.6 2.4-.2 4.3 1.1 4.9 3.6Z"
+            fill="#A9843F"
+            stroke="#8A6A2A"
+            strokeWidth="0.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M12 17c2.4-.5 4.2-1.8 4.9-3.6-2.4-.2-4.3 1.1-4.9 3.6Z"
+            fill="#B8944A"
+            stroke="#8A6A2A"
+            strokeWidth="0.8"
+            strokeLinejoin="round"
+          />
+        </svg>
       );
     case 'GOLD':
       return (
@@ -100,33 +175,16 @@ const MetricIcon = ({ symbol }) => {
           aria-hidden="true"
           focusable="false"
         >
-          <defs>
-            <linearGradient id="goldBarGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#FDE68A" />
-              <stop offset="55%" stopColor="#F4B400" />
-              <stop offset="100%" stopColor="#B45309" />
-            </linearGradient>
-          </defs>
-          <path
-            d="M5 9.5 8.5 6h9L19 9.5v7L15.5 20h-9L5 16.5Z"
-            fill="url(#goldBarGradient)"
-            stroke="#8A5A00"
-            strokeWidth="1.2"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M8.5 6 12 9.5h7"
-            fill="none"
-            stroke="rgba(255,255,255,0.65)"
-            strokeWidth="1"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M12 9.5v7"
-            fill="none"
-            stroke="rgba(120,72,0,0.35)"
-            strokeWidth="1"
-          />
+          {/* Stacked gold bullion bars */}
+          <rect x="5" y="14.5" width="14" height="4.2" rx="0.6" fill="#B45309" />
+          <rect x="5.3" y="14.5" width="13.4" height="1.5" rx="0.4" fill="#FDE68A" />
+          <rect x="5.3" y="16" width="13.4" height="2.2" rx="0.3" fill="#EAB308" />
+          <rect x="6.2" y="10.4" width="11.6" height="4.2" rx="0.6" fill="#B45309" />
+          <rect x="6.5" y="10.4" width="11" height="1.5" rx="0.4" fill="#FDE68A" />
+          <rect x="6.5" y="11.9" width="11" height="2.2" rx="0.3" fill="#F4B400" />
+          <rect x="7.4" y="6.3" width="9.2" height="4.2" rx="0.6" fill="#92400E" />
+          <rect x="7.7" y="6.3" width="8.6" height="1.5" rx="0.4" fill="#FEF3C7" />
+          <rect x="7.7" y="7.8" width="8.6" height="2.2" rx="0.3" fill="#F59E0B" />
         </svg>
       );
     case 'BTC':
@@ -136,7 +194,7 @@ const MetricIcon = ({ symbol }) => {
         </span>
       );
     default:
-      return <span aria-hidden="true">{symbol === 'BRENT' ? '💧' : '📈'}</span>;
+      return <span aria-hidden="true">📈</span>;
   }
 };
 
@@ -221,6 +279,9 @@ const USDCorrelationMatrix = (props) => {
   const fxvlHistorical = isHistoricalFxvlSnapshot(fxvlSnapshot);
   const fxvlAvailable = isDisplayableFxvlSnapshot(fxvlSnapshot);
   const fxvlAsOfLabel = fxvlHistorical ? formatFxvlAsOfDate(fxvlSnapshot.asOf) : null;
+  const fxvlIsRealized = String(fxvlSnapshot?.measure || '').toLowerCase() === 'realized'
+    || /^yahoo(?:\b|[-_])/i.test(String(fxvlSnapshot?.source || ''));
+  const fxvlDisplaySymbol = fxvlIsRealized ? 'G5RV' : 'FXVL';
   const tableMetrics = variant === 'radar'
     ? USD_METRICS.filter(({ symbol }) => symbol !== 'FXVL')
     : USD_METRICS;
@@ -256,7 +317,7 @@ const USDCorrelationMatrix = (props) => {
         <section className="usd-card-section usd-card-section--fxvl" aria-label="FX Volatility">
           <VolatilityMetricRow
             row={fxvlSnapshot}
-            symbol="FXVL"
+            symbol={fxvlDisplaySymbol}
             available={fxvlAvailable}
             historical={fxvlHistorical}
             asOfLabel={fxvlAsOfLabel}
@@ -264,8 +325,12 @@ const USDCorrelationMatrix = (props) => {
             ariaLabel={
               fxvlAvailable
                 ? fxvlHistorical
-                  ? `FXVL closing volatility as of ${fxvlAsOfLabel}`
-                  : 'FXVL current volatility'
+                  ? fxvlIsRealized
+                    ? `${fxvlDisplaySymbol} G5 FX 1M realized vol as of ${fxvlAsOfLabel}`
+                    : `FXVL closing volatility as of ${fxvlAsOfLabel}`
+                  : fxvlIsRealized
+                    ? `${fxvlDisplaySymbol} G5 FX 1M realized vol`
+                    : 'FXVL current volatility'
                 : 'FXVL volatility data unavailable'
             }
           />
@@ -398,6 +463,7 @@ const USDCorrelationMatrix = (props) => {
 };
 
 export {
+  isAttributedFxvlSnapshot,
   isCompleteCorrelationMetric,
   isCurrentFxvlSnapshot,
   isDisplayableFxvlSnapshot,

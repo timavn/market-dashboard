@@ -69,6 +69,13 @@ function validateRtaCheckpoint(checkpoint) {
   }
   if (!isValidTimestamp(canonical.capturedAt)) reasons.push('capture-time-missing');
   if (!isValidTimestamp(canonical.asOf)) reasons.push('as-of-time-missing');
+  if (
+    isValidTimestamp(canonical.capturedAt)
+    && isValidTimestamp(canonical.asOf)
+    && Date.parse(canonical.asOf) > Date.parse(canonical.capturedAt)
+  ) {
+    reasons.push('as-of-after-capture');
+  }
   if (!CAPTURE_PRECISIONS.has(canonical.capturePrecision)) reasons.push('capture-precision-invalid');
   if (!canonical.source || !AUTHORITATIVE_SOURCE_PATTERN.test(canonical.source)) {
     reasons.push('source-not-authoritative');
@@ -140,10 +147,27 @@ function createRtaCheckpoint(input = {}) {
   return checkpoint;
 }
 
+function resolveRtaReplayCutoff({
+  now = new Date(),
+  windowDays = 90,
+  checkpointTime = null,
+} = {}) {
+  const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) throw new Error('Invalid RTA replay clock.');
+  const boundedWindowDays = Math.max(1, Number(windowDays) || 90);
+  const windowCutoffMs = nowMs - (boundedWindowDays * 24 * 60 * 60 * 1000);
+  const checkpointMs = new Date(checkpointTime || '').getTime();
+  const cutoffMs = Number.isFinite(checkpointMs)
+    ? Math.min(windowCutoffMs, checkpointMs)
+    : windowCutoffMs;
+  return new Date(cutoffMs).toISOString();
+}
+
 module.exports = {
   CHECKPOINT_PARSER_VERSION,
   canonicalCheckpointPayload,
   checkpointContentHash,
   createRtaCheckpoint,
+  resolveRtaReplayCutoff,
   validateRtaCheckpoint,
 };

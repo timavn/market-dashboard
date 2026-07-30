@@ -105,10 +105,99 @@ describe('compositePortfolioDataProvider', () => {
     });
   });
 
+  it('preserves contract identity so duplicate-symbol holdings remain distinguishable', async () => {
+    ibkrPortfolio.ENABLED = true;
+    ibkrPortfolio.getPortfolioSnapshot.mockResolvedValue({
+      holdings: [
+        {
+          positionId: 'U1#101',
+          symbol: 'ES',
+          conid: 101,
+          localSymbol: 'ESU6',
+          description: 'E-mini S&P 500 Sep 2026',
+          accountId: 'U1',
+          quantity: 1,
+          price: 6500,
+          marketValue: 325000,
+          assetType: 'FUT',
+          assetClass: 'Derivatives',
+          secType: 'FUT',
+          currency: 'USD',
+          exchange: 'CME',
+          positionSource: 'ibkr_live_session',
+          priceSource: 'ibkr',
+        },
+        {
+          positionId: 'U1#202',
+          symbol: 'ES',
+          conid: 202,
+          localSymbol: 'ESZ6',
+          description: 'E-mini S&P 500 Dec 2026',
+          accountId: 'U1',
+          quantity: -1,
+          price: 6550,
+          marketValue: -327500,
+          assetType: 'FUT',
+          assetClass: 'Derivatives',
+          secType: 'FUT',
+          currency: 'USD',
+          exchange: 'CME',
+          positionSource: 'ibkr_live_session',
+          priceSource: 'ibkr',
+        },
+      ],
+      accountSummary: { netLiquidation: 500000, currency: 'USD' },
+      summary: { totalValue: 500000, positionCount: 2, longCount: 1, shortCount: 1 },
+      fetchedAt: '2026-07-26T12:00:00.000Z',
+      dataSource: 'ibkr_api',
+      liveSessionVerified: true,
+    });
+
+    const composite = createCompositePortfolioDataProvider(uploadProvider);
+    const snap = await composite.getPortfolioSnapshot('U1');
+
+    expect(snap.holdings).toEqual([
+      expect.objectContaining({
+        positionId: 'U1#101',
+        symbol: 'ES',
+        conid: 101,
+        localSymbol: 'ESU6',
+        currency: 'USD',
+        exchange: 'CME',
+      }),
+      expect.objectContaining({
+        positionId: 'U1#202',
+        symbol: 'ES',
+        conid: 202,
+        localSymbol: 'ESZ6',
+        currency: 'USD',
+        exchange: 'CME',
+      }),
+    ]);
+    expect(new Set(snap.holdings.map((holding) => holding.positionId)).size).toBe(2);
+    expect(snap.topHoldings.map(({ positionId, conid, localSymbol }) => ({
+      positionId,
+      conid,
+      localSymbol,
+    }))).toEqual([
+      { positionId: 'U1#202', conid: 202, localSymbol: 'ESZ6' },
+      { positionId: 'U1#101', conid: 101, localSymbol: 'ESU6' },
+    ]);
+  });
+
   it('uses upload when source=upload', async () => {
     ibkrPortfolio.getProviderStatus.mockResolvedValue({ connected: true });
     uploadProvider.getPortfolioSnapshot.mockResolvedValue({
-      holdings: [{ symbol: 'MSFT', positionSource: 'uploaded_statement', marketValue: 500 }],
+      holdings: [{
+        positionId: 'snapshot-1#MSFT',
+        symbol: 'MSFT',
+        conid: 272093,
+        localSymbol: 'MSFT',
+        currency: 'USD',
+        exchange: 'NASDAQ',
+        positionSource: 'uploaded_statement',
+        marketValue: 500,
+      }],
       summary: { totalValue: 500, positionCount: 1 },
       empty: false,
       dataSource: 'uploaded_statement',
@@ -118,6 +207,13 @@ describe('compositePortfolioDataProvider', () => {
     const composite = createCompositePortfolioDataProvider(uploadProvider);
     const snap = await composite.getPortfolioSnapshot(null, { source: 'upload' });
     expect(snap.dataSource).toBe('uploaded_statement');
+    expect(snap.holdings[0]).toMatchObject({
+      positionId: 'snapshot-1#MSFT',
+      conid: 272093,
+      localSymbol: 'MSFT',
+      currency: 'USD',
+      exchange: 'NASDAQ',
+    });
   });
 
   it('returns ibkr_offline when Gateway disconnected', async () => {

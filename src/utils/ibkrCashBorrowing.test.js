@@ -162,6 +162,39 @@ describe('calculateIbkrCashBorrowing', () => {
     expect(result.longTrimNeeded).toBe(12000);
   });
 
+  test('uses a larger verified model reserve without double counting live accrued cash', () => {
+    const result = calculateIbkrCashBorrowing(
+      fundingPayload({
+        accruedCashSecurities: -3,
+        interestValidationReserve: 5.25,
+      }),
+    );
+
+    expect(result.available).toBe(true);
+    expect(result.negativeAccruedCashReserve).toBe(5.25);
+    expect(result.liveNegativeAccruedCashReserve).toBe(3);
+    expect(result.modelInterestReserve).toBe(5.25);
+    expect(result.interestReserve).toEqual({
+      liveNegativeAccruedCash: 3,
+      modelOutstandingUpper: 5.25,
+      incrementalModelReserve: 2.25,
+      applied: 5.25,
+    });
+    expect(result.rawHeadroom).toBe(11994.75);
+  });
+
+  test('never lets a smaller model estimate reduce the live accrued-cash reserve', () => {
+    const result = calculateIbkrCashBorrowing(
+      fundingPayload({
+        accruedCashSecurities: -8,
+        interestValidationReserve: 2,
+      }),
+    );
+
+    expect(result.negativeAccruedCashReserve).toBe(8);
+    expect(result.interestReserve.incrementalModelReserve).toBe(0);
+  });
+
   test('does not add positive commodity residual to positive securities cash', () => {
     const result = calculateIbkrCashBorrowing(
       fundingPayload({

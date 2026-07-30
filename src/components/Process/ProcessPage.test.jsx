@@ -1,12 +1,23 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 import '@testing-library/jest-dom';
 import ProcessPage from './ProcessPage';
 
 const mockToggleTheme = jest.fn();
+const mockSetThemePreference = jest.fn();
 
 jest.mock('../../context/ThemeContext', () => ({
-  useTheme: () => ({ theme: 'light', toggleTheme: mockToggleTheme }),
+  useTheme: () => ({
+    theme: 'light',
+    themePreference: 'light',
+    toggleTheme: mockToggleTheme,
+    setThemePreference: mockSetThemePreference,
+  }),
 }));
 
 describe('ProcessPage', () => {
@@ -15,98 +26,167 @@ describe('ProcessPage', () => {
     window.scrollTo = jest.fn();
     window.print = jest.fn();
     window.confirm = jest.fn(() => true);
+    window.requestAnimationFrame = (callback) => callback();
     Element.prototype.scrollIntoView = jest.fn();
     mockToggleTheme.mockClear();
+    mockSetThemePreference.mockClear();
   });
 
-  test('renders the analytical master paper and restrained published-document index', () => {
-    render(<ProcessPage documentId="the-process" onBack={jest.fn()} />);
+  test('renders Process as a restrained article with Process and Methods navigation', () => {
+    window.localStorage.setItem('process-reader-preferences-v1', JSON.stringify({
+      textSize: 'large',
+      articleWidth: 'standard',
+    }));
+    render(<ProcessPage documentId="the-process" />);
 
     expect(screen.getByTestId('process-page')).toHaveAttribute('data-document-id', 'the-process');
-    expect(screen.getByRole('heading', { name: 'The Process' })).toBeInTheDocument();
-    expect(screen.getByText('Portfolio Management Framework')).toBeInTheDocument();
-    expect(screen.queryByText(/Referenced method:/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('process-document-title')).toHaveTextContent('Process');
+    expect(screen.queryByText(/Portfolio Management Framework · Version 0\.1 · Draft/i)).not.toBeInTheDocument();
     expect(screen.getAllByTestId('process-paper-section')).toHaveLength(10);
 
-    const index = screen.getByRole('navigation', { name: 'Process documents' });
-    const links = within(index).getAllByRole('link');
-    expect(links).toHaveLength(2);
-    expect(screen.getByRole('link', { name: /The Process v0\.1 · Draft/i })).toHaveAttribute('href', '#/process');
-    expect(screen.getByRole('link', { name: /Position Sizing v1\.1 · Canonical/i })).toHaveAttribute(
-      'href',
-      '#/process/methods/position-sizing',
-    );
+    const library = screen.getByRole('navigation', { name: 'Process library' });
+    expect(within(library).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Process',
+      'Methods',
+    ]);
+    expect(within(library).getByRole('link', { name: 'Process' })).toHaveAttribute('aria-current', 'page');
 
-    expect(screen.getByText(/Trade is the short-duration signal with a horizon of three weeks or less/i)).toBeInTheDocument();
-    expect(screen.getByText(/Trend is the longer-duration signal with a horizon of three months or more/i)).toBeInTheDocument();
-    expect(screen.getByTestId('process-document')).toHaveTextContent(/Trend breaks but Trade continues to support the held side.*MIN/i);
-    expect(screen.getByTestId('process-document')).toHaveTextContent(/Trade breaks for the held side.*target becomes zero/i);
-    expect(screen.getByTestId('process-document')).toHaveTextContent(/Tail, the Quad overlay, portfolio-policy limits, and Pods.*research or descriptive/i);
+    const documentActions = screen.getByRole('navigation', { name: 'Document actions' });
+    expect(within(documentActions).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Read',
+      'Edit',
+    ]);
+    expect(screen.queryByRole('button', { name: 'Notes' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('process-page')).toHaveAttribute('data-text-size', 'small');
+    expect(screen.getByTestId('process-page')).toHaveAttribute('data-article-width', 'wide');
+    expect(screen.queryByRole('complementary', { name: 'Appearance' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Own enough to matter/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Beta defines the boundaries/i)).not.toBeInTheDocument();
   });
 
-  test('renders Position Sizing as the canonical independently printable technical note', () => {
-    render(<ProcessPage documentId="position-sizing" onBack={jest.fn()} />);
+  test('renders Methods as an index containing all eight mechanisms', () => {
+    render(<ProcessPage documentId="methods-index" />);
 
-    expect(screen.getByTestId('process-page')).toHaveAttribute('data-document-id', 'position-sizing');
-    expect(screen.getByRole('heading', { name: 'Position Sizing' })).toBeInTheDocument();
-    expect(screen.getByText(/Version 1\.1.*Canonical/i)).toBeInTheDocument();
+    expect(screen.getByTestId('process-document-title')).toHaveTextContent('Methods');
+    const article = screen.getByTestId('process-document');
+    [
+      'Signals and Risk Ranges',
+      'Position Sizing',
+      'Stops, Exits, and Reversals',
+      'Macro Regime and Quad Overlay',
+      'Security Selection and Pods',
+      'Portfolio Construction and Diversification',
+      'Data Controls and Execution',
+      'Validation and Change Control',
+    ].forEach((name) => {
+      expect(within(article).getByRole('link', { name })).toBeInTheDocument();
+    });
+    expect(
+      within(screen.getByRole('navigation', { name: 'Process library' }))
+        .getByRole('link', { name: 'Methods' }),
+    ).toHaveAttribute('aria-current', 'page');
+  });
+
+  test('presents Position Sizing as an editable Method, not a separate white paper', () => {
+    render(<ProcessPage documentId="position-sizing" />);
+
+    expect(screen.getByTestId('process-document-title')).toHaveTextContent('Position Sizing');
+    expect(screen.queryByText(/Method · Version 1\.1 · Canonical/i)).not.toBeInTheDocument();
     expect(screen.getAllByTestId('process-section')).toHaveLength(8);
-    expect(screen.getByText(/values in this section are generated by the production sizing engine/i)).toBeInTheDocument();
-    expect(screen.getByTestId('process-document')).toHaveTextContent(/conviction = 20% x range \+ 30% x structure \+ 50% x record/i);
-    expect(screen.getByTestId('process-document')).toHaveTextContent(/target = 2\.0% \+ 0\.83\(4\.5% - 2\.0%\) -> 4\.0%/i);
-    expect(screen.queryByRole('button', { name: 'Edit document' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Referenced by The Process/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('process-document')).toHaveTextContent(
+      /Trend breaks while Trade remains aligned, MIN becomes the ceiling/i,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(
+      screen.getByRole('textbox', { name: 'Edit Position Sizing document' }),
+    ).toHaveAttribute('contenteditable', 'true');
   });
 
-  test('edits master sections directly and restores the saved draft after remount', () => {
-    const view = render(<ProcessPage documentId="the-process" onBack={jest.fn()} />);
+  test('edits article sections inline and restores a version-scoped draft after remount', () => {
+    const view = render(<ProcessPage documentId="the-process" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit document' }));
-    expect(screen.getByRole('textbox', { name: 'Edit Title page section' })).toHaveAttribute('contenteditable', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const abstract = screen.getByRole('textbox', { name: 'Edit Abstract section' });
-    expect(abstract).toHaveAttribute('contenteditable', 'true');
-    fireEvent.input(abstract, { target: { innerHTML: '<p>Edited abstract for the next review.</p>' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Done editing' }));
+    fireEvent.input(abstract, {
+      target: { innerHTML: '<p>Edited abstract for the next review.</p>' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Read' }));
 
     expect(screen.getByText('Edited abstract for the next review.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Restore published version' })).toBeInTheDocument();
 
     view.unmount();
-    render(<ProcessPage documentId="the-process" onBack={jest.fn()} />);
+    render(<ProcessPage documentId="the-process" />);
     expect(screen.getByText('Edited abstract for the next review.')).toBeInTheDocument();
   });
 
-  test('persists review notes and can restore the published master', () => {
-    const view = render(<ProcessPage documentId="the-process" onBack={jest.fn()} />);
-    const notes = screen.getByLabelText('Review notes');
-    fireEvent.input(notes, { target: { value: 'Clarify the portfolio-constraint paragraph.' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Print / Save PDF' }));
-    view.unmount();
+  test('restores an edited local draft from Tools', () => {
+    const view = render(<ProcessPage documentId="the-process" />);
 
-    render(<ProcessPage documentId="the-process" onBack={jest.fn()} />);
-    expect(screen.getByLabelText('Review notes')).toHaveValue('Clarify the portfolio-constraint paragraph.');
-    fireEvent.click(screen.getByRole('button', { name: 'Restore published version' }));
-    expect(window.confirm).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText('Review notes')).toHaveValue('');
-    expect(screen.getByText(/This paper defines the order in which investment and portfolio-management decisions are made/i)).toBeInTheDocument();
-  });
-
-  test('supports contents navigation, printing, theme switching, and dashboard return', () => {
-    const onBack = jest.fn();
-    render(<ProcessPage documentId="the-process" onBack={onBack} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /8 Stops, Exits, and Reversals/i }));
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
-
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const abstract = screen.getByRole('textbox', { name: 'Edit Abstract section' });
+    fireEvent.input(abstract, { target: { innerHTML: '<p>Draft to restore.</p>' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Read' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
     fireEvent.click(screen.getByRole('button', { name: 'Print / Save PDF' }));
     expect(window.print).toHaveBeenCalledTimes(1);
+    view.unmount();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dark' }));
-    expect(mockToggleTheme).toHaveBeenCalledTimes(1);
+    render(<ProcessPage documentId="the-process" />);
+    expect(screen.getByText('Draft to restore.')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /^Dashboard$/i }));
-    expect(onBack).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore published version' }));
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Read' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('searches document titles and section headings and navigates to a Method section', () => {
+    const onNavigate = jest.fn();
+    render(
+      <ProcessPage
+        documentId="the-process"
+        onNavigate={onNavigate}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Process documents' }), {
+      target: { value: 'Tail' },
+    });
+    fireEvent.click(screen.getByRole('option', { name: /Tail.*Signals and Risk Ranges/i }));
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      '#/process/methods/signals-and-risk-ranges?section=tail',
+    );
+  });
+
+  test('supports contents, color mode, and internal navigation', () => {
+    const onNavigate = jest.fn();
+    render(
+      <ProcessPage
+        documentId="the-process"
+        onNavigate={onNavigate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /8 Stops, Exits, and Reversals/i }));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'start',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
+    const lightMode = screen.getByRole('button', { name: /Light/ });
+    const darkMode = screen.getByRole('button', { name: /Dark/ });
+    expect(screen.queryByRole('button', { name: 'Automatic' })).not.toBeInTheDocument();
+    expect(lightMode).toHaveAttribute('aria-pressed', 'true');
+    expect(darkMode).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(darkMode);
+    expect(mockSetThemePreference).toHaveBeenCalledWith('dark');
+
+    fireEvent.click(screen.getByRole('link', { name: 'Methods' }));
+    expect(onNavigate).toHaveBeenCalledWith('#/process/methods');
+
   });
 });

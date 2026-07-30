@@ -340,6 +340,7 @@ const VolatilityMapPanel = ({ volatilityState, status }) => {
                 bucket={bucket}
                 regimeLabel={regime?.label}
                 regimeRange={formatVolatilityRange(regime)}
+                regimeRanges={VOL_RANGES[name]?.ranges}
                 resolveLevelBucket={(value) => getBucketForSeries(name, value)}
                 ariaLabel={
                   available
@@ -449,7 +450,7 @@ const MarketBackdrop = ({ marketData, marketDataLoading, marketDataError, provid
                 <tr>
                   <th>Index</th>
                   <th>Price</th>
-                  <th>D</th>
+                  <th>DAY</th>
                   <th>15D</th>
                   <th>1M</th>
                   <th>3M</th>
@@ -627,20 +628,22 @@ const USDCurrencySpreadsheet = ({ leftRows, rightRows, loading, providerStatus }
         <col className="usd-currency-spreadsheet__return-col" span={5} />
       </colgroup>
       <thead>
-        <tr className="usd-currency-spreadsheet__groups">
-          <th colSpan="7" scope="colgroup">Dollar &amp; Majors</th>
-          <th colSpan="7" scope="colgroup">USD Crosses</th>
-        </tr>
         <tr>
-          <th>Ticker</th><th>Price</th><th>D</th><th>15D</th><th>1M</th><th>3M</th><th>6M</th>
-          <th>Ticker</th><th>Price</th><th>D</th><th>15D</th><th>1M</th><th>3M</th><th>6M</th>
+          <th>Ticker</th><th>Price</th><th>DAY</th><th>15D</th><th>1M</th><th>3M</th><th>6M</th>
+          <th>Ticker</th><th>Price</th><th>DAY</th><th>15D</th><th>1M</th><th>3M</th><th>6M</th>
         </tr>
       </thead>
       <tbody>
         {Array.from({ length: rowCount }, (_, index) => (
           <tr key={`${leftRows[index]?.symbol || 'blank'}-${rightRows[index]?.symbol || 'blank'}`}>
-            <USDCurrencyCells row={leftRows[index]} providerStatus={providerStatus} />
-            <USDCurrencyCells row={rightRows[index]} providerStatus={providerStatus} />
+            <USDCurrencyCells
+              row={leftRows[index]}
+              providerStatus={providerStatus}
+            />
+            <USDCurrencyCells
+              row={rightRows[index]}
+              providerStatus={providerStatus}
+            />
           </tr>
         ))}
       </tbody>
@@ -656,8 +659,8 @@ const USDCurrenciesSection = ({ rows, loading, providerStatus }) => {
       className="usd-card-section usd-card-section--currencies"
       aria-labelledby="usd-card-currencies-title"
     >
-      <header className="usd-card-section__header">
-        <h3 id="usd-card-currencies-title">Currencies · USD First</h3>
+      <header className="usd-card-section__header usd-card-section__header--dollar">
+        <h3 id="usd-card-currencies-title">Dollar</h3>
       </header>
       <div className="usd-card-section__body usd-card-currencies__body">
         <USDCurrencySpreadsheet

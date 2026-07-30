@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import unittest
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +19,12 @@ os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "infra" / "scripts"))
 sys.path.insert(0, str(REPO_ROOT / "infra" / "lambdas" / "hermes_worker"))
+sys.path.insert(0, str(REPO_ROOT / "infra" / "lambdas" / "hermes_watchdog"))
 sys.path.insert(0, str(REPO_ROOT / "infra" / "lambdas" / "gmail_ingestor"))
 
 from render_hermes_contract import render_contract  # noqa: E402
 import hermes_worker as worker  # noqa: E402
+import hermes_watchdog as watchdog  # noqa: E402
 import hermes_gmail_ingestor as gmail_ingestor  # noqa: E402
 import parse_hedgeye_email_html as hedgeye_parser  # noqa: E402
 
@@ -115,6 +118,28 @@ def statement_for_action(
         statement
         for statement in policy_statements(function_properties)
         if action in statement_actions(statement)
+    )
+
+
+def condition_allows_leading_key(
+    statement: dict[str, Any],
+    leading_key: str,
+) -> bool:
+    condition = statement.get("Condition") or {}
+    if condition.get("Null", {}).get("dynamodb:LeadingKeys") != "false":
+        return False
+    exact = condition.get("ForAllValues:StringEquals", {}).get(
+        "dynamodb:LeadingKeys",
+        [],
+    )
+    exact_values = exact if isinstance(exact, list) else [exact]
+    patterns = condition.get("ForAllValues:StringLike", {}).get(
+        "dynamodb:LeadingKeys",
+        [],
+    )
+    pattern_values = patterns if isinstance(patterns, list) else [patterns]
+    return leading_key in exact_values or any(
+        fnmatchcase(leading_key, pattern) for pattern in pattern_values
     )
 
 
@@ -220,6 +245,7 @@ class HermesInfrastructureContractTests(unittest.TestCase):
             self.contract["inputSnapshotTable"],
             manifest_resources["hermesInputSnapshotTable"],
         )
+
         environment = function["Environment"]["Variables"]
         self.assertEqual(
             environment["HERMES_INPUT_SNAPSHOT_TABLE"],
@@ -246,6 +272,100 @@ class HermesInfrastructureContractTests(unittest.TestCase):
         self.assertEqual(hedgeye_parser.RISK_RANGE_MANIFEST_TABLE, manifest_resources["riskRangeManifestTable"])
         self.assertEqual(hedgeye_parser.RISK_RANGE_DATA_TABLE, manifest_resources["riskRangeDataTable"])
         self.assertEqual(hedgeye_parser.RISK_RANGE_HISTORY_TABLE, manifest_resources["riskRangeHistoryTable"])
+
+    def test_reserved_concurrency_is_opt_in_and_omitted_by_default(self):
+        self.assertEqual(
+            self.template["Parameters"]["ReservedConcurrencyState"],
+            {
+                "Type": "String",
+                "Default": "DISABLED",
+                "AllowedValues": ["ENABLED", "DISABLED"],
+                "Description": (
+                    "Opt in only after the account concurrency quota can preserve "
+                    "ten unreserved executions."
+                ),
+            },
+        )
+        self.assertEqual(
+            self.template["Conditions"]["ReservedConcurrencyEnabled"],
+            {
+                "tag": "Equals",
+                "value": [
+                    {"tag": "Ref", "value": "ReservedConcurrencyState"},
+                    "ENABLED",
+                ],
+            },
+        )
+        expected = {
+            "GmailIngestorFunction": 1,
+            "HedgeyePdfProcessorFunction": 2,
+            "HermesWorkerFunction": 3,
+        }
+        for logical_id, concurrency in expected.items():
+            with self.subTest(logical_id=logical_id):
+                self.assertEqual(
+                    self.template["Resources"][logical_id]["Properties"][
+                        "ReservedConcurrentExecutions"
+                    ],
+                    {
+                        "tag": "If",
+                        "value": [
+                            "ReservedConcurrencyEnabled",
+                            concurrency,
+                            {"tag": "Ref", "value": "AWS::NoValue"},
+                        ],
+                    },
+                )
+
+    def test_worker_alert_lifecycle_is_key_scoped_and_publishes_only_to_operations(self):
+        function = self.template["Resources"]["HermesWorkerFunction"]["Properties"]
+        environment = function["Environment"]["Variables"]
+        self.assertEqual(
+            environment["HERMES_OPERATIONS_TOPIC_ARN"],
+            {"tag": "Ref", "value": "OperationsTopic"},
+        )
+        statements = {
+            statement.get("Sid"): statement
+            for statement in policy_statements(function)
+            if statement.get("Sid")
+        }
+        alerts = statements["ManageOwnedHermesAlerts"]
+        self.assertEqual(
+            statement_actions(alerts),
+            {"dynamodb:GetItem", "dynamodb:PutItem"},
+        )
+        self.assertEqual(
+            alerts["Condition"],
+            {
+                "ForAllValues:StringLike": {
+                    "dynamodb:LeadingKeys": [
+                        "quant-analyst#runtime-health#*",
+                        "quant-developer#runtime-health#*",
+                        "security#runtime-health#*",
+                    ],
+                },
+                "Null": {"dynamodb:LeadingKeys": "false"},
+            },
+        )
+        for owned_key in (
+            "quant-analyst#runtime-health#PORTFOLIO_STALE",
+            "quant-developer#runtime-health#STATE",
+            "security#runtime-health#AUTH_REQUIRED",
+        ):
+            self.assertTrue(condition_allows_leading_key(alerts, owned_key))
+        for foreign_key in (
+            "gmail#runtime-health#AUTH_REQUIRED",
+            "cloud-watchdog#runtime-health#STATE",
+            "quant-developer#deployment#FAILED",
+        ):
+            self.assertFalse(condition_allows_leading_key(alerts, foreign_key))
+
+        publish = statements["PublishHermesAlertLifecycle"]
+        self.assertEqual(statement_actions(publish), {"sns:Publish"})
+        self.assertEqual(
+            publish["Resource"],
+            {"tag": "Ref", "value": "OperationsTopic"},
+        )
 
     def test_worker_schedule_ids_expressions_cadences_and_inputs_match(self):
         resources = self.template["Resources"]
@@ -290,6 +410,334 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     schedule["ScheduleExpression"],
                     r"^cron\(\S+ \* \? \* \* \*\)$",
                 )
+
+    def test_cloud_watchdog_is_independent_staged_and_read_only(self):
+        resources = self.template["Resources"]
+        function = resources["HermesCloudWatchdogFunction"]["Properties"]
+        rule = resources["HermesCloudWatchdogRule"]
+        permission = resources["HermesCloudWatchdogInvokePermission"]["Properties"]
+
+        self.assertEqual(
+            self.template["Parameters"]["CloudWatchdogScheduleState"],
+            {
+                "Type": "String",
+                "Default": "DISABLED",
+                "AllowedValues": ["ENABLED", "DISABLED"],
+                "Description": (
+                    "Enable the independent read-only watchdog only through "
+                    "staged activation."
+                ),
+            },
+        )
+        self.assertEqual(
+            function["FunctionName"],
+            "market-dashboard-hermes-cloud-watchdog-v1",
+        )
+        self.assertEqual(function["CodeUri"], "lambdas/hermes_watchdog/")
+        self.assertEqual(function["Handler"], "hermes_watchdog.lambda_handler")
+        self.assertEqual(function["Timeout"], 120)
+        self.assertEqual(function["Architectures"], ["arm64"])
+        self.assertNotIn("ReservedConcurrentExecutions", function)
+
+        self.assertEqual(rule["Type"], "AWS::Events::Rule")
+        self.assertEqual(
+            rule["Properties"],
+            {
+                "Name": "market-dashboard-hermes-cloud-watchdog-v1",
+                "Description": (
+                    "Independent five-minute read-only cloud reliability watchdog."
+                ),
+                "ScheduleExpression": "rate(5 minutes)",
+                "State": {
+                    "tag": "Ref",
+                    "value": "CloudWatchdogScheduleState",
+                },
+                "Targets": [
+                    {
+                        "Arn": {
+                            "tag": "GetAtt",
+                            "value": "HermesCloudWatchdogFunction.Arn",
+                        },
+                        "Id": "hermes-cloud-watchdog",
+                        "Input": (
+                            '{"source":"aws-events","ruleId":'
+                            '"market-dashboard-hermes-cloud-watchdog-v1"}'
+                        ),
+                        "RetryPolicy": {
+                            "MaximumEventAgeInSeconds": 300,
+                            "MaximumRetryAttempts": 0,
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertEqual(
+            permission,
+            {
+                "Action": "lambda:InvokeFunction",
+                "FunctionName": {
+                    "tag": "Ref",
+                    "value": "HermesCloudWatchdogFunction",
+                },
+                "Principal": "events.amazonaws.com",
+                "SourceArn": {
+                    "tag": "GetAtt",
+                    "value": "HermesCloudWatchdogRule.Arn",
+                },
+            },
+        )
+
+        environment = function["Environment"]["Variables"]
+        self.assertEqual(environment["WATCHDOG_STACK_NAME"], watchdog.STACK_NAME)
+        self.assertEqual(environment["WATCHDOG_RULE_ID"], watchdog.RULE_ID)
+        self.assertEqual(
+            environment["WATCHDOG_SERVICE_ID"], watchdog.WATCHDOG_SERVICE_ID
+        )
+        self.assertEqual(
+            environment["HERMES_OPERATIONS_TOPIC_ARN"],
+            {"tag": "Ref", "value": "OperationsTopic"},
+        )
+        self.assertEqual(
+            environment["RUNTIME_FAILURE_QUEUE_URL"],
+            {"tag": "Ref", "value": "RuntimeFailureQueue"},
+        )
+        self.assertEqual(
+            environment["RUNTIME_FAILURE_QUEUE_NAME"],
+            {"tag": "GetAtt", "value": "RuntimeFailureQueue.QueueName"},
+        )
+        for spec in watchdog.SCHEDULE_SPECS:
+            self.assertIn(spec["name"], environment.values())
+            self.assertIn(spec["serviceId"], environment.values())
+        for spec in watchdog.FUNCTION_SPECS:
+            if spec["key"] == "watchdog":
+                self.assertEqual(
+                    environment["WATCHDOG_FUNCTION_NAME"], spec["name"]
+                )
+
+        statements = policy_statements(function)
+        actions = {
+            action
+            for statement in statements
+            for action in statement_actions(statement)
+        }
+        self.assertEqual(
+            actions,
+            {
+                "cloudformation:DescribeStacks",
+                "scheduler:GetSchedule",
+                "dynamodb:GetItem",
+                "dynamodb:Query",
+                "dynamodb:PutItem",
+                "sqs:GetQueueAttributes",
+                "cloudwatch:GetMetricData",
+                "cloudwatch:PutMetricData",
+                "sns:Publish",
+            },
+        )
+        self.assertTrue(
+            actions.isdisjoint(
+                {
+                    "cloudformation:UpdateStack",
+                    "cloudformation:CreateChangeSet",
+                    "scheduler:UpdateSchedule",
+                    "scheduler:CreateSchedule",
+                    "iam:PutRolePolicy",
+                    "iam:PassRole",
+                    "lambda:InvokeFunction",
+                    "lambda:UpdateFunctionCode",
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:SendMessage",
+                }
+            )
+        )
+
+        stack_read = statement_for_action(function, "cloudformation:DescribeStacks")
+        self.assertEqual(
+            stack_read["Resource"],
+            {
+                "tag": "Sub",
+                "value": (
+                    "arn:${AWS::Partition}:cloudformation:${AWS::Region}:"
+                    "${AWS::AccountId}:stack/market-dashboard-readiness-v2/*"
+                ),
+            },
+        )
+        schedule_read = statement_for_action(function, "scheduler:GetSchedule")
+        self.assertEqual(
+            {
+                item["value"]
+                for item in schedule_read["Resource"]
+                if item.get("tag") == "Sub"
+            },
+            {
+                (
+                    "arn:${AWS::Partition}:scheduler:${AWS::Region}:"
+                    "${AWS::AccountId}:schedule/default/"
+                    f"{spec['name']}"
+                )
+                for spec in watchdog.SCHEDULE_SPECS
+            },
+        )
+        queue_read = statement_for_action(function, "sqs:GetQueueAttributes")
+        self.assertEqual(
+            queue_read["Resource"],
+            {"tag": "GetAtt", "value": "RuntimeFailureQueue.Arn"},
+        )
+        heartbeat_read = statement_for_action(function, "dynamodb:Query")
+        self.assertEqual(
+            heartbeat_read["Resource"],
+            {"tag": "GetAtt", "value": "ServiceHeartbeatTable.Arn"},
+        )
+        statements_by_sid = {
+            statement["Sid"]: statement
+            for statement in policy_statements(function)
+            if "Sid" in statement
+        }
+        heartbeat_write = statements_by_sid["WriteTypedWatchdogHeartbeat"]
+        alert_write = statements_by_sid["WriteOwnedWatchdogAlerts"]
+        alert_publish = statements_by_sid["PublishWatchdogAlertLifecycle"]
+        self.assertEqual(
+            heartbeat_write["Resource"],
+            {"tag": "GetAtt", "value": "ServiceHeartbeatTable.Arn"},
+        )
+        self.assertEqual(
+            heartbeat_write["Condition"],
+            {
+                "ForAllValues:StringEquals": {
+                    "dynamodb:LeadingKeys": ["hermes:cloud-watchdog"],
+                },
+                "Null": {"dynamodb:LeadingKeys": "false"},
+            },
+        )
+        self.assertEqual(
+            alert_write["Resource"],
+            {
+                "tag": "Sub",
+                "value": (
+                    "arn:${AWS::Partition}:dynamodb:${AWS::Region}:"
+                    "${AWS::AccountId}:table/${HermesAlertsTableName}"
+                ),
+            },
+        )
+        self.assertEqual(
+            alert_write["Condition"],
+            {
+                "ForAllValues:StringLike": {
+                    "dynamodb:LeadingKeys": [
+                        "cloud-watchdog#runtime-health#*",
+                    ],
+                },
+                "Null": {"dynamodb:LeadingKeys": "false"},
+            },
+        )
+        self.assertEqual(
+            statement_actions(alert_write),
+            {"dynamodb:GetItem", "dynamodb:PutItem"},
+        )
+        self.assertTrue(
+            condition_allows_leading_key(
+                heartbeat_write,
+                "hermes:cloud-watchdog",
+            )
+        )
+        for foreign_service_id in (
+            "gmail:timsmithaviation@gmail.com",
+            "hermes:quant-developer",
+            "hermes:cloud-watchdog:manual",
+        ):
+            self.assertFalse(
+                condition_allows_leading_key(
+                    heartbeat_write,
+                    foreign_service_id,
+                )
+            )
+        self.assertTrue(
+            condition_allows_leading_key(
+                alert_write,
+                "cloud-watchdog#runtime-health#GMAIL_INVOCATION_TIMEOUT",
+            )
+        )
+        for foreign_alert_id in (
+            "quant-developer#runtime-health#HERMES_HEARTBEAT_MISSING",
+            "cloud-watchdog#deployment#FAILED",
+            "foreign-host#runtime-health#FAILED",
+        ):
+            self.assertFalse(
+                condition_allows_leading_key(
+                    alert_write,
+                    foreign_alert_id,
+                )
+            )
+        self.assertEqual(statement_actions(alert_publish), {"sns:Publish"})
+        self.assertEqual(
+            alert_publish["Resource"],
+            {"tag": "Ref", "value": "OperationsTopic"},
+        )
+        metric_write = statement_for_action(function, "cloudwatch:PutMetricData")
+        self.assertEqual(metric_write["Resource"], "*")
+        self.assertEqual(
+            metric_write["Condition"],
+            {
+                "StringEquals": {
+                    "cloudwatch:namespace": "MarketDashboard/Readiness"
+                }
+            },
+        )
+
+    def test_cloud_watchdog_alarms_default_to_no_actions(self):
+        resources = self.template["Resources"]
+        expected = {
+            "CloudWatchdogHeartbeatMissingAlarm": ("Heartbeat", 600),
+            "CloudWatchdogUnhealthyAlarm": ("Healthy", 300),
+        }
+        for logical_id, (metric_name, period) in expected.items():
+            with self.subTest(logical_id=logical_id):
+                properties = resources[logical_id]["Properties"]
+                self.assertEqual(
+                    properties["ActionsEnabled"],
+                    {
+                        "tag": "If",
+                        "value": ["OperationalAlarmsEnabled", True, False],
+                    },
+                )
+                self.assertEqual(
+                    properties["Namespace"], "MarketDashboard/Readiness"
+                )
+                self.assertEqual(properties["MetricName"], metric_name)
+                self.assertEqual(properties["Period"], period)
+                self.assertEqual(
+                    dimension_value(properties, "ServiceId"),
+                    watchdog.WATCHDOG_SERVICE_ID,
+                )
+                self.assertEqual(
+                    properties["AlarmActions"],
+                    [{"tag": "Ref", "value": "OperationsTopic"}],
+                )
+                self.assertEqual(
+                    properties["OKActions"],
+                    [{"tag": "Ref", "value": "OperationsTopic"}],
+                )
+
+        self.assertEqual(
+            resources["CloudWatchdogHeartbeatMissingAlarm"]["Properties"][
+                "TreatMissingData"
+            ],
+            {
+                "tag": "If",
+                "value": [
+                    "OperationalAlarmsEnabled",
+                    "breaching",
+                    "notBreaching",
+                ],
+            },
+        )
+        self.assertEqual(
+            resources["CloudWatchdogUnhealthyAlarm"]["Properties"][
+                "TreatMissingData"
+            ],
+            "notBreaching",
+        )
 
     def test_gmail_runtime_schedule_and_sam_resources_match_manifest(self):
         services = {service["id"]: service for service in self.manifest["services"]}
@@ -386,12 +834,21 @@ class HermesInfrastructureContractTests(unittest.TestCase):
         resources = self.template["Resources"]
         gmail = resources["GmailIngestorFunction"]["Properties"]
         processor = resources["HedgeyePdfProcessorFunction"]["Properties"]
+        worker = resources["HermesWorkerFunction"]["Properties"]
         queue = resources["RuntimeFailureQueue"]["Properties"]
         manifest_resources = self.manifest["aws"]["resources"]
 
+        self.assertNotIn("Architectures", self.template["Globals"]["Function"])
+        self.assertEqual(gmail["Architectures"], ["arm64"])
         self.assertEqual(processor["Handler"], "hedgeye_pdf_processor_lambda.lambda_handler")
         self.assertEqual(processor["CodeUri"], "../aws/lambda/")
         self.assertEqual(processor["Architectures"], ["x86_64"])
+        self.assertEqual(worker["Architectures"], ["arm64"])
+        makefile = (REPO_ROOT / "aws" / "lambda" / "Makefile").read_text()
+        self.assertIn("--platform manylinux2014_x86_64", makefile)
+        self.assertIn("--python-version 3.12", makefile)
+        self.assertIn("--abi cp312", makefile)
+        self.assertIn("--only-binary=:all:", makefile)
         self.assertEqual(processor["Timeout"], 900)
         self.assertEqual(
             processor["Environment"]["Variables"],

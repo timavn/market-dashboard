@@ -819,13 +819,16 @@ class CatalogLifecycleTests(unittest.TestCase):
 
     def test_live_positions_verifies_socket_and_returns_basis_without_market_values(self):
         class FakeIb:
+            def isConnected(self):
+                return True
+
             async def reqCurrentTimeAsync(self):
                 return datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc)
 
             def managedAccounts(self):
                 return ["U1", "U2"]
 
-            def positions(self):
+            async def reqPositionsAsync(self):
                 return [
                     SimpleNamespace(
                         account="U1",
@@ -855,17 +858,32 @@ class CatalogLifecycleTests(unittest.TestCase):
                     ),
                 ]
 
+            def positions(self):
+                raise AssertionError(
+                    "The live-position endpoint must not read the positions cache."
+                )
+
         async def connected():
             return {"ok": True, "status": "connected"}
 
         original_ib = app.ib
+        original_positions_ib = app.positions_ib
+        original_positions_factory = app.create_positions_snapshot_session
+        original_positions_task = app.positions_snapshot_task
         original_ensure_connected = app.ensure_connected
         try:
-            app.ib = FakeIb()
+            broker = FakeIb()
+            app.ib = broker
+            app.positions_ib = broker
+            app.positions_snapshot_task = None
+            app.create_positions_snapshot_session = lambda: broker
             app.ensure_connected = connected
             response = asyncio.run(app.portfolio_live_positions())
         finally:
             app.ib = original_ib
+            app.positions_ib = original_positions_ib
+            app.positions_snapshot_task = original_positions_task
+            app.create_positions_snapshot_session = original_positions_factory
             app.ensure_connected = original_ensure_connected
 
         payload = json.loads(response.body)

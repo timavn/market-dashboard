@@ -8,6 +8,13 @@ function createAsyncTtlCache({ ttlMs, maxEntries = Number.POSITIVE_INFINITY, now
 
   const entries = new Map();
   const inFlight = new Map();
+  const generations = new Map();
+  let clearGeneration = 0;
+  const generationFor = (key) => generations.get(key) || 0;
+  const invalidateKey = (key) => {
+    generations.set(key, generationFor(key) + 1);
+    inFlight.delete(key);
+  };
 
   const touch = (key, entry) => {
     entries.delete(key);
@@ -40,12 +47,25 @@ function createAsyncTtlCache({ ttlMs, maxEntries = Number.POSITIVE_INFINITY, now
 
     const pending = inFlight.get(key);
     if (pending) {
-      return pending;
+      return pending.promise;
     }
 
+    const generation = generationFor(key);
+    const capturedClearGeneration = clearGeneration;
+    let requestRecord;
     const request = Promise.resolve()
       .then(loader)
       .then((value) => {
+        const tokenCurrent = generationFor(key) === generation
+          && clearGeneration === capturedClearGeneration;
+        if (!tokenCurrent) {
+          return {
+            value,
+            status: 'superseded',
+            ageMs: 0,
+            storedAt: null,
+          };
+        }
         const storedAt = now();
         const entry = { value, storedAt };
         touch(key, entry);
@@ -53,6 +73,9 @@ function createAsyncTtlCache({ ttlMs, maxEntries = Number.POSITIVE_INFINITY, now
         return { value, status: 'miss', ageMs: 0, storedAt };
       })
       .catch((error) => {
+        const tokenCurrent = generationFor(key) === generation
+          && clearGeneration === capturedClearGeneration;
+        if (!tokenCurrent) throw error;
         if (!existing) throw error;
         touch(key, existing);
         return {
@@ -64,22 +87,39 @@ function createAsyncTtlCache({ ttlMs, maxEntries = Number.POSITIVE_INFINITY, now
         };
       })
       .finally(() => {
-        inFlight.delete(key);
+        if (inFlight.get(key) === requestRecord) {
+          inFlight.delete(key);
+        }
       });
 
-    inFlight.set(key, request);
+    requestRecord = {
+      promise: request,
+      generation,
+      clearGeneration: capturedClearGeneration,
+    };
+    inFlight.set(key, requestRecord);
     return request;
   };
 
   return {
     get,
+    set(key, value) {
+      invalidateKey(key);
+      const storedAt = now();
+      const entry = { value, storedAt };
+      touch(key, entry);
+      enforceCapacity();
+      return entry;
+    },
     delete(key) {
-      inFlight.delete(key);
+      invalidateKey(key);
       return entries.delete(key);
     },
     clear() {
+      clearGeneration += 1;
       entries.clear();
       inFlight.clear();
+      generations.clear();
     },
     peek(key) {
       return entries.get(key) || null;

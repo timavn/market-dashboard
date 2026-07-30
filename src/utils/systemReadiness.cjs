@@ -5,6 +5,7 @@ const {
 
 const VALID_CHECK_STATUSES = new Set(['pass', 'warn', 'fail']);
 const VALID_CAPABILITY_STATUSES = new Set(['ready', 'degraded', 'blocked']);
+const MAX_FUTURE_CLOCK_SKEW_MS = 30_000;
 const EXPECTED_CLOUD_BUILD_VERSION = process.env.MARKET_DASHBOARD_EXPECTED_CLOUD_BUILD_VERSION
   || require('../../package.json').version;
 const GMAIL_SERVICE_DEFINITION = (SERVICE_MANIFEST.services || [])
@@ -20,7 +21,16 @@ function ageSeconds(observedAt, now = new Date()) {
   const observed = toDate(observedAt);
   const current = toDate(now);
   if (!observed || !current) return null;
-  return Math.max(0, Math.floor((current.getTime() - observed.getTime()) / 1000));
+  const ageMs = current.getTime() - observed.getTime();
+  if (ageMs < -MAX_FUTURE_CLOCK_SKEW_MS) return null;
+  return Math.max(0, Math.floor(ageMs / 1000));
+}
+
+function exceedsFutureClockSkew(observedAt, now = new Date()) {
+  const observed = toDate(observedAt);
+  const current = toDate(now);
+  if (!observed || !current) return false;
+  return observed.getTime() - current.getTime() > MAX_FUTURE_CLOCK_SKEW_MS;
 }
 
 function addMinutes(value, minutes) {
@@ -171,8 +181,9 @@ function buildRootCauses(checks) {
     const rootIds = resolveRootIds(affected.id);
     for (const rootId of rootIds.length > 0 ? rootIds : [affected.id]) {
       const root = unhealthyById.get(rootId) || affected;
-      const key = root.errorCode || root.id;
-      const existing = roots.get(key);
+      const legacyId = root.errorCode || root.id;
+      const dedupeKey = `${root.id}:${legacyId}`;
+      const existing = roots.get(dedupeKey);
       const capabilityIds = uniqueStrings([
         ...(existing?.capabilityIds || []),
         ...root.capabilityIds,
@@ -180,15 +191,16 @@ function buildRootCauses(checks) {
       ]);
       const affectedCheckIds = uniqueStrings([...(existing?.affectedCheckIds || []), affected.id]);
       if (existing) {
-        roots.set(key, {
+        roots.set(dedupeKey, {
           ...existing,
           status: statusRank(root.status) > statusRank(existing.status) ? root.status : existing.status,
           capabilityIds,
           affectedCheckIds,
         });
       } else {
-        roots.set(key, {
-          id: key,
+        roots.set(dedupeKey, {
+          id: legacyId,
+          dedupeKey,
           errorCode: root.errorCode,
           checkId: root.id,
           label: root.label,
@@ -198,15 +210,78 @@ function buildRootCauses(checks) {
           capabilityIds,
           affectedCheckIds,
           recovery: root.recovery,
+          impact: root.impact || null,
+          suppressionReason: root.suppressionReason || null,
+          nextRetryAt: root.nextRetryAt || root.nextDueAt || null,
+          verification: root.verification || null,
+          runbook: root.runbook || null,
         });
       }
     }
   }
 
-  return [...roots.values()].sort((left, right) => (
+  const values = [...roots.values()];
+  const legacyIdCounts = values.reduce((counts, cause) => {
+    counts.set(cause.id, Number(counts.get(cause.id) || 0) + 1);
+    return counts;
+  }, new Map());
+  return values.map((cause) => (
+    legacyIdCounts.get(cause.id) > 1
+      ? { ...cause, id: cause.dedupeKey }
+      : cause
+  )).sort((left, right) => (
     statusRank(right.status) - statusRank(left.status)
     || left.label.localeCompare(right.label)
   ));
+}
+
+function buildManualActions(rootCauses) {
+  const actions = new Map();
+  for (const cause of rootCauses) {
+    const recovery = cause?.recovery;
+    if (!recovery || recovery.automatic === true || recovery.kind !== 'manual') continue;
+    const id = `manual:${cause.errorCode || cause.checkId || cause.id}`;
+    const existing = actions.get(id);
+    if (existing) {
+      existing.rootCauseIds = uniqueStrings([...existing.rootCauseIds, cause.id]);
+      existing.affectedCheckIds = uniqueStrings([
+        ...existing.affectedCheckIds,
+        ...(cause.affectedCheckIds || []),
+      ]);
+      continue;
+    }
+    actions.set(id, {
+      id,
+      label: recovery.label || `Resolve ${cause.label}.`,
+      owner: cause.owner || 'unassigned',
+      rootCauseIds: [cause.id],
+      affectedCheckIds: uniqueStrings(cause.affectedCheckIds),
+      impact: cause.impact || null,
+      runbook: cause.runbook || null,
+      approvalRequired: true,
+    });
+  }
+  return [...actions.values()];
+}
+
+function buildSuppressedSymptoms(checks, rootCauses) {
+  const unhealthyIds = new Set(
+    checks.filter((check) => check.status !== 'pass').map((check) => check.id),
+  );
+  return checks.flatMap((check) => {
+    if (check.status === 'pass') return [];
+    const unhealthyDependencies = check.dependsOn.filter((id) => unhealthyIds.has(id));
+    if (unhealthyDependencies.length === 0) return [];
+    const suppressedBy = uniqueStrings(rootCauses
+      .filter((cause) => cause.affectedCheckIds.includes(check.id))
+      .map((cause) => cause.id));
+    return [{
+      checkId: check.id,
+      errorCode: check.errorCode,
+      suppressedBy,
+      reason: `Dependent symptom is suppressed while ${unhealthyDependencies.join(', ')} remains unhealthy.`,
+    }];
+  });
 }
 
 function buildCapabilities(checks, rootCauses, manifest = SERVICE_MANIFEST) {
@@ -269,6 +344,8 @@ function buildSystemReadiness(rawGroups = [], options = {}) {
   }, { passed: 0, warnings: 0, failed: 0, total: 0, blockingFailures: 0 });
 
   const rootCauses = buildRootCauses(checks);
+  const manualActions = buildManualActions(rootCauses);
+  const suppressedSymptoms = buildSuppressedSymptoms(checks, rootCauses);
   const capabilities = buildCapabilities(checks, rootCauses, manifest);
   const hasBlockedCapability = capabilities.some((capability) => capability.status === 'blocked');
   const hasLegacyBlockingFailure = checks.some((check) => (
@@ -288,6 +365,8 @@ function buildSystemReadiness(rawGroups = [], options = {}) {
     summary,
     capabilities,
     rootCauses,
+    manualActions,
+    suppressedSymptoms,
     groups,
   };
 }
@@ -321,7 +400,7 @@ function evaluateHermesWorker({
   const runStatus = String(
     (hasServiceHeartbeat ? heartbeat.status : null) || worker?.status || '',
   ).toLowerCase();
-  const heartbeatStatusValid = ['success', 'succeeded', 'healthy', 'warning'].includes(runStatus);
+  const heartbeatStatusValid = ['success', 'succeeded', 'healthy', 'warning', 'blocked'].includes(runStatus);
   const runSummary = (hasServiceHeartbeat ? heartbeat.detail : null) || worker?.summary || null;
   const lastSuccessAt = heartbeat?.lastSuccessAt
     || worker?.lastSuccessAt
@@ -396,6 +475,27 @@ function evaluateHermesWorker({
       now,
       impact: 'This automation is not completing successfully.',
       recovery,
+      provenance,
+    });
+  }
+
+  if (runStatus === 'blocked') {
+    const blockedBy = String(heartbeat?.blockedBy || 'portfolio.live');
+    return makeCheck({
+      id: `hermes.${worker.key}`,
+      label,
+      status: 'warn',
+      blocking: true,
+      dependsOn: blockedBy === 'portfolio.live' ? ['ibkr.gateway'] : [],
+      summary: `${label} completed but is blocked by ${blockedBy}.`,
+      errorCode: heartbeat?.errorCode || 'HERMES_DEPENDENCY_BLOCKED',
+      detail: runSummary,
+      observedAt: lastRun,
+      lastSuccessAt,
+      nextDueAt,
+      now,
+      impact: 'The worker is scheduled and healthy, but live-dependent analysis is paused.',
+      recovery: null,
       provenance,
     });
   }
@@ -550,15 +650,26 @@ function evaluateGmailIngestion({
 }) {
   const authRecovery = {
     kind: 'manual',
-    label: 'Re-authorize the configured Gmail account in secret hermes/gmail/oauth, then invoke market-dashboard-gmail-ingestor-v2 once.',
+    label: 'Run the OAuth-only probe. Re-authorize or rotate hermes/gmail/oauth only if that probe fails.',
   };
-  const retryRecovery = {
+  const scheduleRecovery = {
+    kind: 'manual',
+    label: 'Inspect the owned Scheduler state and latest Lambda timeout logs; schedule activation or deployment requires operator approval.',
+  };
+  const investigateRecovery = {
+    kind: 'manual',
+    label: 'Inspect the Gmail poll heartbeat, Lambda logs, and retained failure queue before choosing a recovery action.',
+  };
+  const transientRetryRecovery = {
     kind: 'command',
-    label: 'Retry the configured Gmail incremental poll, then refresh readiness.',
+    label: 'Retry one bounded Gmail poll from the verified scheduled poller, then refresh readiness.',
     command: 'Retry the configured Gmail incremental poll',
   };
   const hasServiceHeartbeat = Boolean(heartbeat && typeof heartbeat === 'object');
-  const observedAt = (hasServiceHeartbeat ? heartbeat.finishedAt || heartbeat.observedAt : null)
+  const heartbeatObservedAt = hasServiceHeartbeat
+    ? heartbeat.finishedAt || heartbeat.observedAt || null
+    : null;
+  const observedAt = heartbeatObservedAt
     || metrics?.latestAt
     || inbox?.lastUpdated
     || null;
@@ -576,7 +687,7 @@ function evaluateGmailIngestion({
     : {};
   const detail = hasServiceHeartbeat
     ? `Account: ${account || heartbeat?.accountEmail || 'unknown'}; heartbeat status: ${heartbeatStatus || 'unknown'}; messages: ${Number(heartbeatCounts.messages || 0)}; stored: ${Number(heartbeatCounts.stored || 0)}; errors: ${Number(heartbeatCounts.errors || 0)}.`
-    : `Account: ${account || 'unknown'}; Lambda invocations: ${Number(metrics?.invocations || 0)}; errors: ${Number(metrics?.errors || 0)}.`;
+    : `Account: ${account || 'unknown'}; Lambda invocations: ${Number(metrics?.invocations || 0)}; errors: ${Number(metrics?.errors || 0)}; maximum duration: ${Number(metrics?.maxDurationMs || 0)}ms.`;
   const provenance = hasServiceHeartbeat ? {
     source: 'service-heartbeat-table',
     serviceId: heartbeat.serviceId || `gmail:${String(account || '').toLowerCase()}`,
@@ -609,7 +720,25 @@ function evaluateGmailIngestion({
         nextDueAt,
         now,
         impact: 'A manual poll cannot prove Gmail ingestion remains scheduled.',
-        recovery: retryRecovery,
+        recovery: scheduleRecovery,
+        provenance,
+      });
+    }
+    if (exceedsFutureClockSkew(heartbeatObservedAt, now)) {
+      return makeCheck({
+        id: 'gmail.ingestion',
+        label: 'Gmail authentication and ingestion',
+        status: 'fail',
+        blocking: true,
+        summary: 'The latest Gmail heartbeat is more than 30 seconds ahead of the dashboard clock.',
+        errorCode: 'GMAIL_HEARTBEAT_FUTURE_TIMESTAMP',
+        detail: `Received ${heartbeatObservedAt}; future clock skew beyond 30 seconds is not accepted as current telemetry.`,
+        observedAt,
+        lastSuccessAt: inbox?.lastSuccessAt || null,
+        nextDueAt: null,
+        now,
+        impact: 'Future-dated telemetry cannot prove that the scheduled poller is currently healthy.',
+        recovery: investigateRecovery,
         provenance,
       });
     }
@@ -636,10 +765,94 @@ function evaluateGmailIngestion({
       });
     }
 
+    const timeoutFailure = heartbeatStatus === 'timeout'
+      || heartbeatErrorCode === 'GMAIL_INVOCATION_TIMEOUT'
+      || heartbeatErrorCode === 'GMAIL_SHUTDOWN_MARGIN_REACHED';
+    if (timeoutFailure) {
+      return makeCheck({
+        id: 'gmail.ingestion',
+        label: 'Gmail authentication and ingestion',
+        status: 'fail',
+        blocking: true,
+        summary: 'The scheduled Gmail invocation exhausted its bounded processing window.',
+        errorCode: 'GMAIL_INVOCATION_TIMEOUT',
+        detail: heartbeat.detail || detail,
+        observedAt,
+        lastSuccessAt,
+        nextDueAt,
+        now,
+        impact: 'The cursor and message checkpoints require inspection before another poll is attempted.',
+        recovery: investigateRecovery,
+        provenance,
+      });
+    }
+
+    if (heartbeatErrorCode === 'GMAIL_HEARTBEAT_WRITE_FAILED') {
+      return makeCheck({
+        id: 'gmail.ingestion',
+        label: 'Gmail authentication and ingestion',
+        status: 'fail',
+        blocking: true,
+        summary: 'The poller could not persist its authoritative service heartbeat.',
+        errorCode: 'GMAIL_HEARTBEAT_WRITE_FAILED',
+        detail: heartbeat.detail || detail,
+        observedAt,
+        lastSuccessAt,
+        nextDueAt,
+        now,
+        impact: 'Ingestion health cannot be proven even if message processing occurred.',
+        recovery: investigateRecovery,
+        provenance,
+      });
+    }
+
+    if (heartbeatErrorCode === 'GMAIL_BACKLOG_STALLED') {
+      return makeCheck({
+        id: 'gmail.ingestion',
+        label: 'Gmail authentication and ingestion',
+        status: 'fail',
+        blocking: true,
+        summary: 'The Gmail backlog is no longer making checkpointed progress.',
+        errorCode: 'GMAIL_BACKLOG_STALLED',
+        detail: heartbeat.detail || detail,
+        observedAt,
+        lastSuccessAt,
+        nextDueAt,
+        now,
+        impact: 'Queued email products will remain delayed until the stalled record is isolated.',
+        recovery: investigateRecovery,
+        provenance,
+      });
+    }
+
+    if (heartbeatStatus === 'warning') {
+      return makeCheck({
+        id: 'gmail.ingestion',
+        label: 'Gmail authentication and ingestion',
+        status: 'warn',
+        blocking: true,
+        summary: 'Gmail polling is current, but one or more immutable artifacts require recovery.',
+        errorCode: heartbeatErrorCode || 'GMAIL_QUARANTINED_ARTIFACTS_PENDING',
+        detail: heartbeat.detail || detail,
+        observedAt,
+        lastSuccessAt,
+        nextDueAt,
+        now,
+        impact: 'Unaffected email products continue ingesting; quarantined products remain unavailable.',
+        recovery: investigateRecovery,
+        provenance,
+      });
+    }
+
     if (heartbeatStatus === 'error' || heartbeatStatus === 'failed') {
       const messages = Number(heartbeatCounts.messages || 0);
       const errors = Number(heartbeatCounts.errors || 0);
       const partial = errors > 0 && (errors < messages || Number(heartbeatCounts.stored || 0) > 0);
+      const retryable = new Set([
+        'GMAIL_PROVIDER_UNAVAILABLE',
+        'GMAIL_RATE_LIMITED',
+        'GMAIL_TRANSIENT_ERROR',
+      ]).has(heartbeatErrorCode);
       return makeCheck({
         id: 'gmail.ingestion',
         label: 'Gmail authentication and ingestion',
@@ -657,7 +870,7 @@ function evaluateGmailIngestion({
         impact: partial
           ? 'Some email updates may be delayed or missing.'
           : 'The Gmail ingestion Lambda is not completing successfully.',
-        recovery: partial ? retryRecovery : authRecovery,
+        recovery: retryable ? transientRetryRecovery : investigateRecovery,
         provenance,
       });
     }
@@ -676,7 +889,26 @@ function evaluateGmailIngestion({
         nextDueAt,
         now,
         impact: 'Email-driven dashboard data is not being refreshed.',
-        recovery: retryRecovery,
+        recovery: scheduleRecovery,
+        provenance,
+      });
+    }
+
+    if (heartbeatStatus === 'in_progress') {
+      return makeCheck({
+        id: 'gmail.ingestion',
+        label: 'Gmail authentication and ingestion',
+        status: 'warn',
+        blocking: true,
+        summary: 'The scheduled Gmail poll checkpointed a bounded batch and has more work queued.',
+        errorCode: heartbeatErrorCode || 'GMAIL_BACKLOG_IN_PROGRESS',
+        detail,
+        observedAt,
+        lastSuccessAt,
+        nextDueAt,
+        now,
+        impact: 'Email-driven products may lag while the retained backlog drains.',
+        recovery: investigateRecovery,
         provenance,
       });
     }
@@ -695,7 +927,7 @@ function evaluateGmailIngestion({
         nextDueAt,
         now,
         impact: 'Gmail ingestion cannot be assumed healthy.',
-        recovery: authRecovery,
+        recovery: investigateRecovery,
         provenance,
       });
     }
@@ -714,7 +946,7 @@ function evaluateGmailIngestion({
         nextDueAt,
         now,
         impact: 'The schedule may still be invoking an old or unmanaged ingestion package.',
-        recovery: authRecovery,
+        recovery: investigateRecovery,
         provenance,
       });
     }
@@ -734,20 +966,55 @@ function evaluateGmailIngestion({
     });
   }
 
+  const maxDurationMs = Number(metrics?.maxDurationMs || metrics?.durationMaximum || 0);
+  const timeoutObserved = metrics?.timedOut === true
+    || (Number(metrics?.errors || 0) > 0 && maxDurationMs >= 295_000);
+  const noScheduledInvocation = !metrics?.error && Number(metrics?.invocations || 0) === 0;
+  const inboxErrorCode = String(inbox?.errorCode || '').toUpperCase();
+  const inboxAuthFailure = ['GMAIL_AUTH_REQUIRED', 'GMAIL_OAUTH_CLIENT_DISABLED']
+    .includes(inboxErrorCode);
+  const inboxHeartbeatFailure = inboxErrorCode === 'GMAIL_HEARTBEAT_WRITE_FAILED';
+  const inboxBacklogStalled = [
+    'GMAIL_BACKLOG_STALLED',
+    'GMAIL_POISON_MESSAGES_QUARANTINED',
+  ].includes(inboxErrorCode);
+  const missingErrorCode = timeoutObserved
+    ? 'GMAIL_INVOCATION_TIMEOUT'
+    : (inboxAuthFailure
+      ? inboxErrorCode
+      : (inboxHeartbeatFailure || inboxBacklogStalled
+        ? inboxErrorCode
+        : (noScheduledInvocation ? 'GMAIL_SCHEDULE_MISSING' : 'GMAIL_HEARTBEAT_MISSING')));
   return makeCheck({
     id: 'gmail.ingestion',
     label: 'Gmail authentication and ingestion',
     status: 'fail',
     blocking: true,
-    summary: 'No typed Gmail service heartbeat was available; Lambda metrics alone cannot prove ingestion health.',
-    errorCode: 'GMAIL_HEARTBEAT_MISSING',
+    summary: timeoutObserved
+      ? 'The scheduled Gmail Lambda is reaching its timeout without writing a typed heartbeat.'
+      : (inboxAuthFailure
+        ? 'The OAuth-only Gmail state indicates authorization is required, but no scheduled heartbeat is healthy.'
+        : (inboxHeartbeatFailure
+          ? 'The Gmail poller reported that it could not persist its typed heartbeat.'
+          : (inboxBacklogStalled
+            ? 'The retained Gmail backlog requires operator inspection before another poll.'
+      : (noScheduledInvocation
+        ? 'No scheduled Gmail invocation or typed heartbeat was observed in the readiness window.'
+        : 'No typed Gmail service heartbeat was available; Lambda metrics alone cannot prove ingestion health.')))),
+    errorCode: missingErrorCode,
     detail,
     observedAt,
     lastSuccessAt,
     nextDueAt,
     now,
-    impact: 'Email-driven dashboard data is not trusted until the owned poller writes a fresh typed heartbeat.',
-    recovery: retryRecovery,
+    impact: timeoutObserved
+      ? 'The poller may have advanced partially; inspect durable checkpoints and retained failures before retrying.'
+      : 'Email-driven dashboard data is not trusted until the owned poller writes a fresh typed heartbeat.',
+    recovery: inboxAuthFailure
+      ? authRecovery
+      : (timeoutObserved || inboxHeartbeatFailure || inboxBacklogStalled
+        ? investigateRecovery
+        : scheduleRecovery),
   });
 }
 

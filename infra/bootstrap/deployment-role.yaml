@@ -15,6 +15,11 @@ Resources:
     Properties:
       RoleName: !Ref DeploymentRoleName
       Description: CloudFormation execution role limited to the market-dashboard readiness stack.
+      Tags:
+        - Key: market-dashboard:owner
+          Value: market-dashboard-readiness-v2
+        - Key: market-dashboard:purpose
+          Value: cloudformation-deployment
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -36,6 +41,12 @@ Resources:
                 Resource:
                   - !Sub arn:${AWS::Partition}:s3:::${ArtifactBucketName}
                   - !Sub arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*
+              - Sid: UseSamTransform
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                Resource:
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
               - Sid: ManageOwnedFunctions
                 Effect: Allow
                 Action:
@@ -44,22 +55,35 @@ Resources:
                   - lambda:GetFunction
                   - lambda:GetFunctionConfiguration
                   - lambda:GetFunctionConcurrency
-                  - lambda:GetFunctionEventInvokeConfig
+                  - lambda:GetFunctionCodeSigningConfig
+                  - lambda:GetFunctionRecursionConfig
+                  - lambda:GetFunctionScalingConfig
+                  - lambda:GetRuntimeManagementConfig
                   - lambda:ListTags
                   - lambda:UpdateFunctionCode
                   - lambda:UpdateFunctionConfiguration
                   - lambda:PutFunctionConcurrency
                   - lambda:DeleteFunctionConcurrency
-                  - lambda:PutFunctionEventInvokeConfig
-                  - lambda:UpdateFunctionEventInvokeConfig
-                  - lambda:DeleteFunctionEventInvokeConfig
                   - lambda:AddPermission
                   - lambda:RemovePermission
                   - lambda:TagResource
                   - lambda:UntagResource
                 Resource:
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-gmail-ingestor-v2
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hedgeye-pdf-processor-v1
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hermes-worker-v2
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hermes-cloud-watchdog-v1
+              - Sid: ManageOwnedFunctionEventInvokeConfigs
+                Effect: Allow
+                Action:
+                  - lambda:GetFunctionEventInvokeConfig
+                  - lambda:PutFunctionEventInvokeConfig
+                  - lambda:UpdateFunctionEventInvokeConfig
+                  - lambda:DeleteFunctionEventInvokeConfig
+                Resource:
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-gmail-ingestor-v2:$LATEST
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hedgeye-pdf-processor-v1:$LATEST
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hermes-worker-v2:$LATEST
               - Sid: ManageOwnedTables
                 Effect: Allow
                 Action:
@@ -71,12 +95,18 @@ Resources:
                   - dynamodb:DescribeTimeToLive
                   - dynamodb:UpdateContinuousBackups
                   - dynamodb:DescribeContinuousBackups
+                  - dynamodb:DescribeContributorInsights
+                  - dynamodb:DescribeKinesisStreamingDestination
+                  - dynamodb:GetResourcePolicy
+                  - dynamodb:ListTagsOfResource
                   - dynamodb:TagResource
                   - dynamodb:UntagResource
                 Resource:
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/MarketDashboardServiceHeartbeats
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/HermesInputSnapshots
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ResearchEventLedgerV2
+                  - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ResearchEntityEventsV1
+                  - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ResearchProductManifestsV1
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/PredictionMarketCatalogV2
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/RiskRangePublicationManifestsV2
               - Sid: ManageOwnedSchedules
@@ -90,26 +120,41 @@ Resources:
                   - scheduler:TagResource
                   - scheduler:UntagResource
                 Resource: !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-*-v2*
+              - Sid: ManageOwnedWatchdogRule
+                Effect: Allow
+                Action:
+                  - events:DeleteRule
+                  - events:DescribeRule
+                  - events:DisableRule
+                  - events:EnableRule
+                  - events:ListTagsForResource
+                  - events:ListTargetsByRule
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                  - events:TagResource
+                  - events:UntagResource
+                Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/market-dashboard-hermes-cloud-watchdog-v1
               - Sid: ManageOwnedQueueAndTopic
                 Effect: Allow
                 Action:
                   - sqs:CreateQueue
                   - sqs:DeleteQueue
                   - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:ListQueueTags
                   - sqs:SetQueueAttributes
                   - sqs:TagQueue
                   - sqs:UntagQueue
-                Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:market-dashboard-*-v2
-              - Sid: CreateQueueNeedsWildcard
-                Effect: Allow
-                Action: sqs:GetQueueUrl
-                Resource: '*'
+                Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:market-dashboard-runtime-failures-v2
               - Sid: ManageOwnedSns
                 Effect: Allow
                 Action:
                   - sns:CreateTopic
                   - sns:DeleteTopic
                   - sns:GetTopicAttributes
+                  - sns:GetDataProtectionPolicy
+                  - sns:ListTagsForResource
                   - sns:SetTopicAttributes
                   - sns:Subscribe
                   - sns:Unsubscribe
@@ -122,6 +167,7 @@ Resources:
                 Action:
                   - cloudwatch:DeleteAlarms
                   - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListTagsForResource
                   - cloudwatch:PutMetricAlarm
                   - cloudwatch:TagResource
                   - cloudwatch:UntagResource
@@ -145,8 +191,8 @@ Resources:
                   - iam:TagRole
                   - iam:UntagRole
                 Resource:
-                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/market-dashboard-*
-                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/market-dashboard-readiness-v2-*
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/market-dashboard-scheduler-invoke-v2
+                  - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/market-dashboard-readine*
               - Sid: ManageOwnedLogGroups
                 Effect: Allow
                 Action:

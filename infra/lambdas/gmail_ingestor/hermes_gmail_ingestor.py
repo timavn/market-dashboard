@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -38,13 +39,15 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from pathlib import PurePosixPath
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from parse_hedgeye_email_html import parse_html_snapshot, save_snapshot_to_dynamodb
 from research_intelligence import (
     PARSER_VERSION as SECURITY_INTELLIGENCE_PARSER_VERSION,
+    finalize_snapshot_intelligence,
     persist_snapshot_failure,
     persist_snapshot_intelligence,
     product_definition,
@@ -69,7 +72,31 @@ GMAIL_QUERY = os.environ.get(
     "HERMES_GMAIL_QUERY",
     "newer_than:30d hedgeye",
 )
-MAX_MESSAGES = int(os.environ.get("HERMES_MAX_MESSAGES", "500"))
+MAX_MESSAGES_PER_INVOCATION = min(
+    25,
+    max(1, int(os.environ.get("HERMES_MAX_MESSAGES", "25"))),
+)
+DISCOVERY_PAGE_SIZE = min(
+    100,
+    max(1, int(os.environ.get("HERMES_DISCOVERY_PAGE_SIZE", "100"))),
+)
+GMAIL_HTTP_TIMEOUT_SECONDS = 30
+WORK_BUDGET_SECONDS = min(
+    240,
+    max(1, int(os.environ.get("HERMES_WORK_BUDGET_SECONDS", "240"))),
+)
+MIN_REMAINING_TIME_MS = max(
+    60_000,
+    int(os.environ.get("HERMES_MIN_REMAINING_TIME_MS", "60000")),
+)
+MESSAGE_QUEUE_MAX_ATTEMPTS = min(
+    3,
+    max(1, int(os.environ.get("HERMES_MESSAGE_QUEUE_MAX_ATTEMPTS", "3"))),
+)
+BACKLOG_STALLED_SECONDS = max(
+    15 * 60,
+    int(os.environ.get("HERMES_BACKLOG_STALLED_SECONDS", str(60 * 60))),
+)
 ATTACHMENT_TTL_DAYS = int(os.environ.get("HERMES_LEDGER_TTL_DAYS", "730"))
 SECRET_CACHE_SECONDS = int(os.environ.get("HERMES_SECRET_CACHE_SECONDS", str(6 * 60 * 60)))
 GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1"
@@ -78,35 +105,82 @@ MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
 MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
-MATERIALIZED_DATA_VERSION = "gmail-materialized-v3-security-intelligence"
+MATERIALIZED_DATA_VERSION = "gmail-materialized-v4-canonical-verification"
 RESEARCH_PARSER_VERSION = "research-event-ledger-v2"
 MATERIALIZATION_WRITE_RETRIES = 3
 MATERIALIZATION_MAX_ATTEMPTS = 3
+IMMUTABLE_ARTIFACT_EVIDENCE_FIELDS = (
+    "s3Bucket",
+    "s3Key",
+    "contentSha256",
+    "byteSize",
+    "receivedAt",
+    "s3ArtifactCreated",
+)
 ATTACHMENT_CLAIM_STALE_SECONDS = int(
     os.environ.get("HERMES_ATTACHMENT_CLAIM_STALE_SECONDS", str(10 * 60))
 )
 TEXTRACT_CLAIM_STALE_SECONDS = 60 * 60
 BUILD_VERSION = os.environ.get("BUILD_VERSION", "development")
 HEARTBEAT_TTL_DAYS = int(os.environ.get("SERVICE_HEARTBEAT_TTL_DAYS", "90"))
-GMAIL_ACCOUNT = os.environ.get("HERMES_GMAIL_ACCOUNT", "timsmithaviation@gmail.com")
-GMAIL_SERVICE_ID = f"gmail:{GMAIL_ACCOUNT.lower()}"
+GMAIL_ACCOUNT = str(
+    os.environ.get("HERMES_GMAIL_ACCOUNT", "timsmithaviation@gmail.com")
+).strip().casefold()
+GMAIL_SERVICE_ID = f"gmail:{GMAIL_ACCOUNT}"
 GMAIL_SCHEDULE_ID = os.environ.get(
     "HERMES_GMAIL_SCHEDULE_ID",
     "market-dashboard-gmail-v2-every-15m",
 )
 RUNTIME_STATE_MESSAGE_ID = f"runtime#gmail#{GMAIL_ACCOUNT.lower()}"
 HISTORY_CURSOR_ATTACHMENT_ID = "history-cursor"
+MESSAGE_QUEUE_ATTACHMENT_PREFIX = "message-queue#"
+MESSAGE_QUEUE_ACTIVE_STATUSES = {"PENDING", "RETRYABLE", "IN_PROGRESS"}
+MESSAGE_QUEUE_TERMINAL_STATUSES = {"COMPLETED", "QUARANTINED"}
+MAX_RECORDED_QUARANTINES = 100
+RISK_RANGE_BUILD_RECOVERY_ERROR_CODES = frozenset(
+    {
+        "RISK_RANGE_PUBLICATION_INVALID",
+        "RISK_RANGE_DUPLICATE_TICKER_CONFLICT",
+        "RISK_RANGE_TRANSACTION_LIMIT_EXCEEDED",
+        "RISK_RANGE_TRANSACTION_WRITE_FAILED",
+        "RISK_RANGE_PUBLICATION_VERIFICATION_FAILED",
+        "RISK_RANGE_STALE_PUBLICATION_REJECTED",
+        "RISK_RANGE_PUBLICATION_ORDER_UNVERIFIED",
+    }
+)
 PDF_PROCESSOR_FUNCTION_NAME = os.environ.get(
     "PDF_PROCESSOR_FUNCTION_NAME",
     "market-dashboard-hedgeye-pdf-processor-v1",
 )
 
+AWS_CLIENT_CONFIG = Config(
+    connect_timeout=3,
+    read_timeout=15,
+    retries={"max_attempts": 2, "mode": "standard"},
+)
 
-secretsmanager = boto3.client("secretsmanager", region_name=AWS_REGION)
-dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-s3 = boto3.client("s3", region_name=AWS_REGION)
-cloudwatch = boto3.client("cloudwatch", region_name=AWS_REGION)
-lambda_client = boto3.client("lambda", region_name=AWS_REGION)
+
+secretsmanager = boto3.client(
+    "secretsmanager",
+    region_name=AWS_REGION,
+    config=AWS_CLIENT_CONFIG,
+)
+dynamodb = boto3.resource(
+    "dynamodb",
+    region_name=AWS_REGION,
+    config=AWS_CLIENT_CONFIG,
+)
+s3 = boto3.client("s3", region_name=AWS_REGION, config=AWS_CLIENT_CONFIG)
+cloudwatch = boto3.client(
+    "cloudwatch",
+    region_name=AWS_REGION,
+    config=AWS_CLIENT_CONFIG,
+)
+lambda_client = boto3.client(
+    "lambda",
+    region_name=AWS_REGION,
+    config=AWS_CLIENT_CONFIG,
+)
 
 
 _oauth_secret_cache: Optional[Dict[str, Any]] = None
@@ -117,6 +191,26 @@ class RetryableResearchMaterializationError(RuntimeError):
 
     error_code = "GMAIL_RESEARCH_MATERIALIZATION_ERROR"
     retryable = True
+
+
+class GmailAccountProvenanceError(RuntimeError):
+    """The OAuth token is not proven to belong to the configured mailbox."""
+
+    error_code = "GMAIL_ACCOUNT_MISMATCH"
+
+
+class GmailStateStoreError(RuntimeError):
+    """The durable ingestion queue/cursor could not be read or checkpointed."""
+
+    error_code = "GMAIL_STATE_STORE_ERROR"
+
+
+class GmailInvocationBudgetYield(RuntimeError):
+    """Stop safely before another unit of discovery work."""
+
+    def __init__(self, error_code: str) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
 
 
 REPORT_RULES = report_rules()
@@ -231,27 +325,41 @@ def gmail_path(user_id: str, suffix: str) -> str:
     return f"{GMAIL_API_ROOT}/users/{urllib.parse.quote(user_id, safe='')}/{suffix.lstrip('/')}"
 
 
-def list_message_ids(access_token: str, user_id: str) -> List[str]:
-    message_ids: List[str] = []
-    page_token: Optional[str] = None
+class GmailDiscoveryPage(list):
+    """One resumable Gmail discovery page and its opaque continuation token."""
 
-    # Drain every page before advancing the history cursor. Truncating a full
-    # sync and then saving the mailbox's newest historyId permanently skips the
-    # messages on later pages. Message processing itself is immutable and
-    # idempotent, so a Lambda timeout safely resumes on the next poll without
-    # ever acknowledging an incompletely listed mailbox.
-    while True:
-        params = {"q": GMAIL_QUERY, "maxResults": min(500, max(1, MAX_MESSAGES))}
-        if page_token:
-            params["pageToken"] = page_token
+    def __init__(
+        self,
+        message_ids: Iterable[str],
+        *,
+        next_page_token: Optional[str],
+    ) -> None:
+        super().__init__(message_ids)
+        self.next_page_token = (
+            str(next_page_token) if next_page_token is not None else None
+        )
 
-        data = http_json("GET", gmail_path(user_id, "messages"), access_token=access_token, params=params)
-        message_ids.extend(msg["id"] for msg in data.get("messages", []) if msg.get("id"))
-        page_token = data.get("nextPageToken")
-        if not page_token:
-            break
 
-    return message_ids
+def list_message_ids(
+    access_token: str,
+    user_id: str,
+    *,
+    page_token: Optional[str] = None,
+) -> GmailDiscoveryPage:
+    """Read exactly one newest-first query page."""
+    params = {"q": GMAIL_QUERY, "maxResults": DISCOVERY_PAGE_SIZE}
+    if page_token:
+        params["pageToken"] = page_token
+    data = http_json(
+        "GET",
+        gmail_path(user_id, "messages"),
+        access_token=access_token,
+        params=params,
+    )
+    return GmailDiscoveryPage(
+        (msg["id"] for msg in data.get("messages", []) if msg.get("id")),
+        next_page_token=data.get("nextPageToken"),
+    )
 
 
 def _gmail_label_name_from_query(query: str) -> Optional[str]:
@@ -275,6 +383,20 @@ def resolve_label_id(access_token: str, user_id: str) -> Optional[str]:
 
 def get_profile_history_id(access_token: str, user_id: str) -> Optional[str]:
     payload = http_json("GET", gmail_path(user_id, "profile"), access_token=access_token)
+    expected_account = str(GMAIL_ACCOUNT or "").strip().casefold()
+    observed_account = str(payload.get("emailAddress") or "").strip().casefold()
+    if not expected_account:
+        raise GmailAccountProvenanceError(
+            "The configured Gmail account is empty."
+        )
+    if not observed_account:
+        raise GmailAccountProvenanceError(
+            "The authenticated Gmail profile did not include a verifiable emailAddress."
+        )
+    if observed_account != expected_account:
+        raise GmailAccountProvenanceError(
+            "The authenticated Gmail profile does not match the configured account."
+        )
     value = payload.get("historyId")
     return str(value) if value is not None else None
 
@@ -285,32 +407,36 @@ def list_history_message_ids(
     start_history_id: str,
     *,
     label_id: Optional[str],
-) -> List[str]:
-    """Read newly-added message IDs from Gmail history without replaying the mailbox."""
+    page_token: Optional[str] = None,
+) -> GmailDiscoveryPage:
+    """Read exactly one chronological history page."""
     message_ids: List[str] = []
     seen = set()
-    page_token: Optional[str] = None
-    while True:
-        params: Dict[str, Any] = {
-            "startHistoryId": start_history_id,
-            "historyTypes": "messageAdded",
-            "maxResults": min(500, max(1, MAX_MESSAGES)),
-        }
-        if label_id:
-            params["labelId"] = label_id
-        if page_token:
-            params["pageToken"] = page_token
-        payload = http_json("GET", gmail_path(user_id, "history"), access_token=access_token, params=params)
-        for history in payload.get("history", []):
-            for added in history.get("messagesAdded", []):
-                message_id = added.get("message", {}).get("id")
-                if message_id and message_id not in seen:
-                    seen.add(message_id)
-                    message_ids.append(message_id)
-        page_token = payload.get("nextPageToken")
-        if not page_token:
-            break
-    return message_ids
+    params: Dict[str, Any] = {
+        "startHistoryId": start_history_id,
+        "historyTypes": "messageAdded",
+        "maxResults": DISCOVERY_PAGE_SIZE,
+    }
+    if label_id:
+        params["labelId"] = label_id
+    if page_token:
+        params["pageToken"] = page_token
+    payload = http_json(
+        "GET",
+        gmail_path(user_id, "history"),
+        access_token=access_token,
+        params=params,
+    )
+    for history in payload.get("history", []):
+        for added in history.get("messagesAdded", []):
+            message_id = added.get("message", {}).get("id")
+            if message_id and message_id not in seen:
+                seen.add(message_id)
+                message_ids.append(message_id)
+    return GmailDiscoveryPage(
+        message_ids,
+        next_page_token=payload.get("nextPageToken"),
+    )
 
 
 def read_ingestion_state(table: Any) -> Dict[str, Any]:
@@ -323,26 +449,359 @@ def read_ingestion_state(table: Any) -> Dict[str, Any]:
             ConsistentRead=True,
         ).get("Item") or {}
     except Exception as err:
-        print(f"[gmail] state read unavailable: {type(err).__name__}")
-        return {}
+        raise GmailStateStoreError(
+            f"Durable Gmail ingestion state read failed: {type(err).__name__}"
+        ) from err
 
 
 def write_ingestion_state(table: Any, **updates: Any) -> None:
-    now = utc_now().isoformat()
-    current = read_ingestion_state(table)
-    item = {
-        **current,
-        "messageId": RUNTIME_STATE_MESSAGE_ID,
-        "attachmentId": HISTORY_CURSOR_ATTACHMENT_ID,
-        "status": updates.pop("status", current.get("status", "READY")),
-        "accountEmail": GMAIL_ACCOUNT,
+    try:
+        now = utc_now().isoformat()
+        current = read_ingestion_state(table)
+        item = {
+            **current,
+            "messageId": RUNTIME_STATE_MESSAGE_ID,
+            "attachmentId": HISTORY_CURSOR_ATTACHMENT_ID,
+            "status": updates.pop("status", current.get("status", "READY")),
+            "accountEmail": GMAIL_ACCOUNT,
+            "query": GMAIL_QUERY,
+            "createdAt": current.get("createdAt") or now,
+            "updatedAt": now,
+            "ttl": ttl_epoch(),
+            **updates,
+        }
+        table.put_item(Item=item)
+    except GmailStateStoreError:
+        raise
+    except Exception as err:
+        raise GmailStateStoreError(
+            f"Durable Gmail ingestion state write failed: {type(err).__name__}"
+        ) from err
+
+
+def _queue_batch_id(
+    _message_ids: Iterable[str],
+    *,
+    cursor_before: Optional[str],
+    pending_history_id: Optional[str],
+    poll_mode: str,
+    force_backfill: bool,
+) -> str:
+    payload = {
+        "account": GMAIL_ACCOUNT,
         "query": GMAIL_QUERY,
-        "createdAt": current.get("createdAt") or now,
-        "updatedAt": now,
-        "ttl": ttl_epoch(),
-        **updates,
+        "cursorBefore": cursor_before,
+        "pendingHistoryId": pending_history_id,
+        "pollMode": poll_mode,
+        "forceBackfill": force_backfill,
     }
-    table.put_item(Item=item)
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:24]
+
+
+def persist_discovered_message_queue(
+    table: Any,
+    message_ids: List[str],
+    *,
+    cursor_before: Optional[str],
+    pending_history_id: Optional[str],
+    poll_mode: str,
+    force_backfill: bool,
+    start_sequence: int = 0,
+    sequence_direction: int = 1,
+    budget_check: Optional[Callable[[], Optional[str]]] = None,
+) -> str:
+    """Durably record a page before the mailbox page token can advance.
+
+    Batch identity is independent of the discovered list, so a crash can
+    re-fetch and idempotently persist the same page. Newest-first query pages
+    use descending sequence values; later, older pages therefore sort first.
+    """
+    if sequence_direction not in {-1, 1}:
+        raise ValueError("sequence_direction must be -1 or 1")
+    ordered_ids = list(dict.fromkeys(
+        str(value) for value in message_ids if str(value)
+    ))
+    batch_id = _queue_batch_id(
+        (),
+        cursor_before=cursor_before,
+        pending_history_id=pending_history_id,
+        poll_mode=poll_mode,
+        force_backfill=force_backfill,
+    )
+    now = utc_now().isoformat()
+    if budget_check:
+        budget_reason = budget_check()
+        if budget_reason:
+            raise GmailInvocationBudgetYield(budget_reason)
+    existing_by_message_id = {
+        str(item.get("gmailMessageId") or ""): item
+        for item in read_message_queue(table, batch_id)
+        if item.get("gmailMessageId")
+    }
+    for index, gmail_message_id in enumerate(ordered_ids):
+        if budget_check:
+            budget_reason = budget_check()
+            if budget_reason:
+                raise GmailInvocationBudgetYield(budget_reason)
+        sequence = start_sequence + sequence_direction * index
+        if gmail_message_id in existing_by_message_id:
+            # users.history can repeat an ID across records or pages.
+            continue
+        sequence_key = (
+            f"p{sequence:018d}"
+            if sequence >= 0
+            else f"n{abs(sequence):018d}"
+        )
+        message_key = hashlib.sha256(
+            gmail_message_id.encode("utf-8")
+        ).hexdigest()[:16]
+        item = {
+            "messageId": RUNTIME_STATE_MESSAGE_ID,
+            "attachmentId": (
+                f"{MESSAGE_QUEUE_ATTACHMENT_PREFIX}{batch_id}#"
+                f"{sequence_key}#{message_key}"
+            ),
+            "batchId": batch_id,
+            "gmailMessageId": gmail_message_id,
+            "sequence": sequence,
+            "status": "PENDING",
+            "attemptCount": 0,
+            "createdAt": now,
+            "updatedAt": now,
+            "ttl": ttl_epoch(),
+        }
+        try:
+            table.put_item(
+                Item=item,
+                ConditionExpression=(
+                    "attribute_not_exists(#messageId) AND "
+                    "attribute_not_exists(#attachmentId)"
+                ),
+                ExpressionAttributeNames={
+                    "#messageId": "messageId",
+                    "#attachmentId": "attachmentId",
+                },
+            )
+        except ClientError as err:
+            if err.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise GmailStateStoreError(
+                    "Durable Gmail message queue write failed."
+                ) from err
+            existing = table.get_item(
+                Key={
+                    "messageId": RUNTIME_STATE_MESSAGE_ID,
+                    "attachmentId": item["attachmentId"],
+                },
+                ConsistentRead=True,
+            ).get("Item") or {}
+            if (
+                existing.get("batchId") != batch_id
+                or existing.get("gmailMessageId") != gmail_message_id
+                or int(existing.get("sequence", -1)) != sequence
+            ):
+                raise GmailStateStoreError(
+                    "Durable Gmail message queue idempotency conflict."
+                ) from err
+        except Exception as err:
+            raise GmailStateStoreError(
+                f"Durable Gmail message queue write failed: {type(err).__name__}"
+            ) from err
+    return batch_id
+
+
+def read_message_queue(table: Any, batch_id: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    exclusive_start_key = None
+    prefix = f"{MESSAGE_QUEUE_ATTACHMENT_PREFIX}{batch_id}#"
+    try:
+        while True:
+            query: Dict[str, Any] = {
+                "KeyConditionExpression": (
+                    "#messageId = :messageId AND "
+                    "begins_with(#attachmentId, :attachmentPrefix)"
+                ),
+                "ExpressionAttributeNames": {
+                    "#messageId": "messageId",
+                    "#attachmentId": "attachmentId",
+                },
+                "ExpressionAttributeValues": {
+                    ":messageId": RUNTIME_STATE_MESSAGE_ID,
+                    ":attachmentPrefix": prefix,
+                },
+                "ConsistentRead": True,
+            }
+            if exclusive_start_key:
+                query["ExclusiveStartKey"] = exclusive_start_key
+            response = table.query(**query)
+            items.extend(
+                item
+                for item in response.get("Items") or []
+                if item.get("batchId") == batch_id
+                and str(item.get("attachmentId") or "").startswith(prefix)
+            )
+            exclusive_start_key = response.get("LastEvaluatedKey")
+            if not exclusive_start_key:
+                break
+    except Exception as err:
+        raise GmailStateStoreError(
+            f"Durable Gmail message queue read failed: {type(err).__name__}"
+        ) from err
+    return sorted(
+        items,
+        key=lambda item: (
+            int(item.get("sequence", 0)),
+            str(item.get("attachmentId") or ""),
+        ),
+    )
+
+
+def _queue_item_is_stale(item: Dict[str, Any], now: datetime) -> bool:
+    try:
+        updated_at = datetime.fromisoformat(
+            str(item.get("updatedAt") or "").replace("Z", "+00:00")
+        )
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        updated_at = updated_at.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    return (now - updated_at).total_seconds() >= ATTACHMENT_CLAIM_STALE_SECONDS
+
+
+def claim_queued_message(
+    table: Any,
+    item: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Atomically claim a pending/retryable message or reclaim a stale lease."""
+    now = utc_now()
+    status = str(item.get("status") or "")
+    if status not in {"PENDING", "RETRYABLE"}:
+        if status != "IN_PROGRESS" or not _queue_item_is_stale(item, now):
+            return None
+    claimed = {
+        **item,
+        "status": "IN_PROGRESS",
+        "attemptCount": int(item.get("attemptCount") or 0) + 1,
+        "updatedAt": now.isoformat(),
+        "leaseExpiresAt": (
+            now + timedelta(seconds=ATTACHMENT_CLAIM_STALE_SECONDS)
+        ).isoformat(),
+        "ttl": ttl_epoch(),
+    }
+    try:
+        table.put_item(
+            Item=claimed,
+            ConditionExpression="#status = :expectedStatus AND #updatedAt = :expectedUpdatedAt",
+            ExpressionAttributeNames={
+                "#status": "status",
+                "#updatedAt": "updatedAt",
+            },
+            ExpressionAttributeValues={
+                ":expectedStatus": item.get("status"),
+                ":expectedUpdatedAt": item.get("updatedAt"),
+            },
+        )
+    except ClientError as err:
+        if err.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return None
+        raise GmailStateStoreError(
+            "Durable Gmail message lease claim failed."
+        ) from err
+    except Exception as err:
+        raise GmailStateStoreError(
+            f"Durable Gmail message lease claim failed: {type(err).__name__}"
+        ) from err
+    return claimed
+
+
+def checkpoint_queued_message(
+    table: Any,
+    claimed: Dict[str, Any],
+    *,
+    status: str,
+    error_code: Optional[str] = None,
+    error_detail: Optional[str] = None,
+) -> Dict[str, Any]:
+    if status not in MESSAGE_QUEUE_TERMINAL_STATUSES | {"RETRYABLE"}:
+        raise ValueError(f"Unsupported Gmail queue checkpoint status: {status}")
+    checkpoint = {
+        **claimed,
+        "status": status,
+        "updatedAt": utc_now().isoformat(),
+        "ttl": ttl_epoch(),
+    }
+    checkpoint.pop("leaseExpiresAt", None)
+    if error_code:
+        checkpoint["errorCode"] = error_code
+    else:
+        checkpoint.pop("errorCode", None)
+    if error_detail:
+        checkpoint["errorDetail"] = error_detail
+    else:
+        checkpoint.pop("errorDetail", None)
+    try:
+        table.put_item(
+            Item=checkpoint,
+            ConditionExpression="#status = :inProgress AND #updatedAt = :claimedAt",
+            ExpressionAttributeNames={
+                "#status": "status",
+                "#updatedAt": "updatedAt",
+            },
+            ExpressionAttributeValues={
+                ":inProgress": "IN_PROGRESS",
+                ":claimedAt": claimed.get("updatedAt"),
+            },
+        )
+    except ClientError as err:
+        if err.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise GmailStateStoreError(
+                "Durable Gmail message checkpoint lost its lease."
+            ) from err
+        raise GmailStateStoreError(
+            "Durable Gmail message checkpoint failed."
+        ) from err
+    except Exception as err:
+        raise GmailStateStoreError(
+            f"Durable Gmail message checkpoint failed: {type(err).__name__}"
+        ) from err
+    return checkpoint
+
+
+def invocation_budget_reason(
+    context: Any,
+    *,
+    monotonic_started_at: float,
+    reserve_seconds: int = 0,
+) -> Optional[str]:
+    elapsed = time.monotonic() - monotonic_started_at
+    if elapsed + max(0, reserve_seconds) >= WORK_BUDGET_SECONDS:
+        return "GMAIL_WORK_BUDGET_EXHAUSTED"
+    remaining = getattr(context, "get_remaining_time_in_millis", None)
+    if callable(remaining):
+        try:
+            required_remaining_ms = (
+                MIN_REMAINING_TIME_MS + max(0, reserve_seconds) * 1000
+            )
+            if int(remaining()) <= required_remaining_ms:
+                return "GMAIL_INVOCATION_NEAR_TIMEOUT"
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def gmail_call_budget_reason(
+    context: Any,
+    *,
+    monotonic_started_at: float,
+) -> Optional[str]:
+    """Reserve a full HTTP timeout in addition to the shutdown margin."""
+    return invocation_budget_reason(
+        context,
+        monotonic_started_at=monotonic_started_at,
+        reserve_seconds=GMAIL_HTTP_TIMEOUT_SECONDS,
+    )
 
 
 def classify_runtime_error(error: Exception) -> str:
@@ -391,7 +850,7 @@ def write_service_heartbeat(
     detail: Optional[str] = None,
     secret_version: Optional[str] = None,
     counts: Optional[Dict[str, int]] = None,
-) -> None:
+) -> bool:
     finished = utc_now()
     scheduled = trigger_source == "aws-scheduler" and schedule_id == GMAIL_SCHEDULE_ID
     service_id = GMAIL_SERVICE_ID if scheduled else f"{GMAIL_SERVICE_ID}:manual"
@@ -415,15 +874,26 @@ def write_service_heartbeat(
         item["errorCode"] = error_code
     if detail:
         item["detail"] = detail
+    heartbeat_written = True
     try:
         dynamodb.Table(HEARTBEAT_TABLE).put_item(Item=item)
     except Exception as err:
         # CloudWatch remains the out-of-band signal when the heartbeat store itself fails.
+        heartbeat_written = False
         print(f"[gmail] heartbeat write unavailable: {type(err).__name__}")
     try:
-        cloudwatch.put_metric_data(
-            Namespace="MarketDashboard/Readiness",
-            MetricData=[
+        metric_data = [
+            {
+                "MetricName": "Healthy",
+                "Dimensions": [{"Name": "ServiceId", "Value": service_id}],
+                "Timestamp": finished,
+                "Value": 1 if heartbeat_written and status == "success" else 0,
+                "Unit": "Count",
+            },
+        ]
+        if heartbeat_written:
+            metric_data.insert(
+                0,
                 {
                     "MetricName": "Heartbeat",
                     "Dimensions": [{"Name": "ServiceId", "Value": service_id}],
@@ -431,17 +901,24 @@ def write_service_heartbeat(
                     "Value": 1,
                     "Unit": "Count",
                 },
+            )
+        else:
+            metric_data.append(
                 {
-                    "MetricName": "Healthy",
+                    "MetricName": "HeartbeatWriteFailure",
                     "Dimensions": [{"Name": "ServiceId", "Value": service_id}],
                     "Timestamp": finished,
-                    "Value": 1 if status == "success" else 0,
+                    "Value": 1,
                     "Unit": "Count",
                 },
-            ],
+            )
+        cloudwatch.put_metric_data(
+            Namespace="MarketDashboard/Readiness",
+            MetricData=metric_data,
         )
     except Exception as err:
         print(f"[gmail] heartbeat metric unavailable: {type(err).__name__}")
+    return heartbeat_written
 
 
 def get_message(access_token: str, user_id: str, message_id: str) -> Dict[str, Any]:
@@ -728,6 +1205,14 @@ def _parse_ledger_datetime(item: Dict[str, Any]) -> datetime:
     return utc_now()
 
 
+def _immutable_artifact_evidence(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: item[key]
+        for key in IMMUTABLE_ARTIFACT_EVIDENCE_FIELDS
+        if item.get(key) is not None
+    }
+
+
 def claim_attachment(
     table: Any,
     *,
@@ -758,14 +1243,8 @@ def claim_attachment(
             Item=claim_item,
             ConditionExpression=(
                 "attribute_not_exists(messageId) "
-                "OR #status = :error "
-                "OR #status = :textractError"
+                "AND attribute_not_exists(attachmentId)"
             ),
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={
-                ":error": "ERROR",
-                ":textractError": "TEXTRACT_ERROR",
-            },
         )
         return True
     except ClientError as err:
@@ -776,6 +1255,37 @@ def claim_attachment(
     existing = table.get_item(Key=key, ConsistentRead=True).get("Item")
     expected_updated_at = existing.get("updatedAt") if existing else None
     existing_status = str(existing.get("status") or "") if existing else ""
+    if existing and existing_status in {"ERROR", "TEXTRACT_ERROR"}:
+        if not expected_updated_at:
+            return False
+        reclaimed_item = {
+            **claim_item,
+            **_immutable_artifact_evidence(existing),
+            "createdAt": existing.get("createdAt") or now,
+            "reclaimedAt": now,
+        }
+        try:
+            table.put_item(
+                Item=reclaimed_item,
+                ConditionExpression=(
+                    "(#status = :error OR #status = :textractError) "
+                    "AND #updatedAt = :expectedUpdatedAt"
+                ),
+                ExpressionAttributeNames={
+                    "#status": "status",
+                    "#updatedAt": "updatedAt",
+                },
+                ExpressionAttributeValues={
+                    ":error": "ERROR",
+                    ":textractError": "TEXTRACT_ERROR",
+                    ":expectedUpdatedAt": expected_updated_at,
+                },
+            )
+            return True
+        except ClientError as err:
+            if err.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return False
+            raise
     is_pdf = (
         str(mime_type or "").lower() == "application/pdf"
         or str(filename or "").lower().endswith(".pdf")
@@ -809,6 +1319,7 @@ def claim_attachment(
 
     reclaimed_item = {
         **claim_item,
+        **_immutable_artifact_evidence(existing),
         "createdAt": existing.get("createdAt") or now,
         "reclaimedAt": now,
     }
@@ -876,6 +1387,40 @@ def _canonical_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _canonical_value(value[key]) for key in sorted(value)}
     return value
+
+
+RESEARCH_EVENT_VERIFICATION_HASH_VERSION = "research-event-content-v1"
+
+
+def _verification_value(value: Any) -> Any:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (Decimal, float, int)):
+        decimal_value = Decimal(str(value))
+        if not decimal_value.is_finite():
+            return str(decimal_value)
+        normalized = format(decimal_value.normalize(), "f")
+        return "-0" if decimal_value.is_zero() and decimal_value.is_signed() else normalized
+    if isinstance(value, list):
+        return [_verification_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _verification_value(value[key]) for key in sorted(value)}
+    return value
+
+
+def _research_event_verification_hash(event_type: str, payload: Any) -> str:
+    canonical = _verification_value({
+        "eventType": event_type,
+        "payload": payload,
+    })
+    return hashlib.sha256(
+        json.dumps(
+            canonical,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _research_event_payloads(snapshot: Dict[str, Any]) -> List[Tuple[str, Any]]:
@@ -950,6 +1495,7 @@ def persist_research_event_ledger(
         event_hash = hashlib.sha256(
             json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         ).hexdigest()
+        verification_hash = _research_event_verification_hash(event_type, payload)
         event_key = f"{event_time}#{message_id}#{sequence:04d}"
         default_source_kind = {
             "POSITION_ACTION": "position-action",
@@ -963,6 +1509,7 @@ def persist_research_event_ledger(
             "eventTime": event_time,
             "sourceMessageId": message_id,
             "sequence": sequence,
+            "sourceEventCount": len(payloads),
             "eventType": event_type,
             "payload": payload,
             "snapshotDate": snapshot.get("date"),
@@ -971,6 +1518,8 @@ def persist_research_event_ledger(
             "sourceArtifact": artifact_key,
             "contentHash": content_sha256 or snapshot.get("contentHash") or event_hash,
             "eventHash": event_hash,
+            "verificationHashVersion": RESEARCH_EVENT_VERIFICATION_HASH_VERSION,
+            "verificationHash": verification_hash,
             "parserVersion": RESEARCH_PARSER_VERSION,
             "capturedAt": str(snapshot.get("scrapedAt") or utc_now().isoformat()),
             "immutable": True,
@@ -993,7 +1542,128 @@ def persist_research_event_ledger(
                 raise RuntimeError(
                     f"RESEARCH_EVENT_CONFLICT: immutable event {product_key}/{event_key} changed"
                 ) from err
+            if (
+                existing.get("verificationHashVersion") != RESEARCH_EVENT_VERIFICATION_HASH_VERSION
+                or existing.get("verificationHash") != verification_hash
+                or existing.get("sourceEventCount") != len(payloads)
+            ):
+                table.update_item(
+                    Key={"productKey": product_key, "eventKey": event_key},
+                    UpdateExpression=(
+                        "SET #verificationHashVersion = :verificationHashVersion, "
+                        "#verificationHash = :verificationHash, "
+                        "#sourceEventCount = :sourceEventCount"
+                    ),
+                    ConditionExpression="#eventHash = :eventHash",
+                    ExpressionAttributeNames={
+                        "#eventHash": "eventHash",
+                        "#verificationHashVersion": "verificationHashVersion",
+                        "#verificationHash": "verificationHash",
+                        "#sourceEventCount": "sourceEventCount",
+                    },
+                    ExpressionAttributeValues={
+                        ":eventHash": event_hash,
+                        ":verificationHashVersion": RESEARCH_EVENT_VERIFICATION_HASH_VERSION,
+                        ":verificationHash": verification_hash,
+                        ":sourceEventCount": len(payloads),
+                    },
+                )
     return written
+
+
+def _integral_dynamodb_number(value: Any, *, minimum: int) -> Optional[int]:
+    """Normalize live DynamoDB Number values without accepting lossy numerics."""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        return None
+    if isinstance(value, Decimal):
+        if not value.is_finite() or value != value.to_integral_value():
+            return None
+    parsed = int(value)
+    return parsed if parsed >= minimum else None
+
+
+def verify_research_event_ledger(db: Any) -> Dict[str, Any]:
+    table = db.Table(RESEARCH_EVENT_LEDGER_TABLE)
+    products: Dict[str, Dict[str, int]] = {}
+    for product_key in ("real-time-alert", "etf-pro"):
+        items: List[Dict[str, Any]] = []
+        exclusive_start_key = None
+        while True:
+            query: Dict[str, Any] = {
+                "KeyConditionExpression": "#productKey = :productKey",
+                "ExpressionAttributeNames": {"#productKey": "productKey"},
+                "ExpressionAttributeValues": {":productKey": product_key},
+                "ConsistentRead": True,
+            }
+            if exclusive_start_key:
+                query["ExclusiveStartKey"] = exclusive_start_key
+            response = table.query(**query)
+            items.extend(response.get("Items") or [])
+            exclusive_start_key = response.get("LastEvaluatedKey")
+            if not exclusive_start_key:
+                break
+        unverified_keys = set()
+        for index, item in enumerate(items):
+            expected = _research_event_verification_hash(
+                str(item.get("eventType") or ""),
+                item.get("payload"),
+            )
+            if (
+                item.get("verificationHashVersion")
+                != RESEARCH_EVENT_VERIFICATION_HASH_VERSION
+                or item.get("verificationHash") != expected
+            ):
+                unverified_keys.add(index)
+        by_source: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
+        for index, item in enumerate(items):
+            source_message_id = str(item.get("sourceMessageId") or "")
+            by_source.setdefault(source_message_id, []).append((index, item))
+        for source_message_id, source_items in by_source.items():
+            normalized_counts = [
+                _integral_dynamodb_number(item.get("sourceEventCount"), minimum=1)
+                for _, item in source_items
+            ]
+            normalized_sequences = [
+                _integral_dynamodb_number(item.get("sequence"), minimum=0)
+                for _, item in source_items
+            ]
+            counts = {
+                value for value in normalized_counts if value is not None
+            }
+            sequences = {
+                value for value in normalized_sequences if value is not None
+            }
+            expected_count = next(iter(counts)) if len(counts) == 1 else None
+            complete = (
+                bool(source_message_id)
+                and expected_count is not None
+                and all(value == expected_count for value in normalized_counts)
+                and all(value is not None for value in normalized_sequences)
+                and len(source_items) == expected_count
+                and len(sequences) == len(source_items)
+                and sequences == set(range(expected_count))
+            )
+            if not complete:
+                unverified_keys.update(index for index, _ in source_items)
+        unverified = len(unverified_keys)
+        products[product_key] = {
+            "eventCount": len(items),
+            "unverifiedEventCount": unverified,
+        }
+    event_count = sum(item["eventCount"] for item in products.values())
+    unverified_count = sum(
+        item["unverifiedEventCount"] for item in products.values()
+    )
+    verified = (
+        unverified_count == 0
+        and all(item["eventCount"] > 0 for item in products.values())
+    )
+    return {
+        "verified": verified,
+        "eventCount": event_count,
+        "unverifiedEventCount": unverified_count,
+        "products": products,
+    }
 
 
 def _ordered_unique(values: Iterable[Any]) -> List[str]:
@@ -1415,6 +2085,58 @@ def _s3_object_exists(bucket: Optional[str], key: Optional[str]) -> bool:
         raise
 
 
+def put_immutable_s3_object(
+    *,
+    bucket: str,
+    key: str,
+    body: bytes,
+    content_type: str,
+    metadata: Dict[str, str],
+    content_sha256: str,
+) -> bool:
+    """Create one immutable artifact version and never overwrite it on retry.
+
+    The deterministic key is bound to the Gmail message and attachment. S3
+    versioning makes an ordinary overwrite billable and persistent, so the
+    conditional write is a hard cost and integrity boundary. A pre-existing
+    object is accepted only when its stored bytes prove the same SHA-256.
+    """
+    try:
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType=content_type,
+            Metadata=metadata,
+            IfNoneMatch="*",
+        )
+        return True
+    except ClientError as err:
+        code = str(err.response.get("Error", {}).get("Code") or "")
+        status_code = int(err.response.get("ResponseMetadata", {}).get("HTTPStatusCode") or 0)
+        if (
+            code not in {"PreconditionFailed", "ConditionalRequestConflict", "412"}
+            and status_code not in {409, 412}
+        ):
+            raise
+
+    existing = s3.head_object(Bucket=bucket, Key=key)
+    existing_metadata = {
+        str(name).casefold(): str(value)
+        for name, value in (existing.get("Metadata") or {}).items()
+    }
+    existing_sha256 = existing_metadata.get("content-sha256")
+    if not existing_sha256:
+        response = s3.get_object(Bucket=bucket, Key=key)
+        existing_body = response["Body"].read()
+        existing_sha256 = hashlib.sha256(existing_body).hexdigest()
+    if not hmac.compare_digest(existing_sha256, content_sha256):
+        raise RuntimeError(
+            "Immutable S3 key already exists with a different content checksum."
+        )
+    return False
+
+
 def claim_textract_content(
     table: Any,
     *,
@@ -1555,9 +2277,13 @@ def _retryable_materialization_error(
 ) -> RetryableResearchMaterializationError:
     if isinstance(error, RetryableResearchMaterializationError):
         return error
-    return RetryableResearchMaterializationError(
+    wrapped = RetryableResearchMaterializationError(
         f"Research parse/materialization failed: {safe_error_detail(error)}"
     )
+    typed_error_code = getattr(error, "error_code", None)
+    if typed_error_code:
+        wrapped.error_code = str(typed_error_code)
+    return wrapped
 
 
 def _materialization_failure_metadata(
@@ -1648,6 +2374,7 @@ def backfill_html_snapshot(
             snapshot,
             dynamodb,
             content_sha256=item.get("contentSha256"),
+            finalize=False,
         )
         materialized, _ = materialize_email_snapshot(snapshot, dynamodb)
         entity_projection_status = (
@@ -1658,6 +2385,13 @@ def backfill_html_snapshot(
             and entity_event_count == 0
             else "INDEXED"
         )
+        if entity_projection_status == "INDEXED":
+            finalize_snapshot_intelligence(
+                snapshot,
+                dynamodb,
+                content_sha256=item.get("contentSha256"),
+                event_count=entity_event_count,
+            )
         materialization_extra = {
             "snapshotType": snapshot["snapshotType"],
             "snapshotDate": snapshot["date"],
@@ -1718,8 +2452,12 @@ def backfill_html_snapshot(
         raise retryable_error from parse_err
 
 
-def _should_backfill_materialized_snapshot(item: Dict[str, Any]) -> bool:
-    if item.get("status") not in {"STORED", "DUPLICATE"}:
+def _should_backfill_materialized_snapshot(
+    item: Dict[str, Any],
+    *,
+    allow_version_upgrade: bool = False,
+) -> bool:
+    if item.get("status") not in {"STORED", "DUPLICATE", "INDEXED"}:
         return False
     if not str(item.get("attachmentId") or "").startswith("message-body-"):
         return False
@@ -1736,7 +2474,9 @@ def _should_backfill_materialized_snapshot(item: Dict[str, Any]) -> bool:
     if not is_materializable:
         return False
     if item.get("materializationAttemptVersion") != MATERIALIZED_DATA_VERSION:
-        return True
+        # Parser-version migrations are explicit, metered repair work. A
+        # scheduled poll must never turn a deployment into a historical replay.
+        return allow_version_upgrade
     return (
         item.get("materializationStatus") == "ERROR"
         and _materialization_attempt_count(item) < MATERIALIZATION_MAX_ATTEMPTS
@@ -1868,12 +2608,13 @@ def upload_attachment(
             "report-type": report_type[:120],
             "content-sha256": content_sha256,
         }
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=s3_key,
-            Body=content,
-            ContentType=mime_type,
-            Metadata=metadata,
+        artifact_created = put_immutable_s3_object(
+            bucket=S3_BUCKET,
+            key=s3_key,
+            body=content,
+            content_type=mime_type,
+            metadata=metadata,
+            content_sha256=content_sha256,
         )
         if is_pdf:
             dispatch_pdf_processor(
@@ -1898,7 +2639,18 @@ def upload_attachment(
             "contentSha256": content_sha256,
             "byteSize": len(content),
             "receivedAt": received_at.isoformat(),
+            "s3ArtifactCreated": artifact_created,
         }
+        # Commit immutable artifact provenance before parsing or projection.
+        # A later materialization failure updates this row in place and must
+        # never erase the evidence needed for a deterministic retry.
+        mark_attachment(
+            table,
+            message_id=message_id,
+            attachment_id=attachment_id,
+            status="IN_PROGRESS",
+            extra=extra,
+        )
 
         if attachment_id.startswith("message-body-") and mime_type == "text/html":
             try:
@@ -1921,6 +2673,7 @@ def upload_attachment(
                         snapshot,
                         dynamodb,
                         content_sha256=content_sha256,
+                        finalize=False,
                     )
                     materialized, _ = materialize_email_snapshot(snapshot, dynamodb)
                     entity_projection_status = (
@@ -1931,6 +2684,13 @@ def upload_attachment(
                         and entity_event_count == 0
                         else "INDEXED"
                     )
+                    if entity_projection_status == "INDEXED":
+                        finalize_snapshot_intelligence(
+                            snapshot,
+                            dynamodb,
+                            content_sha256=content_sha256,
+                            event_count=entity_event_count,
+                        )
                     extra["snapshotType"] = snapshot["snapshotType"]
                     extra["snapshotDate"] = snapshot["date"]
                     extra["snapshotSource"] = snapshot["source"]
@@ -2047,7 +2807,21 @@ def upload_attachment(
         raise
 
 
-def process_message(access_token: str, user_id: str, message_id: str, table: Any) -> Dict[str, Any]:
+def process_message(
+    access_token: str,
+    user_id: str,
+    message_id: str,
+    table: Any,
+    *,
+    allow_version_backfill: bool = False,
+    budget_check: Optional[Callable[[], Optional[str]]] = None,
+) -> Dict[str, Any]:
+    def require_work_budget() -> None:
+        reason = budget_check() if budget_check else None
+        if reason:
+            raise GmailInvocationBudgetYield(reason)
+
+    require_work_budget()
     ledger_items = get_message_ledger_items(table, message_id)
     if message_is_fully_processed(ledger_items):
         attachment_items = [
@@ -2066,8 +2840,12 @@ def process_message(access_token: str, user_id: str, message_id: str, table: Any
         }
 
         for item in attachment_items:
+            require_work_budget()
             filename = item.get("filename", "")
-            if _should_backfill_materialized_snapshot(item):
+            if _should_backfill_materialized_snapshot(
+                item,
+                allow_version_upgrade=allow_version_backfill,
+            ):
                 report_type = str(item.get("reportType") or "unknown")
                 backfilled = backfill_html_snapshot(
                     table=table,
@@ -2102,6 +2880,7 @@ def process_message(access_token: str, user_id: str, message_id: str, table: Any
             )
         return result
 
+    require_work_budget()
     message = get_message(access_token, user_id, message_id)
     headers = get_headers(message)
     received_at = parse_received_date(headers, message.get("internalDate"))
@@ -2122,6 +2901,7 @@ def process_message(access_token: str, user_id: str, message_id: str, table: Any
     }
 
     for attachment in attachments:
+        require_work_budget()
         status, detail = upload_attachment(
             access_token=access_token,
             user_id=user_id,
@@ -2145,8 +2925,38 @@ def process_message(access_token: str, user_id: str, message_id: str, table: Any
     return result
 
 
+def prepare_build_recovery(
+    state: Dict[str, Any],
+    *,
+    build_version: str,
+    attempted_at: str,
+    limit: int = 1,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    """Select each quarantined Risk Range message at most once per build."""
+    selected: List[str] = []
+    updated: List[Dict[str, Any]] = []
+    for raw_item in state.get("quarantinedMessages") or []:
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        message_id = str(item.get("messageId") or "")
+        eligible = (
+            message_id
+            and item.get("errorCode") in RISK_RANGE_BUILD_RECOVERY_ERROR_CODES
+            and item.get("recoveryBuildVersion") != build_version
+            and len(selected) < max(0, limit)
+        )
+        if eligible:
+            selected.append(message_id)
+            item["recoveryBuildVersion"] = build_version
+            item["recoveryAttemptedAt"] = attempted_at
+        updated.append(item)
+    return selected, updated
+
+
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
     """Poll Gmail with cursoring, auth circuit-breaking, and an unconditional heartbeat."""
+    monotonic_started_at = time.monotonic()
     event = event or {}
     trigger_source = str(event.get("source") or "manual").strip()
     schedule_id = str(event.get("scheduleId") or "").strip() or None
@@ -2154,65 +2964,282 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     table = dynamodb.Table(LEDGER_TABLE)
     secret: Dict[str, Any] = {}
     secret_version = "unknown"
+    auth_probe_only = event.get("authProbeOnly") is True
+    force_auth_probe_requested = event.get("forceAuthProbe") is True
+    forced_auth_probe = auth_probe_only and force_auth_probe_requested
 
-    try:
-        secret = load_oauth_secret()
-        secret_version = str(secret.get("_secret_version") or "unknown")
-    except Exception as err:
-        error_code = classify_runtime_error(err)
-        write_service_heartbeat(
+    def heartbeat_response(
+        *,
+        status_code: int,
+        body: Dict[str, Any],
+        heartbeat_status: str,
+        error_code: Optional[str] = None,
+        detail: Optional[str] = None,
+        heartbeat_secret_version: Optional[str] = None,
+        counts: Optional[Dict[str, int]] = None,
+    ) -> Dict[str, Any]:
+        """Return only after proving the typed heartbeat was persisted."""
+        heartbeat_written = write_service_heartbeat(
             started_at=started_at,
-            status="error",
+            status=heartbeat_status,
             trigger_source=trigger_source,
             schedule_id=schedule_id,
             error_code=error_code,
+            detail=detail,
+            secret_version=heartbeat_secret_version,
+            counts=counts,
+        )
+        response_body = dict(body)
+        if not heartbeat_written:
+            status_code = 503
+            response_body.update({
+                "status": "ERROR",
+                "errorCode": "GMAIL_HEARTBEAT_WRITE_FAILED",
+                "errorCount": max(1, int(response_body.get("errorCount") or 0)),
+            })
+        return {
+            "statusCode": status_code,
+            "body": json.dumps(response_body),
+        }
+
+    if trigger_source == "aws-scheduler" and schedule_id != GMAIL_SCHEDULE_ID:
+        return heartbeat_response(
+            status_code=400,
+            body={
+                "status": "ERROR",
+                "errorCode": "GMAIL_SCHEDULE_ID_MISMATCH",
+                "pollMode": "rejected",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code="GMAIL_SCHEDULE_ID_MISMATCH",
+            detail="Invocation did not identify the configured Gmail Scheduler job.",
+        )
+
+    # The force flag is privileged because it bypasses an open auth circuit.
+    # Accept it only as part of the bounded profile-only probe; never let an
+    # unpaired force flag turn into a full mailbox poll.
+    if force_auth_probe_requested and not auth_probe_only:
+        return heartbeat_response(
+            status_code=400,
+            body={
+                "status": "ERROR",
+                "errorCode": "GMAIL_AUTH_PROBE_EVENT_INVALID",
+                "pollMode": "rejected",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code="GMAIL_AUTH_PROBE_EVENT_INVALID",
+            detail="forceAuthProbe requires authProbeOnly=true.",
+        )
+
+    try:
+        secret = (
+            load_oauth_secret(force_refresh=True)
+            if forced_auth_probe
+            else load_oauth_secret()
+        )
+        secret_version = str(secret.get("_secret_version") or "unknown")
+    except Exception as err:
+        error_code = classify_runtime_error(err)
+        return heartbeat_response(
+            status_code=503,
+            body={
+                "status": "ERROR",
+                "errorCode": error_code,
+                "pollMode": "secret_unavailable",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code=error_code,
             detail=safe_error_detail(err),
         )
-        raise
 
     user_id = event.get("userId") or secret.get("user_id") or os.environ.get("GMAIL_USER_ID", "me")
     # A forced activation probe validates OAuth/Gmail without depending on or
     # mutating the ingestion cursor. Normal polls still require the ledger
     # state before deciding whether the auth circuit is open.
-    state = (
-        {}
-        if event.get("authProbeOnly") and event.get("forceAuthProbe")
-        else read_ingestion_state(table)
-    )
+    try:
+        state = (
+            {}
+            if forced_auth_probe
+            else read_ingestion_state(table)
+        )
+    except Exception as err:
+        error_code = classify_runtime_error(err)
+        return heartbeat_response(
+            status_code=503,
+            body={
+                "status": "ERROR",
+                "errorCode": error_code,
+                "pollMode": "state_unavailable",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code=error_code,
+            detail=safe_error_detail(err),
+            heartbeat_secret_version=secret_version,
+        )
     # While auth is blocked, do not call Google, but do check Secrets Manager on
     # every scheduled invocation. A long-lived warm-runtime cache must not delay
     # recovery for hours after an operator atomically promotes a new version.
     if (
         state.get("status") == "AUTH_REQUIRED"
         and state.get("blockedSecretVersion") == secret_version
-        and not event.get("forceAuthProbe")
+        and not forced_auth_probe
     ):
-        secret = load_oauth_secret(force_refresh=True)
-        secret_version = str(secret.get("_secret_version") or "unknown")
-        user_id = event.get("userId") or secret.get("user_id") or os.environ.get("GMAIL_USER_ID", "me")
+        try:
+            secret = load_oauth_secret(force_refresh=True)
+            secret_version = str(secret.get("_secret_version") or "unknown")
+            user_id = (
+                event.get("userId")
+                or secret.get("user_id")
+                or os.environ.get("GMAIL_USER_ID", "me")
+            )
+        except Exception as err:
+            error_code = classify_runtime_error(err)
+            return heartbeat_response(
+                status_code=503,
+                body={
+                    "status": "ERROR",
+                    "errorCode": error_code,
+                    "pollMode": "secret_unavailable",
+                    "messageCount": 0,
+                    "errorCount": 1,
+                },
+                heartbeat_status="error",
+                error_code=error_code,
+                detail=safe_error_detail(err),
+                heartbeat_secret_version=secret_version,
+            )
     auth_blocked = (
         state.get("status") == "AUTH_REQUIRED"
         and state.get("blockedSecretVersion") == secret_version
-        and not event.get("forceAuthProbe")
+        and not forced_auth_probe
     )
     if auth_blocked:
-        write_service_heartbeat(
-            started_at=started_at,
-            status="auth_required",
-            trigger_source=trigger_source,
-            schedule_id=schedule_id,
-            error_code="GMAIL_AUTH_REQUIRED",
-            detail="OAuth authorization is blocked until the Secrets Manager version changes.",
-            secret_version=secret_version,
-        )
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
+        return heartbeat_response(
+            status_code=200,
+            body={
                 "status": "AUTH_REQUIRED",
                 "errorCode": "GMAIL_AUTH_REQUIRED",
                 "messageCount": 0,
-            }),
+            },
+            heartbeat_status="auth_required",
+            error_code="GMAIL_AUTH_REQUIRED",
+            detail="OAuth authorization is blocked until the Secrets Manager version changes.",
+            heartbeat_secret_version=secret_version,
+        )
+
+    scheduled_invocation = (
+        trigger_source == "aws-scheduler"
+        and schedule_id == GMAIL_SCHEDULE_ID
+    )
+    if (
+        scheduled_invocation
+        and state.get("errorCode") == "GMAIL_HISTORY_CURSOR_EXPIRED"
+        and event.get("forceBackfill") is not True
+    ):
+        return heartbeat_response(
+            status_code=409,
+            body={
+                "status": "ERROR",
+                "errorCode": "GMAIL_HISTORY_CURSOR_EXPIRED",
+                "pollMode": "cursor_reset_required",
+                "historyId": state.get("historyId"),
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code="GMAIL_HISTORY_CURSOR_EXPIRED",
+            detail=(
+                "The Gmail history cursor expired. A bounded operator-approved "
+                "recovery is required; scheduled full-mailbox replay is disabled."
+            ),
+            heartbeat_secret_version=secret_version,
+        )
+
+    def budget_yield_response(
+        reason: str,
+        *,
+        poll_mode: Optional[str] = None,
+        discovered: int = 0,
+        remaining: int = 0,
+    ) -> Dict[str, Any]:
+        effective_mode = poll_mode or str(
+            state.get("discoveryMode")
+            or state.get("pendingPollMode")
+            or "pending"
+        )
+        counts = {
+            "messages": 0,
+            "stored": 0,
+            "skipped": 0,
+            "errors": 0,
+            "dropped": int(state.get("quarantinedCount") or 0),
+            "remaining": remaining,
         }
+        if not forced_auth_probe:
+            try:
+                write_ingestion_state(
+                    table,
+                    status="IN_PROGRESS",
+                    historyId=state.get("historyId"),
+                    errorCode=reason,
+                    errorDetail=(
+                        "Invocation yielded before another potentially "
+                        "30-second Gmail call."
+                    ),
+                    counts=counts,
+                )
+            except Exception as err:
+                error_code = classify_runtime_error(err)
+                return heartbeat_response(
+                    status_code=503,
+                    body={
+                        "status": "ERROR",
+                        "errorCode": error_code,
+                        "pollMode": effective_mode,
+                        "messageCount": 0,
+                        "errorCount": 1,
+                    },
+                    heartbeat_status="error",
+                    error_code=error_code,
+                    detail=safe_error_detail(err),
+                    heartbeat_secret_version=secret_version,
+                    counts={**counts, "errors": 1},
+                )
+        return heartbeat_response(
+            status_code=200,
+            body={
+                "status": "IN_PROGRESS",
+                "errorCode": reason,
+                "pollMode": effective_mode,
+                "historyId": state.get("historyId"),
+                "messageCount": 0,
+                "discoveredCount": discovered,
+                "remainingCount": remaining,
+                "storedCount": 0,
+                "skippedCount": 0,
+                "errorCount": 0,
+            },
+            heartbeat_status="in_progress",
+            error_code=reason,
+            detail="Invocation yielded before another potentially 30-second Gmail call.",
+            heartbeat_secret_version=secret_version,
+            counts=counts,
+        )
+
+    initial_call_budget = gmail_call_budget_reason(
+        context,
+        monotonic_started_at=monotonic_started_at,
+    )
+    if initial_call_budget:
+        return budget_yield_response(initial_call_budget)
 
     try:
         access_token = refresh_access_token(secret)
@@ -2223,6 +3250,12 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             secret = load_oauth_secret(force_refresh=True)
             secret_version = str(secret.get("_secret_version") or "unknown")
             user_id = event.get("userId") or secret.get("user_id") or os.environ.get("GMAIL_USER_ID", "me")
+            retry_budget = gmail_call_budget_reason(
+                context,
+                monotonic_started_at=monotonic_started_at,
+            )
+            if retry_budget:
+                return budget_yield_response(retry_budget)
             access_token = refresh_access_token(secret)
         except Exception as err:
             error_code = classify_runtime_error(err)
@@ -2237,196 +3270,1043 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
                     )
                 except Exception as state_err:
                     print(f"[gmail] auth state write unavailable: {type(state_err).__name__}")
-                write_service_heartbeat(
-                    started_at=started_at,
-                    status="auth_required",
-                    trigger_source=trigger_source,
-                    schedule_id=schedule_id,
-                    error_code=error_code,
-                    detail=safe_error_detail(err),
-                    secret_version=secret_version,
-                )
-                return {
-                    "statusCode": 200,
-                    "body": json.dumps({
+                return heartbeat_response(
+                    status_code=200,
+                    body={
                         "status": "AUTH_REQUIRED",
                         "errorCode": error_code,
                         "messageCount": 0,
-                    }),
-                }
-            write_service_heartbeat(
-                started_at=started_at,
-                status="error",
-                trigger_source=trigger_source,
-                schedule_id=schedule_id,
+                    },
+                    heartbeat_status="auth_required",
+                    error_code=error_code,
+                    detail=safe_error_detail(err),
+                    heartbeat_secret_version=secret_version,
+                )
+            return heartbeat_response(
+                status_code=503,
+                body={
+                    "status": "ERROR",
+                    "errorCode": error_code,
+                    "pollMode": "auth",
+                    "messageCount": 0,
+                    "errorCount": 1,
+                },
+                heartbeat_status="error",
                 error_code=error_code,
                 detail=safe_error_detail(err),
-                secret_version=secret_version,
+                heartbeat_secret_version=secret_version,
             )
-            raise
 
-    if event.get("authProbeOnly"):
+    # Bind every successful invocation to the configured mailbox before any
+    # listing or message processing. The same verified profile historyId is
+    # committed only after all work succeeds, preserving fail-closed cursoring.
+    profile_budget = gmail_call_budget_reason(
+        context,
+        monotonic_started_at=monotonic_started_at,
+    )
+    if profile_budget:
+        return budget_yield_response(profile_budget)
+    try:
+        profile_history_id = get_profile_history_id(access_token, user_id)
+    except Exception as err:
+        error_code = classify_runtime_error(err)
+        return heartbeat_response(
+            status_code=503,
+            body={
+                "status": "ERROR",
+                "errorCode": error_code,
+                "pollMode": "auth_probe" if auth_probe_only else "profile",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code=error_code,
+            detail=safe_error_detail(err),
+            heartbeat_secret_version=secret_version,
+        )
+
+    if auth_probe_only:
         # Activation can validate the refresh grant and readonly Gmail API
         # access without listing messages, advancing the history cursor, or
         # materializing any research data. This remains a manual heartbeat and
         # can never satisfy the scheduled-poller rollout gate.
-        try:
-            get_profile_history_id(access_token, user_id)
-        except Exception as err:
-            error_code = classify_runtime_error(err)
-            write_service_heartbeat(
-                started_at=started_at,
-                status="error",
-                trigger_source=trigger_source,
-                schedule_id=schedule_id,
-                error_code=error_code,
-                detail=safe_error_detail(err),
-                secret_version=secret_version,
-            )
-            return {
-                "statusCode": 503,
-                "body": json.dumps({
-                    "status": "ERROR",
-                    "errorCode": error_code,
-                    "pollMode": "auth_probe",
-                    "messageCount": 0,
-                    "errorCount": 1,
-                }),
-            }
 
-        write_service_heartbeat(
-            started_at=started_at,
-            status="success",
-            trigger_source=trigger_source,
-            schedule_id=schedule_id,
-            secret_version=secret_version,
-            counts={"messages": 0, "stored": 0, "skipped": 0, "errors": 0, "dropped": 0},
-        )
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
+        return heartbeat_response(
+            status_code=200,
+            body={
                 "status": "SUCCESS",
                 "pollMode": "auth_probe",
                 "messageCount": 0,
                 "storedCount": 0,
                 "skippedCount": 0,
                 "errorCount": 0,
-            }),
-        }
+            },
+            heartbeat_status="success",
+            heartbeat_secret_version=secret_version,
+            counts={"messages": 0, "stored": 0, "skipped": 0, "errors": 0, "dropped": 0},
+        )
 
-    message_ids = list(event.get("messageIds") or [])
-    poll_mode = "explicit" if message_ids else "query"
+    def queue_failure_response(error: Exception, poll_mode: str) -> Dict[str, Any]:
+        error_code = classify_runtime_error(error)
+        return heartbeat_response(
+            status_code=503,
+            body={
+                "status": "ERROR",
+                "errorCode": error_code,
+                "pollMode": poll_mode,
+                "messageCount": 0,
+                "storedCount": 0,
+                "skippedCount": 0,
+                "errorCount": 1,
+                "errors": [{
+                    "messageId": None,
+                    "error": safe_error_detail(error),
+                    "errorCode": error_code,
+                    "retryable": True,
+                }],
+            },
+            heartbeat_status="error",
+            error_code=error_code,
+            detail=safe_error_detail(error),
+            heartbeat_secret_version=secret_version,
+            counts={"messages": 0, "stored": 0, "skipped": 0, "errors": 1, "dropped": 0},
+        )
+
     cursor_before = state.get("historyId")
-    if not message_ids and cursor_before and not event.get("forceBackfill"):
+    active_batch_id = str(state.get("activeBatchId") or "")
+    pending_history_id = state.get("pendingHistoryId")
+    pending_force_backfill = bool(state.get("pendingForceBackfill"))
+    poll_mode = str(state.get("pendingPollMode") or "query")
+    discovered_count = int(state.get("pendingDiscoveredCount") or 0)
+    discovery_status = str(state.get("discoveryStatus") or "")
+    discovery_in_progress = discovery_status == "IN_PROGRESS"
+    explicit_message_ids = list(dict.fromkeys(
+        str(message_id)
+        for message_id in (event.get("messageIds") or [])
+        if str(message_id)
+    ))
+    build_recovery_message_ids: List[str] = []
+    if (
+        scheduled_invocation
+        and not active_batch_id
+        and not explicit_message_ids
+    ):
+        recovery_attempted_at = utc_now().isoformat()
+        (
+            build_recovery_message_ids,
+            _updated_quarantines,
+        ) = prepare_build_recovery(
+            state,
+            build_version=BUILD_VERSION,
+            attempted_at=recovery_attempted_at,
+        )
+        if build_recovery_message_ids:
+            explicit_message_ids = build_recovery_message_ids
+
+    if (
+        scheduled_invocation
+        and not cursor_before
+        and not active_batch_id
+        and not explicit_message_ids
+        and event.get("forceBackfill") is not True
+    ):
+        bootstrap_counts = {
+            "messages": 0,
+            "stored": 0,
+            "skipped": 0,
+            "errors": 0,
+            "dropped": int(state.get("quarantinedCount") or 0),
+            "remaining": 0,
+        }
         try:
-            label_id = resolve_label_id(access_token, user_id)
-            if label_id:
-                message_ids = list_history_message_ids(
+            write_ingestion_state(
+                table,
+                status="READY",
+                historyId=profile_history_id,
+                activeBatchId=None,
+                pendingHistoryId=None,
+                pendingPollMode=None,
+                pendingForceBackfill=False,
+                pendingDiscoveredCount=0,
+                discoveryStatus=None,
+                discoveryBatchId=None,
+                discoveryCursorBefore=None,
+                discoveryTargetHistoryId=None,
+                discoveryPageToken=None,
+                discoveryNextSequence=None,
+                discoveryMode=None,
+                discoveryLabelId=None,
+                pendingSince=None,
+                lastProgressAt=utc_now().isoformat(),
+                lastSuccessAt=utc_now().isoformat(),
+                pollMode="cursor_bootstrap",
+                blockedSecretVersion=None,
+                errorCode=None,
+                errorDetail=None,
+                counts=bootstrap_counts,
+            )
+        except Exception as err:
+            return queue_failure_response(err, "cursor_bootstrap")
+        return heartbeat_response(
+            status_code=200,
+            body={
+                "status": "SUCCESS",
+                "pollMode": "cursor_bootstrap",
+                "historyId": profile_history_id,
+                "messageCount": 0,
+                "discoveredCount": 0,
+                "remainingCount": 0,
+                "storedCount": 0,
+                "skippedCount": 0,
+                "errorCount": 0,
+            },
+            heartbeat_status="success",
+            heartbeat_secret_version=secret_version,
+            counts=bootstrap_counts,
+        )
+
+    if not active_batch_id:
+        pending_force_backfill = event.get("forceBackfill") is True
+        pending_history_id = (
+            None if explicit_message_ids else profile_history_id
+        )
+        label_id = None
+        if explicit_message_ids:
+            poll_mode = (
+                "build_recovery:"
+                + hashlib.sha256(BUILD_VERSION.encode("utf-8")).hexdigest()[:12]
+                if build_recovery_message_ids
+                else "explicit"
+            )
+        elif cursor_before and not pending_force_backfill:
+            label_budget = gmail_call_budget_reason(
+                context,
+                monotonic_started_at=monotonic_started_at,
+            )
+            if label_budget:
+                return budget_yield_response(label_budget, poll_mode="history")
+            try:
+                label_id = resolve_label_id(access_token, user_id)
+            except Exception as err:
+                return queue_failure_response(err, "history")
+            poll_mode = "history" if label_id else "query"
+        else:
+            poll_mode = "query"
+
+        active_batch_id = _queue_batch_id(
+            (),
+            cursor_before=(
+                str(cursor_before) if cursor_before is not None else None
+            ),
+            pending_history_id=(
+                str(pending_history_id)
+                if pending_history_id is not None
+                else None
+            ),
+            poll_mode=poll_mode,
+            force_backfill=pending_force_backfill,
+        )
+        pending_started_at = utc_now().isoformat()
+        discovery_status = "COMPLETE" if explicit_message_ids else "IN_PROGRESS"
+        try:
+            if explicit_message_ids:
+                # Explicit requests are not paginated. Keep their batch pointer
+                # invisible until every requested ID is durable.
+                persist_discovered_message_queue(
+                    table,
+                    explicit_message_ids,
+                    cursor_before=(
+                        str(cursor_before)
+                        if cursor_before is not None
+                        else None
+                    ),
+                    pending_history_id=None,
+                    poll_mode=poll_mode,
+                    force_backfill=pending_force_backfill,
+                )
+                discovered_count = len(
+                    read_message_queue(table, active_batch_id)
+                )
+            # Paginated polls persist their batch identity and current token
+            # before the Gmail call. A crash can only repeat that same page.
+            write_ingestion_state(
+                table,
+                status="IN_PROGRESS",
+                historyId=cursor_before,
+                activeBatchId=active_batch_id,
+                pendingHistoryId=pending_history_id,
+                pendingPollMode=poll_mode,
+                pendingForceBackfill=pending_force_backfill,
+                pendingDiscoveredCount=discovered_count,
+                pendingSince=pending_started_at,
+                lastProgressAt=pending_started_at,
+                discoveryStatus=discovery_status,
+                discoveryBatchId=active_batch_id,
+                discoveryCursorBefore=cursor_before,
+                discoveryTargetHistoryId=pending_history_id,
+                discoveryPageToken=None,
+                discoveryNextSequence=(
+                    len(explicit_message_ids) if explicit_message_ids else 0
+                ),
+                discoveryMode=poll_mode,
+                discoveryLabelId=label_id,
+                blockedSecretVersion=None,
+                errorCode=None,
+                errorDetail=None,
+            )
+            state = {
+                **state,
+                "status": "IN_PROGRESS",
+                "activeBatchId": active_batch_id,
+                "pendingHistoryId": pending_history_id,
+                "pendingPollMode": poll_mode,
+                "pendingForceBackfill": pending_force_backfill,
+                "pendingDiscoveredCount": discovered_count,
+                "pendingSince": pending_started_at,
+                "lastProgressAt": pending_started_at,
+                "discoveryStatus": discovery_status,
+                "discoveryBatchId": active_batch_id,
+                "discoveryCursorBefore": cursor_before,
+                "discoveryTargetHistoryId": pending_history_id,
+                "discoveryPageToken": None,
+                "discoveryNextSequence": (
+                    len(explicit_message_ids) if explicit_message_ids else 0
+                ),
+                "discoveryMode": poll_mode,
+                "discoveryLabelId": label_id,
+            }
+        except Exception as err:
+            return queue_failure_response(err, poll_mode)
+        discovery_in_progress = discovery_status == "IN_PROGRESS"
+
+    if discovery_in_progress:
+        poll_mode = str(state.get("discoveryMode") or poll_mode)
+        cursor_before = state.get("discoveryCursorBefore")
+        pending_history_id = state.get("discoveryTargetHistoryId")
+        pending_force_backfill = bool(state.get("pendingForceBackfill"))
+        page_token = state.get("discoveryPageToken")
+        next_sequence = int(state.get("discoveryNextSequence") or 0)
+        page_budget = gmail_call_budget_reason(
+            context,
+            monotonic_started_at=monotonic_started_at,
+        )
+        if page_budget:
+            return budget_yield_response(
+                page_budget,
+                poll_mode=poll_mode,
+                discovered=discovered_count,
+                remaining=discovered_count,
+            )
+        try:
+            if poll_mode == "history":
+                page = list_history_message_ids(
                     access_token,
                     user_id,
                     str(cursor_before),
-                    label_id=label_id,
+                    label_id=state.get("discoveryLabelId"),
+                    page_token=(
+                        str(page_token) if page_token is not None else None
+                    ),
                 )
-                poll_mode = "history"
+            else:
+                page = list_message_ids(
+                    access_token,
+                    user_id,
+                    page_token=(
+                        str(page_token) if page_token is not None else None
+                    ),
+                )
         except Exception as err:
-            if classify_runtime_error(err) != "GMAIL_HISTORY_CURSOR_EXPIRED":
-                write_service_heartbeat(
-                    started_at=started_at,
-                    status="error",
-                    trigger_source=trigger_source,
-                    schedule_id=schedule_id,
-                    error_code=classify_runtime_error(err),
-                    detail=safe_error_detail(err),
-                    secret_version=secret_version,
+            if (
+                poll_mode == "history"
+                and classify_runtime_error(err) == "GMAIL_HISTORY_CURSOR_EXPIRED"
+            ):
+                if scheduled_invocation and not pending_force_backfill:
+                    error_detail = (
+                        "The Gmail history cursor expired. A bounded "
+                        "operator-approved recovery is required; scheduled "
+                        "full-mailbox replay is disabled."
+                    )
+                    try:
+                        write_ingestion_state(
+                            table,
+                            status="ERROR",
+                            historyId=cursor_before,
+                            activeBatchId=None,
+                            pendingHistoryId=None,
+                            pendingPollMode=None,
+                            pendingForceBackfill=False,
+                            pendingDiscoveredCount=0,
+                            discoveryStatus=None,
+                            discoveryBatchId=None,
+                            discoveryCursorBefore=None,
+                            discoveryTargetHistoryId=None,
+                            discoveryPageToken=None,
+                            discoveryNextSequence=None,
+                            discoveryMode=None,
+                            discoveryLabelId=None,
+                            pendingSince=None,
+                            errorCode="GMAIL_HISTORY_CURSOR_EXPIRED",
+                            errorDetail=error_detail,
+                        )
+                    except Exception as state_err:
+                        return queue_failure_response(state_err, poll_mode)
+                    return heartbeat_response(
+                        status_code=409,
+                        body={
+                            "status": "ERROR",
+                            "errorCode": "GMAIL_HISTORY_CURSOR_EXPIRED",
+                            "pollMode": "cursor_reset_required",
+                            "historyId": cursor_before,
+                            "messageCount": 0,
+                            "errorCount": 1,
+                        },
+                        heartbeat_status="error",
+                        error_code="GMAIL_HISTORY_CURSOR_EXPIRED",
+                        detail=error_detail,
+                        heartbeat_secret_version=secret_version,
+                    )
+                # Restart discovery as a deterministic full-query recovery.
+                # The cursor remains unchanged and any orphan history rows are
+                # never referenced by the new batch.
+                poll_mode = "cursor_recovery"
+                active_batch_id = _queue_batch_id(
+                    (),
+                    cursor_before=(
+                        str(cursor_before)
+                        if cursor_before is not None
+                        else None
+                    ),
+                    pending_history_id=(
+                        str(pending_history_id)
+                        if pending_history_id is not None
+                        else None
+                    ),
+                    poll_mode=poll_mode,
+                    force_backfill=pending_force_backfill,
                 )
-                raise
-            poll_mode = "cursor_recovery"
+                try:
+                    write_ingestion_state(
+                        table,
+                        activeBatchId=active_batch_id,
+                        pendingPollMode=poll_mode,
+                        pendingDiscoveredCount=0,
+                        discoveryStatus="IN_PROGRESS",
+                        discoveryBatchId=active_batch_id,
+                        discoveryPageToken=None,
+                        discoveryNextSequence=0,
+                        discoveryMode=poll_mode,
+                        discoveryLabelId=None,
+                    )
+                except Exception as state_err:
+                    return queue_failure_response(state_err, poll_mode)
+                state.update({
+                    "activeBatchId": active_batch_id,
+                    "pendingPollMode": poll_mode,
+                    "pendingDiscoveredCount": 0,
+                    "discoveryStatus": "IN_PROGRESS",
+                    "discoveryBatchId": active_batch_id,
+                    "discoveryPageToken": None,
+                    "discoveryNextSequence": 0,
+                    "discoveryMode": poll_mode,
+                    "discoveryLabelId": None,
+                })
+                return budget_yield_response(
+                    "GMAIL_DISCOVERY_PENDING",
+                    poll_mode=poll_mode,
+                )
+            return queue_failure_response(err, poll_mode)
 
-    # A successful history poll with zero new messages is real work completed,
-    # not a reason to rescan the mailbox. Only initial/backfill and expired
-    # cursor recovery paths should issue the broader Gmail query.
-    if not message_ids and poll_mode in {"query", "cursor_recovery"}:
-        message_ids = list_message_ids(access_token, user_id)
-        if poll_mode != "cursor_recovery":
-            poll_mode = "query"
-
-    # users.messages.list is newest-first, while users.history.list is already
-    # chronological (increasing historyId). Preserve that distinction so every
-    # materialized action is replayed oldest-first.
-    message_ids = list(dict.fromkeys(message_ids))
-    if poll_mode in {"query", "cursor_recovery"}:
-        message_ids.reverse()
-
-    results = []
-    errors = []
-    for message_id in message_ids:
+        page_message_ids = list(dict.fromkeys(str(value) for value in page if value))
+        next_page_token = getattr(page, "next_page_token", None)
+        sequence_direction = (
+            -1 if poll_mode in {"query", "cursor_recovery"} else 1
+        )
         try:
-            results.append(process_message(access_token, user_id, message_id, table))
-        except Exception as err:
-            errors.append({
-                "messageId": message_id,
-                "error": safe_error_detail(err),
-                "errorCode": classify_runtime_error(err),
-                "retryable": bool(getattr(err, "retryable", False)),
+            # IDs are durable first. Only the following state write may advance
+            # Gmail's opaque page token.
+            persist_discovered_message_queue(
+                table,
+                page_message_ids,
+                cursor_before=(
+                    str(cursor_before) if cursor_before is not None else None
+                ),
+                pending_history_id=(
+                    str(pending_history_id)
+                    if pending_history_id is not None
+                    else None
+                ),
+                poll_mode=poll_mode,
+                force_backfill=pending_force_backfill,
+                start_sequence=next_sequence,
+                sequence_direction=sequence_direction,
+                budget_check=lambda: invocation_budget_reason(
+                    context,
+                    monotonic_started_at=monotonic_started_at,
+                ),
+            )
+            next_sequence += sequence_direction * len(page_message_ids)
+            queue_after_page = read_message_queue(table, active_batch_id)
+            discovered_count = len(queue_after_page)
+            discovery_status = (
+                "IN_PROGRESS" if next_page_token else "COMPLETE"
+            )
+            last_progress_at = utc_now().isoformat()
+            write_ingestion_state(
+                table,
+                status="IN_PROGRESS",
+                historyId=cursor_before,
+                activeBatchId=active_batch_id,
+                pendingHistoryId=pending_history_id,
+                pendingPollMode=poll_mode,
+                pendingForceBackfill=pending_force_backfill,
+                pendingDiscoveredCount=discovered_count,
+                pendingSince=state.get("pendingSince") or started_at,
+                lastProgressAt=last_progress_at,
+                discoveryStatus=discovery_status,
+                discoveryBatchId=active_batch_id,
+                discoveryCursorBefore=cursor_before,
+                discoveryTargetHistoryId=pending_history_id,
+                discoveryPageToken=next_page_token,
+                discoveryNextSequence=next_sequence,
+                discoveryMode=poll_mode,
+                errorCode=None,
+                errorDetail=None,
+            )
+            state.update({
+                "status": "IN_PROGRESS",
+                "activeBatchId": active_batch_id,
+                "pendingHistoryId": pending_history_id,
+                "pendingPollMode": poll_mode,
+                "pendingForceBackfill": pending_force_backfill,
+                "pendingDiscoveredCount": discovered_count,
+                "lastProgressAt": last_progress_at,
+                "discoveryStatus": discovery_status,
+                "discoveryBatchId": active_batch_id,
+                "discoveryCursorBefore": cursor_before,
+                "discoveryTargetHistoryId": pending_history_id,
+                "discoveryPageToken": next_page_token,
+                "discoveryNextSequence": next_sequence,
+                "discoveryMode": poll_mode,
             })
+        except GmailInvocationBudgetYield as err:
+            return budget_yield_response(
+                err.error_code,
+                poll_mode=poll_mode,
+                discovered=discovered_count,
+                remaining=discovered_count,
+            )
+        except Exception as err:
+            return queue_failure_response(err, poll_mode)
+
+        if next_page_token:
+            post_page_budget = gmail_call_budget_reason(
+                context,
+                monotonic_started_at=monotonic_started_at,
+            )
+            return budget_yield_response(
+                post_page_budget or "GMAIL_DISCOVERY_PENDING",
+                poll_mode=poll_mode,
+                discovered=discovered_count,
+                remaining=discovered_count,
+            )
+
+    try:
+        queue_items = (
+            read_message_queue(table, active_batch_id)
+            if active_batch_id
+            else []
+        )
+    except Exception as err:
+        return queue_failure_response(err, poll_mode)
+
+    results: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    successful_message_ids = set()
+    new_quarantines: List[Dict[str, Any]] = []
+    attempted_count = 0
+    budget_reason = None
+    last_progress_at = str(
+        state.get("lastProgressAt")
+        or state.get("pendingSince")
+        or started_at
+    )
+
+    for queue_item in queue_items:
+        if str(queue_item.get("status") or "") not in MESSAGE_QUEUE_ACTIVE_STATUSES:
+            continue
+        if attempted_count >= MAX_MESSAGES_PER_INVOCATION:
+            break
+        budget_reason = gmail_call_budget_reason(
+            context,
+            monotonic_started_at=monotonic_started_at,
+        )
+        if budget_reason:
+            break
+        try:
+            claimed = claim_queued_message(table, queue_item)
+        except Exception as err:
+            return queue_failure_response(err, poll_mode)
+        if claimed is None:
+            continue
+
+        attempted_count += 1
+        gmail_message_id = str(claimed.get("gmailMessageId") or "")
+        try:
+            process_kwargs: Dict[str, Any] = {
+                "budget_check": lambda: gmail_call_budget_reason(
+                    context,
+                    monotonic_started_at=monotonic_started_at,
+                ),
+            }
+            if pending_force_backfill:
+                process_kwargs["allow_version_backfill"] = True
+            result = process_message(
+                access_token,
+                user_id,
+                gmail_message_id,
+                table,
+                **process_kwargs,
+            )
+        except GmailInvocationBudgetYield as err:
+            budget_reason = err.error_code
+            try:
+                checkpoint_queued_message(
+                    table,
+                    claimed,
+                    status="RETRYABLE",
+                    error_code=budget_reason,
+                    error_detail=(
+                        "Invocation yielded before the next message work unit."
+                    ),
+                )
+            except Exception as checkpoint_error:
+                return queue_failure_response(checkpoint_error, poll_mode)
+            break
+        except Exception as err:
+            error_code = classify_runtime_error(err)
+            error_detail = safe_error_detail(err)
+            quarantined = (
+                poll_mode.startswith("build_recovery:")
+                or int(claimed.get("attemptCount") or 0)
+                >= MESSAGE_QUEUE_MAX_ATTEMPTS
+            )
+            try:
+                checkpoint_queued_message(
+                    table,
+                    claimed,
+                    status="QUARANTINED" if quarantined else "RETRYABLE",
+                    error_code=error_code,
+                    error_detail=error_detail,
+                )
+            except Exception as checkpoint_error:
+                return queue_failure_response(checkpoint_error, poll_mode)
+            error_item = {
+                "messageId": gmail_message_id,
+                "error": error_detail,
+                "errorCode": error_code,
+                "retryable": not quarantined,
+                "attemptCount": int(claimed.get("attemptCount") or 0),
+                "quarantined": quarantined,
+            }
+            errors.append(error_item)
+            if quarantined:
+                quarantine_record = {
+                    "messageId": gmail_message_id,
+                    "errorCode": error_code,
+                    "quarantinedAt": utc_now().isoformat(),
+                    "attemptCount": int(claimed.get("attemptCount") or 0),
+                }
+                if poll_mode.startswith("build_recovery:"):
+                    quarantine_record.update(
+                        {
+                            "recoveryBuildVersion": BUILD_VERSION,
+                            "recoveryAttemptedAt": utc_now().isoformat(),
+                        }
+                    )
+                new_quarantines.append(quarantine_record)
+        else:
+            try:
+                checkpoint_queued_message(
+                    table,
+                    claimed,
+                    status="COMPLETED",
+                )
+            except Exception as checkpoint_error:
+                return queue_failure_response(checkpoint_error, poll_mode)
+            results.append(result)
+            successful_message_ids.add(gmail_message_id)
+            last_progress_at = utc_now().isoformat()
+
+    try:
+        queue_items = (
+            read_message_queue(table, active_batch_id)
+            if active_batch_id
+            else []
+        )
+    except Exception as err:
+        return queue_failure_response(err, poll_mode)
+
+    remaining_items = [
+        item
+        for item in queue_items
+        if str(item.get("status") or "") in MESSAGE_QUEUE_ACTIVE_STATUSES
+    ]
+    batch_quarantines = [
+        item
+        for item in queue_items
+        if str(item.get("status") or "") == "QUARANTINED"
+    ]
+
+    recorded_quarantines = [
+        dict(item)
+        for item in (state.get("quarantinedMessages") or [])
+        if isinstance(item, dict)
+    ]
+    recovered_quarantine_ids = {
+        str(item.get("messageId") or "")
+        for item in recorded_quarantines
+    } & successful_message_ids
+    if successful_message_ids:
+        recorded_quarantines = [
+            item
+            for item in recorded_quarantines
+            if item.get("messageId") not in successful_message_ids
+        ]
+    known_quarantined_ids = {
+        str(item.get("messageId") or "")
+        for item in recorded_quarantines
+    }
+    for item in new_quarantines:
+        if item["messageId"] in known_quarantined_ids:
+            recorded_quarantines = [
+                (
+                    {**existing, **item}
+                    if existing.get("messageId") == item["messageId"]
+                    else existing
+                )
+                for existing in recorded_quarantines
+            ]
+        else:
+            recorded_quarantines.append(item)
+            known_quarantined_ids.add(item["messageId"])
+    recorded_quarantines = recorded_quarantines[-MAX_RECORDED_QUARANTINES:]
+    previous_quarantine_count = max(
+        len(recorded_quarantines),
+        int(state.get("quarantinedCount") or 0)
+        - len(recovered_quarantine_ids),
+    )
+    quarantined_count = max(
+        previous_quarantine_count,
+        len(recorded_quarantines),
+        len(batch_quarantines),
+    )
 
     stored_count = sum(len(item["stored"]) for item in results)
     skipped_count = sum(len(item["skipped"]) for item in results)
     counts = {
-        "messages": len(message_ids),
+        "messages": attempted_count,
         "stored": stored_count,
         "skipped": skipped_count,
         "errors": len(errors),
-        "dropped": 0,
+        "dropped": quarantined_count,
+        "remaining": len(remaining_items),
     }
 
-    history_id = None
-    if not errors:
-        history_id = get_profile_history_id(access_token, user_id)
-        write_ingestion_state(
-            table,
-            status="READY",
-            historyId=history_id,
-            blockedSecretVersion=None,
-            errorCode=None,
-            errorDetail=None,
-            lastSuccessAt=utc_now().isoformat(),
-            pollMode=poll_mode,
+    if remaining_items:
+        stalled = False
+        if not successful_message_ids:
+            try:
+                progress_time = datetime.fromisoformat(
+                    last_progress_at.replace("Z", "+00:00")
+                )
+                if progress_time.tzinfo is None:
+                    progress_time = progress_time.replace(tzinfo=timezone.utc)
+                stalled = (
+                    utc_now() - progress_time.astimezone(timezone.utc)
+                ).total_seconds() >= BACKLOG_STALLED_SECONDS
+            except (TypeError, ValueError):
+                stalled = True
+
+        if stalled:
+            heartbeat_status = "error"
+            heartbeat_error_code = "GMAIL_BACKLOG_STALLED"
+        elif new_quarantines:
+            heartbeat_status = "warning"
+            heartbeat_error_code = "GMAIL_QUARANTINED_ARTIFACTS_PENDING"
+        else:
+            heartbeat_status = "in_progress"
+            heartbeat_error_code = (
+                budget_reason
+                or (
+                    "GMAIL_MESSAGE_RETRY_PENDING"
+                    if errors
+                    else "GMAIL_BACKLOG_PENDING"
+                )
+            )
+        try:
+            write_ingestion_state(
+                table,
+                status=(
+                    "ERROR"
+                    if heartbeat_status == "error"
+                    else "WARNING"
+                    if heartbeat_status == "warning"
+                    else "IN_PROGRESS"
+                ),
+                historyId=cursor_before,
+                activeBatchId=active_batch_id,
+                pendingHistoryId=pending_history_id,
+                pendingPollMode=poll_mode,
+                pendingForceBackfill=pending_force_backfill,
+                pendingDiscoveredCount=discovered_count,
+                pendingSince=state.get("pendingSince") or started_at,
+                lastProgressAt=last_progress_at,
+                quarantinedCount=quarantined_count,
+                quarantinedMessages=recorded_quarantines,
+                errorCode=heartbeat_error_code,
+                errorDetail=(
+                    f"{len(remaining_items)} durable Gmail message(s) remain."
+                ),
+                counts=counts,
+            )
+        except Exception as err:
+            return queue_failure_response(err, poll_mode)
+
+        heartbeat_written = write_service_heartbeat(
+            started_at=started_at,
+            status=heartbeat_status,
+            trigger_source=trigger_source,
+            schedule_id=schedule_id,
+            error_code=heartbeat_error_code,
+            detail=f"{len(remaining_items)} durable Gmail message(s) remain.",
+            secret_version=secret_version,
             counts=counts,
         )
+        response_status = (
+            "ERROR"
+            if heartbeat_status == "error"
+            else "ATTENTION"
+            if heartbeat_status == "warning"
+            else "IN_PROGRESS"
+        )
+        status_code = 207 if heartbeat_status == "error" else 200
+        if not heartbeat_written:
+            response_status = "ERROR"
+            status_code = 503
+            heartbeat_error_code = "GMAIL_HEARTBEAT_WRITE_FAILED"
+            try:
+                write_ingestion_state(
+                    table,
+                    status="ERROR",
+                    historyId=cursor_before,
+                    activeBatchId=active_batch_id,
+                    pendingHistoryId=pending_history_id,
+                    pendingPollMode=poll_mode,
+                    pendingForceBackfill=pending_force_backfill,
+                    pendingDiscoveredCount=discovered_count,
+                    pendingSince=state.get("pendingSince") or started_at,
+                    lastProgressAt=last_progress_at,
+                    quarantinedCount=quarantined_count,
+                    quarantinedMessages=recorded_quarantines,
+                    errorCode=heartbeat_error_code,
+                    errorDetail="Scheduled progress heartbeat could not be persisted.",
+                    counts=counts,
+                )
+            except Exception:
+                pass
+        return {
+            "statusCode": status_code,
+            "body": json.dumps({
+                "status": response_status,
+                "errorCode": heartbeat_error_code,
+                "query": GMAIL_QUERY,
+                "pollMode": poll_mode,
+                "historyId": cursor_before,
+                "pendingHistoryId": pending_history_id,
+                "messageCount": attempted_count,
+                "discoveredCount": discovered_count,
+                "remainingCount": len(remaining_items),
+                "storedCount": stored_count,
+                "skippedCount": skipped_count,
+                "errorCount": len(errors),
+                "quarantinedCount": quarantined_count,
+                "results": results,
+                "errors": errors,
+            }),
+        }
 
-    error_codes = {item["errorCode"] for item in errors}
+    canonical_verification = None
+    if pending_force_backfill:
+        try:
+            canonical_verification = verify_research_event_ledger(dynamodb)
+            if not canonical_verification["verified"]:
+                errors.append({
+                    "messageId": None,
+                    "error": (
+                        "Canonical RTA/ETF research-event verification is incomplete "
+                        "after forceBackfill."
+                    ),
+                    "errorCode": "GMAIL_CANONICAL_VERIFICATION_INCOMPLETE",
+                    "retryable": True,
+                })
+        except Exception as err:
+            canonical_verification = {
+                "verified": False,
+                "eventCount": 0,
+                "unverifiedEventCount": 0,
+                "products": {},
+            }
+            errors.append({
+                "messageId": None,
+                "error": safe_error_detail(err),
+                "errorCode": "GMAIL_CANONICAL_VERIFICATION_FAILED",
+                "retryable": True,
+            })
+
+    counts["errors"] = len(errors)
+    history_id = (
+        pending_history_id
+        if pending_history_id is not None
+        else cursor_before
+    )
+    has_processing_error = any(
+        item.get("quarantined") is not True
+        for item in errors
+    )
+    has_quarantine_warning = bool(
+        quarantined_count and not has_processing_error
+    )
+    error_codes = {
+        str(item.get("errorCode") or "")
+        for item in errors
+        if item.get("errorCode")
+    }
     heartbeat_error_code = None
-    if errors:
+    if has_processing_error and error_codes:
         heartbeat_error_code = (
             next(iter(error_codes))
             if len(error_codes) == 1
             else "GMAIL_MESSAGE_PROCESSING_ERROR"
         )
+    elif quarantined_count:
+        heartbeat_error_code = "GMAIL_QUARANTINED_ARTIFACTS_PENDING"
 
-    write_service_heartbeat(
+    try:
+        write_ingestion_state(
+            table,
+            status=(
+                "ERROR"
+                if has_processing_error
+                else "WARNING"
+                if has_quarantine_warning
+                else "READY"
+            ),
+            historyId=history_id,
+            activeBatchId=None,
+            pendingHistoryId=None,
+            pendingPollMode=None,
+            pendingForceBackfill=False,
+            pendingDiscoveredCount=0,
+            discoveryStatus=None,
+            discoveryBatchId=None,
+            discoveryCursorBefore=None,
+            discoveryTargetHistoryId=None,
+            discoveryPageToken=None,
+            discoveryNextSequence=None,
+            discoveryMode=None,
+            discoveryLabelId=None,
+            pendingSince=None,
+            lastProgressAt=last_progress_at,
+            blockedSecretVersion=None,
+            errorCode=heartbeat_error_code,
+            errorDetail=(
+                (
+                    f"{quarantined_count} Gmail message(s) remain quarantined."
+                    if quarantined_count
+                    else f"{len(errors)} message(s) failed processing."
+                )
+                if has_processing_error or has_quarantine_warning
+                else None
+            ),
+            lastSuccessAt=(
+                state.get("lastSuccessAt")
+                if has_processing_error
+                else utc_now().isoformat()
+            ),
+            pollMode=poll_mode,
+            quarantinedCount=quarantined_count,
+            quarantinedMessages=recorded_quarantines,
+            counts=counts,
+        )
+    except Exception as err:
+        return queue_failure_response(err, poll_mode)
+
+    heartbeat_written = write_service_heartbeat(
         started_at=started_at,
-        status="error" if errors else "success",
+        status=(
+            "error"
+            if has_processing_error
+            else "warning"
+            if has_quarantine_warning
+            else "success"
+        ),
         trigger_source=trigger_source,
         schedule_id=schedule_id,
         error_code=heartbeat_error_code,
-        detail=f"{len(errors)} message(s) failed processing." if errors else None,
+        detail=(
+            (
+                f"{quarantined_count} Gmail message(s) remain quarantined."
+                if quarantined_count
+                else f"{len(errors)} message(s) failed processing."
+            )
+            if has_processing_error or has_quarantine_warning
+            else None
+        ),
         secret_version=secret_version,
         counts=counts,
     )
+    if not heartbeat_written:
+        heartbeat_error_code = "GMAIL_HEARTBEAT_WRITE_FAILED"
+        try:
+            write_ingestion_state(
+                table,
+                status="ERROR",
+                historyId=history_id,
+                errorCode=heartbeat_error_code,
+                errorDetail="Scheduled completion heartbeat could not be persisted.",
+                counts=counts,
+            )
+        except Exception:
+            pass
 
     return {
-        "statusCode": 207 if errors else 200,
+        "statusCode": (
+            503
+            if not heartbeat_written
+            else (207 if has_processing_error else 200)
+        ),
         "body": json.dumps(
             {
-                "status": "PARTIAL_ERROR" if errors else "SUCCESS",
+                "status": (
+                    "ERROR"
+                    if has_processing_error or not heartbeat_written
+                    else "ATTENTION"
+                    if has_quarantine_warning
+                    else "SUCCESS"
+                ),
+                "errorCode": heartbeat_error_code,
                 "query": GMAIL_QUERY,
                 "pollMode": poll_mode,
                 "historyId": history_id,
-                "messageCount": len(message_ids),
+                "messageCount": attempted_count,
+                "discoveredCount": discovered_count,
+                "remainingCount": 0,
                 "storedCount": stored_count,
                 "skippedCount": skipped_count,
                 "errorCount": len(errors),
+                "quarantinedCount": quarantined_count,
+                "canonicalVerification": canonical_verification,
                 "results": results,
                 "errors": errors,
             }

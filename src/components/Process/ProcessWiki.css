@@ -1,0 +1,746 @@
+.process-overlay-host {
+  position: fixed;
+  inset: 0 var(--dashboard-active-rail-width, 76px) 0 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  pointer-events: none;
+}
+
+.process-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.22);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+
+.process-overlay-dialog {
+  position: relative;
+  width: min(1000px, 100%);
+  height: min(94vh, 1040px);
+  overflow: clip;
+  color: #202122;
+  border: 1px solid #a2a9b1;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+}
+
+.dark .process-overlay-backdrop {
+  background: rgba(0, 0, 0, 0.44);
+}
+
+.dark .process-overlay-dialog {
+  color: #eaecf0;
+  border-color: #4b5563;
+  background: #202122;
+}
+
+.process-wiki {
+  --process-article-width: 650px;
+  --process-font-size: 14px;
+  --process-bg: #fff;
+  --process-subtle-bg: #f8f9fa;
+  --process-ink: #202122;
+  --process-muted: #54595d;
+  --process-link: #36c;
+  --process-link-hover: #3056a9;
+  --process-border: #a2a9b1;
+  --process-light-border: #eaecf0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--process-ink);
+  background: var(--process-bg);
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+}
+
+.process-wiki,
+.process-wiki * {
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+}
+
+.dark .process-wiki {
+  --process-bg: #202122;
+  --process-subtle-bg: #27292d;
+  --process-ink: #eaecf0;
+  --process-muted: #b8bdc3;
+  --process-link: #8ab4f8;
+  --process-link-hover: #aecbfa;
+  --process-border: #72777d;
+  --process-light-border: #454a50;
+}
+
+.process-wiki__site-header {
+  min-height: 58px;
+  padding: 8px 14px 8px 18px;
+  display: grid;
+  grid-template-columns: minmax(210px, 520px) 1fr;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--process-light-border);
+  background: var(--process-bg);
+}
+
+.process-wiki__search {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.process-wiki__search input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 6px 10px;
+  color: var(--process-ink);
+  border: 1px solid var(--process-border);
+  border-radius: 2px 0 0 2px;
+  background: var(--process-bg);
+  font: 14px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.process-wiki__search input:focus {
+  border-color: var(--process-ink);
+  outline: 1px solid var(--process-ink);
+  outline-offset: -1px;
+}
+
+.process-wiki__search-label {
+  height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--process-ink);
+  border: 1px solid var(--process-border);
+  border-left: 0;
+  border-radius: 0 2px 2px 0;
+  background: var(--process-subtle-bg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.process-wiki__search-results {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 310px;
+  overflow-y: auto;
+  border: 1px solid var(--process-border);
+  background: var(--process-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+
+.process-wiki__search-result {
+  width: 100%;
+  padding: 8px 10px;
+  display: grid;
+  gap: 2px;
+  color: var(--process-ink);
+  border: 0;
+  border-bottom: 1px solid var(--process-light-border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.process-wiki__search-result:hover,
+.process-wiki__search-result:focus-visible {
+  background: var(--process-subtle-bg);
+  outline: none;
+}
+
+.process-wiki__search-result strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.process-wiki__search-result small {
+  color: var(--process-muted);
+  font-size: 11px;
+}
+
+.process-wiki__header-actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.process-wiki__plain-button,
+.process-wiki__tab,
+.process-wiki__contents button,
+.process-wiki__tools-menu button {
+  color: var(--process-link);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.process-wiki__plain-button {
+  padding: 7px 8px;
+  font-size: 13px;
+}
+
+.process-wiki__plain-button:hover,
+.process-wiki__plain-button:focus-visible {
+  color: var(--process-link-hover);
+  text-decoration: underline;
+  outline: none;
+}
+
+.process-wiki__responsive-control {
+  display: none;
+}
+
+.process-wiki__tools {
+  position: relative;
+}
+
+.process-wiki__tools-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  z-index: 12;
+  width: 205px;
+  padding: 5px 0;
+  border: 1px solid var(--process-border);
+  background: var(--process-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+
+.process-wiki__tools-menu button {
+  width: 100%;
+  padding: 8px 12px;
+  display: block;
+  color: var(--process-ink);
+  text-align: left;
+}
+
+.process-wiki__tools-menu button[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+.process-wiki__tools-separator {
+  height: 1px;
+  margin: 5px 0;
+  display: block;
+  background: var(--process-light-border);
+}
+
+.process-wiki__tools-section-label {
+  padding: 5px 12px 3px;
+  display: block;
+  color: var(--process-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.process-wiki__tools-check {
+  width: 18px;
+  display: inline-block;
+  color: var(--process-muted);
+}
+
+.process-wiki__tools-menu button:hover,
+.process-wiki__tools-menu button:focus-visible {
+  background: var(--process-subtle-bg);
+  outline: none;
+}
+
+.process-wiki__body {
+  min-height: 0;
+  flex: 1;
+  padding: 24px 20px 32px;
+  display: grid;
+  grid-template-columns: 170px minmax(0, var(--process-article-width)) 150px;
+  justify-content: center;
+  align-items: stretch;
+  gap: 18px;
+  overflow: hidden;
+}
+
+.process-wiki__contents {
+  min-height: 0;
+  overflow-y: auto;
+  color: var(--process-muted);
+  font-size: 13px;
+}
+
+.process-wiki__side-heading {
+  margin: 0 0 9px;
+  padding-bottom: 7px;
+  color: var(--process-ink);
+  border-bottom: 1px solid var(--process-light-border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.process-wiki__contents ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.process-wiki__contents li {
+  margin: 0 0 3px;
+}
+
+.process-wiki__contents button {
+  width: 100%;
+  padding: 5px 6px;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 2px;
+  color: var(--process-link);
+  border-left: 2px solid transparent;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.process-wiki__contents button:hover,
+.process-wiki__contents button:focus-visible,
+.process-wiki__contents button.is-active {
+  color: var(--process-ink);
+  border-left-color: var(--process-ink);
+  text-decoration: none;
+  outline: none;
+}
+
+.process-wiki__contents button small {
+  color: var(--process-muted);
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+  font-size: 11px;
+}
+
+.process-wiki__article-scroll {
+  min-width: 0;
+  min-height: 0;
+  grid-column: 2 / -1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/* Keep the reading measure fixed while reserving the unused right column for
+   the scroll track. This keeps the track at the workspace edge, not beside
+   the article text. */
+.process-wiki__article-scroll > * {
+  max-width: var(--process-article-width);
+}
+
+.process-wiki__document-header {
+  margin: 0 0 15px;
+}
+
+.process-wiki__document-header h1 {
+  margin: 0;
+  color: var(--process-ink);
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+  font-size: 29px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.process-wiki__tabs {
+  margin-top: 4px;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--process-border);
+}
+
+.process-wiki__primary-tabs,
+.process-wiki__action-tabs {
+  display: flex;
+  align-items: end;
+  gap: 3px;
+}
+
+.process-wiki__tab {
+  min-height: 32px;
+  padding: 7px 8px 6px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--process-link);
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.process-wiki__tab:hover,
+.process-wiki__tab:focus-visible {
+  color: var(--process-link-hover);
+  text-decoration: underline;
+  outline: none;
+}
+
+.process-wiki__tab.is-active,
+.process-wiki__tab[aria-current="page"],
+.process-wiki__tab[aria-pressed="true"] {
+  color: var(--process-ink);
+  border-bottom-color: var(--process-ink);
+  text-decoration: none;
+}
+
+.process-wiki__metadata {
+  margin: 8px 0 0;
+  color: var(--process-muted);
+  font-size: 12px;
+}
+
+.process-wiki__save-status {
+  min-height: 18px;
+  margin: 4px 0 0;
+  color: var(--process-muted);
+  font-size: 11px;
+}
+
+.process-wiki__article {
+  font-size: var(--process-font-size);
+  line-height: 1.62;
+}
+
+.process-wiki .wp-paper {
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  color: var(--process-ink);
+  background: transparent;
+  box-shadow: none;
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.process-wiki .wp-paper * {
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+}
+
+.process-wiki .wp-paper__title,
+.process-wiki .process-library-article__header {
+  display: none;
+}
+
+.process-wiki .wp-paper h2,
+.process-wiki .wp-paper h3,
+.process-wiki .wp-paper h4,
+.process-wiki .wp-paper h2 *,
+.process-wiki .wp-paper h3 *,
+.process-wiki .wp-paper h4 *,
+.process-wiki .wp-equation code {
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+}
+
+.process-wiki .wp-paper h2 {
+  margin: 26px 0 10px;
+  padding-bottom: 3px;
+  color: var(--process-ink);
+  border-bottom: 1px solid var(--process-border);
+  font-size: 1.5em;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.process-wiki .wp-paper h3 {
+  margin: 21px 0 7px;
+  color: var(--process-ink);
+  font-size: 1.2em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.process-wiki .wp-paper h4 {
+  margin: 18px 0 6px;
+  font-size: 1.04em;
+}
+
+.process-wiki .wp-paper p {
+  margin: 0 0 12px;
+  color: var(--process-ink);
+  text-align: left;
+  hyphens: none;
+}
+
+.process-wiki .wp-abstract {
+  max-width: none;
+  margin: 0 0 20px;
+}
+
+.process-wiki .wp-abstract p {
+  font-size: inherit;
+}
+
+.process-wiki .wp-paper a {
+  color: var(--process-link);
+  text-decoration: none;
+}
+
+.process-wiki .wp-paper a:hover,
+.process-wiki .wp-paper a:focus-visible {
+  color: var(--process-link-hover);
+  text-decoration: underline;
+}
+
+.process-wiki .wp-paper ul,
+.process-wiki .wp-paper ol {
+  margin: 4px 0 13px;
+  padding-left: 25px;
+}
+
+.process-wiki .wp-paper li {
+  margin: 0 0 5px;
+}
+
+.process-wiki .wp-table {
+  width: 100%;
+  margin: 14px 0 18px;
+  border: 1px solid var(--process-border);
+  border-collapse: collapse;
+  table-layout: auto;
+  background: var(--process-bg);
+  font-size: 0.84em;
+  line-height: 1.42;
+}
+
+.process-wiki .wp-table thead,
+.process-wiki .wp-table tbody,
+.process-wiki .wp-table tbody tr + tr {
+  border: 0;
+}
+
+.process-wiki .wp-table th,
+.process-wiki .wp-table td {
+  padding: 7px 9px;
+  border: 1px solid var(--process-border);
+  vertical-align: top;
+}
+
+.process-wiki .wp-table th {
+  background: var(--process-subtle-bg);
+  font-weight: 600;
+}
+
+.process-wiki .wp-equation {
+  width: min(94%, 620px);
+  margin: 18px auto;
+}
+
+.process-wiki .wp-equation code {
+  color: var(--process-ink);
+  font-size: 0.95em;
+}
+
+.process-wiki .process-paper.is-editing [data-editable-region],
+.process-wiki [contenteditable="true"][data-editable-region] {
+  outline: 1px dashed var(--process-border);
+  outline-offset: 5px;
+}
+
+.process-wiki .process-paper.is-editing [data-editable-region]:focus,
+.process-wiki [contenteditable="true"][data-editable-region]:focus {
+  outline: 2px solid var(--process-link);
+}
+
+@media (max-width: 1060px) {
+  .process-wiki__site-header {
+    grid-template-columns: minmax(180px, 1fr) auto;
+  }
+
+  .process-wiki__body {
+    grid-template-columns: 180px minmax(0, var(--process-article-width));
+  }
+
+  .process-wiki__article-scroll {
+    grid-column: 2;
+  }
+
+  .process-wiki__responsive-control {
+    display: inline-flex;
+  }
+
+}
+
+@media (max-width: 760px) {
+  .process-overlay-host {
+    padding: 8px;
+  }
+
+  .process-overlay-dialog {
+    height: calc(100vh - 16px);
+  }
+
+  .process-wiki__site-header {
+    min-height: 52px;
+    padding: 7px 8px 7px 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+
+  .process-wiki__search {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .process-wiki__header-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .process-wiki__site-header {
+    min-height: 94px;
+  }
+
+  .process-wiki__body {
+    padding: 15px 14px 24px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .process-wiki__article-scroll {
+    grid-column: 1;
+  }
+
+  .process-wiki__contents {
+    position: absolute;
+    top: 95px;
+    left: 8px;
+    z-index: 14;
+    width: min(245px, calc(100% - 24px));
+    max-height: calc(100% - 108px);
+    padding: 14px;
+    display: none;
+    border: 1px solid var(--process-border);
+    background: var(--process-bg);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  }
+
+  .process-wiki__contents.is-open {
+    display: block;
+  }
+
+  .process-wiki__document-header h1 {
+    font-size: 26px;
+  }
+
+  .process-wiki__tabs {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .process-wiki__primary-tabs,
+  .process-wiki__action-tabs {
+    width: max-content;
+  }
+
+  .process-wiki__action-tabs {
+    margin-top: -1px;
+    border-top: 1px solid var(--process-light-border);
+  }
+
+  .process-wiki .wp-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .process-wiki__site-header {
+    position: relative;
+    min-height: 94px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 34px 34px;
+    align-content: center;
+    gap: 7px;
+  }
+
+  .process-wiki__search {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .process-wiki__header-actions {
+    width: 100%;
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: stretch;
+    justify-content: flex-start;
+    gap: 1px;
+  }
+
+  .process-wiki__tab {
+    padding-right: 5px;
+    padding-left: 5px;
+    font-size: 12px;
+  }
+
+  .process-wiki__primary-tabs,
+  .process-wiki__action-tabs {
+    gap: 0;
+  }
+
+  .process-wiki__contents {
+    top: 95px;
+    max-height: calc(100% - 108px);
+  }
+}
+
+@media print {
+  .dashboard-shell {
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  .dashboard-shell > :not(.process-overlay-host) {
+    display: none !important;
+  }
+
+  .process-overlay-host,
+  .process-overlay-dialog,
+  .process-wiki,
+  .process-wiki__body,
+  .process-wiki__article-scroll {
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    color: #000 !important;
+    border: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  .process-overlay-backdrop,
+  .process-wiki__site-header,
+  .process-wiki__contents,
+  .process-wiki__document-header,
+  .process-wiki__save-status {
+    display: none !important;
+  }
+
+  .process-wiki__body {
+    display: block !important;
+  }
+
+  .process-wiki .wp-paper__title,
+  .process-wiki .process-library-article__header {
+    display: block !important;
+  }
+}

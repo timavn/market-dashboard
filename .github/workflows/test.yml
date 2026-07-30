@@ -1,12 +1,65 @@
-name: Test Workflow
+name: Reliability verification
 
 on:
+  pull_request:
   push:
-    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reliability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  node:
+    name: Supervisor, bridge, readiness, controller, and UI
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-    - name: Hello World
-      run: echo "Hello World"
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Verify supervisor, bridge, and reliability controller
+        run: npm run test:ops
+
+      - name: Verify readiness contracts and UI
+        env:
+          CI: "true"
+        run: npm test -- --watchAll=false --runInBand
+
+  infrastructure:
+    name: Infrastructure, Gmail, contracts, and SAM
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install infrastructure test dependencies
+        run: python -m pip install --disable-pip-version-check boto3 pyyaml
+
+      - name: Verify generated Hermes contract
+        run: python infra/scripts/render_hermes_contract.py --check
+
+      - name: Run infrastructure and Gmail tests
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: python -m unittest discover -s infra/tests -p "test_*.py"
+
+      - uses: aws-actions/setup-sam@v2
+
+      - name: Validate SAM template
+        working-directory: infra
+        run: sam validate --lint --template-file template.yaml

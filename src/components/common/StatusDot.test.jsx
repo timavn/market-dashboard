@@ -171,6 +171,33 @@ describe('StatusDot', () => {
     expect(screen.getByTestId('status-dot-visual')).toHaveClass('bg-red-500');
   });
 
+  test('renders an exact source state label without a redundant detail row', () => {
+    render(
+      <StatusDot
+        label="Portfolio"
+        status="stale"
+        sources={[
+          {
+            id: 'interest-validation',
+            label: 'Interest validation',
+            stateLabel: 'Learning',
+            detail: 'Learning',
+            status: 'stale',
+            detailRows: [],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show status details for portfolio/i }));
+    const sourceCard = screen.getByTestId('status-source-card-interest-validation');
+    expect(sourceCard).toHaveAttribute('data-status-tone', 'learning');
+    expect(screen.getByTestId('status-source-card-interest-validation-state'))
+      .toHaveClass('text-[#ca8a04]');
+    expect(within(sourceCard).queryByText('Stale')).not.toBeInTheDocument();
+    expect(within(sourceCard).getAllByText('Learning')).toHaveLength(1);
+  });
+
   test('uses a larger native button target without changing the visible dot size', () => {
     render(<StatusDot label="Compact feed" status="active" size={8} />);
 

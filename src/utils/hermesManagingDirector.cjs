@@ -1,6 +1,9 @@
 const HERMES_AGENT_RUNS_TABLE = process.env.HERMES_AGENT_RUNS_TABLE || 'HermesAgentRuns';
 const HERMES_ALERTS_TABLE = process.env.HERMES_ALERTS_TABLE || 'HermesAlerts';
+const SERVICE_HEARTBEAT_TABLE = process.env.SERVICE_HEARTBEAT_TABLE
+  || 'MarketDashboardServiceHeartbeats';
 const HERMES_ALERT_EMAIL_TO = process.env.HERMES_ALERT_EMAIL_TO || process.env.ALERT_EMAIL_TO || '';
+const MAX_FUTURE_CLOCK_SKEW_MS = 30_000;
 const SERVICE_MANIFEST = require('../../ops/services.json');
 const MANIFEST_SERVICES = new Map(
   (SERVICE_MANIFEST.services || []).map((service) => [String(service.id), service]),
@@ -366,10 +369,65 @@ function workerFallback(workerKey, workflowSnapshot, alerts) {
   };
 }
 
-function buildWorkerSnapshot(workerDefinition, latestRun, workflowSnapshot, alerts) {
+function heartbeatTime(heartbeat) {
+  const value = heartbeat?.finishedAt || heartbeat?.observedAt || null;
+  const parsed = value ? new Date(value) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function buildWorkerSnapshot(
+  workerDefinition,
+  latestRun,
+  workflowSnapshot,
+  alerts,
+  heartbeat = null,
+  now = new Date(),
+) {
   const fallback = workerFallback(workerDefinition.key, workflowSnapshot, alerts);
-  const source = latestRun || {};
-  const status = normalizeWorkerStatus(source.status || fallback.status);
+  const historicalRun = latestRun || {};
+  const observed = heartbeatTime(heartbeat);
+  const maxAgeMs = Math.max(
+    1,
+    Number(workerDefinition.readinessMaxAgeMinutes) || 45,
+  ) * 60 * 1000;
+  const futureDated = Boolean(
+    observed
+    && observed.getTime() - now.getTime() > MAX_FUTURE_CLOCK_SKEW_MS
+  );
+  const heartbeatAgeMs = observed && !futureDated
+    ? Math.max(0, now.getTime() - observed.getTime())
+    : null;
+  const expectedScheduleId = workerDefinition.scheduleId
+    || `market-dashboard-hermes-${workerDefinition.key}-v2`;
+  const scheduled = Boolean(
+    heartbeat
+    && heartbeat.source === 'aws-lambda'
+    && heartbeat.triggerSource === 'aws-scheduler'
+    && heartbeat.scheduled === true
+    && heartbeat.scheduleId === expectedScheduleId
+  );
+  const fresh = !futureDated && heartbeatAgeMs != null && heartbeatAgeMs <= maxAgeMs;
+  const heartbeatStatus = normalizeWorkerStatus(heartbeat?.status);
+  let status;
+  let summary;
+  if (!heartbeat) {
+    status = 'warning';
+    summary = historicalRun.startedAt
+      ? `Latest recorded run is historical (${historicalRun.startedAt}); no authoritative scheduled heartbeat is current.`
+      : 'No authoritative scheduled heartbeat has been recorded.';
+  } else if (!scheduled) {
+    status = 'warning';
+    summary = `Latest heartbeat did not prove the owned schedule ${expectedScheduleId}.`;
+  } else if (futureDated) {
+    status = 'warning';
+    summary = `Scheduled heartbeat is more than 30 seconds ahead of the dashboard clock (${observed.toISOString()}).`;
+  } else if (!fresh) {
+    status = 'warning';
+    summary = `Scheduled heartbeat is stale; last observed ${observed?.toISOString() || 'at an invalid time'}.`;
+  } else {
+    status = heartbeatStatus;
+    summary = heartbeat.summary || heartbeat.detail || fallback.summary;
+  }
   return {
     key: workerDefinition.key,
     name: workerDefinition.name,
@@ -378,13 +436,35 @@ function buildWorkerSnapshot(workerDefinition, latestRun, workflowSnapshot, aler
     cadence: workerDefinition.cadence,
     functionName: process.env[workerDefinition.lambdaEnv] || workerDefinition.defaultFunctionName || null,
     status,
-    severity: normalizeSeverity(source.severity || fallback.severity),
-    summary: source.summary || fallback.summary,
-    lastRun: source.startedAt || null,
-    finishedAt: source.finishedAt || null,
-    triggerType: source.triggerType || workerDefinition.triggerType,
+    severity: normalizeSeverity(heartbeat?.severity || historicalRun.severity || fallback.severity),
+    summary,
+    lastRun: observed?.toISOString() || historicalRun.startedAt || null,
+    finishedAt: heartbeat?.finishedAt || historicalRun.finishedAt || null,
+    triggerType: heartbeat?.triggerSource || historicalRun.triggerType || workerDefinition.triggerType,
+    heartbeatAt: observed?.toISOString() || null,
+    heartbeatFresh: fresh,
+    heartbeatScheduled: scheduled,
+    heartbeatServiceId: workerDefinition.heartbeatServiceId,
+    historicalLastRun: historicalRun.startedAt || null,
     openAlertCount: alerts.filter((alert) => alert.worker === workerDefinition.key && alert.status !== 'resolved').length,
   };
+}
+
+async function safeQueryServiceHeartbeat(dynamodb, serviceId) {
+  if (!dynamodb || typeof dynamodb.query !== 'function') return null;
+  try {
+    const result = await dynamodb.query({
+      TableName: SERVICE_HEARTBEAT_TABLE,
+      KeyConditionExpression: '#serviceId = :serviceId',
+      ExpressionAttributeNames: { '#serviceId': 'serviceId' },
+      ExpressionAttributeValues: { ':serviceId': serviceId },
+      ScanIndexForward: false,
+      Limit: 1,
+    }).promise();
+    return Array.isArray(result?.Items) ? result.Items[0] || null : null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 function buildDirectorStatus(workers, alerts) {
@@ -502,10 +582,20 @@ async function getDirectorSnapshot({ dynamodb, workflowSnapshot = {} }) {
 
   for (const worker of WORKERS) {
     const latestRun = await safeQueryLatestRun(dynamodb, worker.key);
+    const heartbeat = await safeQueryServiceHeartbeat(
+      dynamodb,
+      worker.heartbeatServiceId || `hermes:${worker.key}`,
+    );
     latestRuns[worker.key] = latestRun;
     const todaysWorkerRuns = await safeQueryRunsForToday(dynamodb, worker.key);
     todaysRuns.push(...todaysWorkerRuns);
-    workers.push(buildWorkerSnapshot(worker, latestRun, workflowSnapshot, unresolvedAlerts));
+    workers.push(buildWorkerSnapshot(
+      worker,
+      latestRun,
+      workflowSnapshot,
+      unresolvedAlerts,
+      heartbeat,
+    ));
   }
 
   todaysRuns.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
@@ -712,5 +802,6 @@ module.exports = {
   buildRunRecord,
   buildAlertRecord,
   normalizeWorkerStatus,
+  buildWorkerSnapshot,
   COMMANDS,
 };

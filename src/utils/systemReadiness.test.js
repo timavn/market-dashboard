@@ -14,7 +14,9 @@ const {
   buildResearchPipelineCheck,
   buildResearchChecks,
   buildSidecarChecks,
+  buildHostChecks,
   collectHermesWorkerSignals,
+  getLambdaActivity,
   getLaunchAgentProvenance,
   getServiceHeartbeat,
   isHermesDueNow,
@@ -120,6 +122,26 @@ describe('system readiness evaluation', () => {
     });
   });
 
+  test('adds deduplicated approval-required manual actions without changing version 1', () => {
+    const report = buildSystemReadiness([{
+      id: 'automation.hermes',
+      checks: [{
+        id: 'gmail.ingestion',
+        status: 'fail',
+        errorCode: 'GMAIL_AUTH_REQUIRED',
+        recovery: { kind: 'manual', label: 'Run the OAuth-only probe.' },
+      }],
+    }], { now: NOW });
+
+    expect(report.version).toBe(1);
+    expect(report.manualActions).toEqual([expect.objectContaining({
+      id: 'manual:GMAIL_AUTH_REQUIRED',
+      label: 'Run the OAuth-only probe.',
+      approvalRequired: true,
+      rootCauseIds: ['GMAIL_AUTH_REQUIRED'],
+    })]);
+  });
+
   test('collapses dependent portfolio failures into one upstream root cause', () => {
     const report = buildSystemReadiness([{ id: 'brokerage', checks: [
       { id: 'ibkr.sidecar', status: 'fail', summary: 'Sidecar down.', errorCode: 'IBKR_SIDECAR_UNREACHABLE' },
@@ -139,6 +161,47 @@ describe('system readiness evaluation', () => {
         'ibkr.portfolio',
       ]),
     });
+    expect(report.suppressedSymptoms).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        checkId: 'ibkr.portfolio',
+        suppressedBy: ['IBKR_SIDECAR_UNREACHABLE'],
+      }),
+    ]));
+  });
+
+  test('keeps independent services with the same error code as separate root causes', () => {
+    const report = buildSystemReadiness([{
+      id: 'automation.hermes',
+      checks: [
+        {
+          id: 'hermes.quant-developer',
+          status: 'fail',
+          errorCode: 'HERMES_HEARTBEAT_MISSING',
+          summary: 'Developer heartbeat missing.',
+        },
+        {
+          id: 'hermes.security',
+          status: 'fail',
+          errorCode: 'HERMES_HEARTBEAT_MISSING',
+          summary: 'Security heartbeat missing.',
+        },
+      ],
+    }], { now: NOW });
+
+    expect(report.rootCauses).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'hermes.quant-developer:HERMES_HEARTBEAT_MISSING',
+        dedupeKey: 'hermes.quant-developer:HERMES_HEARTBEAT_MISSING',
+        checkId: 'hermes.quant-developer',
+        affectedCheckIds: ['hermes.quant-developer'],
+      }),
+      expect.objectContaining({
+        id: 'hermes.security:HERMES_HEARTBEAT_MISSING',
+        dedupeKey: 'hermes.security:HERMES_HEARTBEAT_MISSING',
+        checkId: 'hermes.security',
+        affectedCheckIds: ['hermes.security'],
+      }),
+    ]));
   });
 
   test('adds owner, dependency, schedule, and allowlisted recovery metadata without replacing legacy fields', () => {
@@ -319,6 +382,37 @@ describe('system readiness evaluation', () => {
     });
   });
 
+  test('reports a scheduled Hermes analyst blocked by IBKR as a warning', () => {
+    const check = evaluateHermesWorker({
+      worker: {
+        key: 'quant-analyst',
+        name: 'Quant Analyst',
+        scheduleId: 'market-dashboard-hermes-quant-analyst-v2',
+      },
+      heartbeat: {
+        serviceId: 'hermes:quant-analyst',
+        observedAt: '2026-07-21T16:59:00.000Z',
+        status: 'blocked',
+        errorCode: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
+        blockedBy: 'portfolio.live',
+        source: 'aws-lambda',
+        triggerSource: 'aws-scheduler',
+        scheduleId: 'market-dashboard-hermes-quant-analyst-v2',
+        scheduled: true,
+      },
+      now: NOW,
+      maxAgeMinutes: 45,
+      due: true,
+    });
+
+    expect(check).toMatchObject({
+      status: 'warn',
+      errorCode: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
+      dependsOn: ['ibkr.gateway'],
+      recovery: null,
+    });
+  });
+
   test('does not accept a successful worker heartbeat from an old build', () => {
     const check = evaluateHermesWorker({
       worker: {
@@ -417,7 +511,7 @@ describe('system readiness evaluation', () => {
     });
   });
 
-  test('offers only the allowlisted poll retry for a stale Gmail heartbeat', () => {
+  test('requires operator schedule diagnosis for a stale Gmail heartbeat', () => {
     const check = evaluateGmailIngestion({
       account: 'timsmithaviation@gmail.com',
       heartbeat: {
@@ -435,6 +529,127 @@ describe('system readiness evaluation', () => {
     expect(check).toMatchObject({
       status: 'fail',
       errorCode: 'GMAIL_POLL_STALE',
+      recovery: {
+        kind: 'manual',
+        automatic: false,
+      },
+    });
+  });
+
+  test('rejects a Gmail heartbeat more than thirty seconds in the future', () => {
+    const check = evaluateGmailIngestion({
+      account: 'timsmithaviation@gmail.com',
+      heartbeat: {
+        serviceId: 'gmail:timsmithaviation@gmail.com',
+        observedAt: '2026-07-21T17:00:31.000Z',
+        status: 'success',
+        source: 'aws-lambda',
+        triggerSource: 'aws-scheduler',
+        scheduleId: 'market-dashboard-gmail-v2-every-15m',
+        scheduled: true,
+        buildVersion: require('../../package.json').version,
+      },
+      now: NOW,
+    });
+
+    expect(check).toMatchObject({
+      status: 'fail',
+      errorCode: 'GMAIL_HEARTBEAT_FUTURE_TIMESTAMP',
+      recovery: {
+        kind: 'manual',
+        automatic: false,
+      },
+    });
+    expect(check.summary).toMatch(/ahead of the dashboard clock/i);
+  });
+
+  test('allows at most thirty seconds of Gmail heartbeat clock skew', () => {
+    const check = evaluateGmailIngestion({
+      account: 'timsmithaviation@gmail.com',
+      heartbeat: {
+        serviceId: 'gmail:timsmithaviation@gmail.com',
+        observedAt: '2026-07-21T17:00:30.000Z',
+        status: 'success',
+        source: 'aws-lambda',
+        triggerSource: 'aws-scheduler',
+        scheduleId: 'market-dashboard-gmail-v2-every-15m',
+        scheduled: true,
+        buildVersion: require('../../package.json').version,
+      },
+      now: NOW,
+    });
+
+    expect(check).toMatchObject({
+      status: 'pass',
+      errorCode: null,
+    });
+  });
+
+  test('keeps a fresh Gmail poll with retained quarantines at warning', () => {
+    const check = evaluateGmailIngestion({
+      account: 'timsmithaviation@gmail.com',
+      heartbeat: {
+        serviceId: 'gmail:timsmithaviation@gmail.com',
+        observedAt: '2026-07-21T16:59:00.000Z',
+        status: 'warning',
+        errorCode: 'GMAIL_QUARANTINED_ARTIFACTS_PENDING',
+        detail: '1 Gmail message remains quarantined.',
+        source: 'aws-lambda',
+        triggerSource: 'aws-scheduler',
+        scheduleId: 'market-dashboard-gmail-v2-every-15m',
+        scheduled: true,
+        buildVersion: require('../../package.json').version,
+        counts: { messages: 0, stored: 0, errors: 0, dropped: 1 },
+      },
+      now: NOW,
+    });
+
+    expect(check).toMatchObject({
+      status: 'warn',
+      errorCode: 'GMAIL_QUARANTINED_ARTIFACTS_PENDING',
+      recovery: { kind: 'manual', automatic: false },
+    });
+  });
+
+  test('classifies timeout metrics without presenting a Gmail retry', () => {
+    const check = evaluateGmailIngestion({
+      account: 'timsmithaviation@gmail.com',
+      metrics: {
+        invocations: 3,
+        errors: 3,
+        maxDurationMs: 300000,
+        latestAt: '2026-07-21T16:55:00.000Z',
+      },
+      now: NOW,
+    });
+
+    expect(check).toMatchObject({
+      status: 'fail',
+      errorCode: 'GMAIL_INVOCATION_TIMEOUT',
+      recovery: { kind: 'manual', automatic: false },
+    });
+  });
+
+  test('allows a bounded retry only for an authentic scheduled transient failure', () => {
+    const check = evaluateGmailIngestion({
+      account: 'timsmithaviation@gmail.com',
+      heartbeat: {
+        serviceId: 'gmail:timsmithaviation@gmail.com',
+        observedAt: '2026-07-21T16:59:00.000Z',
+        status: 'error',
+        errorCode: 'GMAIL_RATE_LIMITED',
+        source: 'aws-lambda',
+        triggerSource: 'aws-scheduler',
+        scheduleId: 'market-dashboard-gmail-v2-every-15m',
+        scheduled: true,
+        counts: { messages: 1, errors: 1 },
+      },
+      now: NOW,
+    });
+
+    expect(check).toMatchObject({
+      status: 'fail',
+      errorCode: 'GMAIL_RATE_LIMITED',
       recovery: {
         kind: 'command',
         automatic: true,
@@ -480,6 +695,109 @@ describe('system readiness evaluation', () => {
     expect(check).toMatchObject({
       status: 'fail',
       errorCode: 'GMAIL_HEARTBEAT_MISSING',
+    });
+  });
+
+  test('collects Lambda maximum duration so readiness can distinguish timeouts', async () => {
+    const cloudwatch = {
+      getMetricStatistics: jest.fn((request) => ({
+        promise: async () => ({
+          Datapoints: request.MetricName === 'Invocations'
+            ? [{ Sum: 3, Timestamp: NOW }]
+            : request.MetricName === 'Errors'
+              ? [{ Sum: 3, Timestamp: NOW }]
+              : [{ Maximum: 300000, Timestamp: NOW }],
+        }),
+      })),
+    };
+
+    const activity = await getLambdaActivity(
+      cloudwatch,
+      'market-dashboard-gmail-ingestor-v2',
+      NOW,
+      45,
+    );
+
+    expect(activity).toMatchObject({
+      invocations: 3,
+      errors: 3,
+      maxDurationMs: 300000,
+      timedOut: true,
+    });
+    expect(cloudwatch.getMetricStatistics).toHaveBeenCalledTimes(3);
+  });
+
+  test('reports low host capacity and stale controller state as nonblocking failures', () => {
+    const checks = buildHostChecks({
+      capacity: {
+        available: true,
+        targetPath: '/repo',
+        freeGiB: 14,
+        usedPercent: 97,
+        freeBytes: 14 * (1024 ** 3),
+        totalBytes: 500 * (1024 ** 3),
+        observedAt: NOW.toISOString(),
+      },
+      controller: {
+        available: true,
+        mode: 'shadow',
+        status: 'running',
+        observedAt: '2026-07-21T16:00:00.000Z',
+        incidents: [],
+        actions: [],
+        circuits: [],
+      },
+      now: NOW,
+    });
+
+    expect(checks).toEqual([
+      expect.objectContaining({
+        id: 'host.capacity',
+        status: 'fail',
+        blocking: false,
+        errorCode: 'HOST_DISK_CAPACITY_CRITICAL',
+      }),
+      expect.objectContaining({
+        id: 'hermes.controller',
+        status: 'fail',
+        blocking: false,
+        errorCode: 'HERMES_CONTROLLER_STALE',
+      }),
+    ]);
+  });
+
+  test('reports a fresh degraded controller poll as failed with its typed error', () => {
+    const checks = buildHostChecks({
+      capacity: {
+        available: true,
+        targetPath: '/repo',
+        freeGiB: 100,
+        usedPercent: 70,
+        freeBytes: 100 * (1024 ** 3),
+        totalBytes: 500 * (1024 ** 3),
+        observedAt: NOW.toISOString(),
+      },
+      controller: {
+        available: true,
+        mode: 'shadow',
+        status: 'degraded',
+        observedAt: NOW.toISOString(),
+        lastError: {
+          errorCode: 'HERMES_CONTROLLER_READINESS_UNAVAILABLE',
+          detail: 'Readiness API timed out.',
+        },
+        incidents: [],
+        actions: [],
+        circuits: [],
+      },
+      now: NOW,
+    });
+
+    expect(checks[1]).toMatchObject({
+      id: 'hermes.controller',
+      status: 'fail',
+      errorCode: 'HERMES_CONTROLLER_READINESS_UNAVAILABLE',
+      detail: 'Readiness API timed out.',
     });
   });
 
@@ -690,6 +1008,125 @@ describe('system readiness evaluation', () => {
     expect(checks.find((check) => check.id === 'research.rta').recovery).toMatchObject({
       automatic: true,
       actionId: 'rebuild-research-projections',
+    });
+  });
+
+  test('never passes optimistic checkpoint-first responses as authoritative readiness', () => {
+    const checks = buildResearchChecks({
+      rtaResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          current: true,
+          comparisonSafe: true,
+          longCount: 4,
+          shortCount: 3,
+          lastUpdated: '2026-07-21T16:55:00.000Z',
+          dataQuality: { status: 'ok', warnings: [] },
+          dataAvailability: {
+            current: true,
+            comparisonSafe: true,
+            authoritativeRevalidationStatus: 'pending',
+          },
+          _readinessCache: { status: 'checkpoint', ageMs: 0 },
+        },
+      },
+      etfResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          current: true,
+          comparisonSafe: true,
+          meta: {
+            available: true,
+            snapshotDate: '2026-07-21',
+            authoritativeRevalidationStatus: 'pending',
+          },
+          dataAvailability: {
+            current: true,
+            comparisonSafe: true,
+            authoritativeRevalidationStatus: 'pending',
+          },
+          rows: [{ ticker: 'SPY' }],
+          _readinessCache: { status: 'revalidating', ageMs: 300_001 },
+        },
+      },
+      workflow: {
+        hedgeye: { status: 'success', lastRun: '2026-07-21', count: 20 },
+      },
+      gmailCheck: { status: 'pass', observedAt: NOW.toISOString() },
+      now: NOW,
+    });
+
+    expect(checks.find((check) => check.id === 'research.rta')).toMatchObject({
+      status: 'fail',
+      errorCode: 'RTA_AUTHORITATIVE_REVALIDATION_PENDING',
+    });
+    expect(checks.find((check) => check.id === 'research.etf-pro')).toMatchObject({
+      status: 'fail',
+      errorCode: 'ETF_PRO_AUTHORITATIVE_REVALIDATION_PENDING',
+    });
+  });
+
+  test('never passes a current checkpoint whose authoritative revalidation failed', () => {
+    const failureDiagnostics = {
+      authoritativeRevalidationStatus: 'failed',
+      authoritativeRevalidationErrorCode: 'AUTHORITATIVE_RESEARCH_REFRESH_TIMEOUT',
+      authoritativeRevalidationReason: 'Authoritative research revalidation timed out.',
+    };
+    const checks = buildResearchChecks({
+      rtaResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          current: true,
+          comparisonSafe: true,
+          referenceOnly: false,
+          longCount: 4,
+          shortCount: 3,
+          lastUpdated: '2026-07-21T16:55:00.000Z',
+          dataQuality: { status: 'ok', warnings: [] },
+          dataAvailability: {
+            current: true,
+            comparisonSafe: true,
+            ...failureDiagnostics,
+          },
+        },
+      },
+      etfResult: {
+        status: 'fulfilled',
+        value: {
+          available: true,
+          current: true,
+          comparisonSafe: true,
+          referenceOnly: false,
+          meta: {
+            available: true,
+            snapshotDate: '2026-07-21',
+            ...failureDiagnostics,
+          },
+          dataAvailability: {
+            current: true,
+            comparisonSafe: true,
+            ...failureDiagnostics,
+          },
+          rows: [{ ticker: 'SPY' }],
+        },
+      },
+      workflow: {
+        hedgeye: { status: 'success', lastRun: '2026-07-21', count: 20 },
+      },
+      gmailCheck: { status: 'pass', observedAt: NOW.toISOString() },
+      now: NOW,
+    });
+
+    expect(checks.find((check) => check.id === 'research.rta')).toMatchObject({
+      status: 'fail',
+      errorCode: 'RTA_AUTHORITATIVE_REVALIDATION_FAILED',
+    });
+    expect(checks.find((check) => check.id === 'research.etf-pro')).toMatchObject({
+      status: 'fail',
+      errorCode: 'ETF_PRO_AUTHORITATIVE_REVALIDATION_FAILED',
     });
   });
 
@@ -1116,6 +1553,9 @@ describe('system readiness evaluation', () => {
         positions: [],
         position_count: 0,
         socket_verified_at: '2026-07-21T16:59:54.000Z',
+        positions_observed_at: '2026-07-21T16:59:55.000Z',
+        position_source: 'ibkr_req_positions',
+        from_cache: false,
         observed_at: '2026-07-21T16:59:55.000Z',
       }),
       now: NOW,
@@ -1161,6 +1601,9 @@ describe('system readiness evaluation', () => {
         accounts: ['U1'],
         positions: [],
         socket_verified_at: NOW.toISOString(),
+        positions_observed_at: NOW.toISOString(),
+        position_source: 'ibkr_req_positions',
+        from_cache: false,
         observed_at: NOW.toISOString(),
       }),
       now: NOW,
@@ -1220,12 +1663,35 @@ describe('system readiness evaluation', () => {
         accounts: ['U1'],
         positions: [],
         socket_verified_at: '2026-07-21T16:00:00.000Z',
+        positions_observed_at: '2026-07-21T16:00:00.000Z',
+        position_source: 'ibkr_req_positions',
+        from_cache: false,
         observed_at: '2026-07-21T16:00:00.000Z',
+      }),
+    }).find((check) => check.id === 'ibkr.portfolio');
+    const unverifiedPositions = buildSidecarChecks({
+      ...base,
+      portfolioResult: fulfilled({
+        ok: true,
+        connected: true,
+        status: 'live',
+        source: 'ibkr_live_session',
+        accounts: ['U1'],
+        positions: [],
+        socket_verified_at: NOW.toISOString(),
+        positions_observed_at: NOW.toISOString(),
+        position_source: 'ibkr_cache',
+        from_cache: true,
+        observed_at: NOW.toISOString(),
       }),
     }).find((check) => check.id === 'ibkr.portfolio');
 
     expect(cached).toMatchObject({ status: 'fail', errorCode: 'IBKR_LIVE_SESSION_UNVERIFIED' });
     expect(stale).toMatchObject({ status: 'fail', errorCode: 'IBKR_LIVE_SESSION_STALE' });
+    expect(unverifiedPositions).toMatchObject({
+      status: 'fail',
+      errorCode: 'IBKR_LIVE_POSITION_PROVENANCE_UNVERIFIED',
+    });
     expect(cached.recovery).toMatchObject({
       automatic: true,
       actionId: 'restart-local-stack',
@@ -1235,6 +1701,7 @@ describe('system readiness evaluation', () => {
   test('requires a fresh successful heartbeat from the owned outbound Hermes bridge', () => {
     const supervisor = {
       stateFound: true,
+      bridgeEnabled: true,
       running: true,
       rootMatches: true,
       commandMatches: true,
@@ -1278,6 +1745,99 @@ describe('system readiness evaluation', () => {
       blocking: false,
       errorCode: 'HERMES_BRIDGE_HEARTBEAT_STALE',
       automatic: false,
+    });
+  });
+
+  test('treats the explicitly disabled outbound bridge as intentionally idle', () => {
+    const disabled = buildHermesBridgeCheck({
+      supervisor: {
+        stateFound: true,
+        instanceId: '2026-07-21T16:58:00.000Z',
+        bridgeEnabled: false,
+        running: true,
+        rootMatches: true,
+        commandMatches: true,
+        sourceMatches: true,
+        children: {
+          bridge: {
+            pid: null,
+            enabled: false,
+            intentionallyDisabled: true,
+            discoveryVerified: true,
+            running: false,
+            status: 'disabled',
+          },
+        },
+      },
+      now: NOW,
+    });
+
+    expect(disabled).toMatchObject({
+      id: 'dashboard.hermes-bridge',
+      status: 'pass',
+      blocking: false,
+      errorCode: null,
+      summary: expect.stringMatching(/intentionally disabled.*idle/i),
+      provenance: {
+        mode: 'disabled',
+        enabled: false,
+        intentionallyDisabled: true,
+      },
+    });
+    expect(disabled.recovery).toBeNull();
+  });
+
+  test('fails disabled mode if a bridge process remains active', () => {
+    const unexpectedProcess = buildHermesBridgeCheck({
+      supervisor: {
+        bridgeEnabled: false,
+        children: {
+          bridge: {
+            pid: 4321,
+            enabled: false,
+            intentionallyDisabled: true,
+            running: true,
+            status: 'blocked',
+          },
+        },
+      },
+      now: NOW,
+    });
+
+    expect(unexpectedProcess).toMatchObject({
+      status: 'fail',
+      blocking: false,
+      errorCode: 'HERMES_BRIDGE_DISABLED_PROCESS_PRESENT',
+      impact: expect.stringMatching(/writes may continue/i),
+    });
+  });
+
+  test('fails disabled mode when exact writer discovery was not verified', () => {
+    const unverified = buildHermesBridgeCheck({
+      supervisor: {
+        stateFound: true,
+        bridgeEnabled: false,
+        running: true,
+        children: {
+          bridge: {
+            pid: null,
+            enabled: false,
+            intentionallyDisabled: true,
+            discoveryVerified: false,
+            running: false,
+            status: 'degraded',
+            lastErrorCode: 'LOCAL_BRIDGE_PROCESS_DISCOVERY_FAILED',
+          },
+        },
+      },
+      now: NOW,
+    });
+
+    expect(unverified).toMatchObject({
+      status: 'fail',
+      blocking: false,
+      errorCode: 'LOCAL_BRIDGE_PROCESS_DISCOVERY_FAILED',
+      impact: expect.stringMatching(/cannot be confirmed idle/i),
     });
   });
 });

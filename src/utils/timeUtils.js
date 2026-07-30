@@ -170,6 +170,7 @@ export const formatLastUpdatedForSources = (sources) => {
     return {
       id: s.id,
       label: s.label,
+      stateLabel: s.stateLabel || null,
       localeString: s.detail ?? localeString,
       status: s.status || 'current',
       action: s.action ?? null,

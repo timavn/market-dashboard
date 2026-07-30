@@ -1,7 +1,7 @@
 // USD Market Data Constants
 
 export const USD_METRICS = [
-  { symbol: 'FXVL', name: 'G5 FX CVOL Index', provider: 'CME Group' },
+  { symbol: 'FXVL', name: 'G5 FX 1M Vol', provider: 'CME CVOL or Yahoo G5 realized' },
   { symbol: 'SPX', name: 'S&P 500', yahooTicker: '^GSPC' },
   { symbol: 'BRENT', name: 'Brent', yahooTicker: 'BZ=F' },
   { symbol: 'CRB', name: 'CRB Index', yahooTicker: '^TRCCRB' },

@@ -710,7 +710,7 @@ router.get('/cpi/current', async (_req, res) => {
       fetchKalshiCpiEvents(release.cpi),
       loadCurrentIbkrCatalog(release),
     ]);
-    let kalshiEventsRaw = kalshiResult.status === 'fulfilled' ? kalshiResult.value : [];
+    const kalshiEventsRaw = kalshiResult.status === 'fulfilled' ? kalshiResult.value : [];
     let ibkrEventsRaw = [];
     if (catalogResult.status === 'fulfilled') {
       ibkrEventsRaw = await fetchIBKREvents({
@@ -724,22 +724,9 @@ router.get('/cpi/current', async (_req, res) => {
         message: catalogResult.reason?.message || 'The active V2 prediction catalog is unavailable.',
       });
     }
-    if (kalshiEventsRaw?.length) {
-      try {
-        await persistCurrentVenueCatalog(kalshiEventsRaw, release, {
-          venues: ['Kalshi'],
-          source: 'kalshi-native-current-release',
-          promoteCurrent: true,
-        });
-      } catch (error) {
-        setProviderStatus('kalshi', {
-          status: 'catalog_persistence_error',
-          errorCode: normalizeCatalogErrorCode(error, 'CATALOG_PERSISTENCE_FAILED'),
-          message: error.message,
-        });
-        kalshiEventsRaw = [];
-      }
-    }
+    // This readiness/read endpoint is deliberately catalog-read-only. Live
+    // Kalshi rows remain in this response only; catalog promotion belongs to
+    // the explicit refresh/discovery reconciliation paths below.
     const kalshiEvents = (kalshiEventsRaw || []).filter((event) => (
       eventMatchesRelease(event, release)
       && isLiveTradingEvent(event)

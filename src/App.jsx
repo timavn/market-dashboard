@@ -3,7 +3,6 @@ import { ThemeProvider } from './context/ThemeContext';
 import { PortfolioProvider } from './context/PortfolioContext';
 import PortfolioDashboard from './components/Dashboard/PortfolioDashboard';
 import HowItWorksPage from './components/HowItWorks/HowItWorksPage';
-import ProcessPage from './components/Process/ProcessPage';
 import {
   getProcessDocument,
   getProcessDocumentByRoute,
@@ -12,13 +11,20 @@ import {
 const HOW_IT_WORKS_HASH = '#/how-it-works';
 const PROCESS_HASH = getProcessDocument('the-process').route;
 const LEGACY_WHITE_PAPER_HASH = '#/white-paper';
+const LEGACY_PROCESS_COMPANION_HASHES = new Set([
+  '#/process/principles',
+  '#/process/playbook',
+]);
+
+const getRouteWithoutSectionQuery = (hash) => String(hash || '').split('?')[0];
 
 const getAppRoute = () => {
   if (typeof window === 'undefined') return { page: 'dashboard', documentId: null };
-  if (window.location.hash === LEGACY_WHITE_PAPER_HASH) {
+  const routeHash = getRouteWithoutSectionQuery(window.location.hash);
+  if (routeHash === LEGACY_WHITE_PAPER_HASH || LEGACY_PROCESS_COMPANION_HASHES.has(routeHash)) {
     return { page: 'process', documentId: 'the-process' };
   }
-  const processDocument = getProcessDocumentByRoute(window.location.hash);
+  const processDocument = getProcessDocumentByRoute(routeHash);
   if (processDocument?.published) {
     return { page: 'process', documentId: processDocument.id };
   }
@@ -30,16 +36,47 @@ function App() {
   const [route, setRoute] = useState(getAppRoute);
 
   useEffect(() => {
-    const handleHashChange = () => {
-      if (window.location.hash === LEGACY_WHITE_PAPER_HASH) {
+    const handleNavigation = () => {
+      const routeHash = getRouteWithoutSectionQuery(window.location.hash);
+      if (routeHash === LEGACY_WHITE_PAPER_HASH || LEGACY_PROCESS_COMPANION_HASHES.has(routeHash)) {
         window.history.replaceState(null, '', PROCESS_HASH);
       }
       setRoute(getAppRoute());
     };
-    handleHashChange();
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    handleNavigation();
+    window.addEventListener('hashchange', handleNavigation);
+    window.addEventListener('popstate', handleNavigation);
+    return () => {
+      window.removeEventListener('hashchange', handleNavigation);
+      window.removeEventListener('popstate', handleNavigation);
+    };
   }, []);
+
+  const openProcess = () => {
+    if (route.page === 'process') return;
+    window.history.pushState({ ...(window.history.state || {}), processOverlayEntry: true }, '', PROCESS_HASH);
+    setRoute(getAppRoute());
+  };
+
+  const navigateProcess = (targetRoute) => {
+    window.history.replaceState(
+      { ...(window.history.state || {}), processOverlayEntry: true },
+      '',
+      targetRoute,
+    );
+    setRoute(getAppRoute());
+  };
+
+  const closeProcess = ({ replace = false } = {}) => {
+    const openedFromDashboard = window.history.state?.processOverlayEntry === true;
+    if (!replace && openedFromDashboard && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    const dashboardUrl = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState(null, '', dashboardUrl);
+    setRoute(getAppRoute());
+  };
 
   // Fix scroll lock issue with Tremor Select dropdowns and prevent scroll propagation
   useEffect(() => {
@@ -128,17 +165,16 @@ function App() {
   return (
     <ThemeProvider>
       <div className="App">
-        {route.page === 'process' ? (
-          <ProcessPage
-            key={route.documentId}
-            documentId={route.documentId}
-            onBack={() => { window.location.hash = ''; }}
-          />
-        ) : route.page === 'how-it-works' ? (
+        {route.page === 'how-it-works' ? (
           <HowItWorksPage onBack={() => { window.location.hash = ''; }} />
         ) : (
           <PortfolioProvider>
-            <PortfolioDashboard onOpenProcess={() => { window.location.hash = PROCESS_HASH.slice(1); }} />
+            <PortfolioDashboard
+              processDocumentId={route.page === 'process' ? route.documentId : null}
+              onOpenProcess={openProcess}
+              onNavigateProcess={navigateProcess}
+              onCloseProcess={closeProcess}
+            />
           </PortfolioProvider>
         )}
       </div>

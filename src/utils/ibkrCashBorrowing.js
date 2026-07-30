@@ -746,9 +746,26 @@ function buildCashBorrowingResult({
     0,
     -numbers.accruedCashSecurities,
   );
+  const modelInterestReserve = Math.max(
+    0,
+    numbers.interestValidationReserve || 0,
+  );
+  const appliedInterestReserve = Math.max(
+    negativeAccruedCashReserve,
+    modelInterestReserve,
+  );
+  const interestReserve = {
+    liveNegativeAccruedCash: negativeAccruedCashReserve,
+    modelOutstandingUpper: modelInterestReserve,
+    incrementalModelReserve: Math.max(
+      0,
+      modelInterestReserve - negativeAccruedCashReserve,
+    ),
+    applied: appliedInterestReserve,
+  };
   const rawHeadroom =
     segmentCash.brokerAdjustedCash -
-    negativeAccruedCashReserve;
+    appliedInterestReserve;
 
   const fixedOrNlvBuffer = Math.max(
     FIXED_POLICY_BUFFER,
@@ -770,7 +787,7 @@ function buildCashBorrowingResult({
     securitiesCashFloor,
     commodityResidual,
     collateralBreakdown.exact,
-    negativeAccruedCashReserve,
+    appliedInterestReserve,
     policyBuffer,
   );
 
@@ -805,7 +822,10 @@ function buildCashBorrowingResult({
     worstCommoditySettlementBalance,
     commodityExcessCash,
     ...segmentCash,
-    negativeAccruedCashReserve,
+    negativeAccruedCashReserve: appliedInterestReserve,
+    liveNegativeAccruedCashReserve: negativeAccruedCashReserve,
+    modelInterestReserve,
+    interestReserve,
     collateral: collateralBreakdown.exact,
     shortCollateral: collateralBreakdown.exact,
     collateralBreakdown,
@@ -911,6 +931,16 @@ function calculateIbkrCashBorrowing(payload) {
     } else {
       numbers[fieldName] = parsed;
     }
+  }
+  if (hasOwn(payload, 'interestValidationReserve')) {
+    const parsed = asFiniteNumber(payload.interestValidationReserve);
+    if (parsed === null || parsed < 0) {
+      errors.push('invalid_interest_validation_reserve');
+    } else {
+      numbers.interestValidationReserve = parsed;
+    }
+  } else {
+    numbers.interestValidationReserve = 0;
   }
 
   if (
@@ -1232,6 +1262,16 @@ function calculateIbkrCashBorrowingReference(payload) {
     } else {
       numbers[fieldName] = parsed;
     }
+  }
+  if (hasOwn(payload, 'interestValidationReserve')) {
+    const parsed = asFiniteNumber(payload.interestValidationReserve);
+    if (parsed === null || parsed < 0) {
+      errors.push('invalid_interest_validation_reserve');
+    } else {
+      numbers.interestValidationReserve = parsed;
+    }
+  } else {
+    numbers.interestValidationReserve = 0;
   }
   if (
     numbers.netLiquidation !== undefined

@@ -14,7 +14,7 @@ const BLOCKED_ELEMENTS = [
 ];
 
 const ALLOWED_ATTRIBUTES = new Set([
-  'aria-label', 'aria-labelledby', 'class', 'colspan', 'href', 'rel', 'role', 'rowspan', 'scope', 'target',
+  'aria-label', 'aria-labelledby', 'class', 'colspan', 'href', 'id', 'rel', 'role', 'rowspan', 'scope', 'target',
   'title',
 ]);
 

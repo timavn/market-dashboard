@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Card, Text } from '@tremor/react';
+import { Card } from '@tremor/react';
 import { ChevronDown, Download, Filter, RefreshCw, Search, X } from 'lucide-react';
 import {
   separateLongsAndShorts,
@@ -13,9 +13,18 @@ import {
 import { isTradingDay } from '../../utils/marketHolidays';
 import { SECURITY_CATEGORY_MAPPING } from '../../constants/securityCategoryMapping';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
+import {
+  getExposureDefinition,
+  resolveSecurityExposureProfile,
+} from '../../constants/quadExposureCatalog';
 import expectedValuesData from '../../constants/expectedValuesData';
 import { MarketDataService } from '../../services/api/marketDataService';
-import LoadingIndicator from '../common/LoadingIndicator';
+import { resolveSizingVolatility } from '../../utils/realizedVolatility.cjs';
+import {
+  FACTOR_EXPOSURE_TABS,
+  buildPortfolioFactorExposure,
+  holdingMatchesFactorExposure,
+} from '../../utils/portfolioFactorExposure';
 import './PortfolioConstructionIdeas.css';
 
 const ASSET_CLASS_COLORS = {
@@ -219,6 +228,14 @@ const getSecurityName = (holding) => {
   return holding?.description || holding?.name || SECURITY_NAME_BY_TICKER[symbol] || holding?.symbol || '--';
 };
 
+const getQuadExposureLabels = (holding) => {
+  const profile = resolveSecurityExposureProfile(holding);
+  if (profile?.classificationStatus !== 'reviewed') return [];
+  return [profile.primaryExposureId, ...(profile.secondaryExposureIds || [])]
+    .map((exposureId) => getExposureDefinition(exposureId)?.label)
+    .filter(Boolean);
+};
+
 const getAssetClassAbbreviation = (holding) => {
   const assetClass = getAssetClassForTicker(holding?.symbol, holding);
   return ASSET_CLASS_ABBREVIATIONS[assetClass] || assetClass || '--';
@@ -247,6 +264,31 @@ const isValidObservedAt = (value) => Number.isFinite(Date.parse(String(value || 
 const isValidSessionDate = (value) => (
   /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))
   && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
+);
+const LIVE_PORTFOLIO_MAX_AGE_MS = 5 * 60 * 1000;
+const LIVE_MARK_MAX_AGE_MS = 60 * 1000;
+const LIVE_EVIDENCE_FUTURE_TOLERANCE_MS = 5 * 1000;
+
+const isFreshLiveEvidence = (value, maxAgeMs, nowMs = Date.now()) => {
+  const observedMs = Date.parse(String(value || ''));
+  if (!Number.isFinite(observedMs)) return false;
+  const ageMs = nowMs - observedMs;
+  return ageMs >= -LIVE_EVIDENCE_FUTURE_TOLERANCE_MS && ageMs <= maxAgeMs;
+};
+
+const hasForbiddenLiveFlag = (value) => Boolean(
+  value
+  && (
+    value.cacheOnly === true
+    || value.cached === true
+    || value.fromCache === true
+    || value.mock === true
+    || value.isMock === true
+    || value.seed === true
+    || value.seeded === true
+    || value.isSeed === true
+    || value.stale === true
+  )
 );
 
 const isVerifiedLiveMark = (holding) => (
@@ -764,6 +806,7 @@ const exposureTypeLabel = (value) => (
 const PortfolioBreakdown = ({
   portfolioData,
   isLoading = false,
+  isRefreshing = false,
   onRefresh = null,
 }) => {
   const holdings = useMemo(() => portfolioData?.holdings || [], [portfolioData?.holdings]);
@@ -803,10 +846,14 @@ const PortfolioBreakdown = ({
     usdCorrelations: null,
     errors: {},
   });
+  const [factorExposureDimension, setFactorExposureDimension] = useState('equityStyleFactors');
+  const [selectedFactorExposureId, setSelectedFactorExposureId] = useState(null);
   const [manualResearchRefreshKey, setManualResearchRefreshKey] = useState(0);
   const researchRequestSequence = useRef(0);
   const marketContextRequestSequence = useRef(0);
   const lastVerifiedRiskMetricsRef = useRef(null);
+  const pendingLedgerSnapRef = useRef(null);
+  const ledgerPaneRefs = useRef({ longs: null, shorts: null });
 
   useEffect(() => {
     if (!metricVerification) return undefined;
@@ -823,6 +870,55 @@ const PortfolioBreakdown = ({
       .filter(Boolean)
   )].sort(), [holdings]);
   const researchSymbolsKey = researchSymbols.join(',');
+  const researchAssetTypes = useMemo(() => {
+    const map = {};
+    holdings.forEach((holding) => {
+      const symbol = String(holding?.symbol || '').trim().toUpperCase();
+      if (!symbol) return;
+      const assetClass = getAssetClassForTicker(symbol, holding);
+      map[symbol] = assetClass === 'Cryptocurrency' ? 'crypto' : 'equity';
+    });
+    return map;
+  }, [holdings]);
+  const researchAssetTypesKey = useMemo(
+    () => researchSymbols
+      .map((symbol) => `${symbol}:${researchAssetTypes[symbol] || 'equity'}`)
+      .join(','),
+    [researchSymbols, researchAssetTypes],
+  );
+
+  const [, setLiveEvidenceTick] = useState(0);
+  const liveEvidenceExpiryAt = useMemo(() => {
+    const expirations = [
+      [portfolioData?.fetchedAt, LIVE_PORTFOLIO_MAX_AGE_MS],
+      [portfolioData?.socketVerifiedAt, LIVE_PORTFOLIO_MAX_AGE_MS],
+      [portfolioData?.accountSummary?.lastUpdated, LIVE_PORTFOLIO_MAX_AGE_MS],
+      [portfolioData?.accountSummary?.socketVerifiedAt, LIVE_PORTFOLIO_MAX_AGE_MS],
+      ...holdings.map((holding) => [holding?.priceObservedAt, LIVE_MARK_MAX_AGE_MS]),
+    ].map(([value, maxAgeMs]) => {
+      const observedMs = Date.parse(String(value || ''));
+      return Number.isFinite(observedMs) ? observedMs + maxAgeMs : null;
+    }).filter(Number.isFinite);
+    return expirations.length > 0 ? Math.min(...expirations) : null;
+  }, [
+    holdings,
+    portfolioData?.fetchedAt,
+    portfolioData?.socketVerifiedAt,
+    portfolioData?.accountSummary?.lastUpdated,
+    portfolioData?.accountSummary?.socketVerifiedAt,
+  ]);
+
+  useEffect(() => {
+    if (!Number.isFinite(liveEvidenceExpiryAt)) return undefined;
+    const delayMs = liveEvidenceExpiryAt - Date.now() + 25;
+    if (delayMs <= 0) return undefined;
+    const timeoutId = window.setTimeout(() => {
+      // Expire sizing locally even if the normal portfolio refresh is delayed
+      // or hung. The next render re-evaluates every timestamp against Date.now.
+      setLiveEvidenceTick((value) => value + 1);
+    }, Math.min(delayMs, 2_147_483_647));
+    return () => window.clearTimeout(timeoutId);
+  }, [liveEvidenceExpiryAt]);
 
   const loadSecurityIntelligence = useCallback(async (signal) => {
     const symbols = researchSymbolsKey ? researchSymbolsKey.split(',') : [];
@@ -907,9 +1003,20 @@ const PortfolioBreakdown = ({
     }
 
     const [riskResult, volatilityResult, usdResult] = await Promise.allSettled([
-      Promise.all(symbolBatches.map((batch) => (
-        MarketDataService.getSecurityRiskMetrics(batch)
-      ))),
+      Promise.all(symbolBatches.map((batch) => {
+        const batchAssetTypes = Object.fromEntries(
+          batch.map((symbol) => {
+            const match = researchAssetTypesKey
+              .split(',')
+              .find((pair) => pair.startsWith(`${symbol}:`));
+            const assetType = match ? match.slice(symbol.length + 1) : 'equity';
+            return [symbol, assetType || 'equity'];
+          }),
+        );
+        return MarketDataService.getSecurityRiskMetrics(batch, {
+          assetTypes: batchAssetTypes,
+        });
+      })),
       MarketDataService.getVolatilitySnapshot(),
       MarketDataService.getUsdCorrelations(),
     ]);
@@ -956,7 +1063,7 @@ const PortfolioBreakdown = ({
       usdCorrelations: usdResult.status === 'fulfilled' ? usdResult.value : null,
       errors,
     });
-  }, [researchSymbolsKey]);
+  }, [researchSymbolsKey, researchAssetTypesKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -999,6 +1106,45 @@ const PortfolioBreakdown = ({
     });
   }, [holdingRowIds]);
 
+  React.useLayoutEffect(() => {
+    const getTargetScrollTop = (pane, row, headerHeight) => Math.max(
+      0,
+      pane.scrollTop
+        + row.getBoundingClientRect().top
+        - pane.getBoundingClientRect().top
+        - headerHeight
+    );
+
+    Object.values(ledgerPaneRefs.current).forEach((pane) => {
+      if (!pane?.isConnected) return;
+      const bottomSpacer = pane.querySelector('.pcv2-ledger-bottom-spacer');
+      if (!bottomSpacer) return;
+
+      bottomSpacer.style.height = '0px';
+      const expandedRows = pane.querySelectorAll('.pcv2-ledger-row.is-expanded');
+      if (expandedRows.length === 0) return;
+
+      const headerHeight = pane.querySelector('thead')?.getBoundingClientRect().height || 28;
+      const lowestExpandedRow = expandedRows[expandedRows.length - 1];
+      const targetScrollTop = getTargetScrollTop(pane, lowestExpandedRow, headerHeight);
+      const naturalMaxScrollTop = Math.max(0, pane.scrollHeight - pane.clientHeight);
+      const missingScrollRoom = Math.max(
+        0,
+        Math.ceil(targetScrollTop - naturalMaxScrollTop)
+      );
+      bottomSpacer.style.height = `${missingScrollRoom}px`;
+    });
+
+    const pendingSnap = pendingLedgerSnapRef.current;
+    pendingLedgerSnapRef.current = null;
+    if (!pendingSnap || !expandedResearchRows.has(pendingSnap.rowId)) return;
+
+    const { pane, row } = pendingSnap;
+    if (!pane?.isConnected || !row?.isConnected) return;
+    const headerHeight = pane.querySelector('thead')?.getBoundingClientRect().height || 28;
+    pane.scrollTop = getTargetScrollTop(pane, row, headerHeight);
+  }, [expandedResearchRows]);
+
   const totalValue = portfolioData?.summary?.totalValue || 0;
   const hasVerifiedPortfolioMarks = Boolean(
     portfolioData?.dataSource === 'ibkr_api'
@@ -1006,17 +1152,50 @@ const PortfolioBreakdown = ({
     && portfolioData?.fromCache === false
   );
   const hasVerifiedLiveNav = Boolean(
-    portfolioData?.liveSessionVerified === true
+    hasVerifiedPortfolioMarks
     && portfolioData?.accountSummary?.source === 'ibkr_live_session'
     && finiteOptionalNumber(portfolioData?.accountSummary?.netLiquidation) > 0
+    && isFreshLiveEvidence(portfolioData?.fetchedAt, LIVE_PORTFOLIO_MAX_AGE_MS)
+    && isFreshLiveEvidence(portfolioData?.socketVerifiedAt, LIVE_PORTFOLIO_MAX_AGE_MS)
+    && isFreshLiveEvidence(
+      portfolioData?.accountSummary?.lastUpdated,
+      LIVE_PORTFOLIO_MAX_AGE_MS,
+    )
+    && isFreshLiveEvidence(
+      portfolioData?.accountSummary?.socketVerifiedAt,
+      LIVE_PORTFOLIO_MAX_AGE_MS,
+    )
+    && portfolioData?.dataQuality?.status === 'ok'
+    && portfolioData?.dataQuality?.markState === 'live'
+    && !hasForbiddenLiveFlag(portfolioData)
+    && !hasForbiddenLiveFlag(portfolioData?._cache)
+    && !hasForbiddenLiveFlag(portfolioData?.dataQuality)
   );
-  const canUseHoldingForSizing = (holding) => Boolean(
+  const canUseHoldingForSizing = useCallback((holding) => Boolean(
     hasVerifiedLiveNav
     && holding?.priceState === 'live'
     && holding?.marketValueState === 'live'
+    && holding?.priceSource === 'ibkr_live_last'
+    && holding?.positionSource === 'ibkr_live_session'
+    && holding?.markPending !== true
+    && !holding?.markFailure
+    && !hasForbiddenLiveFlag(holding)
+    && isFreshLiveEvidence(holding?.priceObservedAt, LIVE_MARK_MAX_AGE_MS)
     && finiteOptionalNumber(holding?.price) > 0
     && finiteOptionalNumber(holding?.marketValue) !== null
+  ), [hasVerifiedLiveNav]);
+
+  const factorExposureAvailable = Boolean(
+    hasVerifiedLiveNav
+    && holdings.length > 0
+    && holdings.every(canUseHoldingForSizing)
   );
+  const factorExposure = useMemo(() => (
+    factorExposureAvailable
+      ? buildPortfolioFactorExposure(holdings, totalValue, factorExposureDimension)
+      : { rows: [], coverage: { classifiedPct: 0, unclassifiedPct: 0 } }
+  ), [factorExposureAvailable, factorExposureDimension, holdings, totalValue]);
+
   // Column visibility state (shared for both tables)
   // Default selection: % Acct, % Portfolio, Buy/Sell, Intraday G/L
   const [columnVisibility, setColumnVisibility] = useState({
@@ -2035,12 +2214,27 @@ const PortfolioBreakdown = ({
     const query = ledgerSearchFilter.trim().toLowerCase();
     return rows.filter(holding => {
       if (ledgerSleeveFilter !== 'all' && getSleeveForHolding(holding) !== ledgerSleeveFilter) return false;
+      if (
+        factorExposureAvailable
+        && selectedFactorExposureId
+        && !holdingMatchesFactorExposure(
+          holding,
+          factorExposureDimension,
+          selectedFactorExposureId,
+        )
+      ) return false;
       if (!query) return true;
       const name = getSecurityName(holding).toLowerCase();
       const symbol = (holding.symbol || '').toLowerCase();
       return symbol.includes(query) || name.includes(query);
     });
-  }, [ledgerSearchFilter, ledgerSleeveFilter]);
+  }, [
+    factorExposureAvailable,
+    factorExposureDimension,
+    ledgerSearchFilter,
+    ledgerSleeveFilter,
+    selectedFactorExposureId,
+  ]);
 
   const ledgerLongs = useMemo(() => {
     return sortLedgerHoldings(filterLedgerHoldings(longs));
@@ -2057,13 +2251,13 @@ const PortfolioBreakdown = ({
 
   const handleExportCsv = () => {
     const rows = [
-      ['Rank', 'Ticker', 'Name', 'Side', 'Weight % (NAV)', 'Target % (NAV)', 'Factor', 'Factor Ctrb', 'Resize (Shares)', 'Price', 'Day G/L (%)', 'Action']
+      ['Rank', 'Ticker', 'Name', 'Side', 'Weight % (NAV)', 'Target % (NAV)', '+EV Exposure Labels', 'Exposure Ctrb', 'Resize (Shares)', 'Price', 'Day G/L (%)', 'Action']
     ];
 
     ledgerRows.forEach(({ holding, index, isLongs }) => {
       const currentPct = getPortfolioWeight(holding, totalValue);
       const targetPct = getHoldingTargetPercent(holding, isLongs);
-      const sleeve = getSleeveForHolding(holding);
+      const exposureLabels = getQuadExposureLabels(holding);
       const shares = getResizeShares(holding, isLongs);
       const action = getActionForResize(shares, isLongs, holding);
       const mark = getVerifiedHoldingMark(holding, hasVerifiedPortfolioMarks);
@@ -2076,7 +2270,7 @@ const PortfolioBreakdown = ({
         isLongs ? 'Long' : 'Short',
         currentPct === null ? '' : (isLongs ? currentPct : -currentPct).toFixed(2),
         Number.isFinite(targetPct) ? targetPct.toFixed(2) : '',
-        sleeve,
+        exposureLabels.join(' · ') || 'Unclassified',
         currentPct === null ? '' : formatPct(isLongs ? currentPct : -currentPct, 1, { signed: true }),
         shares ?? '',
         mark === null ? '' : mark.value.toFixed(4),
@@ -2095,39 +2289,21 @@ const PortfolioBreakdown = ({
     URL.revokeObjectURL(url);
   };
 
-  // Early return after all hooks - check for actual data, not just portfolioData existence
-  // The API returns an object with empty values when no data exists, so we need to check for actual holdings
-  // Don't show "no data" message if we're actively loading/polling
-  if (!isLoading && (!portfolioData || !holdings || (holdings.length === 0 && totalValue === 0 && !portfolioData?.accountSummary?.netLiquidation))) {
-    return (
-      <div
-        className="pcv2-reserved-state"
-        style={{ minHeight: '640px', padding: '32px', textAlign: 'center' }}
-      >
-        <Text className="text-gray-500 dark:text-gray-400">
-          No portfolio data available. Connect IB Gateway and the IBKR API to view portfolio breakdown.
-        </Text>
-      </div>
-    );
-  }
-
-  // Show loading state if we're actively fetching
-  if (isLoading && (!holdings || holdings.length === 0)) {
-    return (
-      <div
-        className="pcv2-reserved-state"
-        style={{
-          alignItems: 'center',
-          display: 'flex',
-          justifyContent: 'center',
-          minHeight: '640px',
-          padding: '32px',
-        }}
-      >
-        <LoadingIndicator label="Loading portfolio data..." size="lg" />
-      </div>
-    );
-  }
+  const hasLivePortfolio = Boolean(
+    portfolioData
+    && (
+      holdings.length > 0
+      || totalValue !== 0
+      || portfolioData?.accountSummary?.netLiquidation
+    )
+  );
+  const portfolioAvailabilityLabel = !hasLivePortfolio
+    ? (
+      isLoading
+        ? 'Connecting to live portfolio…'
+        : 'Live portfolio unavailable — connect IB Gateway and the IBKR API.'
+    )
+    : null;
 
   // Render performance cell without color coding
   const renderPerformanceCell = (value) => {
@@ -2350,9 +2526,58 @@ const PortfolioBreakdown = ({
     return row;
   };
 
-  const getControlledFactorLabels = (entry) => normalizeControlledExposureTags(entry?.exposures)
-    .filter((exposure) => exposure.type === 'factor')
-    .map((exposure) => exposure.label);
+  const getPositionSizeReference = (symbol) => {
+    const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+    const riskMetrics = getVerifiedRiskMetrics(normalizedSymbol);
+    const beta = riskMetrics?.beta?.status === 'available'
+      && finiteOptionalNumber(riskMetrics.beta.value) !== null ? riskMetrics.beta : null;
+    const sizingMetric = (
+      beta
+      && finiteOptionalNumber(beta.observations) >= SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS
+      && String(beta.source || '').trim().length > 0
+      && isValidSessionDate(normalizeResearchDate(beta.asOf))
+      && String(beta.benchmark || '').trim().toUpperCase() === 'SPY'
+      && beta.returnBasis === VERIFIED_BETA_RETURN_BASIS
+    ) ? beta : null;
+    const band = sizingMetric ? calculateBetaBand(sizingMetric) : null;
+    const available = Boolean(
+      band?.available
+      && finiteOptionalNumber(band.minWeight) !== null
+      && finiteOptionalNumber(band.betaMaxWeight) !== null
+    );
+    const value = available
+      ? `${Number(band.minWeight).toFixed(1)}–${Number(band.betaMaxWeight).toFixed(1)}%`
+      : null;
+    const verification = {
+      symbol: normalizedSymbol,
+      metric: 'Position size',
+      formula: `β* = clamp(|β|, ${SIZING_CONSTANTS.MIN_BETA.toFixed(2)}, ${SIZING_CONSTANTS.MAX_BETA.toFixed(2)}); MIN = ${SIZING_CONSTANTS.MIN_WEIGHT_NUMERATOR.toFixed(2)}% ÷ β*; MAX = ${SIZING_CONSTANTS.MAX_WEIGHT_NUMERATOR.toFixed(2)}% ÷ β*`,
+      equation: available
+        ? `|β| ${Math.abs(Number(band.rawBeta)).toFixed(2)} → β* ${Number(band.effectiveBeta).toFixed(2)}; raw ${Number(band.rawMinWeight).toFixed(2)}%–${Number(band.rawMaxWeight).toFixed(2)}% → rounded ${value}`
+        : 'Not calculated — verified completed-session beta provenance is required.',
+      result: value || 'Unavailable',
+      details: available
+        ? [
+          `${sizingMetric.observations} aligned completed-session returns`,
+          `Beta source: ${sizingMetric.source}`,
+          `${SIZING_CONSTANTS.WEIGHT_INCREMENT.toFixed(2)} percentage-point grid`,
+          'ATR may reduce MAX',
+          'Beta alone does not select a final target',
+          `As of ${formatResearchDateLabel(sizingMetric.asOf)}`,
+        ]
+        : ['No position-size band is shown without verified historical beta inputs.'],
+    };
+
+    return {
+      available,
+      band,
+      beta,
+      riskMetrics,
+      sizingMetric,
+      value,
+      verification,
+    };
+  };
 
   const getControlledOtherExposures = (entry) => normalizeControlledExposureTags(entry?.exposures)
     .filter((exposure) => exposure.type && exposure.type !== 'factor');
@@ -2629,30 +2854,16 @@ const PortfolioBreakdown = ({
       ...asArray(entry?.unavailableReasons),
     ].filter(Boolean);
     const otherExposures = getControlledOtherExposures(entry);
-    const riskMetrics = getVerifiedRiskMetrics(symbol);
-    const beta = riskMetrics?.beta?.status === 'available'
-      && finiteOptionalNumber(riskMetrics.beta.value) !== null ? riskMetrics.beta : null;
+    const positionSizeReference = getPositionSizeReference(symbol);
+    const {
+      beta,
+      riskMetrics,
+    } = positionSizeReference;
     const atr14 = riskMetrics?.atr14?.status === 'available'
       && finiteOptionalNumber(riskMetrics.atr14.value) !== null ? riskMetrics.atr14 : null;
     const zScore20 = riskMetrics?.zScore20?.status === 'available'
       && finiteOptionalNumber(riskMetrics.zScore20.value) !== null ? riskMetrics.zScore20 : null;
-    const betaSizingMetric = (
-      beta
-      && finiteOptionalNumber(beta.observations) >= SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS
-      && String(beta.source || '').trim().length > 0
-      && isValidSessionDate(normalizeResearchDate(beta.asOf))
-      && String(beta.benchmark || '').trim().toUpperCase() === 'SPY'
-      && beta.returnBasis === VERIFIED_BETA_RETURN_BASIS
-    ) ? beta : null;
-    const betaSizeBand = betaSizingMetric ? calculateBetaBand(betaSizingMetric) : null;
-    const betaSizeAvailable = Boolean(
-      betaSizeBand?.available
-      && finiteOptionalNumber(betaSizeBand.minWeight) !== null
-      && finiteOptionalNumber(betaSizeBand.betaMaxWeight) !== null
-    );
-    const betaSizeValue = betaSizeAvailable
-      ? `${Number(betaSizeBand.minWeight).toFixed(1)}–${Number(betaSizeBand.betaMaxWeight).toFixed(1)}%`
-      : null;
+    const factorContribution = getPortfolioWeight(holding, totalValue);
 
     const tradeValue = researchValue(verifiedTrade, ['value', 'signal', 'trade']);
     const trendValue = researchValue(verifiedTrend, ['value', 'trend', 'signal']);
@@ -2718,25 +2929,6 @@ const PortfolioBreakdown = ({
           `As of ${formatResearchDateLabel(beta.asOf)}`,
         ]
         : ['Historical beta inputs are unavailable.'],
-    };
-    const betaSizeVerification = {
-      symbol,
-      metric: 'Position size',
-      formula: `β* = clamp(|β|, ${SIZING_CONSTANTS.MIN_BETA.toFixed(2)}, ${SIZING_CONSTANTS.MAX_BETA.toFixed(2)}); MIN = ${SIZING_CONSTANTS.MIN_WEIGHT_NUMERATOR.toFixed(2)}% ÷ β*; MAX = ${SIZING_CONSTANTS.MAX_WEIGHT_NUMERATOR.toFixed(2)}% ÷ β*`,
-      equation: betaSizeAvailable
-        ? `|β| ${Math.abs(Number(betaSizeBand.rawBeta)).toFixed(2)} → β* ${Number(betaSizeBand.effectiveBeta).toFixed(2)}; raw ${Number(betaSizeBand.rawMinWeight).toFixed(2)}%–${Number(betaSizeBand.rawMaxWeight).toFixed(2)}% → rounded ${betaSizeValue}`
-        : 'Not calculated — verified completed-session beta provenance is required.',
-      result: betaSizeValue || 'Unavailable',
-      details: betaSizeAvailable
-        ? [
-          `${betaSizingMetric.observations} aligned completed-session returns`,
-          `Beta source: ${betaSizingMetric.source}`,
-          `${SIZING_CONSTANTS.WEIGHT_INCREMENT.toFixed(2)} percentage-point grid`,
-          'ATR may reduce MAX',
-          'Beta alone does not select a final target',
-          `As of ${formatResearchDateLabel(betaSizingMetric.asOf)}`,
-        ]
-        : ['No position-size band is shown without verified historical beta inputs.'],
     };
     const stopOperator = quantity !== null && quantity < 0 ? '+' : '−';
     const stopVerification = {
@@ -2948,7 +3140,7 @@ const PortfolioBreakdown = ({
             'Trade',
             'Trend',
             'Beta',
-            'Size',
+            'Factor Ctrb',
             'Quad +EV',
           ].map((label) => (
             <div className="pcv2-intel-cell pcv2-intel-span-4" key={label}>{label}</div>
@@ -2982,18 +3174,17 @@ const PortfolioBreakdown = ({
             buttonLabel: `Verify ${symbol} beta calculation`,
           })}
           {renderMetricCell({
-            value: betaSizeValue || (marketContextState.status === 'loading' ? '…' : '—'),
-            meta: betaSizeAvailable
-              ? `${marketContextState.errors?.riskMetrics ? 'Last verified · ' : ''}Beta band · ${betaSizingMetric.observations}D vs SPY · ${formatResearchDateLabel(betaSizingMetric.asOf)} · reference only`
-              : 'Verified historical beta sizing unavailable',
-            title: betaSizeAvailable
-              ? 'Non-executable beta sizing band; ATR may reduce MAX and beta alone does not select a final target.'
-              : 'A size reference requires verified completed-session beta provenance.',
-            tone: betaSizeAvailable ? 'is-neutral' : 'is-muted',
-            className: betaSizeAvailable ? 'is-reference' : '',
+            value: factorContribution === null
+              ? '—'
+              : formatPct(quantity < 0 ? -factorContribution : factorContribution, 1, { signed: true }),
+            meta: factorContribution === null
+              ? 'Verified live NAV contribution unavailable'
+              : `${getQuadExposureLabels(holding).join(' · ') || 'Unclassified'} · signed % NAV`,
+            title: 'Current signed position contribution across the displayed +EV exposures.',
+            tone: factorContribution === null
+              ? 'is-muted'
+              : quantity < 0 ? 'is-negative' : 'is-positive',
             spanClassName: 'pcv2-intel-span-4',
-            onClick: () => setMetricVerification(betaSizeVerification),
-            buttonLabel: `Verify ${symbol} position size calculation`,
           })}
           {renderMetricCell({
             meta: quadRanking ? `${quadRanking.label} · best → worst` : 'No direct +EV row',
@@ -3080,7 +3271,7 @@ const PortfolioBreakdown = ({
         <div className="pcv2-intel-grid pcv2-intel-header" aria-label="Market context headers">
           {[
             'Price Z-score · 20D',
-            'Implied vol',
+            'Sizing vol',
             'Relevant vol index',
             'USD correlation',
             'Stop loss',
@@ -3101,12 +3292,63 @@ const PortfolioBreakdown = ({
             className: zScore20 ? 'is-reference' : '',
             spanClassName: 'pcv2-intel-span-4',
           })}
-          {renderMetricCell({
-            value: 'Unavailable',
-            meta: 'No verified options-IV feed',
-            tone: 'is-muted',
-            spanClassName: 'pcv2-intel-span-4',
-          })}
+          {(() => {
+            const rv = riskMetrics?.realizedVolatility;
+            const sizingVol = rv?.status === 'available'
+              ? resolveSizingVolatility(rv, { useRecent63: true })
+              : null;
+            const sizingVolPct = Number.isFinite(sizingVol) ? sizingVol * 100 : null;
+            const badges = [];
+            if (rv?.limitedHistory) badges.push('Limited history');
+            if (rv?.spikeWarning) badges.push('Spike');
+            const badgeText = badges.length > 0 ? ` · ${badges.join(' · ')}` : '';
+            return renderMetricCell({
+              value: sizingVolPct != null
+                ? `${sizingVolPct.toFixed(1)}%`
+                : marketContextState.status === 'loading' ? '…' : 'Unavailable',
+              meta: sizingVolPct != null
+                ? `max(63d, 1Y) realized · ${formatResearchDateLabel(rv?.asOf)}${badgeText}`
+                : (rv?.warnings?.[0] || 'Insufficient adjusted history for sizing vol'),
+              title: 'Sizing uses the higher of 3-month and 1-year annualized realized volatility. Reference only — not options IV.',
+              tone: sizingVolPct != null ? 'is-muted' : 'is-muted',
+              className: sizingVolPct != null ? 'is-reference' : '',
+              spanClassName: 'pcv2-intel-span-4',
+              children: sizingVolPct != null ? (
+                <span className="pcv2-sizing-vol-value">
+                  {`${sizingVolPct.toFixed(1)}%`}
+                  {badges.length > 0 && (
+                    <span className={`pcv2-vol-badge ${rv?.spikeWarning ? 'is-spike' : 'is-limited'}`}>
+                      {rv?.spikeWarning ? 'Spike' : 'Limited'}
+                    </span>
+                  )}
+                </span>
+              ) : null,
+              onClick: sizingVolPct != null
+                ? () => setMetricVerification({
+                  symbol,
+                  metric: 'Sizing volatility',
+                  formula: 'SizingVol = max(RV₆₃, RV₂₅₂); RV = stdev(ln returns) × √N',
+                  equation: [
+                    `RV₆₃ = ${Number.isFinite(rv?.rv63) ? `${(rv.rv63 * 100).toFixed(2)}%` : 'n/a'}`,
+                    `RV₂₅₂ = ${Number.isFinite(rv?.rv252) ? `${(rv.rv252 * 100).toFixed(2)}%` : 'n/a'}`,
+                    `SizingVol = ${sizingVolPct.toFixed(2)}%`,
+                    `N = ${rv?.annualizationFactor || 252}`,
+                    `Observations = ${rv?.observationCount || 0}`,
+                  ].join(' · '),
+                  result: `${sizingVolPct.toFixed(2)}% annualized`,
+                  details: [
+                    ...(rv?.warnings || []),
+                    'Uses Yahoo adjusted closes only.',
+                    'Leveraged/inverse ETFs use their own price history.',
+                    'Reference-only / non-executable.',
+                  ],
+                })
+                : null,
+              buttonLabel: sizingVolPct != null
+                ? `Verify ${symbol} sizing volatility`
+                : null,
+            });
+          })()}
           {renderMetricCell({
             value: volatilityValue,
             meta: volatilityMeta,
@@ -3326,10 +3568,9 @@ const PortfolioBreakdown = ({
       const action = getActionForResize(shares, isLongs, holding);
       const mark = getVerifiedHoldingMark(holding, hasVerifiedPortfolioMarks);
       const dayGainLossPercent = getDayGainLossPercent(holding);
-      const factorLabels = researchEnvelopeIsCurrent
-        ? getControlledFactorLabels(getSymbolResearch(holding.symbol))
-        : [];
-      const factorExposureText = factorLabels.length > 0 ? factorLabels.join(' · ') : '—';
+      const positionSizeReference = getPositionSizeReference(holding.symbol);
+      const factorLabels = getQuadExposureLabels(holding);
+      const factorExposureText = factorLabels.length > 0 ? factorLabels.join(' · ') : 'Unclassified';
       const compactActionLabel = action.label === 'Reference only'
         ? 'Ref only'
         : action.label === 'Unavailable'
@@ -3349,7 +3590,14 @@ const PortfolioBreakdown = ({
                 aria-expanded={isExpanded}
                 aria-controls={`portfolio-research-${rowId}`}
                 aria-label={`${isExpanded ? 'Hide' : 'Show'} research intelligence for ${holding.symbol}`}
-                onClick={() => {
+                onClick={(event) => {
+                  if (!isExpanded) {
+                    const row = event.currentTarget.closest('.pcv2-ledger-row');
+                    const pane = event.currentTarget.closest('.pcv2-ledger-pane-scroll');
+                    if (row && pane) {
+                      pendingLedgerSnapRef.current = { pane, row, rowId };
+                    }
+                  }
                   setExpandedResearchRows((current) => {
                     const next = new Set(current);
                     if (next.has(rowId)) next.delete(rowId);
@@ -3369,14 +3617,22 @@ const PortfolioBreakdown = ({
             <td className="pcv2-num">
               {pctOfAccount === null ? '—' : formatPct(isLongs ? pctOfAccount : -pctOfAccount, 2)}
             </td>
-            <td className="pcv2-num">{renderTargetControl(holding, isLongs, pctOfAccount)}</td>
-            <td className="pcv2-factor-exposures" title={factorLabels.join(' · ') || 'No controlled factor mapping'}>
-              {factorExposureText}
+            <td className="pcv2-num pcv2-ledger-size-reference">
+              <button
+                type="button"
+                aria-label={`Verify ${holding.symbol} position size calculation`}
+                title={positionSizeReference.available
+                  ? 'Historical beta position-size reference band; not a target or executable sizing instruction.'
+                  : 'A size reference requires verified completed-session beta provenance.'}
+                onClick={() => setMetricVerification(positionSizeReference.verification)}
+              >
+                {positionSizeReference.value
+                  || (marketContextState.status === 'loading' ? '…' : '—')}
+              </button>
             </td>
-            <td className={`pcv2-num ${isLongs ? 'pcv2-positive' : 'pcv2-negative'}`}>
-              {pctOfAccount === null
-                ? '—'
-                : formatPct(isLongs ? pctOfAccount : -pctOfAccount, 1, { signed: true })}
+            <td className="pcv2-num">{renderTargetControl(holding, isLongs, pctOfAccount)}</td>
+            <td className="pcv2-factor-exposures" title={factorLabels.join(' · ') || 'Needs +EV classification review'}>
+              {factorExposureText}
             </td>
             <td className="pcv2-num">
               {shares === null ? '—' : shares ? (shares > 0 ? `+${shares}` : shares) : '0'}
@@ -3423,11 +3679,11 @@ const PortfolioBreakdown = ({
     <thead>
       <tr>
         <th title="Ticker">Ticker</th>
-        <th className="pcv2-num" aria-label="Asset class" title="Asset class">AC</th>
+        <th className="pcv2-num" aria-label="Asset class" title="Asset class">Asset<br />Class</th>
         <th className="pcv2-num" aria-label="Weight % (NAV)" title="Weight % of NAV">Weight<br />% NAV</th>
+        <th className="pcv2-num" aria-label="Position size" title="Historical beta position-size reference band; not a target">Size</th>
         <th className="pcv2-num" aria-label="Target % (NAV)" title="Target % of NAV">Target<br />% NAV</th>
-        <th aria-label="Factor exposures" title="Controlled factor exposures">Factors</th>
-        <th className="pcv2-num" aria-label="Factor contribution" title="Factor contribution">Factor<br />Ctrb</th>
+        <th aria-label="Factor exposures" title="Reviewed +EV exposure labels">Factors</th>
         <th className="pcv2-num" aria-label="Resize (Shares)" title="Resize in shares">Resize<br />Sh</th>
         <th className="pcv2-num" aria-label="Price" title="Verified live price or latest completed-session close">Price</th>
         <th className="pcv2-num" aria-label="Day G/L (%)" title="Day gain/loss percentage">Day G/L<br />%</th>
@@ -3453,33 +3709,143 @@ const PortfolioBreakdown = ({
             </span>
           </div>
         </div>
-        <div className="pcv2-ledger-pane-scroll" data-layout="fit-columns">
+        <div
+          className="pcv2-ledger-pane-scroll"
+          data-layout="fit-columns"
+          ref={(node) => {
+            ledgerPaneRefs.current[isLongs ? 'longs' : 'shorts'] = node;
+          }}
+        >
           <table className="pcv2-ledger-table" data-column-count="10">
             <colgroup>
               <col style={{ width: '17%' }} />
               <col style={{ width: '7%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '10%' }} />
               <col style={{ width: '9%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
               <col style={{ width: '8%' }} />
               <col style={{ width: '10%' }} />
               <col style={{ width: '10%' }} />
-              <col style={{ width: '9%' }} />
+              <col style={{ width: '8%' }} />
             </colgroup>
             {renderLedgerTableHead()}
             <tbody>
               {renderLedgerRows(rows, isLongs)}
             </tbody>
           </table>
+          <div className="pcv2-ledger-bottom-spacer" aria-hidden="true" />
         </div>
       </div>
+    );
+  };
+
+  const renderFactorExposureBalance = () => {
+    const maxSidePct = Math.max(
+      1,
+      ...factorExposure.rows.flatMap(({ longPct, shortPct }) => [longPct, shortPct]),
+    );
+    const activeTab = FACTOR_EXPOSURE_TABS.find(({ id }) => id === factorExposureDimension);
+    const selectedFactor = factorExposureAvailable ? selectedFactorExposureId : null;
+
+    return (
+      <section className="pcv2-card pcv2-factor-balance" aria-label="Factor exposure balance">
+        <header className="pcv2-factor-balance__header">
+          <div>
+            <h3>Factor Exposure</h3>
+            <p>Combined gross long and short exposure · % NAV</p>
+          </div>
+          {selectedFactor ? (
+            <button
+              type="button"
+              className="pcv2-factor-balance__clear"
+              onClick={() => setSelectedFactorExposureId(null)}
+            >
+              Clear factor filter
+            </button>
+          ) : null}
+        </header>
+        <div className="pcv2-factor-balance__tabs" role="tablist" aria-label="Factor exposure category">
+          {FACTOR_EXPOSURE_TABS.map(({ id, label }) => (
+            <button
+              type="button"
+              role="tab"
+              key={id}
+              aria-selected={factorExposureDimension === id}
+              className={factorExposureDimension === id ? 'is-active' : ''}
+              onClick={() => {
+                setFactorExposureDimension(id);
+                setSelectedFactorExposureId(null);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {!factorExposureAvailable ? (
+          <div className="pcv2-factor-balance__state">
+            Factor exposure unavailable — verified IBKR live NAV and marks are required.
+          </div>
+        ) : factorExposure.rows.length === 0 ? (
+          <div className="pcv2-factor-balance__state">
+            No reviewed {activeTab?.label.toLowerCase() || 'factor'} exposures in the current portfolio.
+          </div>
+        ) : (
+          <>
+            <div className="pcv2-factor-balance__legend" aria-hidden="true">
+              <span className="is-short">← Short</span>
+              <span>Gross exposure</span>
+              <span className="is-long">Long →</span>
+            </div>
+            <div className="pcv2-factor-balance__rows" role="list">
+              {factorExposure.rows.map(({ id, label, longPct, shortPct, netPct }) => {
+                const shortWidth = (shortPct / maxSidePct) * 50;
+                const longWidth = (longPct / maxSidePct) * 50;
+                const selected = selectedFactor === id;
+                return (
+                  <div key={id} role="listitem">
+                    <button
+                      type="button"
+                      className={`pcv2-factor-balance__row${selected ? ' is-selected' : ''}`}
+                      aria-pressed={selected}
+                      aria-label={`${selected ? 'Clear' : 'Filter by'} ${label}; ${shortPct.toFixed(1)}% short, ${longPct.toFixed(1)}% long, ${formatPct(netPct, 1, { signed: true })} net`}
+                      onClick={() => setSelectedFactorExposureId((current) => (
+                        current === id ? null : id
+                      ))}
+                    >
+                      <span className="pcv2-factor-balance__label">{label}</span>
+                      <span className="pcv2-factor-balance__bar" aria-hidden="true">
+                        <span className="pcv2-factor-balance__short" style={{ width: `${shortWidth}%` }} />
+                        <span className="pcv2-factor-balance__zero" />
+                        <span className="pcv2-factor-balance__long" style={{ width: `${longWidth}%` }} />
+                      </span>
+                      <span className={`pcv2-factor-balance__net${netPct > 0 ? ' is-long' : netPct < 0 ? ' is-short' : ''}`}>
+                        {formatPct(netPct, 1, { signed: true })}
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <footer className="pcv2-factor-balance__coverage">
+              Reviewed classification: {formatPct(factorExposure.coverage.classifiedPct, 1)} gross NAV
+              {' · '}
+              Unclassified: {formatPct(factorExposure.coverage.unclassifiedPct, 1)} gross NAV
+            </footer>
+          </>
+        )}
+      </section>
     );
   };
 
   const renderUnifiedLedger = () => (
     <section className="pcv2-card pcv2-ledger-card">
       <div className="pcv2-ledger-toolbar">
+        {portfolioAvailabilityLabel && (
+          <span className="pcv2-ledger-availability" role="status">
+            {portfolioAvailabilityLabel}
+          </span>
+        )}
         <label className="pcv2-search">
           <input
             type="text"
@@ -3516,7 +3882,8 @@ const PortfolioBreakdown = ({
           type="button"
           className="pcv2-toolbar-icon"
           title="Refresh portfolio and research"
-          aria-label="Refresh portfolio and research"
+          aria-label={isRefreshing ? 'Refreshing portfolio and research' : 'Refresh portfolio and research'}
+          aria-busy={isRefreshing}
           onClick={handleManualRefresh}
         >
           <RefreshCw size={14} />
@@ -3546,6 +3913,7 @@ const PortfolioBreakdown = ({
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 8px 16px 2px', display: 'flex', flexDirection: 'column' }}>
 
         <section className="pcv2-shell">
+          {renderFactorExposureBalance()}
           {renderUnifiedLedger()}
         </section>
 

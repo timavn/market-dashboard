@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   createRtaCheckpoint,
+  resolveRtaReplayCutoff,
   validateRtaCheckpoint,
 } = require('./rtaCheckpoint.cjs');
 
@@ -27,20 +28,21 @@ describe('RTA authoritative checkpoints', () => {
     expect(checkpoint.contentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  test('loads and validates the tracked authoritative benchmark', () => {
-    const checkpointPath = path.join(__dirname, '..', '..', 'data', 'hedgeye', 'rta', 'latest-benchmark.json');
+  test('loads and validates a sanitized serialized checkpoint fixture', () => {
+    const checkpointPath = path.join(__dirname, '__fixtures__', 'rta-checkpoint.sanitized.json');
     const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
 
     expect(validateRtaCheckpoint(checkpoint)).toMatchObject({ valid: true, reasons: [] });
     expect(checkpoint).toMatchObject({
-      id: 'rta-official-2026-06-28',
-      capturedAt: '2026-06-28T00:00:00-07:00',
-      asOf: '2026-06-28T00:00:00-07:00',
-      capturePrecision: 'date-only',
+      id: 'rta-official-2026-01-02',
+      capturedAt: '2026-01-02T03:04:05Z',
+      asOf: '2026-01-02T03:04:05Z',
+      capturePrecision: 'exact',
       source: 'manual-official-rta-board',
-      sourceArtifact: 'conversation-attachment:rta-board-screenshot-2026-06-28',
-      longs: ['HLT'],
-      shorts: ['KVYO', 'RMD', 'ROP', 'THC'],
+      sourceArtifact:
+        'repository-artifact:src/utils/__fixtures__/rta-checkpoint.sanitized.json',
+      longs: ['AAA', 'BBB'],
+      shorts: ['CCC'],
     });
   });
 
@@ -78,5 +80,32 @@ describe('RTA authoritative checkpoints', () => {
       shorts: ['KVYO'],
       notes: ['Transcribed from the official board.'],
     })).toThrow('capture-precision-note-missing');
+  });
+
+  test('rejects an as-of floor later than the actual capture time', () => {
+    expect(() => createRtaCheckpoint({
+      capturedAt: '2026-07-21T13:45:00-04:00',
+      asOf: '2027-07-21T13:45:00-04:00',
+      capturePrecision: 'exact',
+      source: 'manual-official-rta-board',
+      sourceArtifact: 'repository-artifact:data/rta-board.html',
+      longs: ['SPY'],
+      shorts: ['QQQ'],
+      notes: ['Captured from the official board.'],
+    })).toThrow('as-of-after-capture');
+  });
+
+  test('replays from an older checkpoint instead of aging open actions out at 90 days', () => {
+    expect(resolveRtaReplayCutoff({
+      now: '2026-07-27T03:00:00.000Z',
+      windowDays: 90,
+      checkpointTime: '2025-07-27T03:00:00.000Z',
+    })).toBe('2025-07-27T03:00:00.000Z');
+
+    expect(resolveRtaReplayCutoff({
+      now: '2026-07-27T03:00:00.000Z',
+      windowDays: 90,
+      checkpointTime: '2026-07-20T03:00:00.000Z',
+    })).toBe('2026-04-28T03:00:00.000Z');
   });
 });

@@ -194,7 +194,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 9px;
+  gap: 4.5px;
   min-height: 14px;
   margin-top: 6px;
 }
@@ -204,7 +204,7 @@
   min-width: 0;
   align-items: baseline;
   gap: 4px;
-  padding-left: 9px;
+  padding-left: 4.5px;
   border-left: 1px solid #d9e2e9;
   color: #536174;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -360,6 +360,10 @@
 
 .efr-status-chip--indicator-only[data-indicator='stale'] {
   color: #eab308;
+}
+
+.efr-status-chip--indicator-only[data-indicator='asof'] {
+  color: #94a3b8;
 }
 
 .efr-status-chip--indicator-only[data-indicator='error'] {
@@ -751,6 +755,14 @@
   height: 72px;
   overflow: hidden;
 }
+
+.efr-vol-sparkline__regime-band {
+  pointer-events: none;
+}
+
+.efr-vol-sparkline__regime-band--green { fill: rgba(18, 142, 84, 0.10); }
+.efr-vol-sparkline__regime-band--yellow { fill: rgba(220, 102, 30, 0.11); }
+.efr-vol-sparkline__regime-band--red { fill: rgba(220, 38, 38, 0.09); }
 
 .efr-vol-sparkline__y-tick > line:first-child {
   stroke: #e3e9ef;

@@ -486,6 +486,7 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
 
 module.exports = {
   seedBaselinePositions,
+  normalizeRtaAlertEvent: normalizeAlert,
   normalizeRealTimeAlerts,
   summarizeRealTimeAlertPositions,
   formatRatioText,

@@ -1,3 +1,7 @@
+const {
+  buildRealizedVolatilitySnapshot,
+} = require('./realizedVolatility.cjs');
+
 const BETA_WINDOW_RETURNS = 252;
 const MIN_BETA_RETURNS = 126;
 const ATR_PERIOD = 14;
@@ -15,6 +19,52 @@ const REASONS = Object.freeze({
   ZERO_BENCHMARK_VARIANCE: 'zero_benchmark_variance',
   ZERO_PRICE_STANDARD_DEVIATION: 'zero_price_standard_deviation',
 });
+
+function unavailableRealizedVolatility(reason = REASONS.HISTORY_UNAVAILABLE) {
+  return {
+    status: 'unavailable',
+    rv63: null,
+    rv252: null,
+    rv3y: null,
+    rv5y: null,
+    rv10y: null,
+    sizingVol: null,
+    annualizationFactor: null,
+    observationCount: 0,
+    limitedHistory: true,
+    spikeWarning: false,
+    asOf: null,
+    warnings: [],
+    reason,
+  };
+}
+
+function serializeRealizedVolatility(snapshot, { includeSeries = false } = {}) {
+  if (!snapshot) return unavailableRealizedVolatility();
+  const base = {
+    status: snapshot.status,
+    rv63: snapshot.rv63,
+    rv252: snapshot.rv252,
+    rv3y: snapshot.rv3y,
+    rv5y: snapshot.rv5y,
+    rv10y: snapshot.rv10y,
+    sizingVol: snapshot.sizingVol,
+    annualizationFactor: snapshot.annualizationFactor,
+    observationCount: snapshot.observationCount,
+    limitedHistory: Boolean(snapshot.limitedHistory),
+    spikeWarning: Boolean(snapshot.spikeWarning),
+    asOf: snapshot.asOf,
+    warnings: Array.isArray(snapshot.warnings) ? snapshot.warnings : [],
+    reason: snapshot.reason || null,
+  };
+  if (!includeSeries) return base;
+  return {
+    ...base,
+    rolling63: snapshot.rolling63 || [],
+    rolling252: snapshot.rolling252 || [],
+    priceSeries: snapshot.priceSeries || [],
+  };
+}
 
 function finiteNumber(value) {
   if (value == null || value === '') return null;
@@ -623,6 +673,7 @@ function createUnavailableSecurityRiskMetrics({
     zScore20,
     records,
     priceStructure,
+    realizedVolatility: unavailableRealizedVolatility(reason),
     provenance,
     historicalOnly: true,
     executable: false,
@@ -636,6 +687,8 @@ function buildSecurityRiskMetrics({
   source = DEFAULT_SOURCE,
   provenance = {},
   recordsBeforeDate = null,
+  assetType = 'equity',
+  includeVolSeries = false,
 } = {}) {
   const normalizedSymbol = String(symbol || '').trim().toUpperCase();
   if (!normalizedSymbol) {
@@ -662,6 +715,10 @@ function buildSecurityRiskMetrics({
   const zScore20 = calculatePriceZScore20(normalized, { source });
   const records = calculatePriorAllTimePrices(normalized, { source, beforeDate: recordsBeforeDate });
   const priceStructure = calculatePriceStructureRun(normalized);
+  const realizedSnapshot = buildRealizedVolatilitySnapshot(normalized, { assetType });
+  const realizedVolatility = serializeRealizedVolatility(realizedSnapshot, {
+    includeSeries: includeVolSeries,
+  });
   const availableCount = [beta, atr14, zScore20, records, priceStructure]
     .filter((metric) => metric.status === 'available').length;
 
@@ -676,6 +733,7 @@ function buildSecurityRiskMetrics({
     zScore20,
     records,
     priceStructure,
+    realizedVolatility,
     provenance,
     historicalOnly: true,
     executable: false,
@@ -703,4 +761,6 @@ module.exports = {
   createUnavailableSecurityRiskMetrics,
   normalizeAdjustedPriceBars,
   parseYahooChartBars,
+  serializeRealizedVolatility,
+  unavailableRealizedVolatility,
 };

@@ -1,10 +1,14 @@
 import {
   PROCESS_DOCUMENTS,
+  PROCESS_METHOD_DOCUMENTS,
+  PROCESS_METHOD_IDS,
   PROCESS_RULES,
   PUBLISHED_PROCESS_DOCUMENTS,
   assertValidProcessRegistry,
+  getProcessChildDocuments,
   getProcessDocument,
   getProcessDocumentByRoute,
+  getProcessMethodDocuments,
   getPublishedProcessDocuments,
   getProcessRule,
   validateProcessRegistry,
@@ -16,21 +20,44 @@ const cloneRegistry = () => ({
 });
 
 describe('process document and rule registry', () => {
-  test('publishes the master paper and Position Sizing note at their canonical routes', () => {
+  test('publishes the Process library at addressable routes', () => {
     expect(PUBLISHED_PROCESS_DOCUMENTS.map(({ id }) => id)).toEqual([
       'the-process',
+      'methods-index',
+      'signals-and-risk-ranges',
       'position-sizing',
+      'stops-exits-and-reversals',
+      'macro-regime-and-quad-overlay',
+      'security-selection-and-pods',
+      'portfolio-construction-and-diversification',
+      'data-controls-and-execution',
+      'validation-and-change-control',
     ]);
     expect(getPublishedProcessDocuments()).toBe(PUBLISHED_PROCESS_DOCUMENTS);
     expect(getProcessDocument('the-process')).toEqual(expect.objectContaining({
       route: '#/process',
       type: 'master',
+      section: 'process',
+      parentId: null,
+      editable: true,
       version: '0.1',
       status: 'Draft',
-      asOf: '2026-07-18',
+      asOf: '2026-07-27',
     }));
+    expect(getProcessDocumentByRoute('#/process/methods')).toEqual(
+      expect.objectContaining({ id: 'methods-index', type: 'index' }),
+    );
+    expect(getProcessDocumentByRoute('#/process/principles')).toBeNull();
+    expect(getProcessDocumentByRoute('#/process/playbook')).toBeNull();
     expect(getProcessDocumentByRoute('#/process/methods/position-sizing')).toEqual(
-      expect.objectContaining({ id: 'position-sizing', version: '1.1', status: 'Canonical' }),
+      expect.objectContaining({
+        id: 'position-sizing',
+        type: 'method',
+        parentId: 'methods-index',
+        editable: true,
+        version: '1.1',
+        status: 'Canonical',
+      }),
     );
     expect(getProcessDocument('the-process').dependencies).toContainEqual({
       documentId: 'position-sizing',
@@ -38,17 +65,27 @@ describe('process document and rule registry', () => {
     });
   });
 
-  test('keeps planned notes out of the publication routes', () => {
-    const planned = PROCESS_DOCUMENTS.filter(({ status }) => status === 'Planned');
-    expect(planned).toHaveLength(4);
-    planned.forEach((document) => {
-      expect(document.published).toBe(false);
-      expect(document.route).toBeNull();
+  test('registers all eight supporting Methods under the Methods index', () => {
+    expect(PROCESS_METHOD_IDS).toHaveLength(8);
+    expect(PROCESS_METHOD_DOCUMENTS.map(({ id }) => id)).toEqual(PROCESS_METHOD_IDS);
+    expect(getProcessMethodDocuments()).toBe(PROCESS_METHOD_DOCUMENTS);
+    expect(getProcessChildDocuments('methods-index').map(({ id }) => id)).toEqual(PROCESS_METHOD_IDS);
+
+    PROCESS_METHOD_DOCUMENTS.forEach((document) => {
+      expect(document).toEqual(expect.objectContaining({
+        type: 'method',
+        section: 'methods',
+        parentId: 'methods-index',
+        published: true,
+      }));
+      expect(document.route).toBe(`#/process/methods/${document.id}`);
+      expect(typeof document.editable).toBe('boolean');
     });
+
     expect(getProcessDocument('security-selection-and-pods')).toMatchObject({
       status: 'Deferred',
-      published: false,
-      route: null,
+      published: true,
+      route: '#/process/methods/security-selection-and-pods',
     });
   });
 
@@ -84,20 +121,46 @@ describe('process document and rule registry', () => {
     });
   });
 
-  test('registers the complete canonical sizing mechanism rather than only its boundary rules', () => {
-    expect(getProcessDocument('position-sizing').canonicalRuleIds).toEqual(expect.arrayContaining([
+  test('assigns canonical rules to the Method that defines them', () => {
+    expect(getProcessDocument('signals-and-risk-ranges').canonicalRuleIds).toEqual(expect.arrayContaining([
+      'signal.trade.duration',
+      'signal.trend.duration',
       'data.signal_independence',
+      'entry.long.range_half',
+      'entry.short.range_half',
       'range.normalization',
       'structure.directional_streaks',
       'record.extension',
+    ]));
+    expect(getProcessDocument('stops-exits-and-reversals').canonicalRuleIds).toEqual([
+      'lifecycle.trend_break_trade_holds',
+      'lifecycle.trade_break',
+      'lifecycle.reversal',
+    ]);
+    expect(getProcessDocument('position-sizing').canonicalRuleIds).toEqual(expect.arrayContaining([
+      'risk.beta_band',
+      'risk.atr_cap',
       'sizing.conviction',
       'sizing.target_rounding',
       'lifecycle.open_at_min',
       'lifecycle.incremental_steps',
       'data.optional_strength_missing',
-      'lifecycle.reversal',
-      'data.execution_gate',
     ]));
+    expect(getProcessDocument('data-controls-and-execution').canonicalRuleIds).toEqual([
+      'data.execution_gate',
+    ]);
+    expect(getProcessRule('signal.trade.duration')).toMatchObject({
+      ownerDocumentId: 'signals-and-risk-ranges',
+      ownerVersion: '0.1',
+    });
+    expect(getProcessRule('lifecycle.trade_break')).toMatchObject({
+      ownerDocumentId: 'stops-exits-and-reversals',
+      ownerVersion: '0.1',
+    });
+    expect(getProcessRule('risk.beta_band')).toMatchObject({
+      ownerDocumentId: 'position-sizing',
+      ownerVersion: '1.1',
+    });
     expect(getProcessRule('sizing.conviction').parameters).toEqual({
       range: 0.2,
       structure: 0.3,
@@ -125,13 +188,28 @@ describe('process document and rule registry', () => {
   test('rejects route collisions and missing dependency versions', () => {
     const { documents, rules } = cloneRegistry();
     documents[1].route = documents[0].route;
-    documents[0].dependencies[0].version = '9.9';
+    documents[0].dependencies
+      .find(({ documentId }) => documentId === 'position-sizing')
+      .version = '9.9';
 
     const result = validateProcessRegistry(documents, rules);
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual(expect.arrayContaining([
       'Duplicate document route: #/process',
       'Document the-process requires position-sizing v9.9, but the registry contains v1.1.',
+    ]));
+  });
+
+  test('rejects missing hierarchy metadata and invalid Method parents', () => {
+    const { documents, rules } = cloneRegistry();
+    delete documents.find(({ id }) => id === 'the-process').editable;
+    documents.find(({ id }) => id === 'position-sizing').parentId = 'the-process';
+
+    const result = validateProcessRegistry(documents, rules);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      'Document the-process is missing hierarchy metadata.',
+      'Method position-sizing must belong to the Methods index.',
     ]));
   });
 

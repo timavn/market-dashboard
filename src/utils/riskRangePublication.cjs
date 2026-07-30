@@ -156,11 +156,18 @@ function selectPublicationRows(items, publicationDate) {
   return { invalid, primary, supplemental, merged };
 }
 
-function riskRangeManifestChecksum(items, publicationDate) {
+function riskRangeManifestChecksum(items, publicationDate, {
+  numericFormat = 'canonical',
+} = {}) {
+  const formatNumber = (value) => (
+    numericFormat === 'python-float-v3' && Number.isInteger(value)
+      ? value.toFixed(1)
+      : String(value)
+  );
   const rows = selectPublicationRows(items, publicationDate).primary
     .map((item) => ({
-      hrr: String(item.value.hrr),
-      lrr: String(item.value.lrr),
+      hrr: formatNumber(item.value.hrr),
+      lrr: formatNumber(item.value.lrr),
       ticker: item.ticker,
       trend: item.value.trend,
     }))
@@ -185,7 +192,17 @@ function applyPersistedManifestGate(envelope, items, storedManifest, {
   if (storedManifest && Number(storedManifest.count) !== Number(envelope?.manifest?.primaryCount || 0)) {
     reasons.push('manifest-count-mismatch');
   }
-  if (storedManifest && storedManifest.checksum !== riskRangeManifestChecksum(items, expected)) {
+  const acceptedChecksums = [riskRangeManifestChecksum(items, expected)];
+  // Parser v3 hashed values before DynamoDB normalized integral Decimals
+  // (for example "100.0" became "100" when read back). Accept that exact
+  // producer representation as an equivalent receipt, while retaining the
+  // canonical checksum for every other parser version.
+  if (storedManifest?.parserVersion === 'risk-range-email-v3') {
+    acceptedChecksums.push(riskRangeManifestChecksum(items, expected, {
+      numericFormat: 'python-float-v3',
+    }));
+  }
+  if (storedManifest && !acceptedChecksums.includes(storedManifest.checksum)) {
     reasons.push('manifest-checksum-mismatch');
   }
 

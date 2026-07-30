@@ -390,21 +390,33 @@ describe('WTI prediction-market provider', () => {
 
   test('overview isolates an unavailable SPX market from CPI and WTI', async () => {
     const kalshiFetch = jest.fn(async (path, params) => {
+      if (path.includes('/candlesticks')) {
+        return {
+          candlesticks: [{
+            end_period_ts: Math.floor(NOW / 1000),
+            price: { close_dollars: '0.4400' },
+          }],
+        };
+      }
       if (params.series_ticker === 'KXINXU') throw Object.assign(new Error('SPX unavailable'), { code: 'SPX_EVENT_UNAVAILABLE' });
       if (params.series_ticker === 'KXCPIYOY') {
+        const cpiMarkets = Array.from({ length: 11 }, (_, index) => {
+          const threshold = 3 + index / 10;
+          return {
+            ...directBook({ volume_24h_fp: String(100 + index) }),
+            ticker: `KXCPIYOY-26JUL-T${threshold.toFixed(1)}`,
+            event_ticker: 'KXCPIYOY-26JUL',
+            title: `Will CPI be above ${threshold.toFixed(1)}%?`,
+            status: 'active',
+            close_time: '2026-08-12T12:30:00.000Z',
+            updated_time: '2026-07-21T16:59:50.000Z',
+          };
+        });
         return { events: [{
           event_ticker: 'KXCPIYOY-26JUL',
           series_ticker: 'KXCPIYOY',
           title: 'CPI in July?',
-          markets: [{
-            ...directBook(),
-            ticker: 'KXCPIYOY-26JUL-T2.9',
-            event_ticker: 'KXCPIYOY-26JUL',
-            title: 'Will CPI be above 2.9%?',
-            status: 'active',
-            close_time: '2026-08-12T12:30:00.000Z',
-            updated_time: '2026-07-21T16:59:50.000Z',
-          }],
+          markets: cpiMarkets,
         }] };
       }
       if (params.series_ticker === 'KXWTI') return { events: [event('daily', [dailyMarket(80)])] };
@@ -415,13 +427,67 @@ describe('WTI prediction-market provider', () => {
     const result = await getPredictionMarketsOverview({
       kalshiFetch,
       checkGatewayHealth: jest.fn().mockResolvedValue({ ok: false }),
+      getQuote: jest.fn().mockResolvedValue(null),
+      getSignalAvailability: jest.fn(async ({ market }) => market === 'cpi'
+        ? {
+          name: 'Hedgeye Inflation Nowcast',
+          status: 'available',
+          source: 'hedgeye',
+          details: {
+            scenarios: [
+              { key: 'downside', label: 'Downside', value: 3.2 },
+              { key: 'base', label: 'Base Case', value: 3.4 },
+              { key: 'upside', label: 'Upside', value: 3.6 },
+            ],
+          },
+        }
+        : { name: 'Risk Range', status: 'unavailable' }),
       now: () => NOW,
     });
 
     expect(result.ok).toBe(true);
     expect(result.markets.cpi.status).toBe('available');
+    expect(result.markets.cpi.summary.lines.map((line) => line.label)).toEqual([
+      'Above 3.1%',
+      'Above 3.2%',
+      'Above 3.3%',
+      'Above 3.4%',
+      'Above 3.5%',
+      'Above 3.6%',
+      'Above 3.7%',
+    ]);
+    expect(result.markets.cpi.summary.lines[3]).toEqual(expect.objectContaining({
+      sortValue: 3.4,
+      yesBid: expect.any(Number),
+      yesAsk: expect.any(Number),
+      noBid: expect.any(Number),
+      noAsk: expect.any(Number),
+      volume24h: 104,
+    }));
+    expect(result.markets.cpi.summary.reference).toEqual(expect.objectContaining({
+      status: 'available',
+      kind: 'forecast',
+      label: 'Hedgeye base case',
+      value: 3.4,
+    }));
+    expect(result.markets.cpi.summary.selection).toEqual({
+      method: 'reference_centered',
+      label: 'Centered on Hedgeye base case',
+    });
+    expect(result.markets.cpi.summary.chart).toEqual(expect.objectContaining({
+      status: 'available',
+      source: 'kalshi_trade_api_v2',
+      points: [{ timestamp: NOW, close: 0.44 }],
+    }));
     expect(result.markets.spx).toEqual(expect.objectContaining({ status: 'unavailable', summary: null }));
     expect(result.markets.wti.daily.status).toBe('available');
+    expect(result.markets.wti.daily.summary.lines[0]).toEqual(expect.objectContaining({
+      label: 'Above $80',
+      yesBid: expect.any(Number),
+      yesAsk: expect.any(Number),
+      noBid: expect.any(Number),
+      noAsk: expect.any(Number),
+    }));
     expect(result.markets.wti.weekly.status).toBe('available');
     expect(result.policy).toEqual(expect.objectContaining({
       factualComparisonOnly: true,

@@ -825,7 +825,7 @@ async function getPositions(accountId) {
   let lastError = null;
   for (let attempt = 0; attempt < 2 && !res; attempt += 1) {
     try {
-      res = await sidecarRequest('/portfolio/live-positions', { timeoutMs: 5000 });
+      res = await sidecarRequest('/portfolio/live-positions', { timeoutMs: 45000 });
     } catch (err) {
       lastError = err;
     }

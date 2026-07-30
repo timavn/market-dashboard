@@ -1,5 +1,15 @@
 const { createAsyncTtlCache } = require('./serverResponseCache.cjs');
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('server response cache', () => {
   test('returns hits until expiry and reloads afterward', async () => {
     let currentTime = 1_000;
@@ -77,5 +87,86 @@ describe('server response cache', () => {
     expect(cache.peek('a')).not.toBeNull();
     expect(cache.peek('b')).toBeNull();
     expect(cache.peek('c')).not.toBeNull();
+  });
+
+  test('allows a verified local response to prime the cache without invoking a loader', () => {
+    let currentTime = 42_000;
+    const cache = createAsyncTtlCache({
+      ttlMs: 300_000,
+      now: () => currentTime,
+    });
+
+    cache.set('rta', { source: 'manual-official-checkpoint' });
+    expect(cache.peek('rta')).toEqual({
+      value: { source: 'manual-official-checkpoint' },
+      storedAt: 42_000,
+    });
+
+    currentTime += 1_000;
+    expect(cache.peek('rta')).toEqual({
+      value: { source: 'manual-official-checkpoint' },
+      storedAt: 42_000,
+    });
+  });
+
+  test('delete prevents an old load from overwriting or deleting a newer in-flight request', async () => {
+    const cache = createAsyncTtlCache({ ttlMs: 300_000 });
+    const oldLoad = deferred();
+    const newLoad = deferred();
+    const oldRequest = cache.get('rta', () => oldLoad.promise);
+    await Promise.resolve();
+
+    cache.delete('rta');
+    const newLoader = jest.fn(() => newLoad.promise);
+    const newRequest = cache.get('rta', newLoader);
+    const dedupedNewRequest = cache.get('rta', newLoader);
+    await Promise.resolve();
+    expect(newLoader).toHaveBeenCalledTimes(1);
+
+    oldLoad.resolve({ version: 'old' });
+    await expect(oldRequest).resolves.toMatchObject({
+      status: 'superseded',
+      value: { version: 'old' },
+    });
+    expect(cache.peek('rta')).toBeNull();
+
+    // The old request's finally handler must not remove the newer request.
+    const stillDeduped = cache.get('rta', newLoader);
+    expect(newLoader).toHaveBeenCalledTimes(1);
+    newLoad.resolve({ version: 'new' });
+    await expect(Promise.all([
+      newRequest,
+      dedupedNewRequest,
+      stillDeduped,
+    ])).resolves.toEqual([
+      expect.objectContaining({ status: 'miss', value: { version: 'new' } }),
+      expect.objectContaining({ status: 'miss', value: { version: 'new' } }),
+      expect.objectContaining({ status: 'miss', value: { version: 'new' } }),
+    ]);
+    expect(cache.peek('rta')?.value).toEqual({ version: 'new' });
+  });
+
+  test('set and clear invalidate older loader write tokens', async () => {
+    const cache = createAsyncTtlCache({ ttlMs: 300_000 });
+    const setRace = deferred();
+    const oldSetRequest = cache.get('etf', () => setRace.promise);
+    await Promise.resolve();
+    cache.set('etf', { version: 'manual' });
+    setRace.resolve({ version: 'old-remote' });
+    await expect(oldSetRequest).resolves.toMatchObject({ status: 'superseded' });
+    expect(cache.peek('etf')?.value).toEqual({ version: 'manual' });
+
+    const clearRace = deferred();
+    const oldClearRequest = cache.get('readiness', () => clearRace.promise);
+    await Promise.resolve();
+    cache.clear();
+    const replacement = cache.get('readiness', async () => ({ version: 'replacement' }));
+    clearRace.resolve({ version: 'old-before-clear' });
+    await expect(oldClearRequest).resolves.toMatchObject({ status: 'superseded' });
+    await expect(replacement).resolves.toMatchObject({
+      status: 'miss',
+      value: { version: 'replacement' },
+    });
+    expect(cache.peek('readiness')?.value).toEqual({ version: 'replacement' });
   });
 });

@@ -49,6 +49,43 @@ function finiteRange(item) {
   return Number.isFinite(lrr) && Number.isFinite(hrr) && lrr < hrr;
 }
 
+function toPercent(value) {
+  if (value == null || value === '') return null;
+  const numeric = Number(String(value).replace(/[$,%\s,]/g, ''));
+  if (!Number.isFinite(numeric)) return null;
+  return Math.abs(numeric) > 0 && Math.abs(numeric) <= 0.05 ? numeric * 100 : numeric;
+}
+
+function cpiSignalDetails(snapshot = {}) {
+  const data = snapshot?.data || snapshot || {};
+  const rawScenarios = Array.isArray(data.scenarios)
+    ? data.scenarios
+    : [
+        { key: 'upside', label: 'Upside', value: data.upside ?? data.upsideMom ?? data.upsideM_m },
+        { key: 'base', label: 'Base Case', value: data.base ?? data.baseCase ?? data.baseMom ?? data.baseM_m },
+        { key: 'downside', label: 'Downside', value: data.downside ?? data.downsideMom ?? data.downsideM_m },
+      ];
+  const scenarios = rawScenarios.slice(0, 3).map((scenario, index) => ({
+    key: scenario?.key || ['upside', 'base', 'downside'][index],
+    label: scenario?.label || scenario?.name || ['Upside', 'Base Case', 'Downside'][index],
+    value: toPercent(
+      scenario?.percent ??
+      scenario?.m_m ??
+      scenario?.mom ??
+      scenario?.forecast ??
+      scenario?.raw ??
+      scenario?.value,
+    ),
+  })).filter((scenario) => Number.isFinite(scenario.value));
+  return {
+    forecastMonth: data.forecastMonth || data.reportMonth || snapshot.forecastMonth || null,
+    metric: data.metric || data.measure || data.title || data.heading || null,
+    outlook: data.outlook || null,
+    releaseDate: data.releaseDate?.date || data.releaseDate || data.release_date || snapshot.releaseDate || null,
+    scenarios,
+  };
+}
+
 async function cachedLoad(key, loader, { now = Date.now(), ttlMs = DEFAULT_TTL_MS, useCache = true } = {}) {
   const current = cache.get(key);
   if (useCache && current && current.expiresAt > now) return current.value;
@@ -118,6 +155,7 @@ async function getOverviewSignalAvailability(context = {}, options = {}) {
         sourceMonth,
         asOf: snapshot.publishedAt || snapshot.scrapedAt || snapshot.date || null,
         source: snapshot.sourceProduct || 'HedgeyeDailySnapshot',
+        details: cpiSignalDetails(snapshot),
       };
     }
 
@@ -143,6 +181,13 @@ async function getOverviewSignalAvailability(context = {}, options = {}) {
       requiredDate,
       asOf: range.date,
       source: 'RiskRangeData',
+      details: {
+        ticker,
+        date: range.date,
+        lrr: Number(range.lrr),
+        hrr: Number(range.hrr),
+        trend: range.trend || null,
+      },
     };
   } catch (error) {
     const name = market === 'cpi'
@@ -155,6 +200,7 @@ async function getOverviewSignalAvailability(context = {}, options = {}) {
 module.exports = {
   cpiMonthFromEvent,
   cpiMonthFromSnapshot,
+  cpiSignalDetails,
   dateKeyInNewYork,
   finiteRange,
   getOverviewSignalAvailability,

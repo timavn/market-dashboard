@@ -104,6 +104,19 @@ const attachReferenceCacheMetadata = (response) => {
 
 // Market Data Service
 export class MarketDataService {
+  static async getSystemStatus() {
+    try {
+      // The probes themselves remain tightly bounded server-side. Allow a
+      // little extra client time for the request to enter a busy local API
+      // event loop while the rest of the dashboard is loading.
+      const response = await dedupedGet(ENDPOINTS.SYSTEM_STATUS, { timeout: 4000 });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching system status:', error);
+      throw error;
+    }
+  }
+
   static async getSystemReadiness({ refresh = false } = {}) {
     try {
       const response = await dedupedGet(ENDPOINTS.SYSTEM_READINESS, {
@@ -368,6 +381,43 @@ export class MarketDataService {
     }
   }
 
+  static async getIbkrInterestValidationStatus({ account = null } = {}) {
+    try {
+      const response = await dedupedGet(ENDPOINTS.IBKR_INTEREST_VALIDATION_STATUS, {
+        params: account ? { account } : {},
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching IBKR interest validation status:', error);
+      throw error;
+    }
+  }
+
+  static async getIbkrInterestValidationHistory({ limit = 90 } = {}) {
+    try {
+      const response = await dedupedGet(ENDPOINTS.IBKR_INTEREST_VALIDATION_HISTORY, {
+        params: { limit },
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching IBKR interest validation history:', error);
+      throw error;
+    }
+  }
+
+  static async runIbkrInterestValidation() {
+    try {
+      const response = await apiClient.post(
+        ENDPOINTS.IBKR_INTEREST_VALIDATION_RUN,
+        {},
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error running IBKR interest validation:', error);
+      throw error;
+    }
+  }
+
   static async getPortfolioPredictionMarketPositions({ primaryAccount = null } = {}) {
     try {
       const params = {};
@@ -585,11 +635,15 @@ export class MarketDataService {
     }
   }
 
-  // Get read-only historical beta, ATR14, records, and completed daily
-  // high/low price structure.
+  // Get read-only historical beta, ATR14, records, completed daily
+  // high/low price structure, and realized sizing volatility.
   // The server response is explicitly historicalOnly/non-executable and must
   // never be substituted for a verified live quote or portfolio value.
-  static async getSecurityRiskMetrics(symbols, { forceRefresh = false } = {}) {
+  static async getSecurityRiskMetrics(symbols, {
+    forceRefresh = false,
+    assetTypes = null,
+    includeVolSeries = false,
+  } = {}) {
     const requested = Array.from(new Set(
       (Array.isArray(symbols) ? symbols : [symbols])
         .map((symbol) => String(symbol || '').trim().toUpperCase())
@@ -599,11 +653,27 @@ export class MarketDataService {
       throw new TypeError('At least one symbol is required for historical risk metrics');
     }
 
+    let assetTypesParam = null;
+    if (assetTypes && typeof assetTypes === 'object') {
+      assetTypesParam = Object.entries(assetTypes)
+        .map(([symbol, assetType]) => {
+          const key = String(symbol || '').trim().toUpperCase();
+          const value = String(assetType || '').trim().toLowerCase();
+          return key && value ? `${key}:${value}` : null;
+        })
+        .filter(Boolean)
+        .join(',');
+    } else if (typeof assetTypes === 'string' && assetTypes.trim()) {
+      assetTypesParam = assetTypes.trim();
+    }
+
     try {
       const response = await dedupedGet('/api/security-risk-metrics', {
         params: {
           symbols: requested.join(','),
           ...(forceRefresh ? { forceRefresh: 1 } : {}),
+          ...(assetTypesParam ? { assetTypes: assetTypesParam } : {}),
+          ...(includeVolSeries ? { includeVolSeries: 1 } : {}),
         }
       });
       return attachReferenceCacheMetadata(response);

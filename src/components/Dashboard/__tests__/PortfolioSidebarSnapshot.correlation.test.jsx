@@ -15,6 +15,9 @@ jest.mock('../../../services/api/marketDataService', () => ({
 
 const portfolioData = {
   dataSource: 'ibkr_api',
+  liveSessionVerified: true,
+  fromCache: false,
+  socketVerifiedAt: new Date().toISOString(),
   summary: {
     totalValue: 100000,
   },
@@ -221,6 +224,19 @@ function makeEtfProRows(longCount, shortCount) {
   ];
 }
 
+const VERIFIED_COMPARISON = {
+  current: true,
+  comparisonSafe: true,
+  referenceOnly: false,
+  dataAvailability: {
+    structuralStatus: 'verified',
+    canonicalSourceVerified: true,
+    current: true,
+    comparisonSafe: true,
+    referenceOnly: false,
+  },
+};
+
 function sidebarElement(componentProps = {}) {
   return (
     <PortfolioSidebarSnapshot
@@ -285,6 +301,67 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(within(positionTable).getByText('RTA')).toBeInTheDocument();
   });
 
+  test('keeps the comparison scaffold mounted while live portfolio data is loading', () => {
+    renderSidebar({
+      portfolioData: null,
+      loading: true,
+      rtaPositions: {
+        ...VERIFIED_COMPARISON,
+        available: true,
+        comparisonAvailable: true,
+        longCount: 4,
+        shortCount: 3,
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+      etfProSnapshot: {
+        ...VERIFIED_COMPARISON,
+        available: true,
+        comparisonAvailable: true,
+        longCount: 24,
+        shortCount: 13,
+        rows: makeEtfProRows(24, 13),
+        dataQuality: { status: 'ok', warnings: [] },
+      },
+    });
+
+    const positionTable = screen.getByRole('table', {
+      name: /portfolio versus rta and etf pro position comparison/i,
+    });
+    expect(screen.getByTestId('portfolio-refresh-state'))
+      .toHaveTextContent('Syncing live IBKR');
+    expect(screen.getByTestId('rta-long-count')).toHaveTextContent('4');
+    expect(screen.getByTestId('etf-pro-long-count')).toHaveTextContent('24');
+    expect(within(positionTable).getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Gross Exposure')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cash-debit-guard')).not.toBeInTheDocument();
+  });
+
+  test('labels and retains a current verified snapshot only while its refresh is pending', () => {
+    const freshPortfolio = makeLiveFundingPortfolio({}, {
+      socketVerifiedAt: new Date().toISOString(),
+    });
+    const view = renderSidebar({
+      portfolioData: freshPortfolio,
+      refreshing: true,
+    });
+
+    expect(screen.getByTestId('portfolio-refresh-state'))
+      .toHaveTextContent(/Refreshing · last verified as of/);
+    expect(screen.getByText('Gross Exposure')).toBeInTheDocument();
+
+    view.rerenderSidebar({
+      portfolioData: {
+        ...freshPortfolio,
+        socketVerifiedAt: new Date(Date.now() - 61_000).toISOString(),
+      },
+      refreshing: true,
+    });
+
+    expect(screen.getByTestId('portfolio-refresh-state'))
+      .toHaveTextContent('Syncing live IBKR');
+    expect(screen.queryByText('Gross Exposure')).not.toBeInTheDocument();
+  });
+
   test('ignores stale API summary counts and uses holdings-derived side counts', () => {
     renderSidebar({
       portfolioData: {
@@ -313,29 +390,31 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
   test('renders RTA and ETF Pro counts and net bars only for clean current comparisons', () => {
     renderSidebar({
       rtaPositions: {
+        ...VERIFIED_COMPARISON,
         available: true,
         comparisonAvailable: true,
-        longCount: 1,
-        shortCount: 22,
+        longCount: 4,
+        shortCount: 3,
         dataQuality: { status: 'ok', warnings: [] },
       },
       etfProSnapshot: {
+        ...VERIFIED_COMPARISON,
         available: true,
         comparisonAvailable: true,
-        longCount: 21,
+        longCount: 24,
         shortCount: 13,
         rows: makeEtfProRows(1, 1),
         dataQuality: { status: 'ok', warnings: [] },
       },
     });
 
-    expect(screen.getByTestId('rta-long-count')).toHaveTextContent('1');
-    expect(screen.getByTestId('rta-short-count')).toHaveTextContent('22');
-    expect(screen.getByTestId('rta-net-percent')).toHaveTextContent('-91%');
+    expect(screen.getByTestId('rta-long-count')).toHaveTextContent('4');
+    expect(screen.getByTestId('rta-short-count')).toHaveTextContent('3');
+    expect(screen.getByTestId('rta-net-percent')).toHaveTextContent('+14%');
     expect(screen.getByTestId('rta-net-bar').children).toHaveLength(3);
-    expect(screen.getByTestId('etf-pro-long-count')).toHaveTextContent('21');
+    expect(screen.getByTestId('etf-pro-long-count')).toHaveTextContent('24');
     expect(screen.getByTestId('etf-pro-short-count')).toHaveTextContent('13');
-    expect(screen.getByTestId('etf-pro-net-percent')).toHaveTextContent('+24%');
+    expect(screen.getByTestId('etf-pro-net-percent')).toHaveTextContent('+30%');
     expect(screen.getByTestId('etf-pro-net-bar').children).toHaveLength(3);
   });
 
@@ -344,9 +423,37 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     ['failed comparison', { comparisonAvailable: false, dataQuality: { status: 'ok' } }],
     ['unavailable response', { available: false, dataQuality: { status: 'ok' } }],
     ['data-quality warning', { dataQuality: { status: 'warning' } }],
+    ['missing safety metadata', {
+      current: undefined,
+      comparisonSafe: undefined,
+      referenceOnly: undefined,
+      dataAvailability: undefined,
+      dataQuality: { status: 'ok' },
+    }],
+    ['inconsistent nested safety metadata', {
+      dataAvailability: {
+        ...VERIFIED_COMPARISON.dataAvailability,
+        comparisonSafe: false,
+      },
+      dataQuality: { status: 'ok' },
+    }],
+    ['canonical-source reference', {
+      current: false,
+      comparisonSafe: false,
+      referenceOnly: true,
+      dataAvailability: {
+        structuralStatus: 'unverified',
+        canonicalSourceVerified: false,
+        current: false,
+        comparisonSafe: false,
+        referenceOnly: true,
+      },
+      dataQuality: { status: 'ok' },
+    }],
   ])('shows no RTA or ETF Pro comparison for a %s', (_label, invalidState) => {
     renderSidebar({
       rtaPositions: {
+        ...VERIFIED_COMPARISON,
         available: true,
         comparisonAvailable: true,
         longCount: 1,
@@ -354,6 +461,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
         ...invalidState,
       },
       etfProSnapshot: {
+        ...VERIFIED_COMPARISON,
         available: true,
         comparisonAvailable: true,
         longCount: 21,
@@ -434,6 +542,30 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(within(grossBar).getByText('($295,000)')).toBeInTheDocument();
     expect(within(netBar).getByText('49%')).toBeInTheDocument();
     expect(within(netBar).getByText('(+95,000)')).toBeInTheDocument();
+  });
+
+  test('never applies an interest reserve fetched for another account', () => {
+    renderSidebar({
+      portfolioData: makeLiveFundingPortfolio(),
+      interestValidation: {
+        available: true,
+        status: 'learning',
+        source: 'ibkr_interest_validation',
+        accountMatched: true,
+        requestedAccount: 'U00000000',
+        generatedAt: new Date().toISOString(),
+        guard: {
+          available: true,
+          mode: 'graduated',
+          appliedReserve: 12000,
+        },
+      },
+    });
+
+    const guard = screen.getByTestId('cash-debit-guard');
+    expect(within(guard).getByTestId('cash-debit-guard-hero')).toHaveTextContent(
+      'BUFFERED MAX ESTIMATE $4,000 LONGS AFTER SETTLEMENT',
+    );
   });
 
   test('shows the exact post-settlement trim when guarded headroom is negative', () => {
@@ -724,16 +856,16 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(within(guard).queryByTestId('cash-debit-projection')).not.toBeInTheDocument();
   });
 
-  test('clears the numeric guard while a fresh portfolio refresh is pending', () => {
+  test('keeps the verified numeric guard mounted while a fresh portfolio refresh is pending', () => {
     renderSidebar({
       portfolioData: makeLiveFundingPortfolio(),
       refreshing: true,
     });
 
     const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'refreshing');
-    expect(within(guard).getAllByText('Refreshing').length).toBeGreaterThan(0);
-    expect(within(guard).queryByTestId('cash-debit-guard-hero')).not.toBeInTheDocument();
+    expect(guard).toHaveAttribute('data-status', 'live');
+    expect(within(guard).getByTestId('cash-debit-guard-hero'))
+      .toBeInTheDocument();
   });
 
   test('shows the sanitized unsettled reason when live funding is intentionally unavailable', () => {
@@ -777,24 +909,27 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(guard).toHaveAttribute('data-status', 'reference');
     expect(within(guard).getByText('Historical · Fri, Jul 24'))
       .toBeInTheDocument();
-    expect(within(guard).getByText('Historical only.'))
-      .toBeInTheDocument();
+    expect(within(guard).queryByText('Historical only.'))
+      .not.toBeInTheDocument();
+    expect(within(guard).queryByText(
+      'Refresh on a settlement day before sizing an order.',
+    )).not.toBeInTheDocument();
     const hero = within(guard).getByTestId('cash-debit-guard-hero');
     expect(within(hero).getByText('Estimated long headroom'))
       .toBeInTheDocument();
     expect(within(hero).getByText('$4,000')).toBeInTheDocument();
-    expect(within(hero).getByText(
+    expect(within(hero).queryByText(
       'Remaining after short collateral and safety reserves',
-    )).toBeInTheDocument();
+    )).not.toBeInTheDocument();
     expect(within(guard).getByText('Securities cash floor · Jul 27'))
       .toBeInTheDocument();
     expect(within(guard).getByText('Less: required short collateral'))
       .toBeInTheDocument();
     expect(within(guard).getByText('Less: 5% safety buffer'))
       .toBeInTheDocument();
-    expect(within(guard).getByText(
+    expect(within(guard).queryByText(
       /IBKR cash Sat, Jul 25 · prices Fri, Jul 24 close · settlements included through Mon, Jul 27/,
-    )).toBeInTheDocument();
+    )).not.toBeInTheDocument();
     expect(within(guard).queryByLabelText('Planned trade action'))
       .not.toBeInTheDocument();
     expect(within(guard).queryByLabelText(
@@ -819,10 +954,104 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(within(hero).getByText('Estimated long reduction'))
       .toBeInTheDocument();
     expect(within(hero).getByText('$12,000')).toBeInTheDocument();
-    expect(within(hero).getByText(
+    expect(within(hero).queryByText(
       'Needed to restore the no-borrow cash buffer',
-    )).toBeInTheDocument();
+    )).not.toBeInTheDocument();
     expect(within(guard).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  test('keeps the verified historical reference mounted during refresh and a delayed status check', () => {
+    renderSidebar({
+      portfolioData: makeFundingReferencePortfolio(),
+      refreshing: true,
+      connection: {
+        connected: false,
+        statusRefreshDelayed: true,
+      },
+    });
+
+    const guard = screen.getByTestId('cash-debit-guard');
+    expect(guard).toHaveAttribute('data-status', 'reference');
+    expect(within(guard).getByTestId('cash-debit-guard-hero'))
+      .toBeInTheDocument();
+    expect(within(guard).queryByText('Unavailable'))
+      .not.toBeInTheDocument();
+  });
+
+  test('moves interest validation to the portfolio status button without a standalone card', () => {
+    renderSidebar({
+      portfolioData: makeLiveFundingPortfolio(),
+      interestValidationLoading: true,
+      interestValidation: {
+        available: true,
+        status: 'learning',
+        modelStatus: 'learning',
+        source: 'ibkr_interest_validation',
+        accountMatched: true,
+        requestedAccount: 'U25779973',
+        generatedAt: new Date().toISOString(),
+        mtd: {
+          verifiedDebit: 326.79,
+          liveNetAccrued: -326.79,
+        },
+        latest: {
+          point: 3.91,
+          upper: 5.25,
+          actual: 4.02,
+          residual: 0.11,
+        },
+        calibration: {
+          sampleCount: 7,
+        },
+        guard: {
+          available: true,
+          mode: 'graduated',
+          appliedReserve: 331.04,
+        },
+      },
+    });
+
+    expect(screen.queryByTestId('interest-validation')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/show status details for ibkr/i));
+
+    const statusCard = screen.getByTestId('status-source-card-interest-validation');
+    expect(statusCard).toHaveAttribute('data-status-tone', 'learning');
+    expect(within(statusCard).getByText('Interest validation')).toBeInTheDocument();
+    expect(within(statusCard).getByText('Learning')).toBeInTheDocument();
+    expect(within(statusCard).queryByText('Stale')).not.toBeInTheDocument();
+    expect(within(statusCard).queryByText(/MTD debit/i)).not.toBeInTheDocument();
+    expect(within(statusCard).queryByText(/\$/)).not.toBeInTheDocument();
+    expect(statusCard).not.toHaveTextContent(
+      /\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}/,
+    );
+  });
+
+  test('shows only unavailable status for invalid interest validation data', () => {
+    renderSidebar({
+      portfolioData: makeLiveFundingPortfolio(),
+      interestValidation: {
+        available: false,
+        status: 'unavailable',
+        source: 'ibkr_interest_validation',
+        latest: {
+          point: 999,
+          upper: 999,
+        },
+        guard: {
+          available: false,
+          appliedReserve: null,
+        },
+      },
+    });
+
+    expect(screen.queryByTestId('interest-validation')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/show status details for ibkr/i));
+
+    const statusCard = screen.getByTestId('status-source-card-interest-validation');
+    expect(statusCard).toHaveAttribute('data-status-tone', 'unavailable');
+    expect(within(statusCard).getByText('Unavailable')).toBeInTheDocument();
+    expect(within(statusCard).queryByText(/\$999/)).not.toBeInTheDocument();
+    expect(within(statusCard).queryByText(/Latest forecast/i)).not.toBeInTheDocument();
   });
 
   test('shows the broker-derived Thursday close after a Friday holiday', () => {
@@ -848,9 +1077,9 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(guard).toHaveAttribute('data-status', 'reference');
     expect(within(guard).getByText('Historical · Thu, Jul 2'))
       .toBeInTheDocument();
-    expect(within(guard).getByText(
+    expect(within(guard).queryByText(
       /IBKR cash Sat, Jul 4 · prices Thu, Jul 2 close · settlements included through Mon, Jul 6/,
-    )).toBeInTheDocument();
+    )).not.toBeInTheDocument();
     expect(within(guard).queryByRole('button')).not.toBeInTheDocument();
     expect(within(guard).queryByLabelText('Planned trade action'))
       .not.toBeInTheDocument();
@@ -1317,7 +1546,9 @@ describe('PortfolioBreakdown correlation cleanup', () => {
     expect(screen.queryByText('Correlation Concentration')).not.toBeInTheDocument();
     expect(screen.queryByText('Portfolio Construction')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
-    expect(screen.getByText('GLD')).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Show research intelligence for GLD',
+    })).toBeInTheDocument();
     expect(screen.getByText('Longs')).toBeInTheDocument();
     expect(screen.getByText('Shorts')).toBeInTheDocument();
     expect(screen.getByText('No short positions')).toBeInTheDocument();

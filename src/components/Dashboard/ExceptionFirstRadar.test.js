@@ -7,12 +7,38 @@ import ExceptionFirstRadar, {
 } from './ExceptionFirstRadar';
 
 jest.mock('./GlobalMarketDayCycleHeader', () => () => null);
-jest.mock('./USDCorrelationMatrix', () => ({ currencyPanel, correlationStatus }) => (
-  <div data-testid="usd-matrix">
-    {currencyPanel}
-    {correlationStatus}
-  </div>
-));
+jest.mock('./USDCorrelationMatrix', () => {
+  const isAttributedFxvlSnapshot = (row) => {
+    const source = String(row?.source || '').trim().toLowerCase();
+    return /^cme(?:\b|[-_])/.test(source) || /^yahoo(?:\b|[-_])/.test(source);
+  };
+  const isDisplayableFxvlSnapshot = (row) => {
+    if (!row || !Number.isFinite(Number(row.lastPx)) || !isAttributedFxvlSnapshot(row)) return false;
+    const quoteMode = String(row.quoteMode || '').toLowerCase();
+    if (
+      row.availability === 'historical'
+      && row.freshness === 'historical'
+      && quoteMode === 'end-of-day'
+    ) {
+      return true;
+    }
+    return row.availability === 'available'
+      && row.freshness === 'current'
+      && ['live', 'real-time', 'realtime', 'delayed'].includes(quoteMode);
+  };
+
+  return {
+    __esModule: true,
+    isDisplayableFxvlSnapshot,
+    isAttributedFxvlSnapshot,
+    default: ({ currencyPanel, correlationStatus }) => (
+      <div data-testid="usd-matrix">
+        {currencyPanel}
+        {correlationStatus}
+      </div>
+    ),
+  };
+});
 jest.mock('./RadarReferencePanels', () => ({
   __esModule: true,
   default: () => null,
@@ -80,7 +106,19 @@ const USD_CURRENCY_ROWS = [
     periodReturnsStatus: 'historical',
     periodReturnsAsOf: '2026-07-14',
   },
-  { symbol: 'UUP', name: 'UUP' },
+  {
+    symbol: 'UUP',
+    name: 'UUP',
+    price: 28.12,
+    changePercent: 0.04,
+    fifteenDayChangePct: 0.5,
+    monthChangePct: 1.1,
+    threeMonthChangePct: 2.2,
+    sixMonthChangePct: 3.3,
+    availability: 'delayed',
+    periodReturnsStatus: 'historical',
+    periodReturnsAsOf: '2026-07-14',
+  },
 ];
 
 describe('Exception-First header', () => {
@@ -105,14 +143,14 @@ describe('Exception-First header', () => {
     );
 
     const usdCard = screen.getByLabelText('USD');
-    expect(within(usdCard).getByRole('heading', { name: 'Currencies · USD First' })).toBeInTheDocument();
+    expect(within(usdCard).getByRole('heading', { name: 'Dollar' })).toBeInTheDocument();
     const currencySheet = within(usdCard).getByRole('table', { name: 'USD currency spreadsheet' });
-    expect(currencySheet).toHaveTextContent('Dollar & Majors');
-    expect(currencySheet).toHaveTextContent('USD Crosses');
-    expect(Array.from(currencySheet.querySelectorAll('thead tr:last-child th')).map(({ textContent }) => textContent))
+    expect(currencySheet).not.toHaveTextContent('Dollar & Majors');
+    expect(currencySheet).not.toHaveTextContent('USD Crosses');
+    expect(Array.from(currencySheet.querySelectorAll('thead th')).map(({ textContent }) => textContent))
       .toEqual([
-        'Ticker', 'Price', 'D', '15D', '1M', '3M', '6M',
-        'Ticker', 'Price', 'D', '15D', '1M', '3M', '6M',
+        'Ticker', 'Price', 'DAY', '15D', '1M', '3M', '6M',
+        'Ticker', 'Price', 'DAY', '15D', '1M', '3M', '6M',
       ]);
     const currencyRows = Array.from(currencySheet.querySelectorAll('tbody tr'));
     expect(currencyRows.every((row) => row.children.length === 14)).toBe(true);
@@ -121,10 +159,13 @@ describe('Exception-First header', () => {
     expect(currencyRows.map((row) => row.children[7].textContent))
       .toEqual(['USD/AUD', 'USD/CAD', 'USD/MXN', 'USD/CHF', 'USD/CNY']);
     expect(currencyRows[0]).toHaveTextContent('DXY100.75-0.02%+1.23%+2.34%+3.45%+4.56%');
+    expect(currencyRows[0].children[1].textContent).toBe('100.75');
+    expect(currencyRows[0].children[6].textContent).toBe('+4.56%');
     expect(within(usdCard).queryByRole('table', { name: 'Dollar & Majors currency instruments' })).not.toBeInTheDocument();
     expect(within(usdCard).queryByRole('table', { name: 'USD Crosses currency instruments' })).not.toBeInTheDocument();
     expect(within(usdCard).queryByText('NZD/USD')).not.toBeInTheDocument();
     expect(within(usdCard).queryByText('EUR/GBP')).not.toBeInTheDocument();
+    expect(within(usdCard).queryByText('1M IV')).not.toBeInTheDocument();
     const statusIndicator = within(usdCard).getByLabelText(
       'USD DATA · CURRENCIES DELAYED · CORRELATIONS AS OF JUL 14',
     );
@@ -252,7 +293,7 @@ describe('Exception-First header', () => {
     expect(within(screen.getByRole('region', { name: 'Europe' })).getByRole('heading', { name: 'Europe' }))
       .toHaveTextContent('EU');
     expect(within(usSection).getAllByRole('columnheader').map((header) => header.textContent))
-      .toEqual(['Index', 'Price', 'D', '15D', '1M', '3M', '6M']);
+      .toEqual(['Index', 'Price', 'DAY', '15D', '1M', '3M', '6M']);
     expect(within(usSection).queryByText('Data')).not.toBeInTheDocument();
     expect(within(backdrop).getByLabelText('DELAYED'))
       .toHaveClass('efr-status-chip--indicator-only', 'efr-status-chip--delayed');
@@ -300,6 +341,11 @@ describe('Exception-First header', () => {
     expect(chart).toBeInTheDocument();
     expect(chart.querySelectorAll('.efr-vol-sparkline__y-tick text')).toHaveLength(3);
     expect(chart.querySelector('.efr-vol-sparkline__y-axis')).toBeInTheDocument();
+    expect(Array.from(chart.querySelectorAll('.efr-vol-sparkline__regime-band')).map((band) => band.className.baseVal))
+      .toEqual([
+        'efr-vol-sparkline__regime-band efr-vol-sparkline__regime-band--green',
+        'efr-vol-sparkline__regime-band efr-vol-sparkline__regime-band--yellow',
+      ]);
 
     const segments = Array.from(chart.querySelectorAll('.efr-vol-sparkline__segment'));
     const linePointXs = [
@@ -446,6 +492,12 @@ describe('Exception-First header', () => {
     ]);
 
     const chart = within(row).getByLabelText('VIX volatility from six months ago to 7/15');
+    expect(Array.from(chart.querySelectorAll('.efr-vol-sparkline__regime-band')).map((band) => band.className.baseVal))
+      .toEqual([
+        'efr-vol-sparkline__regime-band efr-vol-sparkline__regime-band--green',
+        'efr-vol-sparkline__regime-band efr-vol-sparkline__regime-band--yellow',
+        'efr-vol-sparkline__regime-band efr-vol-sparkline__regime-band--red',
+      ]);
     const segments = Array.from(chart.querySelectorAll('.efr-vol-sparkline__segment'));
     expect(segments.map((segment) => segment.className.baseVal))
       .toEqual([

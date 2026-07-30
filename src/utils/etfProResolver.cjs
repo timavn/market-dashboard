@@ -200,6 +200,8 @@ function isActiveEtfProSnapshot(payload) {
   const meta = payload?.meta || {};
   const source = `${meta.source || ''} ${meta.sourceKind || ''} ${meta.sourceFile || ''}`.toLowerCase();
   return (
+    meta.authoritativeCheckpoint === true ||
+    /(?:^|\s)(?:manual-official|official)-[a-z0-9-]+/.test(source) ||
     meta.sourceKind === 'active-open-positions' ||
     source.includes('active-open-positions') ||
     source.includes('current open positions') ||
@@ -207,8 +209,28 @@ function isActiveEtfProSnapshot(payload) {
     source.includes('manual-current-open-positions') ||
     source.includes('all-active-tickers') ||
     meta.sourceKind === 'gmail-html-full-book' ||
-    source.includes('gmail-html-full-book')
+    source.includes('gmail-html-full-book') ||
+    meta.sourceKind === 'full-book-checkpoint' ||
+    source.includes('full-book-checkpoint')
   );
+}
+
+function isAuthoritativeEtfProCheckpoint(payload) {
+  const meta = payload?.meta || {};
+  const provenance = [
+    meta.source,
+    meta.sourceKind,
+  ].filter(Boolean).join(' ');
+  return meta.authoritativeCheckpoint === true ||
+    /(?:^|\s)(?:manual-official|official)-[a-z0-9-]+/i.test(provenance);
+}
+
+function isEtfProFullBookSnapshot(payload) {
+  const meta = payload?.meta || {};
+  const source = `${meta.source || ''} ${meta.sourceKind || ''}`.toLowerCase();
+  return isAuthoritativeEtfProCheckpoint(payload) ||
+    source.includes('full-book') ||
+    source.includes('checkpoint');
 }
 
 function mergeDataQualityWarnings(...payloads) {
@@ -369,9 +391,33 @@ function applyEtfProActionUpdate(basePayload, actionPayload, options = {}) {
       sourceSequence: actionPayload.meta?.sourceSequence ?? basePayload.meta?.sourceSequence ?? null,
       sourceEventKey: actionPayload.meta?.sourceEventKey || basePayload.meta?.sourceEventKey || null,
       source: options.source || 'gmail-html-action-applied-to-active-book',
-      sourceKind: isActiveEtfProSnapshot(basePayload) ? 'active-open-positions' : basePayload.meta?.sourceKind,
+      sourceKind: basePayload.meta?.sourceKind ||
+        (isActiveEtfProSnapshot(basePayload) ? 'active-open-positions' : null),
+      sourceArtifact: actionPayload.meta?.sourceArtifact ||
+        actionPayload.meta?.sourceFile ||
+        basePayload.meta?.sourceArtifact ||
+        basePayload.meta?.sourceFile ||
+        null,
       headline: actionPayload.meta?.headline || basePayload.meta?.headline || null,
       baseSnapshotDate: basePayload.meta?.baseSnapshotDate || basePayload.meta?.snapshotDate || null,
+      baseSource: basePayload.meta?.baseSource || basePayload.meta?.source || null,
+      baseSourceKind: basePayload.meta?.baseSourceKind || basePayload.meta?.sourceKind || null,
+      baseSourceArtifact: basePayload.meta?.baseSourceArtifact ||
+        basePayload.meta?.sourceArtifact ||
+        basePayload.meta?.sourceFile ||
+        null,
+      baseSourceMessageId: basePayload.meta?.baseSourceMessageId ||
+        basePayload.meta?.sourceMessageId ||
+        null,
+      baseSourceEventKey: basePayload.meta?.baseSourceEventKey ||
+        basePayload.meta?.sourceEventKey ||
+        null,
+      baseCapturedAt: basePayload.meta?.baseCapturedAt || basePayload.meta?.capturedAt || null,
+      baseContentHash: basePayload.meta?.baseContentHash || basePayload.meta?.contentHash || null,
+      baseProvenance: basePayload.meta?.baseProvenance ||
+        basePayload.meta?.provenance ||
+        null,
+      authoritativeCheckpoint: isAuthoritativeEtfProCheckpoint(basePayload),
       actionCount: actionRows.length,
       appliedActionDates: [
         ...new Set([
@@ -408,6 +454,22 @@ function resolveEtfProFromBase({ basePayload, actionPayloads = [], source = 'gma
       ...(basePayload.meta || {}),
       source: actions.length > 0 ? source : (basePayload.meta?.source || 'manual-current-open-positions'),
       baseSnapshotDate: basePayload.meta?.snapshotDate || null,
+      baseSource: basePayload.meta?.baseSource || basePayload.meta?.source || null,
+      baseSourceKind: basePayload.meta?.baseSourceKind || basePayload.meta?.sourceKind || null,
+      baseSourceArtifact: basePayload.meta?.baseSourceArtifact ||
+        basePayload.meta?.sourceArtifact ||
+        basePayload.meta?.sourceFile ||
+        null,
+      baseSourceMessageId: basePayload.meta?.baseSourceMessageId ||
+        basePayload.meta?.sourceMessageId ||
+        null,
+      baseSourceEventKey: basePayload.meta?.baseSourceEventKey ||
+        basePayload.meta?.sourceEventKey ||
+        null,
+      baseCapturedAt: basePayload.meta?.baseCapturedAt || basePayload.meta?.capturedAt || null,
+      baseContentHash: basePayload.meta?.baseContentHash || basePayload.meta?.contentHash || null,
+      baseProvenance: basePayload.meta?.baseProvenance || basePayload.meta?.provenance || null,
+      authoritativeCheckpoint: isAuthoritativeEtfProCheckpoint(basePayload),
       appliedActionDates: [],
       rowCount: Array.isArray(basePayload.rows) ? basePayload.rows.length : 0,
     },
@@ -609,7 +671,7 @@ function resolveEtfProPayloadFromSources({
     meta: {
       ...(payload.meta || {}),
       source: payload.meta?.source || 'gmail-html-full-book',
-      sourceKind: 'gmail-html-full-book',
+      sourceKind: payload.meta?.sourceKind || 'gmail-html-full-book',
     },
   }));
   const emailActionPayloads = [
@@ -622,14 +684,17 @@ function resolveEtfProPayloadFromSources({
   ]);
 
   if (baseline) {
-    const usesFullBook = baseline.meta?.sourceKind === 'gmail-html-full-book';
+    const usesFullBook = isEtfProFullBookSnapshot(baseline);
+    const usesAuthoritativeCheckpoint = isAuthoritativeEtfProCheckpoint(baseline);
     return applyIngestionHealth(
       resolveEtfProFromBase({
         basePayload: baseline,
         actionPayloads: emailActionPayloads,
-        source: usesFullBook
-          ? 'gmail-html-full-book-applied-actions'
-          : 'gmail-html-action-applied-to-active-book',
+        source: usesAuthoritativeCheckpoint
+          ? 'gmail-html-actions-applied-to-authoritative-checkpoint'
+          : usesFullBook
+            ? 'gmail-html-full-book-applied-actions'
+            : 'gmail-html-action-applied-to-active-book',
       }),
       ingestionHealth,
     );
@@ -649,7 +714,9 @@ module.exports = {
   comparePayloadOrder,
   dedupeEtfProActions,
   getPayloadDate,
+  isAuthoritativeEtfProCheckpoint,
   isActiveEtfProSnapshot,
+  isEtfProFullBookSnapshot,
   isEtfProActionAfterBase,
   isEtfProActionPayload,
   pickNewestPayload,

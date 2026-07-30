@@ -152,11 +152,32 @@ export const buildVolatilityMetricSparkline = (row, width, height, options) => (
   buildVolatilityMetricChart(row, width, height, options)?.points || null
 );
 
-const VolatilityMetricSparkline = ({ row, symbol, available, historical }) => {
+const buildRegimeBands = (chart, regimeRanges) => {
+  if (!chart || !Array.isArray(regimeRanges)) return [];
+  const axisMin = chart.yTicks.at(-1)?.value;
+  const axisMax = chart.yTicks[0]?.value;
+  const valueToY = (value) => (
+    chart.plotTop + (((axisMax - value) / (axisMax - axisMin)) * (chart.plotBottom - chart.plotTop))
+  );
+
+  if (!Number.isFinite(axisMin) || !Number.isFinite(axisMax) || axisMax <= axisMin) return [];
+
+  return regimeRanges.flatMap(({ min, max, color }) => {
+    const lower = Math.max(Number(min), axisMin);
+    const upper = Math.min(max == null ? axisMax : Number(max), axisMax);
+    if (!Number.isFinite(lower) || !Number.isFinite(upper) || upper <= lower || !color) return [];
+    const top = valueToY(upper);
+    const bottom = valueToY(lower);
+    return [{ color, y: top, height: bottom - top }];
+  });
+};
+
+const VolatilityMetricSparkline = ({ row, symbol, available, historical, regimeRanges }) => {
   const chart = buildVolatilityMetricChart(row, undefined, undefined, { available, historical });
   if (!chart) return <div className="efr-vol-sparkline__empty">NO LIVE SERIES</div>;
   const rangeStart = chart.points[0]?.key === 'month6Ago' ? 'six months ago' : 'three months ago';
   const endpointLabel = chart.points[chart.points.length - 1]?.label;
+  const regimeBands = buildRegimeBands(chart, regimeRanges);
 
   return (
     <div className="efr-vol-sparkline">
@@ -165,6 +186,17 @@ const VolatilityMetricSparkline = ({ row, symbol, available, historical }) => {
         role="img"
         aria-label={`${symbol} volatility from ${rangeStart} to ${endpointLabel === 'CLOSE' ? 'close' : endpointLabel}`}
       >
+        {regimeBands.map(({ color, y, height }) => (
+          <rect
+            aria-hidden="true"
+            className={`efr-vol-sparkline__regime-band efr-vol-sparkline__regime-band--${color}`}
+            height={height}
+            key={color}
+            width={chart.plotRight - chart.plotLeft}
+            x={chart.plotLeft}
+            y={y}
+          />
+        ))}
         {chart.yTicks.map((tick) => (
           <g className="efr-vol-sparkline__y-tick" key={tick.label}>
             <line x1={chart.plotLeft} y1={tick.y} x2={chart.plotRight} y2={tick.y} />
@@ -213,6 +245,7 @@ const VolatilityMetricRow = ({
   bucket = null,
   regimeLabel = null,
   regimeRange = null,
+  regimeRanges = null,
   resolveLevelBucket = null,
   ariaLabel,
   className = '',
@@ -227,6 +260,7 @@ const VolatilityMetricRow = ({
         symbol={symbol}
         available={available}
         historical={historical}
+        regimeRanges={regimeRanges}
       />
     </div>
     <div className="efr-vol-row__data">

@@ -11,6 +11,7 @@ const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { buildSystemReadiness } = require('../../src/utils/systemReadiness.cjs');
 const { computeRuntimeFingerprint } = require('../../src/utils/runtimeFingerprint.cjs');
+const { preflightAwsProfile } = require('../ops/aws_profile_preflight');
 
 const root = path.resolve(__dirname, '../..');
 const appSupport = path.join(os.homedir(), 'Library/Application Support/market-dashboard');
@@ -26,18 +27,27 @@ const maxLogBytes = 10 * 1024 * 1024;
 const readinessBaseUrl = String(
   process.env.MARKET_DASHBOARD_API_URL || process.env.REACT_APP_BACKEND_URL || 'http://127.0.0.1:3001',
 ).replace(/\/$/, '');
-const readinessUrl = `${readinessBaseUrl}/api/system-readiness?refresh=1`;
+const readinessUrl = `${readinessBaseUrl}/api/system-readiness`;
 const readinessTimeoutMs = Math.max(1_000, Number(process.env.MARKET_DASHBOARD_READINESS_TIMEOUT_MS) || 35_000);
 const morningStartTimeoutMs = Math.max(5_000, Number(process.env.MARKET_DASHBOARD_START_TIMEOUT_MS) || 60_000);
 const bridgeHeartbeatMaxAgeMs = Math.max(
   90_000,
   Number(process.env.HERMES_BRIDGE_HEARTBEAT_MAX_AGE_MS) || 180_000,
 );
+const controllerHeartbeatMaxAgeMs = Math.max(
+  120_000,
+  Number(process.env.HERMES_CONTROLLER_HEARTBEAT_MAX_AGE_MS) || 180_000,
+);
 const monitorIntervalMs = Math.max(1_000, Number(process.env.MARKET_DASHBOARD_MONITOR_INTERVAL_MS) || 5_000);
+const awsPreflightRetryMs = Math.max(
+  30_000,
+  Number(process.env.MARKET_DASHBOARD_AWS_PREFLIGHT_RETRY_MS) || 60_000,
+);
 const healthFailureThreshold = Math.max(2, Number(process.env.MARKET_DASHBOARD_HEALTH_FAILURE_THRESHOLD) || 3);
 const restartWindowMs = 5 * 60 * 1000;
 const circuitOpenMs = 5 * 60 * 1000;
 const defaultBridgeAwsProfile = 'market-dashboard-bridge';
+const enabledFlagValues = new Set(['1', 'true', 'yes', 'on', 'enabled']);
 const expectedCapabilityIds = Object.freeze([
   'automation.hermes',
   'dashboard.core',
@@ -57,13 +67,41 @@ const services = {
     critical: false,
     heartbeatMaxAgeMs: bridgeHeartbeatMaxAgeMs,
   },
+  controller: {
+    processOnly: true,
+    args: [path.join(root, 'scripts/ops/hermes_reliability_controller.js')],
+    env: {},
+    critical: false,
+    heartbeatMaxAgeMs: controllerHeartbeatMaxAgeMs,
+  },
 };
+const bridgeScriptPath = path.join(root, 'scripts/ops/hermes_snapshot_bridge.js');
+const controllerScriptPath = path.join(root, 'scripts/ops/hermes_reliability_controller.js');
+
+function hermesBridgeEnabled(env = process.env) {
+  const legacy = enabledFlagValues.has(
+    String(env.HERMES_BRIDGE_ENABLED || '').trim().toLowerCase(),
+  );
+  const partitionEnabled = (name) => (
+    Object.prototype.hasOwnProperty.call(env, name)
+      ? enabledFlagValues.has(String(env[name] || '').trim().toLowerCase())
+      : legacy
+  );
+  return partitionEnabled('HERMES_OPERATIONS_BRIDGE_ENABLED')
+    || partitionEnabled('HERMES_PORTFOLIO_BRIDGE_ENABLED');
+}
+
+function supervisedServiceNames(env = process.env) {
+  return ['sidecar', 'api', 'ui', 'controller', 'bridge']
+    .filter((name) => name !== 'bridge' || hermesBridgeEnabled(env));
+}
 
 const localServiceLabels = {
   ui: 'Dashboard UI',
   api: 'Express API',
   sidecar: 'IBKR sidecar',
   bridge: 'Hermes snapshot bridge',
+  controller: 'Hermes reliability controller',
 };
 
 function bridgeRecoveryLabel(serviceState = {}) {
@@ -169,25 +207,113 @@ function configuredBridgeAwsProfile(env = process.env) {
     || defaultBridgeAwsProfile;
 }
 
+function preflightAwsService(name, {
+  env = process.env,
+  preflight = preflightAwsProfile,
+} = {}) {
+  const purpose = name === 'api' || name === 'bridge' ? name : null;
+  if (!purpose) return null;
+  const profile = purpose === 'api'
+    ? 'market-dashboard-local'
+    : configuredBridgeAwsProfile(env);
+  try {
+    return preflight({ purpose, profile, env });
+  } catch {
+    return {
+      ok: false,
+      purpose,
+      profile,
+      errorCode: 'AWS_PROFILE_UNUSABLE',
+      detail: `${profile} could not be validated.`,
+    };
+  }
+}
+
+function credentialPreflightFailureState(name, result, {
+  previous = {},
+  now = Date.now(),
+  retryMs = awsPreflightRetryMs,
+} = {}) {
+  const checkedAt = new Date(now).toISOString();
+  const nextCredentialPreflightAt = new Date(now + retryMs).toISOString();
+  return {
+    ...previous,
+    pid: null,
+    external: false,
+    status: 'blocked',
+    errorCode: result.errorCode || 'AWS_PROFILE_UNUSABLE',
+    lastDetail: result.detail || 'The dedicated AWS profile failed preflight.',
+    healthFailures: 0,
+    credentialPreflightBlocked: true,
+    credentialPreflightPurpose: result.purpose || null,
+    credentialPreflightCheckedAt: checkedAt,
+    nextCredentialPreflightAt,
+    ...(services[name]?.processOnly ? {
+      enabled: true,
+      intentionallyDisabled: false,
+      lastHeartbeatAt: null,
+      lastResultStatus: 'error',
+      lastErrorCode: result.errorCode || 'AWS_PROFILE_UNUSABLE',
+      lastInputErrorCode: null,
+      lastInputDetail: null,
+      lastPublishErrorCode: result.errorCode || 'AWS_PROFILE_UNUSABLE',
+      lastPublishStage: null,
+      lastPublishDetail: result.detail || 'The dedicated AWS profile failed preflight.',
+      lastPublishFailures: [],
+      lastFailureAt: checkedAt,
+      awsProfile: result.profile || configuredBridgeAwsProfile(),
+    } : {}),
+  };
+}
+
+const awsCredentialEnvironmentKeys = Object.freeze([
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_SECURITY_TOKEN',
+  'AWS_ROLE_ARN',
+  'AWS_ROLE_SESSION_NAME',
+  'AWS_WEB_IDENTITY_TOKEN_FILE',
+  'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+  'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  'AWS_SHARED_CREDENTIALS_FILE',
+  'AWS_CONFIG_FILE',
+]);
+
+function clearAwsCredentialEnvironment(environment) {
+  for (const key of awsCredentialEnvironmentKeys) delete environment[key];
+  return environment;
+}
+
 function childEnvironment(name, inheritedEnv = process.env) {
   const environment = { ...inheritedEnv, ...(services[name]?.env || {}) };
+  if (name === 'controller') {
+    // The local controller acts only through loopback APIs and must never
+    // inherit credentials that could expand it into a cloud control plane.
+    clearAwsCredentialEnvironment(environment);
+    delete environment.AWS_PROFILE;
+    delete environment.AWS_DEFAULT_PROFILE;
+    return environment;
+  }
+  if (name === 'api') {
+    clearAwsCredentialEnvironment(environment);
+    environment.AWS_PROFILE = 'market-dashboard-local';
+    environment.AWS_DEFAULT_PROFILE = 'market-dashboard-local';
+    environment.AWS_REGION = 'us-west-1';
+    environment.AWS_DEFAULT_REGION = 'us-west-1';
+    environment.AWS_SDK_LOAD_CONFIG = '1';
+    environment.AWS_EC2_METADATA_DISABLED = 'true';
+    environment.MARKET_DASHBOARD_AWS_PROFILE_LOCKED = 'true';
+    return environment;
+  }
   if (name !== 'bridge') return environment;
 
   // The bridge is a write-only security principal. Environment credentials
   // take precedence over AWS_PROFILE in the SDK, so remove them before
   // selecting the dedicated profile.
-  for (const key of [
-    'AWS_ACCESS_KEY_ID',
-    'AWS_SECRET_ACCESS_KEY',
-    'AWS_SESSION_TOKEN',
-    'AWS_SECURITY_TOKEN',
-    'AWS_ROLE_ARN',
-    'AWS_WEB_IDENTITY_TOKEN_FILE',
-    'AWS_CONTAINER_CREDENTIALS_FULL_URI',
-    'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
-  ]) {
-    delete environment[key];
-  }
+  clearAwsCredentialEnvironment(environment);
   const profile = configuredBridgeAwsProfile(inheritedEnv);
   environment.HERMES_BRIDGE_AWS_PROFILE = profile;
   environment.AWS_PROFILE = profile;
@@ -206,7 +332,7 @@ function localNotificationsEnabled(env = process.env, platform = process.platfor
 }
 
 function notificationPhase(serviceState = {}) {
-  if (serviceState.status === 'ready') return 'ready';
+  if (['ready', 'disabled'].includes(serviceState.status)) return 'ready';
   if (['blocked', 'degraded', 'failed'].includes(serviceState.status)) return 'failed';
   if (
     serviceState.status === 'down'
@@ -294,7 +420,9 @@ function planServiceNotificationTransition({
       kind: 'recovery',
       service: name,
       title: `Market Dashboard: ${label} recovered`,
-      body: `${label} is healthy again${durationMinutes == null ? '' : ` after ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`}.`,
+      body: serviceState.status === 'disabled'
+        ? `${label} is intentionally disabled and idle.`
+        : `${label} is healthy again${durationMinutes == null ? '' : ` after ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`}.`,
       observedAt,
     },
   };
@@ -339,8 +467,16 @@ function launchAgentIsLoaded() {
 function listenerPid(port) {
   try { return Number(execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' }).trim().split(/\s+/)[0]); } catch { return null; }
 }
-function processCommand(pid) { try { return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim(); } catch { return ''; } }
+function validProcessId(pid) {
+  const numericPid = Number(pid);
+  return Number.isInteger(numericPid) && numericPid > 0;
+}
+function processCommand(pid) {
+  if (!validProcessId(pid)) return '';
+  try { return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim(); } catch { return ''; }
+}
 function processCwd(pid) {
+  if (!validProcessId(pid)) return '';
   try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch {}
   try {
     return execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8' })
@@ -354,6 +490,29 @@ function pathIsInRoot(candidate) {
   const relative = path.relative(root, path.resolve(candidate));
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
+function hasExactBridgeCommandSignature(commandText, cwd) {
+  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const executableName = path.basename(tokens[0] || '');
+  if (!['node', 'nodejs'].includes(executableName)) return false;
+  const entrypoint = tokens[1] || '';
+  if (path.isAbsolute(entrypoint)) {
+    return path.normalize(entrypoint) === bridgeScriptPath;
+  }
+  if (!pathIsInRoot(cwd)) return false;
+  const resolvedEntrypoint = path.resolve(cwd, entrypoint);
+  return resolvedEntrypoint === bridgeScriptPath;
+}
+function hasExactControllerCommandSignature(commandText, cwd) {
+  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const executableName = path.basename(tokens[0] || '');
+  if (!['node', 'nodejs'].includes(executableName)) return false;
+  const entrypoint = tokens[1] || '';
+  if (path.isAbsolute(entrypoint)) {
+    return path.normalize(entrypoint) === controllerScriptPath;
+  }
+  if (!pathIsInRoot(cwd)) return false;
+  return path.resolve(cwd, entrypoint) === controllerScriptPath;
+}
 function hasExpectedDashboardSignature(commandText, cwd) {
   const cmd = String(commandText || '');
   const tokens = cmd.split(/\s+/).filter(Boolean);
@@ -361,14 +520,14 @@ function hasExpectedDashboardSignature(commandText, cwd) {
   const cliPath = path.join(root, 'scripts/dev-stack/cli.js');
   const sidecarDir = path.join(root, 'scripts/ibkr_sidecar');
   const sidecarStart = path.join(root, 'scripts/ibkr_sidecar/start.sh');
-  const hermesBridge = path.join(root, 'scripts/ops/hermes_snapshot_bridge.js');
   const cracoRoot = `${path.join(root, 'node_modules/@craco/craco')}${path.sep}`;
 
   const supervisorCommand = tokens.includes(cliPath)
     || (resolvedCwd === root && tokens.includes('scripts/dev-stack/cli.js'));
   if (supervisorCommand && ['start', 'restart', 'monitor'].some(token => tokens.includes(token))) return true;
   if (resolvedCwd === root && (tokens.includes('server.js') || tokens.includes(path.join(root, 'server.js')))) return true;
-  if (resolvedCwd === root && tokens.includes(hermesBridge)) return true;
+  if (hasExactBridgeCommandSignature(commandText, cwd)) return true;
+  if (hasExactControllerCommandSignature(commandText, cwd)) return true;
   if (tokens.some(token => token.startsWith(cracoRoot))
       && (tokens.includes('start') || tokens.some(token => token.endsWith('/start.js')))) return true;
   if (resolvedCwd === sidecarDir && cmd.includes('uvicorn') && tokens.includes('app:app')) return true;
@@ -377,11 +536,39 @@ function hasExpectedDashboardSignature(commandText, cwd) {
   return false;
 }
 function isOwned(pid) {
+  if (!validProcessId(pid)) return false;
   const cwd = processCwd(pid);
   const cmd = processCommand(pid);
   return pathIsInRoot(cwd) && hasExpectedDashboardSignature(cmd, cwd);
 }
-function isAlive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
+function isAlive(pid) {
+  if (!validProcessId(pid)) return false;
+  try { process.kill(Number(pid), 0); return true; } catch { return false; }
+}
+function listProcessIds() {
+  return execFileSync('ps', ['-axo', 'pid='], { encoding: 'utf8', timeout: 5_000 })
+    .split(/\s+/)
+    .map(value => Number(value))
+    .filter(pid => Number.isInteger(pid) && pid > 0);
+}
+function discoverOwnedBridgeProcessIds({
+  pids,
+  commandFor = processCommand,
+  cwdFor = processCwd,
+  alive = isAlive,
+} = {}) {
+  const candidates = Array.isArray(pids) ? pids : listProcessIds();
+  return [...new Set(candidates)]
+    .filter(pid => Number.isInteger(Number(pid)) && Number(pid) > 0 && Number(pid) !== process.pid)
+    .map(pid => Number(pid))
+    .filter(pid => alive(pid))
+    .filter((pid) => {
+      const commandText = commandFor(pid);
+      if (!String(commandText).includes('hermes_snapshot_bridge.js')) return false;
+      return hasExactBridgeCommandSignature(commandText, cwdFor(pid));
+    })
+    .sort((left, right) => left - right);
+}
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function restartPolicyFor({ history = [], now = Date.now(), critical = false, countFailure = true } = {}) {
   const recent = history.filter((time) => Number.isFinite(time) && now - time < restartWindowMs);
@@ -407,13 +594,87 @@ function restartPolicyFor({ history = [], now = Date.now(), critical = false, co
 async function httpOk(url) { try { const response = await fetch(url, { signal: AbortSignal.timeout(1500) }); return response.ok; } catch { return false; } }
 function heartbeatAgeMs(value, now = Date.now()) {
   const observedAt = Date.parse(String(value || ''));
-  return Number.isFinite(observedAt) ? Math.max(0, now - observedAt) : null;
+  if (!Number.isFinite(observedAt)) return null;
+  const ageMs = now - observedAt;
+  return ageMs < -30_000 ? null : Math.max(0, ageMs);
 }
 function processServiceStatus(name, item, now = Date.now()) {
   const service = services[name];
   const pid = Number(item?.pid) || null;
   const running = Boolean(pid && isAlive(pid));
   const owned = Boolean(running && isOwned(pid));
+  const enabled = name !== 'bridge'
+    || (typeof item?.enabled === 'boolean' ? item.enabled : hermesBridgeEnabled());
+  if (!enabled) {
+    const recordedErrorCode = item?.lastErrorCode || item?.errorCode || null;
+    const disabledCleanly = !running
+      && !recordedErrorCode
+      && (!item?.status || item.status === 'disabled');
+    return {
+      pid,
+      running,
+      owned: disabledCleanly || owned,
+      healthy: disabledCleanly,
+      ready: disabledCleanly,
+      enabled: false,
+      intentionallyDisabled: true,
+      status: disabledCleanly ? 'disabled' : (running && !owned ? 'blocked' : 'degraded'),
+      lastHeartbeatAt: item?.lastHeartbeatAt || null,
+      heartbeatAgeMs: null,
+      lastResultStatus: 'disabled',
+      lastErrorCode: disabledCleanly
+        ? null
+        : (recordedErrorCode || 'LOCAL_DISABLED_BRIDGE_PROCESS_PRESENT'),
+      lastInputErrorCode: null,
+      lastInputDetail: null,
+      lastPublishErrorCode: null,
+      lastPublishStage: null,
+      lastPublishDetail: null,
+      lastPublishFailures: [],
+      lastDetail: disabledCleanly
+        ? 'Both outbound bridge partitions are disabled.'
+        : (item?.lastDetail
+          || 'A bridge process is still running while outbound portfolio publishing is disabled.'),
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      awsProfile: null,
+      ...(Array.isArray(item?.unexpectedPids)
+        ? { unexpectedPids: [...item.unexpectedPids] }
+        : {}),
+      ...(typeof item?.discoveryVerified === 'boolean'
+        ? { discoveryVerified: item.discoveryVerified }
+        : {}),
+    };
+  }
+  if (item?.credentialPreflightBlocked) {
+    return {
+      pid: null,
+      running: false,
+      owned: true,
+      healthy: false,
+      ready: false,
+      enabled: true,
+      intentionallyDisabled: false,
+      status: 'blocked',
+      lastHeartbeatAt: null,
+      heartbeatAgeMs: null,
+      lastResultStatus: 'error',
+      lastErrorCode: item.lastErrorCode || item.errorCode || 'AWS_PROFILE_UNUSABLE',
+      lastInputErrorCode: null,
+      lastInputDetail: null,
+      lastPublishErrorCode: item.lastPublishErrorCode || item.errorCode || 'AWS_PROFILE_UNUSABLE',
+      lastPublishStage: null,
+      lastPublishDetail: item.lastPublishDetail || item.lastDetail || null,
+      lastPublishFailures: [],
+      lastDetail: item.lastDetail || null,
+      lastSuccessAt: item.lastSuccessAt || null,
+      lastFailureAt: item.lastFailureAt || null,
+      awsProfile: item.awsProfile || null,
+      credentialPreflightBlocked: true,
+      credentialPreflightCheckedAt: item.credentialPreflightCheckedAt || null,
+      nextCredentialPreflightAt: item.nextCredentialPreflightAt || null,
+    };
+  }
   const age = heartbeatAgeMs(item?.lastHeartbeatAt, now);
   const fresh = age != null && age <= service.heartbeatMaxAgeMs;
   let status = 'down';
@@ -427,6 +688,8 @@ function processServiceStatus(name, item, now = Date.now()) {
     owned,
     healthy: status === 'ready',
     ready: status === 'ready',
+    enabled: true,
+    intentionallyDisabled: false,
     status,
     lastHeartbeatAt: item?.lastHeartbeatAt || null,
     heartbeatAgeMs: age,
@@ -444,6 +707,14 @@ function processServiceStatus(name, item, now = Date.now()) {
     lastSuccessAt: item?.lastSuccessAt || null,
     lastFailureAt: item?.lastFailureAt || null,
     awsProfile: item?.awsProfile || null,
+    ...(name === 'controller' ? {
+      mode: item?.mode || null,
+      controllerStatus: item?.controllerStatus || null,
+      incidentCount: Number(item?.incidentCount || 0),
+      circuitCount: Number(item?.circuitCount || 0),
+      inFlightAction: item?.inFlightAction || null,
+      nextRetryAt: item?.nextRetryAt || null,
+    } : {}),
   };
 }
 
@@ -477,6 +748,38 @@ function applyBridgeStatusPayload(item, payload, observedAt = new Date().toISOSt
   } else {
     item.lastFailureAt = item.lastHeartbeatAt;
   }
+  return true;
+}
+
+function applyControllerStatusPayload(item, payload, observedAt = new Date().toISOString()) {
+  if (!item || payload?.service !== 'hermes-reliability-controller'
+      || !['ready', 'degraded'].includes(payload.status)) {
+    return false;
+  }
+  item.lastHeartbeatAt = payload.observedAt || observedAt;
+  item.lastResultStatus = payload.status === 'ready' ? 'ready' : 'error';
+  item.lastErrorCode = payload.errorCode || null;
+  item.lastDetail = payload.detail || null;
+  item.mode = payload.mode || null;
+  item.enabledActionIds = Array.isArray(payload.enabledActionIds)
+    ? payload.enabledActionIds
+    : [];
+  item.buildFingerprint = payload.buildFingerprint || null;
+  item.shadowSoakStartedAt = payload.shadowSoakStartedAt || null;
+  item.controllerStatus = payload.controllerStatus || null;
+  item.incidentCount = Number(payload.incidentCount || 0);
+  item.circuitCount = Number(payload.circuitCount || 0);
+  item.inFlightAction = payload.inFlightAction || null;
+  item.nextRetryAt = payload.nextRetryAt || null;
+  item.lastInputErrorCode = null;
+  item.lastInputDetail = null;
+  item.lastPublishErrorCode = null;
+  item.lastPublishStage = null;
+  item.lastPublishDetail = null;
+  item.lastPublishFailures = [];
+  item.awsProfile = null;
+  if (item.lastResultStatus === 'ready') item.lastSuccessAt = item.lastHeartbeatAt;
+  else item.lastFailureAt = item.lastHeartbeatAt;
   return true;
 }
 
@@ -524,6 +827,61 @@ async function terminate(pid) {
   for (let n = 0; n < 10 && isAlive(pid); n++) await sleep(1000);
   if (isAlive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch {} }
 }
+async function reconcileDisabledBridgeProcesses({
+  discover = discoverOwnedBridgeProcessIds,
+  terminateProcess = terminate,
+} = {}) {
+  let discoveredPids;
+  try {
+    discoveredPids = discover();
+  } catch (error) {
+    return {
+      verified: false,
+      clean: false,
+      discoveredPids: [],
+      terminatedPids: [],
+      remainingPids: [],
+      errorCode: 'LOCAL_BRIDGE_PROCESS_DISCOVERY_FAILED',
+      detail: String(error?.message || error || 'Bridge process discovery failed.').slice(0, 500),
+    };
+  }
+
+  const terminatedPids = [];
+  for (const pid of discoveredPids) {
+    try {
+      await terminateProcess(pid);
+      terminatedPids.push(pid);
+    } catch {
+      // The verification pass below decides whether disabled mode is clean.
+    }
+  }
+
+  let remainingPids;
+  try {
+    remainingPids = discover();
+  } catch (error) {
+    return {
+      verified: false,
+      clean: false,
+      discoveredPids,
+      terminatedPids,
+      remainingPids: [],
+      errorCode: 'LOCAL_BRIDGE_PROCESS_DISCOVERY_FAILED',
+      detail: String(error?.message || error || 'Bridge process verification failed.').slice(0, 500),
+    };
+  }
+  return {
+    verified: true,
+    clean: remainingPids.length === 0,
+    discoveredPids,
+    terminatedPids,
+    remainingPids,
+    errorCode: remainingPids.length > 0 ? 'LOCAL_DISABLED_BRIDGE_PROCESS_PRESENT' : null,
+    detail: remainingPids.length > 0
+      ? `Exact repo-owned bridge process${remainingPids.length === 1 ? '' : 'es'} still running: ${remainingPids.join(', ')}.`
+      : 'Both outbound bridge partitions are disabled.',
+  };
+}
 async function stop(options = {}) {
   const quiet = options.quiet === true;
   const preserveState = options.preserveState === true;
@@ -549,6 +907,7 @@ async function stop(options = {}) {
 async function waitFor(name, timeout = 30000) {
   const until = Date.now() + timeout;
   while (Date.now() < until) {
+    if (readState()?.children?.[name]?.credentialPreflightBlocked) return false;
     if (services[name].processOnly) {
       if (processServiceStatus(name, readState()?.children?.[name]).ready) return true;
     } else if (await httpOk(services[name].health)) return true;
@@ -560,12 +919,15 @@ async function runMonitor() {
   ensureDirs();
   assertPorts();
   const previousState = readState();
+  const bridgeEnabled = hermesBridgeEnabled();
+  const activeServiceNames = supervisedServiceNames();
   const notificationsActive = localNotificationsEnabled();
   const state = {
     version: 2,
     root,
     startedAt: new Date().toISOString(),
     sourceFingerprint: computeRuntimeFingerprint(root),
+    bridgeEnabled,
     supervisor: { pid: process.pid },
     children: {},
     notifications: notificationsActive && previousState?.notifications
@@ -575,7 +937,10 @@ async function runMonitor() {
   const children = {};
   const histories = {};
   const restartPending = new Set();
-  const bridgeOutputBuffers = { stdout: '', stderr: '' };
+  const processOutputBuffers = {
+    bridge: { stdout: '', stderr: '' },
+    controller: { stdout: '', stderr: '' },
+  };
   let timer = null;
   let reconciling = false;
 
@@ -602,22 +967,32 @@ async function runMonitor() {
   function recordActivity(name, pid, streamName, chunk) {
     if (!state.children[name] || state.children[name].pid !== pid) return;
     const item = state.children[name];
-    if (name === 'bridge') {
-      bridgeOutputBuffers[streamName] += String(chunk);
-      const lines = bridgeOutputBuffers[streamName].split(/\r?\n/);
-      bridgeOutputBuffers[streamName] = lines.pop() || '';
+    if (name === 'bridge' || name === 'controller') {
+      const outputBuffers = processOutputBuffers[name];
+      outputBuffers[streamName] += String(chunk);
+      const lines = outputBuffers[streamName].split(/\r?\n/);
+      outputBuffers[streamName] = lines.pop() || '';
       let parsedStatus = false;
       for (const line of lines.filter(Boolean)) {
         try {
           const payload = JSON.parse(line);
-          parsedStatus = applyBridgeStatusPayload(item, payload) || parsedStatus;
+          parsedStatus = (
+            name === 'bridge'
+              ? applyBridgeStatusPayload(item, payload)
+              : applyControllerStatusPayload(item, payload)
+          ) || parsedStatus;
         } catch {
-          if (streamName === 'stderr' && /\[hermes-bridge\]\s+fatal:/i.test(line)) {
+          const fatalPattern = name === 'bridge'
+            ? /\[hermes-bridge\]\s+fatal:/i
+            : /\[hermes-reliability-controller\]\s+fatal:/i;
+          if (streamName === 'stderr' && fatalPattern.test(line)) {
             const observedAt = new Date().toISOString();
             parsedStatus = true;
             item.lastHeartbeatAt = observedAt;
             item.lastResultStatus = 'error';
-            item.lastErrorCode = 'HERMES_BRIDGE_PROCESS_ERROR';
+            item.lastErrorCode = name === 'bridge'
+              ? 'HERMES_BRIDGE_PROCESS_ERROR'
+              : 'HERMES_CONTROLLER_PROCESS_ERROR';
             item.lastInputErrorCode = null;
             item.lastInputDetail = null;
             item.lastPublishErrorCode = null;
@@ -639,19 +1014,43 @@ async function runMonitor() {
 
   async function startOne(name, { initial = false } = {}) {
     const service = services[name];
-    if (name === 'bridge') {
-      bridgeOutputBuffers.stdout = '';
-      bridgeOutputBuffers.stderr = '';
+    if (processOutputBuffers[name]) {
+      processOutputBuffers[name].stdout = '';
+      processOutputBuffers[name].stderr = '';
     }
     let existing = service.processOnly
       ? Number((initial ? previousState : state)?.children?.[name]?.pid) || null
       : listenerPid(service.port);
     if (existing && !isAlive(existing)) existing = null;
-    if (service.processOnly && existing && isOwned(existing)) {
+    const existingOwned = Boolean(existing && isOwned(existing));
+    if (existing && !existingOwned) {
+      state.children[name] = {
+        pid: existing,
+        external: true,
+        status: 'blocked',
+        errorCode: 'LOCAL_PORT_OWNERSHIP_CONFLICT',
+        healthFailures: 0,
+      };
+      writeState(state);
+      return false;
+    }
+
+    const awsPreflight = preflightAwsService(name);
+    if (awsPreflight && !awsPreflight.ok) {
+      if (existingOwned) await terminate(existing);
+      state.children[name] = credentialPreflightFailureState(name, awsPreflight, {
+        previous: (initial ? previousState : state)?.children?.[name] || {},
+      });
+      observeServiceNotification(name, state.children[name]);
+      writeState(state);
+      return false;
+    }
+
+    if (service.processOnly && existingOwned) {
       await terminate(existing);
       existing = null;
     }
-    if (existing && isOwned(existing)) {
+    if (existingOwned && existing) {
       state.children[name] = {
         pid: existing,
         external: true,
@@ -661,18 +1060,7 @@ async function runMonitor() {
         restarts: (histories[name] || []).length,
       };
       writeState(state);
-      return;
-    }
-    if (existing && !isOwned(existing)) {
-      state.children[name] = {
-        pid: existing,
-        external: true,
-        status: 'blocked',
-        errorCode: 'LOCAL_PORT_OWNERSHIP_CONFLICT',
-        healthFailures: 0,
-      };
-      writeState(state);
-      return;
+      return true;
     }
     const child = childFor(name, (streamName, chunk) => recordActivity(name, child.pid, streamName, chunk));
     children[name] = child;
@@ -684,6 +1072,8 @@ async function runMonitor() {
       healthFailures: 0,
       restarts: (histories[name] || []).length,
       ...(service.processOnly ? {
+        enabled: true,
+        intentionallyDisabled: false,
         lastHeartbeatAt: null,
         lastResultStatus: 'starting',
         lastErrorCode: null,
@@ -693,7 +1083,7 @@ async function runMonitor() {
         lastPublishStage: null,
         lastPublishDetail: null,
         lastPublishFailures: [],
-        awsProfile: configuredBridgeAwsProfile(),
+        awsProfile: name === 'bridge' ? configuredBridgeAwsProfile() : null,
       } : {}),
     };
     writeState(state);
@@ -713,6 +1103,7 @@ async function runMonitor() {
       if (state.stopping || state.children[name]?.pid !== child.pid) return;
       void scheduleRestart(name, { code, signal, reason: 'process-exit' });
     });
+    return true;
   }
 
   async function terminateOwnedService(name) {
@@ -809,23 +1200,88 @@ async function runMonitor() {
     }
   }
 
-  for (const name of ['sidecar', 'api', 'ui', 'bridge']) await startOne(name, { initial: true });
-  for (const name of ['api', 'ui']) state.children[name].status = await waitFor(name) ? 'ready' : 'starting';
+  async function reconcileDisabledBridgeState() {
+    const reconciliation = await reconcileDisabledBridgeProcesses();
+    const remainingPids = reconciliation.remainingPids || [];
+    state.children.bridge = {
+      pid: remainingPids[0] || null,
+      enabled: false,
+      intentionallyDisabled: true,
+      status: reconciliation.clean ? 'disabled' : 'degraded',
+      healthFailures: 0,
+      restarts: 0,
+      lastHeartbeatAt: null,
+      lastResultStatus: 'disabled',
+      lastErrorCode: reconciliation.errorCode,
+      lastInputErrorCode: null,
+      lastInputDetail: null,
+      lastPublishErrorCode: null,
+      lastPublishStage: null,
+      lastPublishDetail: null,
+      lastPublishFailures: [],
+      lastDetail: reconciliation.detail,
+      lastSuccessAt: null,
+      lastFailureAt: reconciliation.clean ? null : new Date().toISOString(),
+      awsProfile: null,
+      unexpectedPids: remainingPids,
+      discoveryVerified: reconciliation.verified,
+      terminatedPids: reconciliation.terminatedPids,
+    };
+    return reconciliation;
+  }
+
+  if (!bridgeEnabled) {
+    await reconcileDisabledBridgeState();
+  }
+  for (const name of activeServiceNames) await startOne(name, { initial: true });
+  for (const name of ['api', 'ui']) {
+    if (state.children[name]?.credentialPreflightBlocked) continue;
+    state.children[name].status = await waitFor(name) ? 'ready' : 'starting';
+  }
   if (state.children.sidecar) state.children.sidecar.status = await waitFor('sidecar', 5000) ? 'ready' : 'degraded';
-  if (state.children.bridge) state.children.bridge.status = await waitFor('bridge', 5000) ? 'ready' : 'degraded';
+  if (state.children.controller) {
+    state.children.controller.status = await waitFor('controller', 5000) ? 'ready' : 'degraded';
+  }
+  if (
+    bridgeEnabled
+    && state.children.bridge
+    && !state.children.bridge.credentialPreflightBlocked
+  ) {
+    state.children.bridge.status = await waitFor('bridge', 5000) ? 'ready' : 'degraded';
+  }
   for (const [name, item] of Object.entries(state.children)) {
     observeServiceNotification(name, item);
   }
   writeState(state);
-  const degradedServices = ['sidecar', 'bridge'].filter(name => state.children[name]?.status !== 'ready');
+  const degradedServices = ['sidecar', 'controller', ...(bridgeEnabled ? ['bridge'] : [])]
+    .filter(name => state.children[name]?.status !== 'ready');
   console.log(`Dashboard ${degradedServices.length === 0 ? 'READY' : `DEGRADED: ${degradedServices.join(', ')} unavailable`} (UI :3000, API :3001)`);
   timer = setInterval(async () => {
     if (reconciling || state.stopping) return;
     reconciling = true;
     try {
-      for (const [name, service] of Object.entries(services)) {
+      if (!bridgeEnabled) {
+        await reconcileDisabledBridgeState();
+        observeServiceNotification('bridge', state.children.bridge);
+      }
+      for (const name of activeServiceNames) {
+        const service = services[name];
         const item = state.children[name];
         if (!item || restartPending.has(name)) continue;
+        if (item.credentialPreflightBlocked) {
+          const retryAt = Date.parse(String(item.nextCredentialPreflightAt || ''));
+          if (Number.isFinite(retryAt) && retryAt > Date.now()) continue;
+          const awsPreflight = preflightAwsService(name);
+          if (awsPreflight && !awsPreflight.ok) {
+            state.children[name] = credentialPreflightFailureState(name, awsPreflight, {
+              previous: item,
+            });
+            observeServiceNotification(name, state.children[name]);
+            continue;
+          }
+          await startOne(name);
+          continue;
+        }
         const circuitUntil = Date.parse(String(item.circuitOpenUntil || ''));
         if (Number.isFinite(circuitUntil) && circuitUntil > Date.now()) {
           item.status = 'degraded';
@@ -888,7 +1344,7 @@ async function runMonitor() {
     if (state.stopping) return;
     state.stopping = true;
     clearInterval(timer);
-    for (const [name] of Object.entries(services)) await terminateOwnedService(name);
+    for (const name of activeServiceNames) await terminateOwnedService(name);
     writeState(state);
     process.exit(0);
   }
@@ -909,7 +1365,19 @@ async function start(options = {}) {
     const log = path.join(logDir, 'supervisor.log');
     const daemon = spawn(process.execPath, [__filename, 'monitor'], { cwd: root, detached: true, stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')], env: process.env });
     daemon.unref();
-    for (let n = 0; n < 60; n++) { await sleep(500); if ((await httpOk(services.ui.health)) && (await httpOk(services.api.health))) break; }
+    for (let n = 0; n < 60; n++) {
+      await sleep(500);
+      const supervisorState = readState();
+      if (supervisorState?.children?.api?.credentialPreflightBlocked) break;
+      if ((await httpOk(services.ui.health)) && (await httpOk(services.api.health))) break;
+    }
+    const supervisorState = readState();
+    if (supervisorState?.children?.api?.credentialPreflightBlocked) {
+      const item = supervisorState.children.api;
+      throw new Error(
+        `Dashboard API credential preflight failed (${item.errorCode}): ${item.lastDetail}`,
+      );
+    }
     if (json) return doctor();
     if (!quiet) console.log('Dashboard supervisor started in detached mode.');
     return;
@@ -947,8 +1415,25 @@ async function doctorReport() {
   const state = readState();
   const report = { ok: false, status: 'down', instanceId: state?.startedAt || null, logDir, services: {} };
   for (const [name, service] of Object.entries(services)) {
+    const recordedState = state?.children?.[name];
+    if (recordedState?.credentialPreflightBlocked) {
+      report.services[name] = {
+        pid: null,
+        running: false,
+        owned: true,
+        healthy: false,
+        ready: false,
+        status: 'blocked',
+        errorCode: recordedState.errorCode || 'AWS_PROFILE_UNUSABLE',
+        detail: recordedState.lastDetail || 'The dedicated AWS profile failed preflight.',
+        credentialPreflightBlocked: true,
+        credentialPreflightCheckedAt: recordedState.credentialPreflightCheckedAt || null,
+        nextCredentialPreflightAt: recordedState.nextCredentialPreflightAt || null,
+      };
+      continue;
+    }
     if (service.processOnly) {
-      report.services[name] = processServiceStatus(name, state?.children?.[name]);
+      report.services[name] = processServiceStatus(name, recordedState);
       continue;
     }
     const pid = listenerPid(service.port);
@@ -967,7 +1452,13 @@ async function doctorReport() {
     && !ownershipBlocked;
   report.status = !report.ok
     ? 'down'
-    : (report.services.sidecar.ready && report.services.bridge.ready ? 'ready' : 'degraded');
+    : (
+      report.services.sidecar.ready
+      && report.services.bridge.ready
+      && report.services.controller.ready
+        ? 'ready'
+        : 'degraded'
+    );
   return report;
 }
 
@@ -980,6 +1471,10 @@ async function localStackGroup() {
     const pid = service.processOnly ? processSnapshot.pid : listenerPid(service.port);
     const owned = service.processOnly ? processSnapshot.owned : Boolean(pid && isOwned(pid));
     const healthy = service.processOnly ? processSnapshot.healthy : await httpOk(service.health);
+    const intentionallyDisabled = service.processOnly
+      && processSnapshot?.status === 'disabled'
+      && processSnapshot?.intentionallyDisabled === true;
+    const checkPassed = intentionallyDisabled || Boolean(pid && owned && healthy);
     let summary;
     let recovery;
     const processErrorCode = processSnapshot?.lastPublishErrorCode
@@ -987,20 +1482,23 @@ async function localStackGroup() {
       || processSnapshot?.lastErrorCode
       || null;
 
-    if (pid && !owned) {
+    if (intentionallyDisabled) {
+      summary = 'Outbound operations and portfolio publishing are intentionally disabled; the bridge is idle.';
+      recovery = null;
+    } else if (pid && !owned) {
       summary = service.processOnly
-        ? `Supervisor state points to unknown bridge PID ${pid}; it will not be adopted or stopped.`
+        ? `Supervisor state points to unknown ${name} PID ${pid}; it will not be adopted or stopped.`
         : `Port ${service.port} is occupied by unknown PID ${pid}; it will not be adopted or stopped.`;
       recovery = {
         kind: 'manual',
         label: service.processOnly
-          ? 'Inspect the recorded bridge PID, then restart the repo-owned supervisor if appropriate.'
+          ? `Inspect the recorded ${name} PID, then restart the repo-owned supervisor if appropriate.`
           : `Inspect the unknown listener on port ${service.port}; stop or reconfigure it manually if appropriate.`,
         ...(service.processOnly ? {} : { command: `lsof -nP -iTCP:${service.port} -sTCP:LISTEN` }),
       };
     } else if (!pid) {
       summary = service.processOnly
-        ? 'No repo-owned Hermes snapshot bridge process is recorded.'
+        ? `No repo-owned ${localServiceLabels[name]} process is recorded.`
         : `Nothing is listening on port ${service.port}.`;
       recovery = {
         kind: 'command',
@@ -1009,12 +1507,14 @@ async function localStackGroup() {
       };
     } else if (!healthy) {
       summary = service.processOnly
-        ? `Repo-owned bridge PID ${pid} is not publishing a fresh successful heartbeat.`
+        ? `Repo-owned ${name} PID ${pid} is not publishing a fresh successful heartbeat.`
         : `Repo-owned PID ${pid} is listening on port ${service.port}, but its health check failed.`;
       recovery = service.processOnly
         ? {
           kind: 'manual',
-          label: bridgeRecoveryLabel(processSnapshot),
+          label: name === 'bridge'
+            ? bridgeRecoveryLabel(processSnapshot)
+            : 'Inspect the controller state and log, then restart the repo-owned supervisor if needed.',
         }
         : {
           kind: 'command',
@@ -1023,7 +1523,9 @@ async function localStackGroup() {
         };
     } else {
       summary = service.processOnly
-        ? `Publishing outbound snapshots from repo-owned PID ${pid}.`
+        ? (name === 'bridge'
+          ? `Publishing outbound snapshots from repo-owned PID ${pid}.`
+          : `Readiness controller is ${processSnapshot.mode || 'shadow'} from repo-owned PID ${pid}.`)
         : `Healthy on port ${service.port} (PID ${pid}).`;
       recovery = null;
     }
@@ -1031,17 +1533,19 @@ async function localStackGroup() {
     return {
       id: `local-${name}`,
       label: localServiceLabels[name],
-      status: pid && owned && healthy ? 'pass' : 'fail',
-      blocking: true,
+      status: checkPassed ? 'pass' : 'fail',
+      blocking: name !== 'controller' && !intentionallyDisabled,
       summary,
-      errorCode: pid && owned && healthy
+      errorCode: checkPassed
         ? null
         : (pid && !owned
           ? 'LOCAL_PORT_OWNERSHIP_CONFLICT'
           : (!pid
             ? `LOCAL_${name.toUpperCase()}_NOT_RUNNING`
             : (processErrorCode || `LOCAL_${name.toUpperCase()}_UNHEALTHY`))),
-      detail: service.processOnly
+      detail: intentionallyDisabled
+        ? 'Both bridge partition controls are false; no bridge process or outbound AWS writer is running.'
+        : service.processOnly
         ? [
           `Heartbeat ${processSnapshot.lastHeartbeatAt || 'unavailable'}; latest result ${processSnapshot.lastResultStatus || 'unknown'}.`,
           processSnapshot.lastInputErrorCode
@@ -1057,15 +1561,21 @@ async function localStackGroup() {
         : service.health,
       observedAt: new Date().toISOString(),
       ageSeconds: 0,
-      impact: service.processOnly
-        ? 'Hermes cannot receive a current outbound portfolio snapshot while the bridge is unhealthy.'
+      impact: intentionallyDisabled
+        ? null
+        : service.processOnly
+        ? (name === 'bridge'
+          ? 'Hermes operations telemetry cannot refresh while the bridge is unhealthy.'
+          : 'Deterministic local readiness repair is unavailable while the controller is unhealthy.')
         : `${localServiceLabels[name]} is required for the local dashboard stack.`,
       recovery,
       provenance: {
         source: 'morning-cli',
         repositoryRoot: root,
         healthUrl: service.health || null,
-        healthMode: service.processOnly ? 'process-heartbeat' : 'http',
+        healthMode: intentionallyDisabled
+          ? 'disabled'
+          : (service.processOnly ? 'process-heartbeat' : 'http'),
       },
       local: {
         name,
@@ -1263,7 +1773,7 @@ function hasUnknownListener(localGroup) {
 }
 
 function hasMissingListener(localGroup) {
-  return localGroup.checks.some(check => !check.local?.pid);
+  return localGroup.checks.some(check => !check.local?.pid && check.local?.enabled !== false);
 }
 
 async function waitForLocalStack(timeoutMs) {
@@ -1286,7 +1796,7 @@ async function recoverMissingLocalStack(initialGroup) {
 
   recovery.attempted = true;
   recovery.startedServices = initialGroup.checks
-    .filter(check => !check.local?.pid)
+    .filter(check => !check.local?.pid && check.local?.enabled !== false)
     .map(check => check.local.name);
   const startedAt = Date.now();
   try {
@@ -1591,11 +2101,18 @@ if (require.main === module) {
 
 module.exports = {
   applyBridgeStatusPayload,
+  applyControllerStatusPayload,
   bridgeRecoveryLabel,
   childEnvironment,
   configuredBridgeAwsProfile,
+  credentialPreflightFailureState,
+  discoverOwnedBridgeProcessIds,
   formatMorningReport,
+  hasExactBridgeCommandSignature,
+  hasExactControllerCommandSignature,
   hasExpectedDashboardSignature,
+  heartbeatAgeMs,
+  hermesBridgeEnabled,
   launchAgentIsLoaded,
   localNotificationsEnabled,
   mergedMorningReport,
@@ -1603,13 +2120,19 @@ module.exports = {
   pathIsInRoot,
   planServiceNotificationTransition,
   planStateWriteNotification,
+  preflightAwsService,
+  processServiceStatus,
+  reconcileDisabledBridgeProcesses,
   recoveryActions,
+  readinessUrl,
   restartPolicyFor,
   sendMacNotification,
   services,
+  supervisedServiceNames,
   summarizeGroups,
   systemSourceIsStale,
   hasStartupReadinessMismatch,
   validateSystemReadinessReport,
+  validProcessId,
   writeJsonAtomically,
 };

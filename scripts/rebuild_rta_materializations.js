@@ -1,11 +1,31 @@
 #!/usr/bin/env node
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
+if (process.env.MARKET_DASHBOARD_AWS_PROFILE_LOCKED === 'true') {
+  for (const key of [
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_SECURITY_TOKEN',
+    'AWS_ROLE_ARN',
+    'AWS_ROLE_SESSION_NAME',
+    'AWS_WEB_IDENTITY_TOKEN_FILE',
+    'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+    'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+    'AWS_SHARED_CREDENTIALS_FILE',
+    'AWS_CONFIG_FILE',
+  ]) {
+    delete process.env[key];
+  }
+}
 const fs = require('fs');
 const path = require('path');
 const AWS = require('aws-sdk/global');
 const S3 = require('aws-sdk/clients/s3');
 const DynamoDB = require('aws-sdk/clients/dynamodb');
+const STS = require('aws-sdk/clients/sts');
 const SERVICE_MANIFEST = require('../ops/services.json');
 const { scanAllPages } = require('../src/utils/dynamoScanAllPages.cjs');
 const { materializeRtaLedgerItems } = require('../src/utils/rtaLedgerMaterialization.cjs');
@@ -29,6 +49,53 @@ const DEFAULT_SNAPSHOT_TABLE = process.env.HEDGEYE_SNAPSHOT_TABLE
 const DEFAULT_BUCKET = process.env.HEDGEYE_BUCKET
   || AWS_RESOURCE_DEFAULTS.rawArtifactBucket
   || 'market-dashboard-csv-data';
+const EXPECTED_ACCOUNT_ID = '915328198276';
+const EXPECTED_REGION = 'us-west-1';
+const EXPECTED_PROFILE = 'market-dashboard-local';
+const EXPECTED_PRINCIPAL_ARN = `arn:aws:iam::${EXPECTED_ACCOUNT_ID}:user/${EXPECTED_PROFILE}`;
+const EXPECTED_RESOURCES = Object.freeze({
+  HERMES_LEDGER_TABLE: 'HermesEmailIngestLedger',
+  RESEARCH_EVENT_LEDGER_TABLE: 'ResearchEventLedgerV2',
+  HEDGEYE_SNAPSHOT_TABLE: 'HedgeyeDailySnapshot',
+  HEDGEYE_BUCKET: 'market-dashboard-csv-data',
+});
+const RESOLVED_RESOURCES = Object.freeze({
+  HERMES_LEDGER_TABLE: DEFAULT_LEDGER_TABLE,
+  RESEARCH_EVENT_LEDGER_TABLE: DEFAULT_EVENT_LEDGER_TABLE,
+  HEDGEYE_SNAPSHOT_TABLE: DEFAULT_SNAPSHOT_TABLE,
+  HEDGEYE_BUCKET: DEFAULT_BUCKET,
+});
+
+function assertRuntimeConfiguration(environment = process.env) {
+  const region = environment.AWS_REGION || environment.AWS_DEFAULT_REGION || EXPECTED_REGION;
+  if (region !== EXPECTED_REGION) {
+    throw new Error(`Refusing AWS region ${region}; expected ${EXPECTED_REGION}.`);
+  }
+  const profile = environment.AWS_PROFILE || environment.AWS_DEFAULT_PROFILE;
+  if (profile !== EXPECTED_PROFILE) {
+    throw new Error(`RTA rebuild requires AWS_PROFILE=${EXPECTED_PROFILE}.`);
+  }
+  for (const [name, expected] of Object.entries(EXPECTED_RESOURCES)) {
+    const actual = environment[name] || RESOLVED_RESOURCES[name];
+    if (actual !== expected) {
+      throw new Error(`Refusing ${name}=${actual}; expected ${expected}.`);
+    }
+  }
+}
+
+function validateCallerIdentity(identity) {
+  if (String(identity?.Account || '') !== EXPECTED_ACCOUNT_ID) {
+    throw new Error(
+      `Refusing AWS account ${identity?.Account || 'unknown'}; expected ${EXPECTED_ACCOUNT_ID}.`,
+    );
+  }
+  if (String(identity?.Arn || '') !== EXPECTED_PRINCIPAL_ARN) {
+    throw new Error(
+      `RTA rebuild requires the least-privilege ${EXPECTED_PROFILE} IAM principal.`,
+    );
+  }
+  return identity;
+}
 
 function parseArgs(argv) {
   const options = {
@@ -118,9 +185,12 @@ async function queryResearchEvents(dynamodb, productKey) {
 }
 
 async function run(options, dependencies = {}) {
-  AWS.config.update({ region: process.env.AWS_REGION || 'us-west-1' });
+  assertRuntimeConfiguration(process.env);
+  AWS.config.update({ region: EXPECTED_REGION });
   const dynamodb = dependencies.dynamodb || new DynamoDB.DocumentClient();
   const s3 = dependencies.s3 || new S3();
+  const sts = dependencies.sts || new STS();
+  validateCallerIdentity(await sts.getCallerIdentity({}).promise());
   const cutoff = cutoffFor(options);
   const [ledgerItems, existingItems, eventLedgerResult] = await Promise.all([
     scanAllPages(dynamodb, { TableName: DEFAULT_LEDGER_TABLE }),
@@ -150,20 +220,59 @@ async function run(options, dependencies = {}) {
   const comparisons = compareProjections(existingItems, materialized.snapshots);
   const changed = comparisons.filter((row) => row.status !== 'unchanged');
   const baselinePath = path.join(__dirname, '..', 'data', 'hedgeye', 'rta', 'latest-benchmark.json');
-  const baseline = fs.existsSync(baselinePath)
-    ? JSON.parse(fs.readFileSync(baselinePath, 'utf8'))
-    : null;
+  const baseline = Object.hasOwn(dependencies, 'baseline')
+    ? dependencies.baseline
+    : (
+      fs.existsSync(baselinePath)
+        ? JSON.parse(fs.readFileSync(baselinePath, 'utf8'))
+        : null
+    );
   const checkpointValidation = validateRtaCheckpoint(baseline);
   const currentBoard = summarizeRealTimeAlertPositions(materialized.snapshots, {
     windowDays: options.windowDays,
     baseline,
   });
 
+  if (options.apply && eventLedgerResult.error) {
+    throw new Error(
+      `Refusing to apply: canonical RTA event ledger is unavailable (${eventLedgerResult.error}).`,
+    );
+  }
+  if (options.apply && materialized.v2EventCount <= 0) {
+    throw new Error('Refusing to apply: no canonical RTA events were found in ResearchEventLedgerV2.');
+  }
+  if (options.apply && materialized.canonicalCoverageGaps.length > 0) {
+    throw new Error(
+      `Refusing to apply: ${materialized.canonicalCoverageGaps.length} canonical RTA source message(s) have incomplete event coverage.`,
+    );
+  }
   if (options.apply && materialized.rejected.length > 0) {
     throw new Error(`Refusing to apply: ${materialized.rejected.length} canonical RTA message(s) could not be materialized.`);
   }
   if (options.apply && !checkpointValidation.valid) {
     throw new Error(`Refusing to apply: RTA checkpoint is invalid (${checkpointValidation.reasons.join(', ')}).`);
+  }
+  if (
+    options.apply
+    && (
+      currentBoard.available !== true
+      || currentBoard.dataQuality?.status !== 'ok'
+      || !Number.isInteger(currentBoard.longCount)
+      || currentBoard.longCount < 0
+      || !Number.isInteger(currentBoard.shortCount)
+      || currentBoard.shortCount < 0
+      || !Array.isArray(currentBoard.holdings)
+      || currentBoard.holdings.length !== currentBoard.longCount + currentBoard.shortCount
+    )
+  ) {
+    const invalidCodes = (currentBoard.dataQuality?.invalidEvents || [])
+      .map((item) => item?.code)
+      .filter(Boolean);
+    throw new Error(
+      `Refusing to apply: reconstructed RTA board failed structural validation${
+        invalidCodes.length > 0 ? ` (${[...new Set(invalidCodes)].join(', ')})` : ''
+      }.`,
+    );
   }
   if (options.apply) {
     for (const row of changed) {
@@ -188,11 +297,19 @@ async function run(options, dependencies = {}) {
     eventLedgerError: eventLedgerResult.error,
     v2EventCount: materialized.v2EventCount,
     legacyMigrationEventCount: materialized.legacyEventCount,
+    canonicalCoverageGaps: materialized.canonicalCoverageGaps,
     selectedMessageCount: materialized.selectedMessageCount,
     materializedEventCount: materialized.materializedEventCount,
     rejected: materialized.rejected,
     currentBoard: {
-      available: checkpointValidation.valid && materialized.rejected.length === 0 && currentBoard.available,
+      available: (
+        !eventLedgerResult.error
+        && materialized.v2EventCount > 0
+        && checkpointValidation.valid
+        && materialized.canonicalCoverageGaps.length === 0
+        && materialized.rejected.length === 0
+        && currentBoard.available
+      ),
       lastUpdated: currentBoard.lastUpdated,
       longCount: checkpointValidation.valid && materialized.rejected.length === 0 ? currentBoard.longCount : null,
       shortCount: checkpointValidation.valid && materialized.rejected.length === 0 ? currentBoard.shortCount : null,
@@ -248,8 +365,10 @@ if (require.main === module) {
 
 module.exports = {
   compareProjections,
+  assertRuntimeConfiguration,
   cutoffFor,
   parseArgs,
   queryResearchEvents,
   run,
+  validateCallerIdentity,
 };

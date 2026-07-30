@@ -17,6 +17,14 @@ PDF_PROCESSOR_SOURCES := $(addprefix $(PDF_PROCESSOR_DIR),$(PDF_PROCESSOR_SOURCE
 RESEARCH_PRODUCT_REGISTRY := $(abspath $(PDF_PROCESSOR_DIR)../../infra/lambdas/gmail_ingestor/research_products.json)
 
 build-HedgeyePdfProcessorFunction:
-	python3 -m pip install --disable-pip-version-check -r "$(PDF_PROCESSOR_DIR)requirements-pdf.txt" -t "$(ARTIFACTS_DIR)"
+	python3 -m pip install \
+		--disable-pip-version-check \
+		--platform manylinux2014_x86_64 \
+		--implementation cp \
+		--python-version 3.12 \
+		--abi cp312 \
+		--only-binary=:all: \
+		-r "$(PDF_PROCESSOR_DIR)requirements-pdf.txt" \
+		-t "$(ARTIFACTS_DIR)"
 	cp $(PDF_PROCESSOR_SOURCES) "$(ARTIFACTS_DIR)"
 	cp "$(RESEARCH_PRODUCT_REGISTRY)" "$(ARTIFACTS_DIR)"

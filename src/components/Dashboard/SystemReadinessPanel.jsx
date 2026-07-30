@@ -1,491 +1,251 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
-import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
-import LoadingIndicator from '../common/LoadingIndicator';
 import RefreshButton from '../common/RefreshButton';
 import './SystemReadinessPanel.css';
 
-const READINESS_POLL_MS = 60 * 1000;
-const MAX_SNAPSHOT_AGE_MS = 5 * 60 * 1000;
+const MAX_STATUS_AGE_MS = 30 * 1000;
+const MAX_FUTURE_CLOCK_SKEW_MS = 30 * 1000;
+const VALID_SERVICE_STATUSES = new Set(['online', 'offline', 'attention', 'unknown']);
 
-const CHECK_STATUS_META = {
-  pass: { label: 'Pass', glyph: '✓' },
-  warn: { label: 'Warning', glyph: '!' },
-  fail: { label: 'Failed', glyph: '×' },
+const SERVICE_DEFINITIONS = [
+  { id: 'dashboard', label: 'Dashboard', summary: 'API + UI' },
+  { id: 'market-data', label: 'Market data', summary: 'Quotes + freshness' },
+  { id: 'live-portfolio', label: 'Live portfolio', summary: 'IBKR session' },
+  { id: 'hermes-gmail', label: 'Hermes / Gmail', summary: 'Agents + ingestion' },
+];
+
+const DETAIL_DEFINITIONS = {
+  dashboard: [
+    { id: 'api-server', label: 'API server', summary: 'Serves dashboard APIs' },
+    { id: 'react-ui', label: 'React UI', summary: 'Renders the dashboard' },
+  ],
+  'market-data': [
+    { id: 'primary-provider', label: 'Primary provider', summary: 'Live quote source' },
+    { id: 'fresh-quote', label: 'Fresh quote', summary: 'Age and session check' },
+  ],
+  'live-portfolio': [
+    { id: 'ibkr-sidecar', label: 'IBKR sidecar', summary: 'Dashboard-to-IBKR bridge' },
+    { id: 'gateway-session', label: 'Gateway session', summary: 'Authenticated gateway link' },
+    { id: 'managed-account', label: 'Managed account', summary: 'Position account access' },
+    { id: 'fresh-session', label: 'Fresh session', summary: 'Recent verified update' },
+  ],
+  'hermes-gmail': [
+    { id: 'hermes-analyst', label: 'Hermes Analyst', summary: 'Live portfolio analysis agent' },
+    { id: 'hermes-developer', label: 'Hermes Developer', summary: 'System repair agent' },
+    { id: 'hermes-security', label: 'Hermes Security', summary: 'Risk monitoring agent' },
+    { id: 'gmail-ingestion', label: 'Gmail Ingestion', summary: 'Hedgeye attachment intake' },
+  ],
 };
 
-const AGGREGATE_STATUS_META = {
-  ready: {
-    label: 'Ready',
-    summary: 'Every required dashboard dependency passed its latest check.',
-  },
-  degraded: {
-    label: 'Degraded',
-    summary: 'Core dashboard capabilities are available, but one or more ancillary services need attention.',
-  },
-  blocked: {
-    label: 'Blocked',
-    summary: 'A required dependency failed. Treat affected live data as unavailable.',
-  },
-  checking: {
-    label: 'Checking',
-    summary: 'Running the complete dashboard readiness checklist.',
-  },
+const HEDGEYE_PRODUCT_DEFINITIONS = [
+  { id: 'risk-ranges', label: 'Risk Ranges', summary: 'Daily LRR/HRR levels, Trend signals, and out-of-bucket names.' },
+  { id: 'early-look', label: 'Early Look', summary: 'Early Trend changes across the published coverage list.' },
+  { id: 'bitcoin-trend-tracker', label: 'Bitcoin Trend Tracker', summary: 'Crypto and related-equity Trend changes.' },
+  { id: 'momo-tracker', label: 'MOMO Tracker', summary: 'Momentum coverage and Trend changes.' },
+  { id: 'signal-strength', label: 'Signal Strength', summary: 'Security rankings plus added and removed names.' },
+  { id: 'portfolio-solutions', label: 'Portfolio Solutions', summary: 'Rankings and top or bottom movers.' },
+  { id: 'the-macro-show', label: 'The Macro Show', summary: 'Long, short, and neutral macro summary notes.' },
+  { id: 'the-call', label: 'The Call', summary: 'Long, short, and neutral call summary notes.' },
+  { id: 'real-time-alert', label: 'Real-Time Alert', summary: 'Published alert headlines, tickers, and signal phrases.' },
+  { id: 'volume', label: 'Volume', summary: 'Market-volume snapshots and market-share data.' },
+  { id: 'market-structure', label: 'Market Structure', summary: 'Market-structure snapshot data and notes.' },
+  { id: 'cftc-positioning', label: 'CFTC Positioning', summary: 'Positioning metrics, weekly changes, and Z-scores.' },
+  { id: 'etf-pro', label: 'ETF Pro', summary: 'Long and short ETF lists with reported changes.' },
+  { id: 'inflation-nowcast', label: 'Inflation Nowcast', summary: 'Inflation forecast, outlook, and scenario notes.' },
+];
+
+const STATUS_META = {
+  online: { label: 'Online', glyph: '✓' },
+  offline: { label: 'Offline', glyph: '×' },
+  attention: { label: 'Attention', glyph: '!' },
+  unknown: { label: 'Unknown', glyph: '?' },
 };
 
-const CAPABILITY_STATUS_META = {
-  ready: { label: 'Available', glyph: '✓' },
-  degraded: { label: 'Degraded', glyph: '!' },
-  blocked: { label: 'Blocked', glyph: '×' },
+const DETAIL_STATUS_META = {
+  online: { label: 'Online', glyph: '✓' },
+  offline: { label: 'Offline', glyph: '×' },
+  attention: { label: 'Attention', glyph: '!' },
+  unknown: { label: 'Unknown', glyph: '?' },
 };
 
-const AGGREGATE_RANK = {
-  ready: 0,
-  degraded: 1,
-  blocked: 2,
-};
-
-const PRODUCT_PIPELINE_STATUS_META = {
-  not_due: { label: 'Not due', glyph: '—' },
-  missing: { label: 'Missing', glyph: '×' },
-  received: { label: 'Received', glyph: '↓' },
-  parsed: { label: 'Parsed', glyph: 'P' },
-  validated: { label: 'Validated', glyph: 'V' },
-  indexed: { label: 'Indexed', glyph: '✓' },
-  failed: { label: 'Failed', glyph: '×' },
-};
-
-function normalizeAggregateStatus(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(AGGREGATE_RANK, normalized)
-    ? normalized
-    : 'blocked';
-}
-
-function normalizeCheck(check, index, groupId) {
-  const rawStatus = String(check?.status || '').trim().toLowerCase();
-  const recognized = Object.prototype.hasOwnProperty.call(CHECK_STATUS_META, rawStatus);
-  const status = recognized ? rawStatus : 'fail';
-  const id = check?.id || `${groupId || 'group'}-check-${index + 1}`;
-  const fallbackDetail = recognized
-    ? null
-    : `Unrecognized readiness status${rawStatus ? `: ${rawStatus}` : ''}.`;
-
-  return {
-    ...check,
-    id,
-    label: check?.label || id,
-    status,
-    // An unrecognized check cannot safely inherit a non-blocking classification.
-    blocking: recognized ? check?.blocking === true : true,
-    summary: check?.summary || fallbackDetail || CHECK_STATUS_META[status].label,
-    detail: check?.detail || fallbackDetail,
-    capabilityIds: Array.isArray(check?.capabilityIds)
-      ? [...new Set(check.capabilityIds.map(String))]
-      : [],
-    dependsOn: Array.isArray(check?.dependsOn)
-      ? [...new Set(check.dependsOn.map(String))]
-      : [],
-    errorCode: status === 'pass' ? null : (check?.errorCode || `${String(id).toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_FAILED`),
-    owner: check?.owner || 'unassigned',
-    automatic: check?.automatic === true,
-  };
-}
-
-function normalizeCapability(capability, index) {
-  const rawStatus = String(capability?.status || '').trim().toLowerCase();
-  const status = Object.prototype.hasOwnProperty.call(CAPABILITY_STATUS_META, rawStatus)
-    ? rawStatus
-    : 'blocked';
-  const id = capability?.id || `capability-${index + 1}`;
-  return {
-    ...capability,
-    id,
-    label: capability?.label || id,
-    status,
-    ready: status === 'ready',
-    blocking: capability?.blocking === true,
-    checkIds: Array.isArray(capability?.checkIds) ? capability.checkIds.map(String) : [],
-    rootCauseIds: Array.isArray(capability?.rootCauseIds) ? capability.rootCauseIds.map(String) : [],
-  };
-}
-
-function normalizeResearchProductMatrix(matrix) {
-  if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) return null;
-  const rawProducts = Array.isArray(matrix.products) ? matrix.products : [];
-  const products = rawProducts.map((product, index) => {
-    const rawStatus = String(product?.status || '').trim().toLowerCase();
-    const recognized = Object.prototype.hasOwnProperty.call(PRODUCT_PIPELINE_STATUS_META, rawStatus);
-    const status = recognized ? rawStatus : 'failed';
-    return {
-      ...product,
-      id: String(product?.id || `research-product-${index + 1}`),
-      label: String(product?.label || product?.id || `Research product ${index + 1}`),
-      cadence: String(product?.cadence || 'unknown'),
-      status,
-      statusLabel: PRODUCT_PIPELINE_STATUS_META[status].label,
-      due: product?.due === true,
-      detail: product?.detail
-        || (recognized ? PRODUCT_PIPELINE_STATUS_META[status].label : 'Unrecognized product pipeline status.'),
-      observedAt: product?.observedAt || null,
-      publicationDate: product?.publicationDate || null,
-      errorCode: status === 'failed'
-        ? (product?.errorCode || 'RESEARCH_PRODUCT_STATUS_INVALID')
-        : (product?.errorCode || null),
-      stages: {
-        received: product?.stages?.received === true,
-        parsed: product?.stages?.parsed === true,
-        validated: product?.stages?.validated === true,
-        indexed: product?.stages?.indexed === true,
-      },
-    };
-  });
-  const collectionErrors = Array.isArray(matrix.collectionErrors)
-    ? matrix.collectionErrors.filter(Boolean).map(String)
-    : [];
-  const hasFailure = collectionErrors.length > 0 || products.some((product) => (
-    product.status === 'failed' || product.status === 'missing'
-  ));
-  const hasIncomplete = products.some((product) => (
-    product.status === 'received'
-    || product.status === 'parsed'
-    || product.status === 'validated'
-  ));
-  const status = hasFailure ? 'failed' : (hasIncomplete ? 'degraded' : 'complete');
-  return {
-    ...matrix,
-    schemaVersion: Number(matrix.schemaVersion) || 1,
-    status,
-    products,
-    collectionErrors,
-  };
-}
-
-function deriveRootCauses(checks, supplied) {
-  if (Array.isArray(supplied)) {
-    const unique = new Map();
-    supplied.forEach((cause, index) => {
-      if (!cause || typeof cause !== 'object') return;
-      const id = String(cause.id || cause.errorCode || cause.checkId || `root-cause-${index + 1}`);
-      if (unique.has(id)) return;
-      unique.set(id, {
-        ...cause,
-        id,
-        errorCode: cause.errorCode || id,
-        status: cause.status === 'warn' ? 'warn' : 'fail',
-        label: cause.label || cause.checkId || id,
-        owner: cause.owner || 'unassigned',
-        capabilityIds: Array.isArray(cause.capabilityIds) ? cause.capabilityIds.map(String) : [],
-        affectedCheckIds: Array.isArray(cause.affectedCheckIds) ? cause.affectedCheckIds.map(String) : [],
-      });
-    });
-    return [...unique.values()];
-  }
-
-  const unique = new Map();
-  checks.filter((check) => check.status !== 'pass').forEach((check) => {
-    const id = check.errorCode || check.id;
-    const existing = unique.get(id);
-    if (existing) {
-      existing.affectedCheckIds = [...new Set([...existing.affectedCheckIds, check.id])];
-      return;
-    }
-    unique.set(id, {
-      id,
-      errorCode: check.errorCode,
-      checkId: check.id,
-      label: check.label,
-      status: check.status,
-      summary: check.summary,
-      owner: check.owner,
-      capabilityIds: check.capabilityIds,
-      affectedCheckIds: [check.id],
-    });
-  });
-  return [...unique.values()];
-}
-
-function deriveAggregateStatus(checks, capabilities = []) {
-  if (checks.length === 0) return 'blocked';
-  if (capabilities.length > 0) {
-    if (capabilities.some((capability) => capability.status === 'blocked')) return 'blocked';
-    if (capabilities.some((capability) => capability.status === 'degraded')) return 'degraded';
-    if (checks.some((check) => check.status !== 'pass')) return 'degraded';
-    return 'ready';
-  }
-  if (checks.some((check) => check.status === 'fail' && check.blocking)) return 'blocked';
-  if (checks.some((check) => check.status === 'fail' || check.status === 'warn')) return 'degraded';
-  return 'ready';
-}
-
-function affectedChecksForCause(cause, groups = []) {
-  const checkLabels = new Map(
-    groups.flatMap((group) => group.checks || []).map((check) => [String(check.id), check.label]),
-  );
-  return (cause.affectedCheckIds || []).map((id) => ({
-    id: String(id),
-    label: checkLabels.get(String(id)) || String(id),
+function unknownProducts() {
+  return HEDGEYE_PRODUCT_DEFINITIONS.map((product) => ({
+    ...product,
+    status: 'unknown',
+    date: null,
+    checkedAt: null,
   }));
 }
 
-function worstAggregateStatus(...statuses) {
-  return statuses
-    .map(normalizeAggregateStatus)
-    .reduce((worst, status) => (
-      AGGREGATE_RANK[status] > AGGREGATE_RANK[worst] ? status : worst
-    ), 'ready');
+function normalizeProductStatus(status) {
+  switch (String(status || '').toLowerCase()) {
+    case 'fresh':
+    case 'current':
+    case 'available':
+    case 'indexed':
+    case 'success':
+      return 'online';
+    case 'missing':
+    case 'error':
+    case 'failed':
+    case 'invalid':
+    case 'unavailable':
+      return 'offline';
+    case 'stale':
+    case 'pending':
+    case 'retained':
+      return 'attention';
+    default:
+      return 'unknown';
+  }
 }
 
-export function normalizeReadinessSnapshot(payload, now = Date.now()) {
+export function normalizeHedgeyeProducts(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+    || !payload.dataTypes || typeof payload.dataTypes !== 'object' || Array.isArray(payload.dataTypes)) {
+    throw new Error('Hedgeye product status response was not valid.');
+  }
+
+  const checkedAt = payload.meta?.timestamp || payload.date || null;
+  return HEDGEYE_PRODUCT_DEFINITIONS.map((product) => {
+    const source = payload.dataTypes[product.id] || {};
+    return {
+      ...product,
+      status: normalizeProductStatus(source.status),
+      date: source.date || source.lastUpdated || null,
+      checkedAt,
+    };
+  });
+}
+
+export function deriveProductsStatus(products = []) {
+  if (!products.length || products.every((product) => product.status === 'unknown')) return 'unknown';
+  if (products.every((product) => product.status === 'online')) return 'online';
+  if (products.every((product) => product.status === 'offline')) return 'offline';
+  return 'attention';
+}
+
+function unknownServices(reason = 'Status unavailable') {
+  return SERVICE_DEFINITIONS.map((service) => ({
+    ...service,
+    status: 'unknown',
+    reason,
+    date: null,
+    details: DETAIL_DEFINITIONS[service.id].map((detail) => ({
+      ...detail,
+      status: 'unknown',
+      reason,
+      date: null,
+    })),
+  }));
+}
+
+function cleanReason(value) {
+  if (!value) return '';
+  const reason = String(value).replace(/\s+/g, ' ').trim();
+  return reason.length > 90 ? `${reason.slice(0, 87)}…` : reason;
+}
+
+function normalizeService(service, definition, checkedAt) {
+  const rawStatus = String(service?.status || '').trim().toLowerCase();
+  const status = VALID_SERVICE_STATUSES.has(rawStatus) ? rawStatus : 'unknown';
+  const suppliedDetails = new Map(
+    (Array.isArray(service?.details) ? service.details : [])
+      .filter((detail) => detail && typeof detail === 'object')
+      .map((detail) => [String(detail.id || ''), detail]),
+  );
+  const details = DETAIL_DEFINITIONS[definition.id].map((detailDefinition) => {
+    const detail = suppliedDetails.get(detailDefinition.id);
+    const rawDetailStatus = String(detail?.status || '').trim().toLowerCase();
+    const detailStatus = VALID_SERVICE_STATUSES.has(rawDetailStatus)
+      ? rawDetailStatus
+      : 'unknown';
+    return {
+      ...detailDefinition,
+      status: detailStatus,
+      date: checkedAt,
+      reason: detailStatus === 'online'
+        ? ''
+        : cleanReason(detail?.reason || 'Status unavailable'),
+    };
+  });
+  return {
+    ...definition,
+    status,
+    date: checkedAt,
+    reason: status === 'online' ? '' : cleanReason(service?.reason),
+    details,
+  };
+}
+
+export function deriveSystemRailStatus(services = []) {
+  const dashboard = services.find((service) => service.id === 'dashboard');
+  if (!dashboard || dashboard.status === 'unknown') return 'unknown';
+  if (dashboard.status === 'offline') return 'offline';
+  return services.some((service) => service.status !== 'online') ? 'attention' : 'online';
+}
+
+export function derivePanelRailStatus(services = [], products = []) {
+  const servicesStatus = deriveSystemRailStatus(services);
+  if (servicesStatus === 'offline' || servicesStatus === 'unknown') return servicesStatus;
+  return servicesStatus === 'attention' || deriveProductsStatus(products) !== 'online'
+    ? 'attention'
+    : 'online';
+}
+
+export function normalizeSystemStatus(payload, now = Date.now()) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Readiness response was not a valid object.');
+    throw new Error('System status response was not a valid object.');
   }
 
   const checkedAt = new Date(payload.checkedAt || '');
   if (!Number.isFinite(checkedAt.getTime())) {
-    throw new Error('Readiness response did not include a valid checkedAt timestamp.');
+    throw new Error('System status response did not include a valid checkedAt timestamp.');
   }
-  const snapshotAgeMs = Math.max(0, now - checkedAt.getTime());
-  if (snapshotAgeMs > MAX_SNAPSHOT_AGE_MS) {
-    throw new Error('Readiness response is stale. Run the checks again.');
+  const statusAgeMs = now - checkedAt.getTime();
+  if (statusAgeMs > MAX_STATUS_AGE_MS || statusAgeMs < -MAX_FUTURE_CLOCK_SKEW_MS) {
+    throw new Error('System status response is stale.');
   }
 
-  const rawGroups = Array.isArray(payload.groups) ? payload.groups : [];
-  const groups = rawGroups.map((group, groupIndex) => {
-    const id = group?.id || `group-${groupIndex + 1}`;
-    return {
-      ...group,
-      id,
-      label: group?.label || id,
-      checks: (Array.isArray(group?.checks) ? group.checks : [])
-        .map((check, checkIndex) => normalizeCheck(check, checkIndex, id)),
-    };
-  });
-  const checks = groups.flatMap((group) => group.checks);
-  const capabilities = (Array.isArray(payload.capabilities) ? payload.capabilities : [])
-    .map(normalizeCapability);
-  const researchProductMatrix = normalizeResearchProductMatrix(payload.researchProductMatrix);
-  const rootCauses = deriveRootCauses(checks, payload.rootCauses);
-  const derivedStatus = deriveAggregateStatus(checks, capabilities);
-  const reportedStatus = normalizeAggregateStatus(payload.status);
-  const readyFlagStatus = payload.ready === false && reportedStatus === 'ready'
-    ? 'degraded'
-    : reportedStatus;
-  const researchStatus = !researchProductMatrix || researchProductMatrix.status === 'complete'
-    ? 'ready'
-    : 'degraded';
-  const status = worstAggregateStatus(derivedStatus, readyFlagStatus, researchStatus);
-  const counts = checks.reduce((result, check) => {
-    result.total += 1;
-    result[check.status] += 1;
-    if (check.status === 'fail' && check.blocking) result.blockingFailures += 1;
-    return result;
-  }, { total: 0, pass: 0, warn: 0, fail: 0, blockingFailures: 0 });
+  const suppliedServices = new Map(
+    (Array.isArray(payload.services) ? payload.services : [])
+      .filter((service) => service && typeof service === 'object')
+      .map((service) => [String(service.id || ''), service]),
+  );
+  const services = SERVICE_DEFINITIONS.map((definition) => (
+    normalizeService(suppliedServices.get(definition.id), definition, checkedAt.toISOString())
+  ));
 
   return {
-    ...payload,
     checkedAt: checkedAt.toISOString(),
-    groups,
-    capabilities,
-    researchProductMatrix,
-    rootCauses,
-    status,
-    ready: status === 'ready',
-    operational: status !== 'blocked',
-    fullyOperational: status === 'ready' && checks.every((check) => check.status === 'pass'),
-    counts,
-    snapshotAgeSeconds: Math.round(snapshotAgeMs / 1000),
+    services,
+    railStatus: deriveSystemRailStatus(services),
   };
 }
 
-function formatDateTime(value) {
+function formatStatusDate(value) {
   if (!value) return '—';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '—';
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
-function formatAge(seconds) {
-  const value = Number(seconds);
-  if (!Number.isFinite(value) || value < 0) return null;
-  if (value < 60) return `${Math.round(value)}s ago`;
-  if (value < 3600) return `${Math.round(value / 60)}m ago`;
-  if (value < 86400) return `${Math.round(value / 3600)}h ago`;
-  return `${Math.round(value / 86400)}d ago`;
+  const normalized = String(value).trim();
+  const dateOnly = normalized.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (dateOnly) return dateOnly[1];
+  const parsed = new Date(normalized);
+  if (!Number.isFinite(parsed.getTime())) return '—';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed);
+  const values = Object.fromEntries(parts.map(({ type, value: partValue }) => [type, partValue]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function errorMessage(error) {
   return error?.response?.data?.error
     || error?.response?.data?.message
     || error?.message
-    || 'The dashboard server did not return readiness results.';
-}
-
-function CheckRow({ check, onRepair, repairingActionId }) {
-  const meta = CHECK_STATUS_META[check.status];
-  const age = formatAge(check.ageSeconds);
-  const recovery = check.recovery && typeof check.recovery === 'object'
-    ? check.recovery
-    : null;
-  const canRepair = check.status !== 'pass'
-    && recovery?.automatic === true
-    && typeof recovery?.actionId === 'string';
-  const repairing = canRepair && repairingActionId === recovery.actionId;
-
-  return (
-    <article
-      className="sr-check"
-      aria-label={check.label}
-      data-status={check.status}
-      data-blocking={check.blocking ? 'true' : 'false'}
-    >
-      <div className="sr-check__status" aria-label={meta.label}>
-        <span aria-hidden="true">{meta.glyph}</span>
-      </div>
-      <div className="sr-check__content">
-        <div className="sr-check__heading">
-          <div>
-            <h3>{check.label}</h3>
-            {check.blocking ? <span className="sr-check__required">Required</span> : null}
-          </div>
-          <strong className="sr-check__status-label">{meta.label}</strong>
-        </div>
-        <p className="sr-check__summary">{check.summary}</p>
-        {check.detail && check.detail !== check.summary ? (
-          <p className="sr-check__detail">{check.detail}</p>
-        ) : null}
-        {(check.observedAt || age) ? (
-          <p className="sr-check__observed">
-            {check.observedAt ? `Observed ${formatDateTime(check.observedAt)}` : 'Observation time unavailable'}
-            {age ? ` · ${age}` : ''}
-          </p>
-        ) : null}
-        {(check.errorCode || check.owner || check.dependsOn.length > 0) ? (
-          <p className="sr-check__operations">
-            {check.errorCode ? <code>{check.errorCode}</code> : null}
-            {check.owner ? <span>Owner: {check.owner}</span> : null}
-            {check.dependsOn.length > 0 ? <span>Depends on: {check.dependsOn.join(', ')}</span> : null}
-          </p>
-        ) : null}
-        {(check.lastSuccessAt || check.nextDueAt) ? (
-          <p className="sr-check__schedule">
-            {check.lastSuccessAt ? <span>Last success {formatDateTime(check.lastSuccessAt)}</span> : null}
-            {check.nextDueAt ? <span>Next due {formatDateTime(check.nextDueAt)}</span> : null}
-          </p>
-        ) : null}
-        {check.impact ? (
-          <p className="sr-check__impact"><strong>Impact</strong>{check.impact}</p>
-        ) : null}
-        {recovery && (recovery.label || recovery.command) ? (
-          <div className="sr-check__recovery">
-            <strong>{recovery.label || 'Recovery'}</strong>
-            {recovery.command ? <code>{recovery.command}</code> : null}
-            {canRepair ? (
-              <button
-                type="button"
-                className="sr-check__repair-button"
-                disabled={repairing}
-                onClick={() => onRepair?.(recovery)}
-              >
-                {repairing ? 'Starting safe repair…' : 'Run safe repair'}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function formatProductCadence(value) {
-  const normalized = String(value || '').toLowerCase();
-  if (normalized === 'market_day_0800') return 'Market days';
-  if (normalized === 'event_driven') return 'When published';
-  if (normalized === 'weekly') return 'Weekly';
-  if (normalized === 'unsupported') return 'Unsupported';
-  return value || 'Unknown';
-}
-
-function ProductPipelineMatrix({ matrix }) {
-  if (!matrix) return null;
-  const products = matrix.products || [];
-  return (
-    <section className="sr-products" aria-labelledby="sr-products-title">
-      <header className="sr-section-heading">
-        <div>
-          <h2 id="sr-products-title">Research product pipeline</h2>
-          <p>{matrix.marketDate ? `Market date ${matrix.marketDate}` : 'Current market date'}</p>
-        </div>
-        <span>{products.length}</span>
-      </header>
-      <p className="sr-products__intro">
-        Each received publication must be parsed, validated, and indexed before portfolio research is complete.
-      </p>
-      {matrix.collectionErrors.length > 0 ? (
-        <div className="sr-products__errors" role="alert">
-          <strong>Pipeline evidence unavailable</strong>
-          {matrix.collectionErrors.map((message) => <p key={message}>{message}</p>)}
-        </div>
-      ) : null}
-      <div className="sr-products__table-wrap">
-        <table className="sr-products__table">
-          <thead>
-            <tr>
-              <th scope="col">Product</th>
-              <th scope="col">Cadence</th>
-              <th scope="col">Pipeline state</th>
-              <th scope="col">Evidence</th>
-            </tr>
-          </thead>
-          <tbody>
-            {products.map((product) => {
-              const meta = PRODUCT_PIPELINE_STATUS_META[product.status];
-              return (
-                <tr key={product.id} data-status={product.status}>
-                  <th scope="row">
-                    <strong>{product.label}</strong>
-                    {product.due ? <span className="sr-products__due">Due</span> : null}
-                  </th>
-                  <td>{formatProductCadence(product.cadence)}</td>
-                  <td>
-                    <span className="sr-products__status">
-                      <span aria-hidden="true">{meta.glyph}</span>
-                      {meta.label}
-                    </span>
-                    <span className="sr-products__stages" aria-label={`${product.label} completed stages`}>
-                      {['received', 'parsed', 'validated', 'indexed'].map((stage) => (
-                        <span
-                          key={stage}
-                          data-complete={product.stages[stage] ? 'true' : 'false'}
-                          title={stage}
-                          aria-label={`${stage}: ${product.stages[stage] ? 'complete' : 'not verified'}`}
-                        >
-                          {stage.slice(0, 1).toUpperCase()}
-                        </span>
-                      ))}
-                    </span>
-                  </td>
-                  <td>
-                    <span>{product.publicationDate || 'No publication'}</span>
-                    {product.observedAt ? <span>Observed {formatDateTime(product.observedAt)}</span> : null}
-                    <small>{product.detail}</small>
-                    {product.errorCode ? <code>{product.errorCode}</code> : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
+    || 'Status unavailable';
 }
 
 const SystemReadinessPanel = ({
@@ -494,235 +254,260 @@ const SystemReadinessPanel = ({
   onStatusChange,
 }) => {
   const { theme } = useTheme();
-  const [snapshot, setSnapshot] = useState(null);
-  const [error, setError] = useState('');
-  const [repairState, setRepairState] = useState({ actionId: null, message: '', error: false });
-  // The first readiness result is not known until the initial poll completes.
-  // Starting in "checking" avoids a misleading blocked/green flash on mount.
-  const [refreshing, setRefreshing] = useState(true);
+  const [services, setServices] = useState(() => unknownServices());
+  const [products, setProducts] = useState(() => unknownProducts());
+  const [refreshing, setRefreshing] = useState(false);
+  const [expandedServiceId, setExpandedServiceId] = useState(null);
+  const [productsExpanded, setProductsExpanded] = useState(false);
   const requestIdRef = useRef(0);
+  const onStatusChangeRef = useRef(onStatusChange);
+  const servicesRef = useRef(services);
+  const productsRef = useRef(products);
+  const lastRailStatusRef = useRef(null);
+  const panelRef = useRef(null);
+  onStatusChangeRef.current = onStatusChange;
 
-  const load = useCallback(async ({ refresh = false } = {}) => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    setRefreshing(true);
-    setError('');
-    onStatusChange?.('checking');
-
-    try {
-      const response = await MarketDataService.getSystemReadiness({ refresh });
-      const normalized = normalizeReadinessSnapshot(response);
-      if (requestId !== requestIdRef.current) return;
-      setSnapshot(normalized);
-      setError('');
-      onStatusChange?.(normalized.status);
-    } catch (loadError) {
-      if (requestId !== requestIdRef.current) return;
-      // A failed check invalidates the prior green snapshot immediately.
-      setSnapshot(null);
-      setError(errorMessage(loadError));
-      onStatusChange?.('blocked');
-    } finally {
-      if (requestId === requestIdRef.current) setRefreshing(false);
-    }
-  }, [onStatusChange]);
-
-  const runRepair = useCallback(async (recovery) => {
-    if (!recovery?.actionId || recovery?.automatic !== true) return;
-    setRepairState({ actionId: recovery.actionId, message: '', error: false });
-    try {
-      const result = await MarketDataService.runSystemReadinessRepair(recovery.actionId);
-      setRepairState({
-        actionId: null,
-        message: result?.message || 'Safe local recovery started. Refresh readiness after the services settle.',
-        error: false,
-      });
-    } catch (repairError) {
-      setRepairState({ actionId: null, message: errorMessage(repairError), error: true });
-    }
+  const publishRailStatus = useCallback((status) => {
+    if (lastRailStatusRef.current === status) return;
+    lastRailStatusRef.current = status;
+    onStatusChangeRef.current?.(status);
   }, []);
 
+  const load = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const checking = unknownServices('Checking status');
+    const checkingProducts = unknownProducts();
+    servicesRef.current = checking;
+    productsRef.current = checkingProducts;
+    setServices(checking);
+    setProducts(checkingProducts);
+    setRefreshing(true);
+    lastRailStatusRef.current = null;
+    publishRailStatus('unknown');
+
+    const systemRequest = MarketDataService.getSystemStatus()
+      .then((payload) => {
+        if (requestId !== requestIdRef.current) return;
+        try {
+          const normalized = normalizeSystemStatus(payload);
+          servicesRef.current = normalized.services;
+          setServices(normalized.services);
+          publishRailStatus(derivePanelRailStatus(normalized.services, productsRef.current));
+        } catch (loadError) {
+          const unavailable = unknownServices(
+            cleanReason(errorMessage(loadError)) || 'Status unavailable',
+          );
+          servicesRef.current = unavailable;
+          setServices(unavailable);
+          publishRailStatus('unknown');
+        }
+      })
+      .catch((loadError) => {
+        if (requestId !== requestIdRef.current) return;
+        // Failed verification invalidates every previously displayed status.
+        const unavailable = unknownServices(
+          cleanReason(errorMessage(loadError)) || 'Status unavailable',
+        );
+        servicesRef.current = unavailable;
+        setServices(unavailable);
+        publishRailStatus('unknown');
+      });
+
+    const productsRequest = MarketDataService.getHedgeyeFreshness()
+      .then((payload) => {
+        if (requestId !== requestIdRef.current) return;
+        try {
+          const normalizedProducts = normalizeHedgeyeProducts(payload);
+          productsRef.current = normalizedProducts;
+          setProducts(normalizedProducts);
+          publishRailStatus(derivePanelRailStatus(servicesRef.current, normalizedProducts));
+        } catch {
+          const unavailable = unknownProducts();
+          productsRef.current = unavailable;
+          setProducts(unavailable);
+          publishRailStatus(derivePanelRailStatus(servicesRef.current, unavailable));
+        }
+      })
+      .catch(() => {
+        if (requestId !== requestIdRef.current) return;
+        const unavailable = unknownProducts();
+        productsRef.current = unavailable;
+        setProducts(unavailable);
+        publishRailStatus(derivePanelRailStatus(servicesRef.current, unavailable));
+      });
+
+    await Promise.allSettled([systemRequest, productsRequest]);
+
+    if (requestId === requestIdRef.current) setRefreshing(false);
+  }, [publishRailStatus]);
+
   useEffect(() => {
-    const stopPolling = startVisibilityAwarePolling({
-      poll: () => load(),
-      intervalMs: READINESS_POLL_MS,
-      pollOnStart: true,
-    });
+    if (!open) return undefined;
+    load();
     return () => {
       requestIdRef.current += 1;
-      stopPolling();
     };
-  }, [load]);
+  }, [load, open]);
 
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined;
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') onClose?.();
+    const handleOutsideMouseDown = (event) => {
+      if (panelRef.current && !panelRef.current.contains(event.target)) onClose?.();
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleOutsideMouseDown);
+    return () => document.removeEventListener('mousedown', handleOutsideMouseDown);
   }, [onClose, open]);
 
-  const visibleStatus = refreshing ? 'checking' : (snapshot?.status || 'blocked');
-  const statusMeta = AGGREGATE_STATUS_META[visibleStatus];
-  const counts = snapshot?.counts;
+  if (!open) return null;
 
   return (
     <section
+      ref={panelRef}
       className={`sr-panel ${theme === 'dark' ? 'sr-panel--dark' : ''}`}
       role={open ? 'dialog' : undefined}
-      aria-modal={open ? 'false' : undefined}
-      aria-label={open ? 'System readiness' : undefined}
+      aria-label={open ? 'Systems' : undefined}
       aria-busy={refreshing || undefined}
     >
-      <header className="sr-panel__header">
-        <div>
-          <span className="sr-eyebrow">Morning operations checklist</span>
-          <h1>System readiness</h1>
-        </div>
-        <div className="sr-panel__actions">
-          <RefreshButton
-            label="Refresh checks"
-            title="Refresh system readiness"
-            loading={refreshing}
-            onClick={() => load({ refresh: true })}
-          />
-          <button type="button" className="sr-panel__close" onClick={onClose} aria-label="Close system readiness">
-            <span aria-hidden="true">×</span>
-          </button>
-        </div>
+      <header className="sr-panel__toolbar">
+        <h2>Systems</h2>
+        <RefreshButton
+          label="Refresh systems"
+          title="Refresh systems"
+          loading={refreshing}
+          iconOnly
+          onClick={load}
+        />
       </header>
 
-      <div className="sr-panel__body" aria-live="polite">
-        <section className="sr-overview" data-status={visibleStatus}>
-          <div className="sr-overview__state">
-            <span className="sr-overview__dot" aria-hidden="true" />
-            <strong>{statusMeta.label}</strong>
-          </div>
-          <p>{statusMeta.summary}</p>
-          {snapshot ? (
-            <div className="sr-overview__meta">
-              <span>Checked {formatDateTime(snapshot.checkedAt)}</span>
-              <span>{counts.total} checks</span>
-              <span>{counts.pass} passed</span>
-              {counts.warn > 0 ? <span>{counts.warn} warning{counts.warn === 1 ? '' : 's'}</span> : null}
-              {counts.fail > 0 ? <span>{counts.fail} failed</span> : null}
-              <span>{snapshot.rootCauses.length} root cause{snapshot.rootCauses.length === 1 ? '' : 's'}</span>
-            </div>
-          ) : null}
-        </section>
-
-        {repairState.message ? (
-          <p className="sr-repair-notice" data-error={repairState.error ? 'true' : 'false'} role="status">
-            {repairState.message}
-          </p>
-        ) : null}
-
-        {refreshing && !snapshot ? (
-          <div className="sr-panel__loading">
-            <LoadingIndicator label="Checking every dashboard dependency…" size="sm" centered />
-          </div>
-        ) : error ? (
-          <section className="sr-unavailable" role="alert">
-            <strong>Readiness checks unavailable</strong>
-            <p>{error}</p>
-            <p>Because the complete check could not finish, system readiness is blocked.</p>
-            <code>npm start</code>
-          </section>
-        ) : snapshot ? (
-          <>
-            {snapshot.capabilities.length > 0 ? (
-              <section className="sr-capabilities" aria-labelledby="sr-capabilities-title">
-                <header className="sr-section-heading">
-                  <h2 id="sr-capabilities-title">Capabilities</h2>
-                  <span>{snapshot.capabilities.length}</span>
-                </header>
-                <div className="sr-capabilities__grid">
-                  {snapshot.capabilities.map((capability) => {
-                    const meta = CAPABILITY_STATUS_META[capability.status];
+      <ul className="sr-services" aria-label="Current system status">
+        {services.map((service) => {
+          const meta = STATUS_META[service.status];
+          const expanded = expandedServiceId === service.id;
+          const checklistId = `sr-details-${service.id}`;
+          return (
+            <li data-status={service.status} key={service.id}>
+              <div className="sr-service__summary">
+                <button
+                  type="button"
+                  className="sr-service__toggle sr-service__trigger"
+                  aria-expanded={expanded}
+                  aria-controls={checklistId}
+                  aria-label={`${expanded ? 'Collapse' : 'Expand'} ${service.label} checklist`}
+                  onClick={() => {
+                    setExpandedServiceId(expanded ? null : service.id);
+                    setProductsExpanded(false);
+                  }}
+                >
+                  <span className="sr-chevron" aria-hidden="true" />
+                  <strong>{service.label}</strong>
+                </button>
+                <span className="sr-service__date">{formatStatusDate(service.date)}</span>
+                <span className="sr-service__scope">{service.summary}</span>
+                <span className="sr-service__result">
+                  <span className="sr-service__status">
+                    <i aria-hidden="true">{meta.glyph}</i>
+                    {meta.label}
+                  </span>
+                </span>
+              </div>
+              {expanded ? (
+                <ul
+                  className="sr-service__details"
+                  id={checklistId}
+                  aria-label={`${service.label} checklist`}
+                >
+                  <li className="sr-section__column-headings" aria-hidden="true">
+                    <span>Service</span>
+                    <span>Date</span>
+                    <span>Description</span>
+                    <span>Status</span>
+                  </li>
+                  {service.details.map((detail) => {
+                    const detailMeta = DETAIL_STATUS_META[detail.status];
                     return (
-                      <article className="sr-capability" data-status={capability.status} key={capability.id}>
-                        <div className="sr-capability__heading">
-                          <strong>{capability.label}</strong>
-                          <span>{meta.glyph} {meta.label}</span>
-                        </div>
-                        {capability.description ? <p>{capability.description}</p> : null}
-                      </article>
-                    );
-                  })}
-                </div>
-              </section>
-            ) : null}
-
-            <ProductPipelineMatrix matrix={snapshot.researchProductMatrix} />
-
-            {snapshot.rootCauses.length > 0 ? (
-              <section className="sr-root-causes" aria-labelledby="sr-root-causes-title">
-                <header className="sr-section-heading">
-                  <h2 id="sr-root-causes-title">What needs attention</h2>
-                  <span>{snapshot.rootCauses.length}</span>
-                </header>
-                <div className="sr-root-causes__list">
-                  {snapshot.rootCauses.map((cause) => {
-                    const affectedChecks = affectedChecksForCause(cause, snapshot.groups);
-                    return (
-                      <article key={cause.id} data-status={cause.status}>
-                        <div>
-                          <strong>{cause.label}</strong>
-                          {cause.errorCode ? <code>{cause.errorCode}</code> : null}
-                        </div>
-                        <p>{cause.summary}</p>
-                        <span>
-                          Owner: {cause.owner}
-                          {affectedChecks.length > 1 ? ` · affects ${affectedChecks.length} checks` : ''}
+                      <li data-status={detail.status} key={detail.id}>
+                        <span>{detail.label}</span>
+                        <span className="sr-service__detail-date">{formatStatusDate(detail.date)}</span>
+                        <span className="sr-service__detail-scope">{detail.summary}</span>
+                        <span className="sr-service__detail-result">
+                          <span className="sr-service__detail-status">
+                            <i aria-hidden="true">{detailMeta.glyph}</i>
+                            {detailMeta.label}
+                          </span>
                         </span>
-                        {affectedChecks.length > 0 ? (
-                          <div className="sr-root-cause__affected">
-                            <strong>Affected checks</strong>
-                            <ul aria-label={`${cause.label} affected checks`}>
-                              {affectedChecks.map((check) => (
-                                <li key={check.id}>{check.label}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-                      </article>
+                      </li>
                     );
                   })}
-                </div>
-              </section>
-            ) : null}
-
-            <div className="sr-groups">
-            {snapshot.groups.map((group) => (
-              <section className="sr-group" key={group.id} aria-labelledby={`sr-group-${group.id}`}>
-                <header className="sr-group__header">
-                  <h2 id={`sr-group-${group.id}`}>{group.label}</h2>
-                  <span>{group.checks.length}</span>
-                </header>
-                {group.checks.length > 0 ? (
-                  <div className="sr-group__checks">
-                    {group.checks.map((check) => (
-                      <CheckRow
-                        key={check.id}
-                        check={check}
-                        onRepair={runRepair}
-                        repairingActionId={repairState.actionId}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="sr-group__empty">No checks were returned for this group.</div>
-                )}
-              </section>
-            ))}
-            </div>
-          </>
-        ) : null}
-      </div>
+                </ul>
+              ) : null}
+            </li>
+          );
+        })}
+        <li className="sr-products-row" data-status={deriveProductsStatus(products)}>
+          <div className="sr-service__summary">
+            <button
+              type="button"
+              className="sr-service__toggle sr-service__trigger"
+              aria-expanded={productsExpanded}
+              aria-controls="sr-products-list"
+              aria-label={`${productsExpanded ? 'Collapse' : 'Expand'} Products`}
+              onClick={() => {
+                setProductsExpanded(!productsExpanded);
+                setExpandedServiceId(null);
+              }}
+            >
+              <span className="sr-chevron" aria-hidden="true" />
+              <strong>Products</strong>
+            </button>
+            <span className="sr-service__date">{formatStatusDate(products[0]?.checkedAt)}</span>
+            <span className="sr-service__scope">Hedgeye research feeds</span>
+            <span className="sr-service__result">
+              <span className="sr-service__status">
+                <i aria-hidden="true">{STATUS_META[deriveProductsStatus(products)].glyph}</i>
+                {STATUS_META[deriveProductsStatus(products)].label}
+              </span>
+            </span>
+          </div>
+          {productsExpanded ? (
+            <ul
+              className="sr-product__details"
+              id="sr-products-list"
+              aria-label="Hedgeye products pulled by the dashboard"
+            >
+              <li className="sr-section__column-headings" aria-hidden="true">
+                <span>Service</span>
+                <span>Date</span>
+                <span>Description</span>
+                <span>Status</span>
+              </li>
+              {products.map((product) => {
+                const meta = STATUS_META[product.status];
+                return (
+                  <li data-status={product.status} key={product.id}>
+                    <strong>{product.label}</strong>
+                    <span className="sr-product__date">{formatStatusDate(product.date)}</span>
+                    <span className="sr-product__description">{product.summary}</span>
+                    <span className="sr-product__status">
+                      <i aria-hidden="true">{meta.glyph}</i>
+                      {meta.label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </li>
+      </ul>
     </section>
   );
 };
 
-export { AGGREGATE_STATUS_META, CAPABILITY_STATUS_META, CHECK_STATUS_META };
+export {
+  DETAIL_DEFINITIONS,
+  DETAIL_STATUS_META,
+  HEDGEYE_PRODUCT_DEFINITIONS,
+  SERVICE_DEFINITIONS,
+  STATUS_META,
+};
 export default SystemReadinessPanel;

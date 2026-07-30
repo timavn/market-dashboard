@@ -1,0 +1,20 @@
+{
+  "id": "rta-official-2026-01-02",
+  "capturedAt": "2026-01-02T03:04:05Z",
+  "asOf": "2026-01-02T03:04:05Z",
+  "capturePrecision": "exact",
+  "source": "manual-official-rta-board",
+  "sourceArtifact": "repository-artifact:src/utils/__fixtures__/rta-checkpoint.sanitized.json",
+  "parserVersion": "rta-checkpoint-v1",
+  "longs": [
+    "AAA",
+    "BBB"
+  ],
+  "shorts": [
+    "CCC"
+  ],
+  "notes": [
+    "Sanitized release fixture with fictional symbols."
+  ],
+  "contentHash": "f01d3a403803f9a91067b687fddcccde0e38bb1df3488b0e5904777dda90a644"
+}

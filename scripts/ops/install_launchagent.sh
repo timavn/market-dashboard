@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TEMPLATE_PATH="${REPO_DIR}/ops/launchd/com.market-dashboard.stack.plist.template"
+AWS_PREFLIGHT_PATH="${REPO_DIR}/scripts/ops/aws_profile_preflight.js"
 USER_ID="$(id -u)"
 USER_NAME="$(id -un)"
 USER_HOME="$(dscl . -read "/Users/${USER_NAME}" NFSHomeDirectory | awk '{print $2}')"
@@ -14,7 +15,82 @@ NODE_PATH="$(command -v node)"
 NODE_REAL_PATH="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$NODE_PATH")"
 PATH_VALUE="$(dirname "$NODE_PATH"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 BRIDGE_AWS_PROFILE="${HERMES_BRIDGE_AWS_PROFILE:-market-dashboard-bridge}"
+API_AWS_PROFILE="market-dashboard-local"
+BRIDGE_ENABLED="${HERMES_BRIDGE_ENABLED:-false}"
+OPERATIONS_BRIDGE_ENABLED="${HERMES_OPERATIONS_BRIDGE_ENABLED:-${BRIDGE_ENABLED}}"
+PORTFOLIO_BRIDGE_ENABLED="${HERMES_PORTFOLIO_BRIDGE_ENABLED:-${BRIDGE_ENABLED}}"
+CONTROLLER_MODE="${HERMES_RELIABILITY_CONTROLLER_MODE:-shadow}"
+CONTROLLER_ENABLED_ACTIONS="${HERMES_RELIABILITY_ENABLED_ACTIONS:-}"
 LOCAL_NOTIFICATIONS="${MARKET_DASHBOARD_LOCAL_NOTIFICATIONS:-true}"
+case "$(printf '%s' "$BRIDGE_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on|enabled)
+    BRIDGE_ENABLED="true"
+    ;;
+  0|false|no|off|disabled|'')
+    BRIDGE_ENABLED="false"
+    ;;
+  *)
+    echo "HERMES_BRIDGE_ENABLED must be a boolean value." >&2
+    exit 1
+    ;;
+esac
+normalize_bridge_partition() {
+  local variable_name="$1"
+  local raw_value="$2"
+  case "$(printf '%s' "$raw_value" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on|enabled)
+      printf 'true'
+      ;;
+    0|false|no|off|disabled|'')
+      printf 'false'
+      ;;
+    *)
+      echo "${variable_name} must be a boolean value." >&2
+      exit 1
+      ;;
+  esac
+}
+OPERATIONS_BRIDGE_ENABLED="$(
+  normalize_bridge_partition HERMES_OPERATIONS_BRIDGE_ENABLED "$OPERATIONS_BRIDGE_ENABLED"
+)"
+PORTFOLIO_BRIDGE_ENABLED="$(
+  normalize_bridge_partition HERMES_PORTFOLIO_BRIDGE_ENABLED "$PORTFOLIO_BRIDGE_ENABLED"
+)"
+case "$(printf '%s' "$CONTROLLER_MODE" | tr '[:upper:]' '[:lower:]')" in
+  active)
+    CONTROLLER_MODE="active"
+    ;;
+  shadow|'')
+    CONTROLLER_MODE="shadow"
+    ;;
+  *)
+    echo "HERMES_RELIABILITY_CONTROLLER_MODE must be shadow or active." >&2
+    exit 1
+    ;;
+esac
+if [[ -n "$CONTROLLER_ENABLED_ACTIONS" ]]; then
+  if [[ ! "$CONTROLLER_ENABLED_ACTIONS" =~ ^[a-z][a-z0-9-]*(,[a-z][a-z0-9-]*)*$ ]]; then
+    echo "HERMES_RELIABILITY_ENABLED_ACTIONS must be a comma-separated list of exact action IDs." >&2
+    exit 1
+  fi
+  IFS=',' read -r -a controller_action_ids <<< "$CONTROLLER_ENABLED_ACTIONS"
+  for controller_action_id in "${controller_action_ids[@]}"; do
+    case "$controller_action_id" in
+      start-local-stack|restart-local-stack|rebuild-sidecar-runtime|retry-gmail-poll|rebuild-research-projections|reconcile-prediction-catalog|prune-dashboard-logs)
+        ;;
+      *)
+        echo "Unknown Hermes controller action ID: ${controller_action_id}" >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+if [[ "$OPERATIONS_BRIDGE_ENABLED" == "false" && "$PORTFOLIO_BRIDGE_ENABLED" == "false" ]]; then
+  # Disabled mode must not depend on, validate, or persist a bridge profile.
+  # In particular, ignore any stale shell value that could corrupt plist
+  # rendering through the sed replacement below.
+  BRIDGE_AWS_PROFILE=""
+fi
 case "$(printf '%s' "$LOCAL_NOTIFICATIONS" | tr '[:upper:]' '[:lower:]')" in
   0|false|no|off|disabled)
     LOCAL_NOTIFICATIONS="false"
@@ -28,17 +104,36 @@ if [[ "$USER_HOME" != /* || "$LAUNCH_AGENTS_DIR" != "$USER_HOME/Library/LaunchAg
   echo "Could not resolve a safe per-user LaunchAgents directory." >&2
   exit 1
 fi
-if [[ ! -f "$TEMPLATE_PATH" || ! -x "$NODE_PATH" ]]; then
+if [[ ! -f "$TEMPLATE_PATH" || ! -f "$AWS_PREFLIGHT_PATH" || ! -x "$NODE_PATH" ]]; then
   echo "LaunchAgent template or Node.js runtime is missing." >&2
   exit 1
 fi
-if [[ -z "${BRIDGE_AWS_PROFILE//[[:space:]]/}" ]]; then
+if [[ "$OPERATIONS_BRIDGE_ENABLED" == "true" || "$PORTFOLIO_BRIDGE_ENABLED" == "true" ]] \
+    && [[ -z "${BRIDGE_AWS_PROFILE//[[:space:]]/}" ]]; then
   echo "HERMES_BRIDGE_AWS_PROFILE must name the dedicated outbound bridge profile." >&2
   exit 1
 fi
-if [[ ! "$BRIDGE_AWS_PROFILE" =~ ^[A-Za-z0-9_+=,.@-]+$ ]]; then
+if [[ "$OPERATIONS_BRIDGE_ENABLED" == "true" || "$PORTFOLIO_BRIDGE_ENABLED" == "true" ]] \
+    && [[ ! "$BRIDGE_AWS_PROFILE" =~ ^[A-Za-z0-9_+=,.@-]+$ ]]; then
   echo "HERMES_BRIDGE_AWS_PROFILE contains unsupported characters." >&2
   exit 1
+fi
+if [[ "$OPERATIONS_BRIDGE_ENABLED" == "true" || "$PORTFOLIO_BRIDGE_ENABLED" == "true" ]] \
+    && [[ "$BRIDGE_AWS_PROFILE" != "market-dashboard-bridge" ]]; then
+  echo "HERMES_BRIDGE_AWS_PROFILE must be the dedicated market-dashboard-bridge profile." >&2
+  exit 1
+fi
+
+# Validate identities before rendering a plist, stopping a process, or changing
+# launchd state. The preflight resolves named profiles through AWS CLI, rejects
+# copied session tokens, and emits no credential or caller-identity values.
+"$NODE_PATH" "$AWS_PREFLIGHT_PATH" \
+  --purpose api \
+  --profile "$API_AWS_PROFILE"
+if [[ "$OPERATIONS_BRIDGE_ENABLED" == "true" || "$PORTFOLIO_BRIDGE_ENABLED" == "true" ]]; then
+  "$NODE_PATH" "$AWS_PREFLIGHT_PATH" \
+    --purpose bridge \
+    --profile "$BRIDGE_AWS_PROFILE"
 fi
 
 xml_escape() {
@@ -50,6 +145,11 @@ node_xml="$(xml_escape "$NODE_PATH")"
 log_xml="$(xml_escape "$LOG_DIR")"
 path_xml="$(xml_escape "$PATH_VALUE")"
 bridge_profile_xml="$(xml_escape "$BRIDGE_AWS_PROFILE")"
+bridge_enabled_xml="$(xml_escape "$BRIDGE_ENABLED")"
+operations_bridge_enabled_xml="$(xml_escape "$OPERATIONS_BRIDGE_ENABLED")"
+portfolio_bridge_enabled_xml="$(xml_escape "$PORTFOLIO_BRIDGE_ENABLED")"
+controller_mode_xml="$(xml_escape "$CONTROLLER_MODE")"
+controller_enabled_actions_xml="$(xml_escape "$CONTROLLER_ENABLED_ACTIONS")"
 local_notifications_xml="$(xml_escape "$LOCAL_NOTIFICATIONS")"
 staged_path="$(mktemp "${TMPDIR:-/tmp}/market-dashboard-launchagent.XXXXXX.plist")"
 trap 'rm -f "$staged_path"' EXIT
@@ -60,6 +160,11 @@ sed \
   -e "s|__LOG_PATH__|${log_xml}|g" \
   -e "s|__PATH_VALUE__|${path_xml}|g" \
   -e "s|__HERMES_BRIDGE_AWS_PROFILE__|${bridge_profile_xml}|g" \
+  -e "s|__HERMES_BRIDGE_ENABLED__|${bridge_enabled_xml}|g" \
+  -e "s|__HERMES_OPERATIONS_BRIDGE_ENABLED__|${operations_bridge_enabled_xml}|g" \
+  -e "s|__HERMES_PORTFOLIO_BRIDGE_ENABLED__|${portfolio_bridge_enabled_xml}|g" \
+  -e "s|__HERMES_CONTROLLER_MODE__|${controller_mode_xml}|g" \
+  -e "s|__HERMES_CONTROLLER_ENABLED_ACTIONS__|${controller_enabled_actions_xml}|g" \
   -e "s|__LOCAL_NOTIFICATIONS__|${local_notifications_xml}|g" \
   "$TEMPLATE_PATH" > "$staged_path"
 

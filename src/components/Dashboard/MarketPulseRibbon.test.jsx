@@ -118,7 +118,7 @@ describe('MarketPulseRibbon', () => {
     expect(screen.queryByText('Ripple')).not.toBeInTheDocument();
   });
 
-  test('rotates each card through its ranked top three movers', () => {
+  test('rotates one card at a time left to right through its ranked movers', () => {
     jest.useFakeTimers();
     const { unmount } = render(
       <MarketPulseRibbon
@@ -128,17 +128,30 @@ describe('MarketPulseRibbon', () => {
             quote('QQQ', 700, 2),
             quote('RUT', 2900, 1),
           ],
+          rates: {
+            us_treasuries: [
+              quote('UST10Y', 4.5, -0.8, { unit: 'yield' }),
+              quote('UST30Y', 4.9, -0.5, { unit: 'yield' }),
+            ],
+          },
         }}
       />,
     );
     const equities = screen.getByLabelText('Equities market pulse');
+    const rates = screen.getByLabelText('Rates market pulse');
 
     expect(within(equities).getByRole('heading')).toHaveTextContent('S&P 500');
+    expect(within(rates).getByRole('heading')).toHaveTextContent('10-Year U.S. Treasury');
 
     act(() => jest.advanceTimersByTime(PULSE_ROTATION_MS));
     expect(within(equities).getByRole('heading')).toHaveTextContent('Nasdaq 100 (QQQ)');
+    expect(within(rates).getByRole('heading')).toHaveTextContent('10-Year U.S. Treasury');
 
     act(() => jest.advanceTimersByTime(PULSE_ROTATION_MS));
+    expect(within(equities).getByRole('heading')).toHaveTextContent('Nasdaq 100 (QQQ)');
+    expect(within(rates).getByRole('heading')).toHaveTextContent('30-Year U.S. Treasury');
+
+    act(() => jest.advanceTimersByTime(PULSE_ROTATION_MS * 3));
     expect(within(equities).getByRole('heading')).toHaveTextContent('Russell 2000');
 
     unmount();

@@ -16,7 +16,7 @@ function renderExpectedValuesWindow() {
 }
 
 function getOverlayTable() {
-  return screen.getAllByRole('table')[0];
+  return screen.getByRole('table', { name: 'Quad probability overlay rankings' });
 }
 
 function getAllEvTable() {

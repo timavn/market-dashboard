@@ -5,10 +5,34 @@
       "Sid": "PublishOwnedBridgeSnapshots",
       "Effect": "Allow",
       "Action": "dynamodb:PutItem",
-      "Resource": [
-        "arn:aws:dynamodb:us-west-1:915328198276:table/HermesInputSnapshots",
-        "arn:aws:dynamodb:us-west-1:915328198276:table/MarketDashboardServiceHeartbeats"
-      ]
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/HermesInputSnapshots",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "tim-market-dashboard#operations",
+            "tim-market-dashboard#portfolio"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
+    },
+    {
+      "Sid": "PublishOwnedBridgeHeartbeat",
+      "Effect": "Allow",
+      "Action": "dynamodb:PutItem",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/MarketDashboardServiceHeartbeats",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "bridge:local-dashboard"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
     }
   ]
 }

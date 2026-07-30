@@ -501,7 +501,14 @@ describe('security historical risk metrics', () => {
         priceBasis: 'completed adjusted daily close',
       },
       records: { status: 'available', observations: 261 },
+      realizedVolatility: {
+        status: 'available',
+        limitedHistory: false,
+      },
     });
+    expect(row.realizedVolatility.sizingVol).toBeGreaterThan(0);
+    expect(row.realizedVolatility.rv63).toBeGreaterThan(0);
+    expect(row.realizedVolatility.rv252).toBeGreaterThan(0);
   });
 
   test('unavailable rows contain no inferred metric values', () => {
@@ -530,6 +537,35 @@ describe('security historical risk metrics', () => {
         priorAllTimeLow: null,
         observations: 0,
       },
+      realizedVolatility: {
+        status: 'unavailable',
+        sizingVol: null,
+        rv63: null,
+        rv252: null,
+      },
     });
+  });
+
+  test('crypto assetType annualizes realized vol with 365 factor', () => {
+    const { securityBars, benchmarkBars } = historiesFromReturns(
+      variedReturns.slice(0, 120),
+      () => 1.1,
+    );
+    const equity = buildSecurityRiskMetrics({
+      symbol: 'IBIT',
+      securityBars,
+      benchmarkBars,
+      assetType: 'equity',
+    });
+    const crypto = buildSecurityRiskMetrics({
+      symbol: 'IBIT',
+      securityBars,
+      benchmarkBars,
+      assetType: 'crypto',
+    });
+    expect(crypto.realizedVolatility.annualizationFactor).toBe(365);
+    expect(equity.realizedVolatility.annualizationFactor).toBe(252);
+    expect(crypto.realizedVolatility.sizingVol)
+      .toBeGreaterThan(equity.realizedVolatility.sizingVol);
   });
 });

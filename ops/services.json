@@ -147,6 +147,19 @@
       "recoveryActionId": "start-local-stack"
     },
     {
+      "id": "hermes.controller",
+      "label": "Hermes reliability controller",
+      "owner": "automation-operations",
+      "runbookId": "local-stack",
+      "cadenceMinutes": 1,
+      "readinessMaxAgeMinutes": 3,
+      "capabilityIds": [],
+      "dependsOn": ["dashboard.supervisor", "dashboard.api"],
+      "blocking": false,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
       "id": "dashboard.runtime",
       "label": "API runtime provenance",
       "owner": "local-operations",
@@ -211,7 +224,7 @@
         "heartbeatTable": "MarketDashboardServiceHeartbeats"
       },
       "capabilityIds": ["automation.hermes"],
-      "dependsOn": ["local-api", "local-sidecar"],
+      "dependsOn": ["local-api"],
       "blocking": false,
       "automatic": true,
       "recoveryActionId": "start-local-stack"
@@ -297,7 +310,7 @@
       "cadenceMinutes": 1,
       "readinessMaxAgeMinutes": 3,
       "capabilityIds": ["automation.hermes"],
-      "dependsOn": ["dashboard.supervisor", "dashboard.api", "ibkr.portfolio"],
+      "dependsOn": ["dashboard.supervisor", "dashboard.api"],
       "blocking": false,
       "automatic": false
     },
@@ -475,7 +488,23 @@
       "executor": "dev-stack-start",
       "command": "npm start",
       "automatic": true,
-      "loopbackOnly": true
+      "loopbackOnly": true,
+      "controllerExecutor": "loopback-readiness-api",
+      "authority": "automatic",
+      "triggeringErrorCodes": [
+        "DASHBOARD_UI_UNREACHABLE",
+        "DASHBOARD_SUPERVISOR_UNVERIFIED"
+      ],
+      "scope": "repo-processes",
+      "riskClass": "low",
+      "prerequisites": [],
+      "verificationChecks": ["dashboard.ui", "dashboard.supervisor"],
+      "settleTimeoutMs": 30000,
+      "cooldownMs": 600000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "local-operations"
     },
     {
       "id": "restart-local-stack",
@@ -484,7 +513,35 @@
       "executor": "dev-stack-restart",
       "command": "npm run dev:restart -- --detach",
       "automatic": true,
-      "loopbackOnly": true
+      "loopbackOnly": true,
+      "controllerExecutor": "loopback-readiness-api",
+      "authority": "automatic",
+      "triggeringErrorCodes": [
+        "DASHBOARD_CODE_VERSION_DRIFT",
+        "DASHBOARD_RUNTIME_MISMATCH",
+        "HERMES_BRIDGE_DISABLED_PROCESS_PRESENT",
+        "HERMES_BRIDGE_DISABLED_STATE_UNVERIFIED",
+        "IBKR_LIVE_SESSION_STALE",
+        "IBKR_LIVE_SESSION_UNAVAILABLE",
+        "IBKR_LIVE_SESSION_UNVERIFIED",
+        "IBKR_SIDECAR_UNREACHABLE"
+      ],
+      "scope": "repo-processes",
+      "riskClass": "low",
+      "prerequisites": [
+        {
+          "checkId": "dashboard.supervisor",
+          "statuses": ["pass"],
+          "maxAgeMs": 180000
+        }
+      ],
+      "verificationChecks": ["dashboard.supervisor"],
+      "settleTimeoutMs": 45000,
+      "cooldownMs": 600000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "local-operations"
     },
     {
       "id": "rebuild-sidecar-runtime",
@@ -493,7 +550,29 @@
       "executor": "sidecar-runtime-rebuild",
       "command": "npm run dev:sidecar:rebuild && npm run dev:restart -- --detach",
       "automatic": true,
-      "loopbackOnly": true
+      "loopbackOnly": true,
+      "controllerExecutor": "loopback-readiness-api",
+      "authority": "automatic",
+      "triggeringErrorCodes": [
+        "RUNTIME_PROVENANCE_MISSING",
+        "RUNTIME_PROVENANCE_UNAVAILABLE"
+      ],
+      "scope": "sidecar-runtime",
+      "riskClass": "low",
+      "prerequisites": [
+        {
+          "checkId": "dashboard.supervisor",
+          "statuses": ["pass"],
+          "maxAgeMs": 180000
+        }
+      ],
+      "verificationChecks": ["ibkr.sidecar", "ibkr.runtime"],
+      "settleTimeoutMs": 120000,
+      "cooldownMs": 900000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "local-operations"
     },
     {
       "id": "retry-gmail-poll",
@@ -502,7 +581,35 @@
       "executor": "gmail-poll-retry",
       "command": "Retry the configured Gmail incremental poll",
       "automatic": true,
-      "loopbackOnly": true
+      "loopbackOnly": true,
+      "controllerExecutor": "loopback-readiness-api",
+      "authority": "automatic",
+      "triggeringErrorCodes": [
+        "GMAIL_PROVIDER_UNAVAILABLE",
+        "GMAIL_RATE_LIMITED",
+        "GMAIL_TRANSIENT_ERROR"
+      ],
+      "scope": "gmail-incremental-poll",
+      "riskClass": "low",
+      "prerequisites": [
+        {
+          "checkId": "gmail.ingestion",
+          "statuses": ["warn", "fail"],
+          "maxAgeMs": 1200000,
+          "provenanceEquals": {
+            "heartbeatSource": "aws-lambda",
+            "triggerSource": "aws-scheduler",
+            "scheduleId": "market-dashboard-gmail-v2-every-15m"
+          }
+        }
+      ],
+      "verificationChecks": ["gmail.ingestion"],
+      "settleTimeoutMs": 120000,
+      "cooldownMs": 900000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "automation-operations"
     },
     {
       "id": "rebuild-research-projections",
@@ -511,7 +618,30 @@
       "executor": "research-projections-rebuild",
       "command": "npm run rebuild:rta -- --apply --window-days=90 --json",
       "automatic": true,
-      "loopbackOnly": true
+      "loopbackOnly": true,
+      "controllerExecutor": "loopback-readiness-api",
+      "authority": "automatic",
+      "triggeringErrorCodes": [
+        "RTA_AUTHORITATIVE_REVALIDATION_FAILED",
+        "RTA_PROJECTION_UNAVAILABLE",
+        "RTA_RESPONSE_CACHE_STALE"
+      ],
+      "scope": "research-projections",
+      "riskClass": "low",
+      "prerequisites": [
+        {
+          "checkId": "gmail.ingestion",
+          "statuses": ["pass"],
+          "maxAgeMs": 1200000
+        }
+      ],
+      "verificationChecks": ["research.rta"],
+      "settleTimeoutMs": 5000,
+      "cooldownMs": 600000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "research-operations"
     },
     {
       "id": "reconcile-prediction-catalog",
@@ -520,7 +650,77 @@
       "executor": "prediction-catalog-reconcile",
       "command": "Reconcile the server-owned current CPI release",
       "automatic": true,
-      "loopbackOnly": true
+      "loopbackOnly": true,
+      "controllerExecutor": "loopback-readiness-api",
+      "authority": "automatic",
+      "triggeringCheckIds": [
+        "prediction.ibkrExecution"
+      ],
+      "triggeringErrorCodes": [
+        "CATALOG_NOT_PROMOTED",
+        "NO_CURRENT_EXECUTABLE_IBKR_CONTRACT"
+      ],
+      "scope": "prediction-catalog",
+      "riskClass": "low",
+      "prerequisites": [
+        {
+          "checkId": "ibkr.sidecar",
+          "statuses": ["pass"],
+          "maxAgeMs": 300000
+        },
+        {
+          "checkId": "ibkr.gateway",
+          "statuses": ["pass"],
+          "maxAgeMs": 300000
+        },
+        {
+          "checkId": "prediction.display",
+          "statuses": ["pass", "fail"],
+          "allowedErrorCodes": [
+            null,
+            "CATALOG_NOT_PROMOTED",
+            "NO_CURRENT_NATIVE_LIVE_QUOTE"
+          ],
+          "maxAgeMs": 180000
+        }
+      ],
+      "verificationChecks": [
+        "ibkr.sidecar",
+        "ibkr.gateway",
+        "prediction.display",
+        "prediction.ibkrExecution"
+      ],
+      "settleTimeoutMs": 15000,
+      "cooldownMs": 600000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "research-operations"
+    },
+    {
+      "id": "prune-dashboard-logs",
+      "label": "Prune dashboard-owned rotated logs",
+      "description": "Removes only rotation generations older than the two retained copies beneath Library/Logs/market-dashboard. It never traverses directories or follows symlinks.",
+      "executor": "dashboard-log-prune",
+      "command": "Prune declared dashboard-owned rotated logs",
+      "automatic": true,
+      "loopbackOnly": true,
+      "controllerExecutor": "dashboard-log-prune",
+      "authority": "automatic",
+      "triggeringErrorCodes": [
+        "HOST_DISK_CAPACITY_CRITICAL",
+        "HOST_DISK_CAPACITY_LOW"
+      ],
+      "scope": "dashboard-logs",
+      "riskClass": "low",
+      "prerequisites": [],
+      "verificationChecks": ["host.capacity"],
+      "settleTimeoutMs": 0,
+      "cooldownMs": 900000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "local-operations"
     }
   ]
 }

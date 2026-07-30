@@ -13,6 +13,23 @@ jest.mock('../../../services/api/marketDataService', () => ({
   },
 }));
 
+const getLedgerRowBySymbol = (symbol) => {
+  const row = screen
+    .getAllByRole('row')
+    .find((candidate) => (
+      candidate.classList.contains('pcv2-ledger-row')
+      && within(candidate).queryByText(symbol)
+    ));
+  if (!row) {
+    throw new Error(`Ledger row for ${symbol} not found`);
+  }
+  return row;
+};
+
+const getLedgerTables = () => screen
+  .getAllByRole('table')
+  .filter((table) => table.classList.contains('pcv2-ledger-table'));
+
 const marketDate = () => {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -77,6 +94,40 @@ const portfolioData = {
     },
   ],
   accountSummary: { netLiquidation: 100000 },
+};
+
+const liveSizingPortfolio = (overrides = {}) => {
+  const observedAt = new Date().toISOString();
+  const baseHolding = {
+    ...portfolioData.holdings[0],
+    positionSource: 'ibkr_live_session',
+    priceSource: 'ibkr_live_last',
+    priceState: 'live',
+    marketValueState: 'live',
+    priceObservedAt: observedAt,
+    markPending: false,
+    markFailure: null,
+  };
+  return {
+    ...portfolioData,
+    dataSource: 'ibkr_api',
+    fromCache: false,
+    liveSessionVerified: true,
+    fetchedAt: observedAt,
+    socketVerifiedAt: observedAt,
+    dataQuality: {
+      status: 'ok',
+      markState: 'live',
+    },
+    accountSummary: {
+      netLiquidation: 100000,
+      source: 'ibkr_live_session',
+      lastUpdated: observedAt,
+      socketVerifiedAt: observedAt,
+    },
+    holdings: [baseHolding],
+    ...overrides,
+  };
 };
 
 const currentEnvelope = () => {
@@ -274,6 +325,21 @@ beforeEach(() => {
           value: 1.25,
           asOf: marketDate(),
         },
+        realizedVolatility: {
+          status: 'available',
+          rv63: 0.18,
+          rv252: 0.15,
+          rv3y: 0.16,
+          rv5y: 0.17,
+          rv10y: 0.19,
+          sizingVol: 0.18,
+          annualizationFactor: 252,
+          observationCount: 500,
+          limitedHistory: false,
+          spikeWarning: false,
+          asOf: marketDate(),
+          warnings: [],
+        },
       },
       NEM: {
         symbol: 'NEM',
@@ -282,6 +348,18 @@ beforeEach(() => {
         beta: { status: 'unavailable', value: null },
         atr14: { status: 'unavailable', value: null },
         zScore20: { status: 'unavailable', value: null },
+        realizedVolatility: {
+          status: 'unavailable',
+          rv63: null,
+          rv252: null,
+          sizingVol: null,
+          annualizationFactor: null,
+          observationCount: 0,
+          limitedHistory: true,
+          spikeWarning: false,
+          asOf: null,
+          warnings: ['Insufficient price history for a volatility estimate (need at least 63 returns).'],
+        },
       },
     },
   });
@@ -307,6 +385,280 @@ beforeEach(() => {
       GOLD: { high: 0.5, low: -0.8, percentPositive: 20, percentNegative: 80 },
     },
   });
+});
+
+/* Removed with the Volatility Position Sizing workspace.
+test('keeps volatility sizing null for a completed-session reference mark', async () => {
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    dataSource: 'ibkr_api',
+    fromCache: false,
+    liveSessionVerified: true,
+    accountSummary: {
+      netLiquidation: 100000,
+      source: 'ibkr_live_session',
+    },
+    holdings: [{
+      ...portfolioData.holdings[0],
+      priceState: 'historical_close',
+      marketValueState: 'historical_close',
+      priceSource: 'ibkr_historical_daily_close',
+    }],
+  }} />);
+
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  const table = screen.getByRole('table', {
+    name: 'Volatility position sizing suggestions',
+  });
+  const row = within(table).getByRole('button', { name: 'GLD' }).closest('tr');
+  const cells = within(row).getAllByRole('cell');
+
+  expect(cells[7]).toHaveTextContent('—');
+  expect(cells[8]).toHaveTextContent('—');
+  expect(cells[9]).toHaveTextContent('—');
+  expect(cells[10]).toHaveTextContent('—');
+  expect(cells[11]).toHaveTextContent('Unverified mark');
+});
+
+test('disables volatility sizing controls when live portfolio provenance is cached', async () => {
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    dataSource: 'ibkr_api',
+    fromCache: true,
+    liveSessionVerified: true,
+    accountSummary: {
+      netLiquidation: 100000,
+      source: 'ibkr_live_session',
+    },
+    holdings: [{
+      ...portfolioData.holdings[0],
+      priceState: 'live',
+      marketValueState: 'live',
+    }],
+  }} />);
+
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  [
+    'Portfolio value',
+    'Total allocation %',
+    'Risk budget % / name',
+    'Max weight %',
+    'Max $ notional',
+    'Mode',
+    'Include 63d',
+    'Asset type',
+  ].forEach((label) => {
+    expect(screen.getByLabelText(label)).toBeDisabled();
+  });
+
+  const table = screen.getByRole('table', {
+    name: 'Volatility position sizing suggestions',
+  });
+  const row = within(table).getByRole('button', { name: 'GLD' }).closest('tr');
+  const cells = within(row).getAllByRole('cell');
+  expect(cells[7]).toHaveTextContent('—');
+  expect(cells[8]).toHaveTextContent('—');
+});
+
+test('enables volatility sizing only for a fully fresh live IBKR universe', async () => {
+  render(<PortfolioBreakdown portfolioData={liveSizingPortfolio()} />);
+
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  expect(screen.getByLabelText('Portfolio value')).toBeEnabled();
+  expect(screen.getByLabelText('Mode')).toBeEnabled();
+
+  const table = screen.getByRole('table', {
+    name: 'Volatility position sizing suggestions',
+  });
+  const row = within(table).getByRole('button', { name: 'GLD' }).closest('tr');
+  const cells = within(row).getAllByRole('cell');
+  await waitFor(() => expect(cells[7]).toHaveTextContent('50.00%'));
+  expect(cells[8]).toHaveTextContent('$50,000');
+  expect(cells[9]).toHaveTextContent('$10,000');
+});
+
+test('fails the whole sizing universe closed for mixed duplicate-symbol provenance', async () => {
+  const live = liveSizingPortfolio();
+  render(<PortfolioBreakdown portfolioData={{
+    ...live,
+    holdings: [
+      live.holdings[0],
+      {
+        ...live.holdings[0],
+        accountId: 'U2',
+        marketValue: 5000,
+        priceState: 'historical_close',
+        marketValueState: 'historical_close',
+        priceSource: 'ibkr_historical_daily_close',
+      },
+    ],
+  }} />);
+
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  expect(screen.getByLabelText('Portfolio value')).toBeDisabled();
+  const table = screen.getByRole('table', {
+    name: 'Volatility position sizing suggestions',
+  });
+  expect(within(table).getAllByRole('button', { name: 'GLD' })).toHaveLength(1);
+  const row = within(table).getByRole('button', { name: 'GLD' }).closest('tr');
+  const cells = within(row).getAllByRole('cell');
+  expect(cells[7]).toHaveTextContent('—');
+  expect(cells[8]).toHaveTextContent('—');
+  expect(cells[11]).toHaveTextContent('Unverified mark');
+});
+
+test.each([
+  ['stale portfolio socket', (data) => ({
+    ...data,
+    socketVerifiedAt: new Date(Date.now() - (6 * 60 * 1000)).toISOString(),
+  })],
+  ['stale live mark', (data) => ({
+    ...data,
+    holdings: [{
+      ...data.holdings[0],
+      priceObservedAt: new Date(Date.now() - 61_000).toISOString(),
+    }],
+  })],
+  ['wrong live price source', (data) => ({
+    ...data,
+    holdings: [{
+      ...data.holdings[0],
+      priceSource: 'portfolio_derived',
+    }],
+  })],
+  ['pending mark', (data) => ({
+    ...data,
+    holdings: [{
+      ...data.holdings[0],
+      markPending: true,
+    }],
+  })],
+  ['failed mark', (data) => ({
+    ...data,
+    holdings: [{
+      ...data.holdings[0],
+      markFailure: { errorCode: 'REFERENCE_MARK_INVALID' },
+    }],
+  })],
+])('keeps sizing unavailable for %s', async (_label, mutate) => {
+  render(<PortfolioBreakdown portfolioData={mutate(liveSizingPortfolio())} />);
+
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  expect(screen.getByLabelText('Portfolio value')).toBeDisabled();
+  const table = screen.getByRole('table', {
+    name: 'Volatility position sizing suggestions',
+  });
+  const row = within(table).getByRole('button', { name: 'GLD' }).closest('tr');
+  const cells = within(row).getAllByRole('cell');
+  expect(cells[7]).toHaveTextContent('—');
+  expect(cells[8]).toHaveTextContent('—');
+});
+
+test('retains a manual value but disables it when live NAV becomes unavailable', async () => {
+  const live = liveSizingPortfolio();
+  const view = render(<PortfolioBreakdown portfolioData={live} />);
+
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  const portfolioValue = screen.getByLabelText('Portfolio value');
+  await waitFor(() => expect(portfolioValue).toHaveValue(100000));
+  fireEvent.change(portfolioValue, { target: { value: '250000' } });
+  expect(portfolioValue).toHaveValue(250000);
+
+  view.rerender(<PortfolioBreakdown portfolioData={{ ...live, fromCache: true }} />);
+
+  expect(screen.getByLabelText('Portfolio value')).toBeDisabled();
+  expect(screen.getByLabelText('Portfolio value')).toHaveValue(250000);
+  const table = screen.getByRole('table', {
+    name: 'Volatility position sizing suggestions',
+  });
+  const row = within(table).getByRole('button', { name: 'GLD' }).closest('tr');
+  expect(within(row).getAllByRole('cell')[8]).toHaveTextContent('—');
+});
+
+test('expires sizing locally when a live mark ages out without a portfolio refresh', async () => {
+  const live = liveSizingPortfolio();
+  render(<PortfolioBreakdown portfolioData={{
+    ...live,
+    holdings: [{
+      ...live.holdings[0],
+      priceObservedAt: new Date(Date.now() - 59_500).toISOString(),
+    }],
+  }} />);
+
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  expect(screen.getByLabelText('Portfolio value')).toBeEnabled();
+  await waitFor(
+    () => expect(screen.getByLabelText('Portfolio value')).toBeDisabled(),
+    { timeout: 1_500 },
+  );
+
+  const table = screen.getByRole('table', {
+    name: 'Volatility position sizing suggestions',
+  });
+  const row = within(table).getByRole('button', { name: 'GLD' }).closest('tr');
+  expect(within(row).getAllByRole('cell')[8]).toHaveTextContent('—');
+});
+
+*/
+
+test('does not render the removed volatility position sizing workspace', () => {
+  render(<PortfolioBreakdown portfolioData={portfolioData} />);
+
+  expect(screen.queryByLabelText('Volatility position sizing')).not.toBeInTheDocument();
+  expect(screen.queryByRole('table', { name: 'Volatility position sizing suggestions' })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Factor exposure balance')).toHaveTextContent(
+    'Factor exposure unavailable — verified IBKR live NAV and marks are required.',
+  );
+});
+
+test('shows a verified factor balance and filters both books from a selected factor', () => {
+  const live = liveSizingPortfolio();
+  render(<PortfolioBreakdown portfolioData={{
+    ...live,
+    holdings: [
+      { ...live.holdings[0], symbol: 'QQQ', marketValue: 9000, quantity: 20 },
+      { ...live.holdings[0], symbol: 'QQQ', accountId: 'U2', marketValue: -3000, quantity: -6 },
+      { ...live.holdings[0], symbol: 'GLD', accountId: 'U3', marketValue: 1000, quantity: 5 },
+    ],
+  }} />);
+
+  const panel = screen.getByLabelText('Factor exposure balance');
+  expect(within(panel).getByRole('tab', { name: 'Equity Style' })).toHaveAttribute('aria-selected', 'true');
+  expect(within(panel).getByRole('button', { name: /Filter by High Beta/ }))
+    .toHaveAttribute('aria-pressed', 'false');
+  expect(within(panel).getByText(/Reviewed classification:/)).toHaveTextContent(
+    'Reviewed classification: 13.0% gross NAV',
+  );
+
+  fireEvent.click(within(panel).getByRole('button', { name: /Filter by High Beta/ }));
+  expect(screen.queryByText('GLD')).not.toBeInTheDocument();
+  expect(screen.getAllByText('QQQ')).toHaveLength(2);
+  expect(within(panel).getByRole('button', { name: 'Clear factor filter' })).toBeInTheDocument();
+
+  fireEvent.click(within(panel).getByRole('button', { name: 'Clear factor filter' }));
+  expect(screen.getByText('GLD')).toBeInTheDocument();
+  fireEvent.click(within(panel).getByRole('tab', { name: 'Asset Class' }));
+  expect(within(panel).getByRole('tab', { name: 'Asset Class' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('clears factor exposure values when the live portfolio snapshot becomes cached', () => {
+  const baseLive = liveSizingPortfolio();
+  const live = {
+    ...baseLive,
+    holdings: [{
+      ...baseLive.holdings[0],
+      symbol: 'QQQ',
+      marketValue: 9000,
+      quantity: 20,
+    }],
+  };
+  const view = render(<PortfolioBreakdown portfolioData={live} />);
+  const panel = screen.getByLabelText('Factor exposure balance');
+  expect(within(panel).getByRole('button', { name: /Filter by High Beta/ })).toBeInTheDocument();
+
+  view.rerender(<PortfolioBreakdown portfolioData={{ ...live, fromCache: true }} />);
+  expect(within(panel).getByText(/Factor exposure unavailable/)).toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: /Filter by High Beta/ })).not.toBeInTheDocument();
 });
 
 test('does not refetch bulk intelligence when only portfolio snapshot timestamps change', async () => {
@@ -354,7 +706,15 @@ test('does not refetch bulk intelligence when only portfolio snapshot timestamps
     symbols: ['GLD', 'NEM'],
     historyDays: 5,
   }));
-  expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledWith(['GLD', 'NEM']);
+  expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledWith(
+    ['GLD', 'NEM'],
+    {
+      assetTypes: {
+        GLD: 'equity',
+        NEM: 'equity',
+      },
+    },
+  );
 });
 
 test('keeps Longs and Shorts as sibling panes in the split ledger', async () => {
@@ -369,6 +729,18 @@ test('keeps Longs and Shorts as sibling panes in the split ledger', async () => 
   expect(splitLedger.children[1]).toHaveClass('pcv2-ledger-pane', 'pcv2-ledger-pane--short');
   expect(within(splitLedger.children[0]).getByText('Longs')).toBeInTheDocument();
   expect(within(splitLedger.children[1]).getByText('Shorts')).toBeInTheDocument();
+});
+
+test('keeps the portfolio ledger mounted during initial live-data loading', () => {
+  render(
+    <PortfolioBreakdown portfolioData={null} isLoading />
+  );
+
+  expect(screen.queryByText('Loading portfolio data...')).not.toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Connecting to live portfolio');
+  expect(screen.getByText('Longs')).toBeInTheDocument();
+  expect(screen.getByText('Shorts')).toBeInTheDocument();
+  expect(getLedgerTables()).toHaveLength(2);
 });
 
 test('fits every compact ledger column in both Longs and Shorts panes', async () => {
@@ -389,11 +761,11 @@ test('fits every compact ledger column in both Longs and Shorts panes', async ()
 
   const expectedVisibleHeaders = [
     'Ticker',
-    'AC',
+    'Asset / Class',
     'Weight / % NAV',
+    'Size',
     'Target / % NAV',
     'Factors',
-    'Factor / Ctrb',
     'Resize / Sh',
     'Price',
     'Day G/L / %',
@@ -403,9 +775,9 @@ test('fits every compact ledger column in both Longs and Shorts panes', async ()
     'Ticker',
     'Asset class',
     'Weight % (NAV)',
+    'Position size',
     'Target % (NAV)',
     'Factor exposures',
-    'Factor contribution',
     'Resize (Shares)',
     'Price',
     'Day G/L (%)',
@@ -447,7 +819,15 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
     symbols: ['GLD', 'NEM'],
     historyDays: 5,
   }));
-  expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledWith(['GLD', 'NEM']);
+  expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledWith(
+    ['GLD', 'NEM'],
+    {
+      assetTypes: {
+        GLD: 'equity',
+        NEM: 'equity',
+      },
+    },
+  );
   expect(MarketDataService.getVolatilitySnapshot).toHaveBeenCalledTimes(1);
   expect(MarketDataService.getUsdCorrelations).toHaveBeenCalledTimes(1);
   expect(MarketDataService.getSecurityIntelligence.mock.calls[0][0]).not.toHaveProperty('date');
@@ -455,18 +835,18 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(screen.queryByText('Portfolio Construction')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
   expect(screen.getAllByRole('columnheader', { name: 'Factor exposures' }).length).toBeGreaterThan(0);
-  const ledgerColumns = screen.getAllByRole('table')[0].querySelectorAll('col');
+  const ledgerColumns = getLedgerTables()[0].querySelectorAll('col');
   expect([...ledgerColumns].map((column) => column.style.width)).toEqual([
     '17%',
     '7%',
-    '10%',
-    '10%',
-    '10%',
     '9%',
+    '11%',
+    '10%',
+    '10%',
     '8%',
     '10%',
     '10%',
-    '9%',
+    '8%',
   ]);
 
   fireEvent.click(screen.getByRole('button', { name: 'Refresh portfolio and research' }));
@@ -482,18 +862,38 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(toggles).toHaveLength(2);
   expect(toggles[0]).not.toHaveAttribute('aria-controls', toggles[1].getAttribute('aria-controls'));
 
+  const firstExpandedRow = toggles[0].closest('.pcv2-ledger-row');
+  const firstPane = firstExpandedRow.closest('.pcv2-ledger-pane-scroll');
+  const firstLedgerHead = firstPane.querySelector('thead');
+  const firstBottomSpacer = firstPane.querySelector('.pcv2-ledger-bottom-spacer');
+  Object.defineProperty(firstPane, 'scrollHeight', { configurable: true, value: 360 });
+  Object.defineProperty(firstPane, 'clientHeight', { configurable: true, value: 300 });
+  firstPane.scrollTop = 40;
+  firstPane.getBoundingClientRect = jest.fn(() => ({ top: 100 }));
+  firstLedgerHead.getBoundingClientRect = jest.fn(() => ({ height: 28 }));
+  firstExpandedRow.getBoundingClientRect = jest.fn(() => ({ top: 300 }));
+
   fireEvent.click(toggles[0]);
   expect(toggles[0]).toHaveAttribute('aria-expanded', 'true');
   expect(toggles[1]).toHaveAttribute('aria-expanded', 'false');
+  expect(firstPane.scrollTop).toBe(212);
+  expect(firstBottomSpacer).toHaveStyle({ height: '152px' });
 
   const firstPanel = screen.getByLabelText('Research intelligence for GLD');
+  expect(firstExpandedRow).toHaveClass('is-expanded');
+  firstPane.scrollTop = 260;
+  fireEvent.scroll(firstPane);
+  expect(firstPane.scrollTop).toBe(260);
+
   await waitFor(() => expect(within(firstPanel).getByText('BUY')).toBeInTheDocument());
   expect(within(firstPanel).getByText('BULLISH')).toBeInTheDocument();
   expect(within(firstPanel).getByText('2,900–3,010')).toBeInTheDocument();
   expect(within(firstPanel).getByText('ADDED')).toBeInTheDocument();
   expect(within(firstPanel).getByText('+3 · ATH')).toBeInTheDocument();
   expect(within(firstPanel).getByText('0.42')).toBeInTheDocument();
-  await waitFor(() => expect(within(firstPanel).getByText('4.0–12.0%')).toBeInTheDocument());
+  await waitFor(() => expect(within(firstExpandedRow).getByRole('button', {
+    name: 'Verify GLD position size calculation',
+  })).toHaveTextContent('4.0–12.0%'));
   expect(within(firstPanel).getByText('+1.25')).toBeInTheDocument();
   expect(within(firstPanel).getByText('GVZ 18.25')).toBeInTheDocument();
   expect(within(firstPanel).getByText('-0.72')).toBeInTheDocument();
@@ -534,7 +934,7 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
     'Trade',
     'Trend',
     'Beta',
-    'Size',
+    'Factor Ctrb',
     'Quad +EV',
   ]);
   expect([...primaryDecisionHeaders.children]).toHaveLength(5);
@@ -547,6 +947,10 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   [...primaryDecisionValues.children].forEach((cell) => (
     expect(cell).toHaveClass('pcv2-intel-span-4')
   ));
+  expect(within(primaryDecisionValues).getByText('+10.0%')).toBeInTheDocument();
+  expect(within(primaryDecisionValues).getByLabelText(
+    '+10.0% · Gold · signed % NAV · Current signed position contribution across the displayed +EV exposures.'
+  )).toBeInTheDocument();
 
   const secondaryDecisionHeaders = within(firstPanel)
     .getByLabelText('Decision intelligence secondary headers');
@@ -572,7 +976,7 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   const contextHeaders = within(firstPanel).getByLabelText('Market context headers');
   expect(within(contextHeaders).getAllByText(/.+/).map((node) => node.textContent)).toEqual([
     'Price Z-score · 20D',
-    'Implied vol',
+    'Sizing vol',
     'Relevant vol index',
     'USD correlation',
     'Stop loss',
@@ -590,10 +994,31 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   fireEvent.click(within(firstPanel).getByText(/Previous 5 market days/));
   expect(historicalNote).toBeVisible();
 
+  const secondExpandedRow = toggles[1].closest('.pcv2-ledger-row');
+  const secondPane = secondExpandedRow.closest('.pcv2-ledger-pane-scroll');
+  const secondLedgerHead = secondPane.querySelector('thead');
+  const secondBottomSpacer = secondPane.querySelector('.pcv2-ledger-bottom-spacer');
+  Object.defineProperty(secondPane, 'scrollHeight', { configurable: true, value: 500 });
+  Object.defineProperty(secondPane, 'clientHeight', { configurable: true, value: 300 });
+  secondPane.scrollTop = 75;
+  secondPane.getBoundingClientRect = jest.fn(() => ({ top: 100 }));
+  secondLedgerHead.getBoundingClientRect = jest.fn(() => ({ height: 28 }));
+  secondExpandedRow.getBoundingClientRect = jest.fn(() => ({ top: 340 }));
+
   fireEvent.click(toggles[1]);
   expect(screen.getAllByLabelText('Research intelligence for GLD')).toHaveLength(2);
+  expect(secondPane.scrollTop).toBe(287);
+  expect(secondBottomSpacer).toHaveStyle({ height: '87px' });
+
+  const scrollTopBeforeCollapse = firstPane.scrollTop;
   fireEvent.click(screen.getAllByRole('button', { name: 'Hide research intelligence for GLD' })[0]);
   expect(screen.getAllByLabelText('Research intelligence for GLD')).toHaveLength(1);
+  expect(firstPane.scrollTop).toBe(scrollTopBeforeCollapse);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Hide research intelligence for GLD' }));
+  expect(screen.queryByLabelText('Research intelligence for GLD')).not.toBeInTheDocument();
+  expect(secondBottomSpacer).toHaveStyle({ height: '0px' });
+  expect(firstPane.scrollTop).toBe(scrollTopBeforeCollapse);
 });
 
 test('uses N/A only for an indexed Call or Macro product with zero matching references', async () => {
@@ -674,16 +1099,15 @@ test('shows the canonical beta-derived position-size band and calculation', asyn
     holdings: [portfolioData.holdings[0]],
   }} />);
   await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
-  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
-
-  const panel = screen.getByLabelText('Research intelligence for GLD');
-  const sizeButton = await within(panel).findByRole('button', {
+  const sizeButton = await screen.findByRole('button', {
     name: 'Verify GLD position size calculation',
   });
   await waitFor(() => expect(sizeButton).toHaveTextContent('1.5–3.5%'));
-  const sizeCell = sizeButton.closest('.pcv2-intel-cell');
-  expect(sizeCell).toHaveClass('is-reference');
-  expectCellProvenance(sizeCell, /Beta band · 252D vs SPY · .* · reference only/);
+  expect(sizeButton.closest('.pcv2-ledger-size-reference')).toBeInTheDocument();
+  expect(sizeButton).toHaveAttribute(
+    'title',
+    'Historical beta position-size reference band; not a target or executable sizing instruction.',
+  );
 
   fireEvent.click(sizeButton);
   const sizeDialog = screen.getByRole('dialog', { name: 'Position size calculation' });
@@ -734,11 +1158,11 @@ test('does not calculate Size from insufficient beta provenance', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
 
   const panel = screen.getByLabelText('Research intelligence for GLD');
-  const sizeButton = await within(panel).findByRole('button', {
+  const sizeButton = await screen.findByRole('button', {
     name: 'Verify GLD position size calculation',
   });
   await waitFor(() => expect(sizeButton).toHaveTextContent('—'));
-  expect(sizeButton.closest('.pcv2-intel-cell')).toHaveAttribute(
+  expect(sizeButton).toHaveAttribute(
     'title',
     'A size reference requires verified completed-session beta provenance.',
   );
@@ -996,7 +1420,7 @@ test('does not promote stale or unauthorized products into current decision fiel
   expect(screen.queryByText('SHOULD_NOT_RENDER')).not.toBeInTheDocument();
   expect(screen.queryByText('STALE_TREND')).not.toBeInTheDocument();
   expect(screen.queryByText('1 – 2')).not.toBeInTheDocument();
-  expect(screen.getAllByText('Unavailable').length).toBeGreaterThanOrEqual(3);
+  expect(screen.getAllByText('Unavailable').length).toBeGreaterThanOrEqual(2);
   const coverageCell = screen.getByText('PARTIAL').closest('.pcv2-intel-cell');
   expectCellProvenance(coverageCell, /Risk Ranges missing/);
   expect(screen.queryByText('Risk Ranges missing')).not.toBeInTheDocument();
@@ -1077,7 +1501,7 @@ test('shows completed IBKR closes as reference values without enabling sizing or
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
   expect(screen.queryByText('IBKR reference closes in use for GLD')).not.toBeInTheDocument();
 
-  const row = screen.getByRole('row', { name: /GLD/ });
+  const row = getLedgerRowBySymbol('GLD');
   expect(within(row).getByText('10.00%')).toBeInTheDocument();
   expect(within(row).getByRole('cell', {
     name: 'Prior close $200.00 from 2026-07-24',
@@ -1122,7 +1546,7 @@ test('shows a verified IBKR live last and signed Day G/L percentage', async () =
   }} />);
 
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
-  const row = screen.getByRole('row', { name: /GLD/ });
+  const row = getLedgerRowBySymbol('GLD');
   expect(within(row).getByRole('cell', {
     name: 'Live price $201.50',
   })).toHaveTextContent('$201.50');
@@ -1149,7 +1573,7 @@ test('does not expose portfolio-derived or unverified values as price or Day G/L
   }} />);
 
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
-  const row = screen.getByRole('row', { name: /GLD/ });
+  const row = getLedgerRowBySymbol('GLD');
   expect(within(row).getByRole('cell', { name: 'Price unavailable' })).toHaveTextContent('—');
   expect(within(row).getByRole('cell', {
     name: 'Day gain/loss percentage unavailable',
@@ -1173,7 +1597,7 @@ test('reserves the red warning state for unavailable or invalid marks', async ()
   }} />);
 
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
-  const row = screen.getByRole('row', { name: /GLD/ });
+  const row = getLedgerRowBySymbol('GLD');
   const errorIcon = within(row).getByLabelText('Bad data warning');
   expect(errorIcon).toHaveClass('pcv2-warning-icon--error');
   expect(errorIcon).not.toHaveClass('pcv2-warning-icon--reference');
@@ -1200,7 +1624,7 @@ test('lets a hard mark failure override an otherwise valid reference-close warni
   }} />);
 
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
-  const row = screen.getByRole('row', { name: /GLD/ });
+  const row = getLedgerRowBySymbol('GLD');
   const errorIcon = within(row).getByLabelText('Bad data warning');
   expect(errorIcon).toHaveClass('pcv2-warning-icon--error');
   expect(errorIcon).not.toHaveClass('pcv2-warning-icon--reference');
@@ -1223,7 +1647,7 @@ test('shows a warming-only market mark as yellow while keeping sizing unavailabl
   }} />);
 
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
-  const row = screen.getByRole('row', { name: /GLD/ });
+  const row = getLedgerRowBySymbol('GLD');
   const loadingIcon = within(row).getByLabelText('Market mark loading');
   expect(loadingIcon).toHaveClass('pcv2-warning-icon--reference');
   expect(loadingIcon).not.toHaveClass('pcv2-warning-icon--error');

@@ -376,12 +376,20 @@ const MarketPulseRibbon = ({
     movers: selectTopMovers(marketData, category, providerStatus),
   })), [marketData, providerStatus]);
 
+  const categoryCount = categories.length;
+
   return (
     <div className="efr-market-pulse" aria-label="Market pulse ribbon">
       <div className="efr-market-pulse__metrics">
-        {categories.map((category) => {
+        {categories.map((category, categoryIndex) => {
           const count = category.movers.length;
-          const activeIndex = count > 0 ? rotationIndex % count : 0;
+          // Stagger left → right: only one card advances per tick, so a full
+          // pass across the ribbon takes categoryCount × PULSE_ROTATION_MS.
+          const activeIndex = count > 0
+            ? Math.floor(
+              (rotationIndex + (categoryCount - 1 - categoryIndex)) / categoryCount,
+            ) % count
+            : 0;
           return (
             <PulseMetric
               activeIndex={activeIndex}

@@ -65,6 +65,14 @@ class FakeBroker:
     def isConnected(self):
         return self.connected
 
+    async def connectAsync(self, *args, **kwargs):
+        await asyncio.sleep(0)
+        self.connected = True
+        return self
+
+    def disconnect(self):
+        self.connected = False
+
     async def reqCurrentTimeAsync(self):
         self.current_time_requests += 1
         await asyncio.sleep(0)
@@ -79,6 +87,15 @@ class FakeBroker:
     async def reqPositionsAsync(self):
         await asyncio.sleep(0)
         return self._positions
+
+    async def reqAccountUpdatesAsync(self, account):
+        raise asyncio.TimeoutError
+
+    def portfolio(self, account):
+        return []
+
+    def reqAccountUpdates(self, subscribe, account=None):
+        return None
 
     async def reqHistoricalDataAsync(self, contract, **kwargs):
         con_id = int(contract.conId)
@@ -100,6 +117,13 @@ class FakeBroker:
             return result
         finally:
             self.active_history_requests -= 1
+
+
+class FreshOnlyBroker(FakeBroker):
+    def positions(self):
+        raise AssertionError(
+            "The verified live-position endpoint must not read ib_insync's positions cache."
+        )
 
 
 class FakeStreamManager:
@@ -127,6 +151,9 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.originals = {
             "ib": app.ib,
             "reference_marks_ib": app.reference_marks_ib,
+            "positions_ib": app.positions_ib,
+            "positions_snapshot_task": app.positions_snapshot_task,
+            "create_positions_snapshot_session": app.create_positions_snapshot_session,
             "stream_manager": app.stream_manager,
             "schedule_reference_marks_warm": app.schedule_reference_marks_warm,
             "persist_reference_close_cache": app.persist_reference_close_cache,
@@ -141,6 +168,7 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         app.reference_marks_requested_accounts.clear()
         app.reference_marks_worker_task = None
         app.reference_marks_active_account = None
+        app.positions_snapshot_task = None
         app.reset_primary_socket_heartbeat()
         app.REFERENCE_MARKS_REQUEST_GAP_SEC = 0
         app.REFERENCE_MARKS_RETRY_DELAY_SEC = 0
@@ -152,6 +180,10 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         if worker and not worker.done():
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
+        positions_task = app.positions_snapshot_task
+        if positions_task and not positions_task.done():
+            positions_task.cancel()
+            await asyncio.gather(positions_task, return_exceptions=True)
         for name, value in self.originals.items():
             if name == "history_gap":
                 app.REFERENCE_MARKS_REQUEST_GAP_SEC = value
@@ -171,14 +203,215 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         app.reference_marks_active_account = None
         app.reset_primary_socket_heartbeat()
 
-    def install_brokers(self, primary, reference=None):
+    def install_brokers(self, primary, reference=None, *, ephemeral=None):
+        app.positions_snapshot_task = None
         app.ib = primary
         app.reference_marks_ib = reference or primary
+        app.positions_ib = ephemeral if ephemeral is not None else primary
         app.stream_manager = FakeStreamManager(primary)
+        # Prefer a separate snapshot session when callers pass ephemeral=...
+        # Production uses dedicated positions_ib; tests usually share primary.
+        snapshot = ephemeral if ephemeral is not None else primary
+        if snapshot is primary:
+            snapshot = FakeBroker(
+                positions=list(getattr(primary, "_positions", []) or []),
+                accounts=list(getattr(primary, "_accounts", []) or ["U1"]),
+                gateway_time=getattr(primary, "_gateway_time", BROKER_TIME),
+            )
+            snapshot.reqAccountUpdatesAsync = primary.reqAccountUpdatesAsync
+            snapshot.reqPositionsAsync = primary.reqPositionsAsync
+            if hasattr(primary, "portfolio"):
+                snapshot.portfolio = primary.portfolio
+            if hasattr(primary, "cancelPositions"):
+                snapshot.cancelPositions = primary.cancelPositions
+            if hasattr(primary, "_portfolio"):
+                snapshot._portfolio = primary._portfolio
+        app.positions_ib = snapshot
+        app.create_positions_snapshot_session = lambda: snapshot
 
     async def endpoint_payload(self, account="U1", include_live=False):
         response = await app.portfolio_reference_marks(account, include_live)
         return response, json.loads(response.body)
+
+    async def test_live_positions_uses_fresh_request_provenance_not_cache(self):
+        primary = FreshOnlyBroker(
+            positions=[stock_position("U1", 101, "SPY", quantity=2)],
+            gateway_time=datetime.now(timezone.utc),
+        )
+        self.install_brokers(primary)
+
+        response = await app.portfolio_live_positions()
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["position_source"], "ibkr_req_positions")
+        self.assertFalse(payload["from_cache"])
+        self.assertEqual(payload["positions_observed_at"], payload["observed_at"])
+        self.assertEqual(payload["positions"][0]["symbol"], "SPY")
+        self.assertEqual(payload["positions"][0]["position"], 2.0)
+
+    async def test_live_positions_never_uses_account_updates_or_position_cache(self):
+        broker = FreshOnlyBroker(
+            positions=[stock_position("U1", 101, "SPY", quantity=2)],
+            gateway_time=datetime.now(timezone.utc),
+        )
+
+        async def reject_account_updates(_account):
+            raise AssertionError(
+                "Strict live positions must use an explicit reqPositions response."
+            )
+
+        broker.reqAccountUpdatesAsync = reject_account_updates
+        self.install_brokers(broker)
+
+        response = await app.portfolio_live_positions()
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["position_source"], "ibkr_req_positions")
+        self.assertEqual(payload["positions"][0]["symbol"], "SPY")
+        self.assertEqual(payload["positions"][0]["position"], 2.0)
+
+    async def test_live_positions_shares_only_an_in_flight_req_positions(self):
+        primary = FreshOnlyBroker(gateway_time=datetime.now(timezone.utc))
+        dedicated = FreshOnlyBroker(
+            positions=[stock_position("U1", 101, "SPY", quantity=2)],
+            gateway_time=datetime.now(timezone.utc),
+        )
+        request_started = asyncio.Event()
+        release_request = asyncio.Event()
+        calls = {"count": 0}
+
+        async def controlled_positions():
+            calls["count"] += 1
+            request_started.set()
+            await release_request.wait()
+            return dedicated._positions
+
+        dedicated.reqPositionsAsync = controlled_positions
+        self.install_brokers(primary, ephemeral=dedicated)
+
+        first_task = asyncio.create_task(app.portfolio_live_positions())
+        await request_started.wait()
+        second_task = asyncio.create_task(app.portfolio_live_positions())
+        await asyncio.sleep(0)
+        release_request.set()
+        first, second = await asyncio.gather(first_task, second_task)
+        first_payload = json.loads(first.body)
+        second_payload = json.loads(second.body)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(calls["count"], 1)
+        self.assertEqual(
+            first_payload["positions_observed_at"],
+            second_payload["positions_observed_at"],
+        )
+        self.assertFalse(first_payload["from_cache"])
+        self.assertFalse(second_payload["from_cache"])
+
+        third = await app.portfolio_live_positions()
+        self.assertEqual(third.status_code, 200)
+        self.assertEqual(calls["count"], 2)
+
+    async def test_live_positions_rejects_timeout_and_unmanaged_accounts(self):
+        timeout_broker = FreshOnlyBroker(gateway_time=datetime.now(timezone.utc))
+
+        async def timeout_positions():
+            raise asyncio.TimeoutError
+
+        timeout_broker.reqPositionsAsync = timeout_positions
+        self.install_brokers(timeout_broker)
+        timeout_response = await app.portfolio_live_positions()
+        timeout_payload = json.loads(timeout_response.body)
+        self.assertEqual(timeout_response.status_code, 503)
+        self.assertEqual(timeout_payload["status"], "positions_request_timeout")
+        self.assertEqual(timeout_payload["source"], "unavailable")
+
+        mismatched = FreshOnlyBroker(
+            accounts=["U1"],
+            positions=[stock_position("U2", 202, "TLT")],
+            gateway_time=datetime.now(timezone.utc),
+        )
+        self.install_brokers(mismatched)
+        mismatch_response = await app.portfolio_live_positions()
+        mismatch_payload = json.loads(mismatch_response.body)
+        self.assertEqual(mismatch_response.status_code, 503)
+        self.assertEqual(mismatch_payload["status"], "live_session_unverified")
+        self.assertEqual(mismatch_payload["positions"], [])
+        self.assertIn("outside the verified managed-account set", mismatch_payload["message"])
+
+    async def test_live_positions_releases_lock_when_positions_ignore_cancel(self):
+        hung_broker = FreshOnlyBroker(gateway_time=datetime.now(timezone.utc))
+        cancel_calls = {"count": 0}
+
+        async def hung_positions():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                # Simulate ib_insync ignoring cancellation long enough to wedge
+                # asyncio.wait_for, which previously pinned the snapshot lock.
+                await asyncio.sleep(30)
+                raise
+
+        def cancel_positions():
+            cancel_calls["count"] += 1
+
+        hung_broker.reqPositionsAsync = hung_positions
+        hung_broker.cancelPositions = cancel_positions
+        self.install_brokers(hung_broker)
+        original_timeout = app.LIVE_POSITIONS_REQUEST_TIMEOUT_SEC
+        original_grace = app.POSITIONS_CANCEL_GRACE_SEC
+        app.LIVE_POSITIONS_REQUEST_TIMEOUT_SEC = 0.05
+        app.POSITIONS_CANCEL_GRACE_SEC = 0.01
+        try:
+            first = await app.portfolio_live_positions()
+            first_payload = json.loads(first.body)
+            self.assertEqual(first.status_code, 503)
+            self.assertEqual(first_payload["status"], "positions_request_timeout")
+            self.assertGreaterEqual(cancel_calls["count"], 1)
+            self.assertFalse(app.positions_snapshot_lock.locked())
+
+            ready_broker = FreshOnlyBroker(
+                positions=[stock_position("U1", 101, "SPY", quantity=1)],
+                gateway_time=datetime.now(timezone.utc),
+            )
+            self.install_brokers(ready_broker)
+            second = await app.portfolio_live_positions()
+            second_payload = json.loads(second.body)
+            self.assertEqual(second.status_code, 200)
+            self.assertTrue(second_payload["ok"])
+            self.assertEqual(second_payload["positions"][0]["symbol"], "SPY")
+        finally:
+            app.LIVE_POSITIONS_REQUEST_TIMEOUT_SEC = original_timeout
+            app.POSITIONS_CANCEL_GRACE_SEC = original_grace
+
+    async def test_live_positions_rejects_connection_generation_change(self):
+        primary = FreshOnlyBroker(
+            positions=[stock_position("U1", 101, "SPY")],
+            gateway_time=datetime.now(timezone.utc),
+        )
+        dedicated = FreshOnlyBroker(
+            positions=[stock_position("U1", 101, "SPY")],
+            gateway_time=datetime.now(timezone.utc),
+        )
+        self.install_brokers(primary, ephemeral=dedicated)
+        original_request = dedicated.reqPositionsAsync
+
+        async def reconnecting_positions():
+            result = await original_request()
+            app.stream_manager.connection_generation += 1
+            return result
+
+        dedicated.reqPositionsAsync = reconnecting_positions
+        response = await app.portfolio_live_positions()
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["status"], "live_session_unverified")
+        self.assertEqual(payload["positions"], [])
+        self.assertIn("connection generation changed", payload["message"])
 
     async def test_endpoint_is_cache_first_and_does_not_wait_for_history(self):
         primary = FakeBroker(
@@ -358,10 +591,13 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         await app.warm_reference_marks_account("U1")
         cached = app.reference_close_cache["U1"][101]
         observed_at = cached["referenceCloseObservedAt"]
+        observed_time = datetime.fromisoformat(
+            observed_at.replace("Z", "+00:00")
+        )
         reused = app.cached_portfolio_reference_close(
             account="U1",
             position=position,
-            broker_time=BROKER_TIME + timedelta(hours=20),
+            broker_time=observed_time + timedelta(hours=20),
         )
 
         self.assertIsNotNone(reused)

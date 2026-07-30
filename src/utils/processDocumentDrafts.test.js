@@ -32,7 +32,7 @@ describe('process document drafts', () => {
 
   test('sanitizes pasted markup while preserving paper structure', () => {
     const html = sanitizeProcessDraftHtml(`
-      <div class="wp-equation" onclick="steal()">
+      <div id="position-sizing" class="wp-equation" onclick="steal()">
         <script>steal()</script>
         <p style="color:red">Keep <strong>this</strong>.</p>
         <a href="data:text/html,unsafe" target="_blank">Unsafe link</a>
@@ -41,6 +41,7 @@ describe('process document drafts', () => {
     `);
 
     expect(html).toContain('class="wp-equation"');
+    expect(html).toContain('id="position-sizing"');
     expect(html).toContain('<strong>this</strong>');
     expect(html).not.toContain('script');
     expect(html).not.toContain('onclick');

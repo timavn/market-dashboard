@@ -1,5 +1,6 @@
 const {
   classifyEtfProRows,
+  isAuthoritativeEtfProCheckpoint,
   resolveEtfProPayloadFromSources,
 } = require('./etfProResolver.cjs');
 
@@ -349,6 +350,63 @@ describe('ETF Pro resolver', () => {
     expect(payload.meta.appliedActionDates).toEqual(['2026-07-11']);
     expect([...classifyEtfProRows(payload.rows).longs].sort()).toEqual(['NEWL', 'RESETL']);
     expect([...classifyEtfProRows(payload.rows).shorts]).toEqual([]);
+  });
+
+  test('preserves manual checkpoint source kind and baseline provenance while applying later actions', () => {
+    const manualCheckpoint = {
+      ...activeBook('2026-07-20', ['SPY'], ['TLT']),
+      meta: {
+        snapshotDate: '2026-07-20',
+        parsedAt: '2026-07-20T16:00:00.000Z',
+        asOf: '2026-07-20T16:00:00.000Z',
+        capturedAt: '2026-07-20T16:00:00.000Z',
+        source: 'manual-official-etf-pro-board',
+        sourceKind: 'manual-official-full-book-checkpoint',
+        sourceArtifact: 'repository-artifact:data/hedgeye/etfpro/checkpoint.json',
+        sourceFile: 'repository-artifact:data/hedgeye/etfpro/checkpoint.json',
+        checkpointId: 'etf-pro-checkpoint-v1:abc123',
+        contentHash: 'a'.repeat(64),
+        provenance: { capturePrecision: 'exact', verifiedBy: 'user' },
+      },
+    };
+    const payload = resolveEtfProPayloadFromSources({
+      hermesPayloads: {
+        fullBooks: [manualCheckpoint],
+        actions: [actionBook('2026-07-21', {
+          addedLongs: ['QQQ'],
+          removedShorts: ['TLT'],
+        })],
+      },
+    });
+
+    expect(payload.meta).toMatchObject({
+      source: 'gmail-html-actions-applied-to-authoritative-checkpoint',
+      sourceKind: 'manual-official-full-book-checkpoint',
+      sourceArtifact: 'repository-artifact:data/hedgeye/etfpro/checkpoint.json',
+      checkpointId: 'etf-pro-checkpoint-v1:abc123',
+      contentHash: 'a'.repeat(64),
+      authoritativeCheckpoint: true,
+      baseSource: 'manual-official-etf-pro-board',
+      baseSourceKind: 'manual-official-full-book-checkpoint',
+      baseSourceArtifact: 'repository-artifact:data/hedgeye/etfpro/checkpoint.json',
+      baseCapturedAt: '2026-07-20T16:00:00.000Z',
+      baseContentHash: 'a'.repeat(64),
+      baseProvenance: { capturePrecision: 'exact', verifiedBy: 'user' },
+    });
+    expect([...classifyEtfProRows(payload.rows).longs].sort()).toEqual(['QQQ', 'SPY']);
+    expect([...classifyEtfProRows(payload.rows).shorts]).toEqual([]);
+  });
+
+  test('does not trust diagnostic source-provider declarations as checkpoint authority', () => {
+    expect(isAuthoritativeEtfProCheckpoint({
+      meta: {
+        source: 'research-event-ledger-v2-full-book',
+        sourceKind: 'gmail-html-full-book',
+        sourceProvider: 'manual-official-etf-pro-board',
+        sourceProviderKind: 'manual-official-full-book-checkpoint',
+        authoritativeCheckpoint: false,
+      },
+    })).toBe(false);
   });
 
   test('keeps a structurally valid book available through quiet days and weekends when polling is healthy', () => {

@@ -71,4 +71,5 @@ aws/lambda/*.png
 
 # Local live-data/runtime snapshots
 /data/hedgeye/rta/*.json
+/data/ibkr-flex/
 /src/services/predictionMarketsIngest/mock/.local-ingest-cache.json

@@ -7,6 +7,7 @@ import {
   getIbkrPortfolioStatusDot,
   getPortfolioOfflinePanel,
   getPortfolioSidebarBanner,
+  getIbkrPortfolioFreshness,
   isPortfolioSyncPending,
 } from '../../../utils/ibkrConnectionStatus';
 import {
@@ -29,6 +30,7 @@ import {
 } from '../../../utils/hedgeyeLatestUpdatesFeed';
 import { saveSelectedAccount, loadIbkrAccounts, saveIbkrAccounts } from '../../../constants/ibkrAccountStorage';
 import { formatIbkrAccountLabel, IBKR_ACCOUNT_LABELS } from '../../../constants/ibkrAccountLabels';
+import { isExplicitlySafeResearchComparison } from '../../../utils/researchComparisonContract';
 import portfolioFolderIcon from '../../../assets/portfolio-folder-icon.png';
 import './PortfolioSidebarSnapshot.css';
 
@@ -38,6 +40,7 @@ const FLEX_RECONCILIATION_TOLERANCE_PCT = 2.5;
 const CASH_GUARD_MAX_AGE_MS = 15 * 1000;
 const CASH_GUARD_REFERENCE_MAX_AGE_MS = 2 * 60 * 1000;
 const CASH_GUARD_FUTURE_TOLERANCE_MS = 5 * 1000;
+const INTEREST_VALIDATION_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
 const CASH_GUARD_PRIOR_CLOSE_SOURCES = new Set([
   'ibkr_live_tick_close',
   'ibkr_historical_daily_close',
@@ -105,6 +108,26 @@ function formatSignedNominal(value) {
   if (value > 0) return `+${abs}`;
   if (value < 0) return `-${abs}`;
   return abs;
+}
+
+function formatPortfolioRefreshAsOf(portfolioData) {
+  const candidates = [
+    portfolioData?.funding?.observedAt,
+    portfolioData?.socketVerifiedAt,
+    portfolioData?.dataQuality?.fetchedAt,
+    portfolioData?.accountSummary?.lastUpdated,
+  ];
+  for (const candidate of candidates) {
+    const timestamp = Date.parse(String(candidate || ''));
+    if (!Number.isFinite(timestamp)) continue;
+    return new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(timestamp));
+  }
+  const label = String(portfolioData?.lastUpdated || '').trim();
+  return label && label !== '—' ? label : 'time unavailable';
 }
 
 function ExposureBar({ label, pct, amount, currency = 'USD', netAmount = false, tooltip, scaleMin = -200, scaleMax = 200 }) {
@@ -243,14 +266,44 @@ function cashGuardReasonText(reason) {
   return messages[reason] || 'The live funding inputs are incomplete or inconsistent.';
 }
 
+function verifiedInterestValidationReserve(snapshot, now, selectedAccount) {
+  const requestedAccount = String(snapshot?.requestedAccount || '').trim();
+  const currentAccount = String(selectedAccount || '').trim();
+  if (
+    !snapshot
+    || snapshot.source !== 'ibkr_interest_validation'
+    || snapshot.accountMatched !== true
+    || !currentAccount
+    || requestedAccount !== currentAccount
+    || snapshot.guard?.available !== true
+    || snapshot.guard?.mode !== 'graduated'
+  ) {
+    return null;
+  }
+  const generatedAt = Date.parse(String(snapshot.generatedAt || ''));
+  const age = Number(now) - generatedAt;
+  const reserve = Number(snapshot.guard.appliedReserve);
+  if (
+    !Number.isFinite(generatedAt)
+    || age < -CASH_GUARD_FUTURE_TOLERANCE_MS
+    || age > INTEREST_VALIDATION_STATUS_MAX_AGE_MS
+    || !Number.isFinite(reserve)
+    || reserve < 0
+  ) {
+    return null;
+  }
+  return reserve;
+}
+
 function resolveCashDebitGuard({
   portfolioData,
   selectedAccount,
   connection,
+  interestValidation,
   refreshing,
   now,
 }) {
-  if (refreshing) {
+  if (refreshing && !portfolioData) {
     return {
       available: false,
       viewStatus: 'refreshing',
@@ -260,17 +313,7 @@ function resolveCashDebitGuard({
     };
   }
 
-  if (connection?.statusRefreshDelayed === true) {
-    return {
-      available: false,
-      viewStatus: 'unavailable',
-      reason: 'provider_status_delayed',
-      calculation: null,
-      funding: null,
-    };
-  }
-
-  if (connection?.connected !== true || portfolioData?.dataSource !== 'ibkr_api') {
+  if (portfolioData?.dataSource !== 'ibkr_api') {
     return {
       available: false,
       viewStatus: 'unavailable',
@@ -359,8 +402,18 @@ function resolveCashDebitGuard({
       };
     }
 
+    const interestValidationReserve = verifiedInterestValidationReserve(
+      interestValidation,
+      now,
+      selectedAccount,
+    );
     const referenceCalculation =
-      calculateIbkrCashBorrowingReference(fundingReference);
+      calculateIbkrCashBorrowingReference({
+        ...fundingReference,
+        ...(interestValidationReserve !== null
+          ? { interestValidationReserve }
+          : {}),
+      });
     if (
       referenceCalculation?.available !== true
       || referenceCalculation.referenceOnly !== true
@@ -384,6 +437,26 @@ function resolveCashDebitGuard({
       calculation: referenceCalculation,
       funding: null,
       referenceFunding: fundingReference,
+    };
+  }
+
+  if (connection?.connected !== true) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'portfolio_offline',
+      calculation: null,
+      funding: null,
+    };
+  }
+
+  if (connection?.statusRefreshDelayed === true) {
+    return {
+      available: false,
+      viewStatus: 'unavailable',
+      reason: 'provider_status_delayed',
+      calculation: null,
+      funding: null,
     };
   }
 
@@ -494,7 +567,18 @@ function resolveCashDebitGuard({
     };
   }
 
-  const calculation = calculateIbkrCashBorrowing(funding);
+  const interestValidationReserve = verifiedInterestValidationReserve(
+    interestValidation,
+    now,
+    selectedAccount,
+  );
+  const fundingWithInterestReserve = {
+    ...funding,
+    ...(interestValidationReserve !== null
+      ? { interestValidationReserve }
+      : {}),
+  };
+  const calculation = calculateIbkrCashBorrowing(fundingWithInterestReserve);
   if (calculation?.available !== true) {
     return {
       available: false,
@@ -511,7 +595,7 @@ function resolveCashDebitGuard({
     viewStatus: 'live',
     reason: null,
     calculation,
-    funding,
+    funding: fundingWithInterestReserve,
   };
 }
 
@@ -593,7 +677,7 @@ function scenarioReasonText(reason) {
   return messages[reason] || 'This planned trade cannot be projected from the verified snapshot.';
 }
 
-function CashDebitReferenceContent({ calculation, funding }) {
+function CashDebitReferenceContent({ calculation }) {
   const currency = calculation?.currency || 'USD';
   const hasHeadroom = calculation.guardedHeadroom >= 0;
   const referenceAmount = hasHeadroom
@@ -605,18 +689,6 @@ function CashDebitReferenceContent({ calculation, funding }) {
   const commodityCashExcluded = Number(
     calculation?.commodityCashExcluded || 0,
   );
-  const referenceDate = formatReferenceDate(
-    funding?.referenceSessionDate,
-    { weekday: true },
-  );
-  const cashObservedDate = formatReferenceDate(
-    funding?.cashLedgerObservedDate,
-    { weekday: true },
-  );
-  const settlementHorizonDate = formatReferenceDate(
-    funding?.settlementHorizonDate,
-    { weekday: true },
-  );
 
   return (
     <div
@@ -626,7 +698,6 @@ function CashDebitReferenceContent({ calculation, funding }) {
       <div
         className="pf-cash-guard__reference-summary"
         data-testid="cash-debit-guard-hero"
-        aria-describedby="cash-debit-reference-caution"
       >
         <span className="pf-cash-guard__reference-label">
           {hasHeadroom
@@ -642,21 +713,7 @@ function CashDebitReferenceContent({ calculation, funding }) {
         >
           {formatCurrency(referenceAmount, currency)}
         </strong>
-        <span className="pf-cash-guard__reference-basis">
-          {hasHeadroom
-            ? 'Remaining after short collateral and safety reserves'
-            : 'Needed to restore the no-borrow cash buffer'}
-        </span>
       </div>
-
-      <p
-        id="cash-debit-reference-caution"
-        className="pf-cash-guard__reference-caution"
-        role="note"
-      >
-        <strong>Historical only.</strong>
-        {' '}Refresh on a settlement day before sizing an order.
-      </p>
 
       <dl
         className="pf-cash-guard__reference-ledger"
@@ -709,7 +766,11 @@ function CashDebitReferenceContent({ calculation, funding }) {
         </div>
         {calculation.negativeAccruedCashReserve > 0 && (
           <div className="pf-cash-guard__reference-row">
-            <dt>Less: accrued-cash reserve</dt>
+            <dt>
+              {calculation.interestReserve?.incrementalModelReserve > 0
+                ? 'Less: cash-interest reserve'
+                : 'Less: accrued-cash reserve'}
+            </dt>
             <dd>
               {formatSignedCurrency(
                 -calculation.negativeAccruedCashReserve,
@@ -746,12 +807,6 @@ function CashDebitReferenceContent({ calculation, funding }) {
           </div>
         </div>
       </div>
-
-      <p className="pf-cash-guard__reference-copy">
-        IBKR cash {cashObservedDate}
-        {' · '}prices {referenceDate} close
-        {' · '}settlements included through {settlementHorizonDate}
-      </p>
     </div>
   );
 }
@@ -1025,7 +1080,6 @@ function CashDebitGuardCard({ guard, selectedAccount, onRefresh }) {
       {guard?.referenceAvailable === true ? (
         <CashDebitReferenceContent
           calculation={guard.calculation}
-          funding={referenceFunding}
         />
       ) : guard?.available !== true ? (
         <div className="pf-cash-guard__unavailable" role="status" aria-live="polite">
@@ -1107,7 +1161,11 @@ function CashDebitGuardCard({ guard, selectedAccount, onRefresh }) {
 
               {displayedCalculation.negativeAccruedCashReserve > 0 && (
                 <div className="pf-cash-guard__accrued">
-                  <span>Negative accrued cash</span>
+                  <span>
+                    {displayedCalculation.interestReserve?.incrementalModelReserve > 0
+                      ? 'Cash-interest reserve'
+                      : 'Negative accrued cash'}
+                  </span>
                   <strong>
                     {formatSignedCurrency(
                       -displayedCalculation.negativeAccruedCashReserve,
@@ -1643,7 +1701,8 @@ function isCleanReferenceComparison(snapshot, { requireAvailable = false } = {})
   if (!snapshot || snapshot?._cache?.stale === true) return false;
   if (snapshot?.comparisonAvailable === false || snapshot?.available === false) return false;
   if (requireAvailable && snapshot?.available !== true) return false;
-  return getReferenceDataQuality(snapshot)?.status === 'ok';
+  return isExplicitlySafeResearchComparison(snapshot)
+    && getReferenceDataQuality(snapshot)?.status === 'ok';
 }
 
 function countEtfProPositionSides(snapshot) {
@@ -1679,6 +1738,8 @@ const PortfolioSidebarSnapshot = ({
   etfProSnapshot,
   exposureReconciliation,
   exposureReconciliationLoading = false,
+  interestValidation,
+  interestValidationLoading = false,
   hedgeyeChangelog,
   hedgeyeChangelogLoading = false,
   hedgeyeChangelogError = null,
@@ -1723,9 +1784,22 @@ const PortfolioSidebarSnapshot = ({
     }
   }, [accounts]);
 
-  const isPortfolioLive = portfolioData?.dataSource === 'ibkr_api';
+  const portfolioVerifiedAt =
+    portfolioData?.socketVerifiedAt ||
+    portfolioData?.dataQuality?.fetchedAt ||
+    portfolioData?.funding?.observedAt ||
+    portfolioData?.accountSummary?.lastUpdated ||
+    null;
+  const isPortfolioLive =
+    portfolioData?.dataSource === 'ibkr_api'
+    && portfolioData?.liveSessionVerified === true
+    && portfolioData?.fromCache !== true
+    && portfolioData?._cache?.stale !== true
+    && getIbkrPortfolioFreshness(portfolioVerifiedAt, sessionClock) === 'current';
   const isSyncPending = isPortfolioSyncPending({ connection, portfolioData });
   const showPortfolioContent = isPortfolioLive || isSyncPending;
+  const refreshActive = loading || refreshing;
+  const retainingVerifiedSnapshot = refreshing && isPortfolioLive;
 
   const exposure = computePortfolioExposure({
     holdings: portfolioData?.holdings || [],
@@ -1738,12 +1812,14 @@ const PortfolioSidebarSnapshot = ({
       portfolioData,
       selectedAccount,
       connection,
+      interestValidation,
       refreshing: loading || refreshing,
       now: sessionClock,
     }),
     [
       connection,
       loading,
+      interestValidation,
       portfolioData,
       refreshing,
       selectedAccount,
@@ -1835,8 +1911,23 @@ const PortfolioSidebarSnapshot = ({
       rtaPositions,
       etfProSnapshot,
       predictionMarketProviderStatus,
+      interestValidation,
+      interestValidationLoading,
+      selectedAccount,
+      now: sessionClock,
     }),
-    [connection, portfolioData, loading, rtaPositions, etfProSnapshot, predictionMarketProviderStatus],
+    [
+      connection,
+      etfProSnapshot,
+      interestValidation,
+      interestValidationLoading,
+      loading,
+      portfolioData,
+      predictionMarketProviderStatus,
+      rtaPositions,
+      selectedAccount,
+      sessionClock,
+    ],
   );
 
   const offlinePanel = useMemo(
@@ -1903,8 +1994,8 @@ const PortfolioSidebarSnapshot = ({
     };
   }, []);
   const liveNetBar = useMemo(() => {
-    return buildNetDisplay(liveLongCount, liveShortCount);
-  }, [buildNetDisplay, liveLongCount, liveShortCount]);
+    return buildNetDisplay(liveLongCount, liveShortCount, showMetrics);
+  }, [buildNetDisplay, liveLongCount, liveShortCount, showMetrics]);
   const rtaNetBar = useMemo(() => {
     return buildNetDisplay(rtaLongCount, rtaShortCount, rtaAvailable);
   }, [buildNetDisplay, rtaAvailable, rtaLongCount, rtaShortCount]);
@@ -2109,9 +2200,19 @@ const PortfolioSidebarSnapshot = ({
       </header>
 
       <div className="pf-body-container">
-        {loading && !showMetrics && (
-          <div className="pf-loading pf-loading--centered">
-            <LoadingIndicator label="Syncing…" size="sm" />
+        {refreshActive && (
+          <div
+            className="pf-refresh-state"
+            data-testid="portfolio-refresh-state"
+            role="status"
+            aria-live="polite"
+          >
+            <RefreshCw className="pf-refresh-state__icon pf-spin" size={12} aria-hidden="true" />
+            <span>
+              {retainingVerifiedSnapshot
+                ? `Refreshing · last verified as of ${formatPortfolioRefreshAsOf(portfolioData)}`
+                : 'Syncing live IBKR…'}
+            </span>
           </div>
         )}
 
@@ -2132,7 +2233,7 @@ const PortfolioSidebarSnapshot = ({
         <p className="pf-banner">{sidebarBanner.message}</p>
       )}
 
-      {!showMetrics && (
+      {!showMetrics && !loading && (
         <CashDebitGuardCard
           key={selectedAccount || 'no-account'}
           guard={cashDebitGuard}
@@ -2141,7 +2242,7 @@ const PortfolioSidebarSnapshot = ({
         />
       )}
 
-      {showMetrics && (
+      {(showMetrics || loading || refreshing) && (
         <div className="pf-body">
 
           {/* Portfolio / signal count comparison */}
@@ -2154,7 +2255,7 @@ const PortfolioSidebarSnapshot = ({
 
               <div className="pf-position-compare__label pf-position-compare__label--long pf-position-compare__cell">Long</div>
               <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums">
-                {liveLongCount}
+                {showMetrics ? liveLongCount : '—'}
               </div>
               <div className="pf-position-compare__value pf-position-compare__value--long pf-position-compare__cell tabular-nums" data-testid="rta-long-count">
                 {rtaLongCount ?? '—'}
@@ -2165,7 +2266,7 @@ const PortfolioSidebarSnapshot = ({
 
               <div className="pf-position-compare__label pf-position-compare__label--short pf-position-compare__cell">Short</div>
               <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums">
-                {liveShortCount}
+                {showMetrics ? liveShortCount : '—'}
               </div>
               <div className="pf-position-compare__value pf-position-compare__value--short pf-position-compare__cell tabular-nums" data-testid="rta-short-count">
                 {rtaShortCount ?? '—'}
@@ -2179,9 +2280,13 @@ const PortfolioSidebarSnapshot = ({
                 <div className="pf-netbar-wrap">
                   <div className={`pf-netbar__pct pf-netbar__pct--${liveNetBar.tone}`}>{liveNetBar.netPctText}</div>
                   <div className="pf-netbar" aria-hidden="true">
-                    <div className="pf-netbar__segment pf-netbar__segment--long" style={{ width: `${liveNetBar.longWidth}%` }} />
-                    <div className="pf-netbar__segment pf-netbar__segment--short" style={{ width: `${liveNetBar.shortWidth}%` }} />
-                    <div className="pf-netbar__marker" style={{ left: `${liveNetBar.markerLeft}%` }} />
+                    {liveNetBar.available && (
+                      <>
+                        <div className="pf-netbar__segment pf-netbar__segment--long" style={{ width: `${liveNetBar.longWidth}%` }} />
+                        <div className="pf-netbar__segment pf-netbar__segment--short" style={{ width: `${liveNetBar.shortWidth}%` }} />
+                        <div className="pf-netbar__marker" style={{ left: `${liveNetBar.markerLeft}%` }} />
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2216,70 +2321,74 @@ const PortfolioSidebarSnapshot = ({
             </div>
           </div>
 
-          <CashDebitGuardCard
-            key={selectedAccount || 'no-account'}
-            guard={cashDebitGuard}
-            selectedAccount={selectedAccount}
-            onRefresh={onRefresh}
-          />
+          {showMetrics && (
+            <>
+              <CashDebitGuardCard
+                key={selectedAccount || 'no-account'}
+                guard={cashDebitGuard}
+                selectedAccount={selectedAccount}
+                onRefresh={onRefresh}
+              />
 
-          {/* Exposure */}
-          <div className="pf-section">
-            <div className="pf-bars">
-              <ExposureBar
-                label="Gross Exposure"
-                pct={displayExposure.grossPct}
-                amount={
-                  Number.isFinite(displayExposure.longMV) &&
-                  Number.isFinite(displayExposure.shortMV)
-                    ? displayExposure.longMV + displayExposure.shortMV
-                    : null
-                }
-                currency={currency}
-              />
-              <ExposureBar
-                label="Net Exposure"
-                pct={displayExposure.netPct}
-                amount={displayExposure.netMV}
-                netAmount
-                currency={currency}
-              />
-              <ExposureBar
-                label="Long Exposure"
-                pct={displayExposure.longPct}
-                amount={displayExposure.longMV}
-                currency={currency}
-              />
-              <ExposureBar
-                label="Short Exposure"
-                pct={displayExposure.shortPct}
-                amount={displayExposure.shortMV}
-                currency={currency}
-              />
-              <ExposureBar
-                label="CASH"
-                pct={exposure.cashPct}
-                amount={exposure.cashValue}
-                currency={currency}
-                tooltip={IDLE_CASH_TOOLTIP}
-              />
-            </div>
-          </div>
+              {/* Exposure */}
+              <div className="pf-section">
+                <div className="pf-bars">
+                  <ExposureBar
+                    label="Gross Exposure"
+                    pct={displayExposure.grossPct}
+                    amount={
+                      Number.isFinite(displayExposure.longMV) &&
+                      Number.isFinite(displayExposure.shortMV)
+                        ? displayExposure.longMV + displayExposure.shortMV
+                        : null
+                    }
+                    currency={currency}
+                  />
+                  <ExposureBar
+                    label="Net Exposure"
+                    pct={displayExposure.netPct}
+                    amount={displayExposure.netMV}
+                    netAmount
+                    currency={currency}
+                  />
+                  <ExposureBar
+                    label="Long Exposure"
+                    pct={displayExposure.longPct}
+                    amount={displayExposure.longMV}
+                    currency={currency}
+                  />
+                  <ExposureBar
+                    label="Short Exposure"
+                    pct={displayExposure.shortPct}
+                    amount={displayExposure.shortMV}
+                    currency={currency}
+                  />
+                  <ExposureBar
+                    label="CASH"
+                    pct={exposure.cashPct}
+                    amount={exposure.cashValue}
+                    currency={currency}
+                    tooltip={IDLE_CASH_TOOLTIP}
+                  />
+                </div>
+              </div>
 
-          <FlexReconciliationPanel
-            liveExposure={displayExposure}
-            currency={currency}
-            reconciliation={exposureReconciliation}
-            loading={exposureReconciliationLoading}
-          />
+              <FlexReconciliationPanel
+                liveExposure={displayExposure}
+                currency={currency}
+                reconciliation={exposureReconciliation}
+                loading={exposureReconciliationLoading}
+              />
 
-          <LatestUpdatesFeed
-            changelog={hedgeyeChangelog}
-            loading={hedgeyeChangelogLoading}
-            error={hedgeyeChangelogError}
-            now={sessionClock}
-            lastSuccessAt={hedgeyeChangelogLastSuccessAt}
-          />
+              <LatestUpdatesFeed
+                changelog={hedgeyeChangelog}
+                loading={hedgeyeChangelogLoading}
+                error={hedgeyeChangelogError}
+                now={sessionClock}
+                lastSuccessAt={hedgeyeChangelogLastSuccessAt}
+              />
+            </>
+          )}
 
         </div>
 

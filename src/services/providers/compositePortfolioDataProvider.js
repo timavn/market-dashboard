@@ -50,7 +50,10 @@ function createCompositePortfolioDataProvider(uploadProvider) {
 
   function formatIbkrResponse(ibkrSnap) {
     const holdings = (ibkrSnap.holdings || []).map((h) => ({
+      positionId: h.positionId,
       symbol: h.symbol,
+      conid: h.conid,
+      localSymbol: h.localSymbol,
       description: h.description,
       accountId: h.accountId,
       quantity: h.quantity,
@@ -64,7 +67,8 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       assetType: h.assetType,
       assetClass: h.assetClass,
       secType: h.secType,
-      conid: h.conid,
+      currency: h.currency,
+      exchange: h.exchange,
       isPredictionMarket: h.isPredictionMarket,
       positionSource: h.positionSource,
       priceSource: h.priceSource,
@@ -106,7 +110,12 @@ function createCompositePortfolioDataProvider(uploadProvider) {
         .sort((a, b) => Math.abs(b.marketValue || 0) - Math.abs(a.marketValue || 0))
         .slice(0, 10)
         .map((h) => ({
+          positionId: h.positionId,
           symbol: h.symbol,
+          conid: h.conid,
+          localSymbol: h.localSymbol,
+          currency: h.currency,
+          exchange: h.exchange,
           marketValue: h.marketValue,
           accountPercent: totalValue && h.marketValue != null
             ? ((Math.abs(h.marketValue) / totalValue) * 100).toFixed(2)
@@ -169,7 +178,10 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       },
       assetAllocation: uploadSnap.assetAllocation,
       holdings: uploadSnap.holdings.map((h) => ({
+        positionId: h.positionId,
         symbol: h.symbol,
+        conid: h.conid,
+        localSymbol: h.localSymbol,
         description: h.description,
         quantity: h.quantity,
         price: h.price,
@@ -180,12 +192,19 @@ function createCompositePortfolioDataProvider(uploadProvider) {
         dayChangePercent: null,
         assetType: h.assetType,
         assetClass: h.assetClass,
+        currency: h.currency,
+        exchange: h.exchange,
         positionSource: h.positionSource,
         priceSource: h.priceSource,
         lastUpdated: uploadSnap.lastUpdated,
       })),
       topHoldings: uploadSnap.holdings.slice(0, 10).map((h) => ({
+        positionId: h.positionId,
         symbol: h.symbol,
+        conid: h.conid,
+        localSymbol: h.localSymbol,
+        currency: h.currency,
+        exchange: h.exchange,
         marketValue: h.marketValue,
       })),
       lastUpdated: formatLastUpdated(timestamp),

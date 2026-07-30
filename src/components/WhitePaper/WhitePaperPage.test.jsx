@@ -12,5 +12,5 @@ test('keeps the legacy component import mapped to the Position Sizing note', () 
   render(<WhitePaperPage />);
 
   expect(screen.getByTestId('process-page')).toHaveAttribute('data-document-id', 'position-sizing');
-  expect(screen.getByRole('heading', { name: 'Position Sizing' })).toBeInTheDocument();
+  expect(document.querySelector('#position-sizing-title')).toHaveTextContent('Position Sizing');
 });

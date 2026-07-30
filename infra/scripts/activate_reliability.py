@@ -6,6 +6,10 @@ Read-only inspection is the default. Mutating operations require both
 staged because a newly enabled Scheduler job must prove its own cadence before
 the next stage (and, finally, alarm actions) can be enabled.
 
+The ``disabled`` apply-only recovery phase skips runtime prerequisites and
+forces every schedule and alarm control off. Any failure after a successful
+rollout deployment triggers the same fail-closed deployment automatically.
+
 This command never reads an OAuth secret value, creates credentials, or writes
 AWS configuration. The only direct runtime mutation before a schedule is
 enabled is an explicit Lambda canary invocation in ``--apply`` mode.
@@ -14,12 +18,14 @@ enabled is an explicit Lambda canary invocation in ``--apply`` mode.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import stat
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -34,6 +40,13 @@ from botocore.exceptions import (
     NoCredentialsError,
     ProfileNotFound,
 )
+from prepare_tested_release import (
+    DEFAULT_KEY_PATH as DEFAULT_RELEASE_RECEIPT_KEY,
+    ReleaseReceiptError,
+    canonical_template_sha256,
+    require_commit,
+    verify_release_receipt,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,12 +56,17 @@ CONTRACT_PATH = INFRA_DIR / "lambdas" / "hermes_worker" / "service_contract.json
 
 EXPECTED_ACCOUNT = "915328198276"
 EXPECTED_REGION = "us-west-1"
+EXPECTED_ARTIFACT_BUCKET = (
+    f"market-dashboard-sam-artifacts-{EXPECTED_ACCOUNT}-{EXPECTED_REGION}"
+)
 STACK_NAME = "market-dashboard-readiness-v2"
+BOOTSTRAP_STACK_NAME = "market-dashboard-deployment-role-v2"
 DEPLOYMENT_ROLE_ARN = (
     "arn:aws:iam::915328198276:role/"
     "market-dashboard-cloudformation-deployment-v2"
 )
 CONTROL_PARAMETERS = (
+    "CloudWatchdogScheduleState",
     "GmailScheduleState",
     "QuantAnalystScheduleState",
     "QuantDeveloperScheduleState",
@@ -67,17 +85,28 @@ ALL_PARAMETER_NAMES = (
     "HermesAgentRunsTableName",
     "HermesAlertsTableName",
     "BridgeHostId",
+    "ReservedConcurrencyState",
     "BuildVersion",
 )
 PHASE_ENABLES = {
-    "gmail": ("GmailScheduleState",),
-    "analyst": ("GmailScheduleState", "QuantAnalystScheduleState"),
+    "disabled": (),
     "developer": (
+        "CloudWatchdogScheduleState",
+        "QuantDeveloperScheduleState",
+    ),
+    "gmail": (
+        "CloudWatchdogScheduleState",
         "GmailScheduleState",
-        "QuantAnalystScheduleState",
         "QuantDeveloperScheduleState",
     ),
     "security": (
+        "CloudWatchdogScheduleState",
+        "GmailScheduleState",
+        "QuantDeveloperScheduleState",
+        "SecurityScheduleState",
+    ),
+    "analyst": (
+        "CloudWatchdogScheduleState",
         "GmailScheduleState",
         "QuantAnalystScheduleState",
         "QuantDeveloperScheduleState",
@@ -85,6 +114,11 @@ PHASE_ENABLES = {
     ),
     "alarms": CONTROL_PARAMETERS,
     "full": CONTROL_PARAMETERS,
+}
+PENDING_HEARTBEAT_FAILURE_CODES = {
+    "HEARTBEAT_COUNT_INSUFFICIENT",
+    "HEARTBEAT_CADENCE_INVALID",
+    "HEARTBEAT_STALE",
 }
 WORKER_PHASES = {
     "analyst": "quant-analyst",
@@ -96,10 +130,15 @@ WORKER_PARAMETER = {
     "quant-developer": "QuantDeveloperScheduleState",
     "security": "SecurityScheduleState",
 }
+WORKER_HEARTBEAT_REQUIRED = {
+    "quant-analyst": 3,
+    "quant-developer": 1,
+    "security": 1,
+}
 PRIOR_WORKERS = {
-    "quant-analyst": (),
-    "quant-developer": ("quant-analyst",),
-    "security": ("quant-analyst", "quant-developer"),
+    "quant-developer": (),
+    "security": ("quant-developer",),
+    "quant-analyst": ("quant-developer", "security"),
 }
 ALARM_NAMES = (
     "market-dashboard-runtime-failure-queue-v2",
@@ -111,6 +150,8 @@ ALARM_NAMES = (
     "market-dashboard-hermes-developer-unhealthy-v2",
     "market-dashboard-hermes-security-heartbeat-missing-v2",
     "market-dashboard-hermes-security-unhealthy-v2",
+    "market-dashboard-hermes-cloud-watchdog-heartbeat-missing-v2",
+    "market-dashboard-hermes-cloud-watchdog-unhealthy-v2",
 )
 ALARM_CONTRACTS = {
     "market-dashboard-runtime-failure-queue-v2": {
@@ -197,6 +238,25 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:security",
         "missingData": "notBreaching",
     },
+    "market-dashboard-hermes-cloud-watchdog-heartbeat-missing-v2": {
+        "namespace": "MarketDashboard/Readiness",
+        "metric": "Heartbeat",
+        "statistic": "Sum",
+        "period": 600,
+        "comparison": "LessThanThreshold",
+        "serviceId": "hermes:cloud-watchdog",
+        "missingDataWhenEnabled": "breaching",
+        "missingDataWhenDisabled": "notBreaching",
+    },
+    "market-dashboard-hermes-cloud-watchdog-unhealthy-v2": {
+        "namespace": "MarketDashboard/Readiness",
+        "metric": "Healthy",
+        "statistic": "Minimum",
+        "period": 300,
+        "comparison": "LessThanThreshold",
+        "serviceId": "hermes:cloud-watchdog",
+        "missingData": "notBreaching",
+    },
 }
 
 DESERIALIZER = TypeDeserializer()
@@ -228,6 +288,140 @@ class ActivationFailure(RuntimeError):
         return result
 
 
+def verify_rollback_export(raw_path: str | os.PathLike[str] | None) -> dict[str, Any]:
+    """Verify the private, complete ownership-preflight export required by apply."""
+
+    if not raw_path:
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_REQUIRED",
+            "--apply requires --rollback-export or "
+            "MARKET_DASHBOARD_ROLLBACK_EXPORT.",
+        )
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback export path must be absolute.",
+        )
+    rollback = candidate.resolve(strict=False)
+    try:
+        rollback.relative_to(REPO_ROOT)
+    except ValueError:
+        pass
+    else:
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback export must be outside the repository.",
+        )
+    if not rollback.is_dir() or rollback.is_symlink():
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback export directory is missing or unsafe.",
+        )
+    if stat.S_IMODE(rollback.stat().st_mode) & 0o077:
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback export must not be accessible by group or other users.",
+        )
+
+    manifest_path = rollback / "SHA256SUMS"
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback export has no regular SHA256SUMS manifest.",
+        )
+    expected: dict[Path, str] = {}
+    for line_number, raw_line in enumerate(
+        manifest_path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        match = re.fullmatch(r"([0-9a-fA-F]{64})  (\./.+)", raw_line)
+        if match is None:
+            raise ActivationFailure(
+                "ROLLBACK_EXPORT_INVALID",
+                f"Invalid rollback checksum entry on line {line_number}.",
+            )
+        relative = Path(match.group(2))
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ActivationFailure(
+                "ROLLBACK_EXPORT_INVALID",
+                "Rollback checksum path escapes the export.",
+            )
+        artifact = (rollback / relative).resolve(strict=False)
+        try:
+            artifact.relative_to(rollback)
+        except ValueError as error:
+            raise ActivationFailure(
+                "ROLLBACK_EXPORT_INVALID",
+                "Rollback checksum path escapes the export.",
+            ) from error
+        if artifact in expected:
+            raise ActivationFailure(
+                "ROLLBACK_EXPORT_INVALID",
+                "Rollback checksum manifest contains a duplicate path.",
+            )
+        expected[artifact] = match.group(1).lower()
+
+    actual = {
+        path.resolve(strict=False)
+        for path in rollback.rglob("*")
+        if path.is_file() and path.name != "SHA256SUMS"
+    }
+    if set(expected) != actual:
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback checksum manifest does not cover exactly every artifact.",
+        )
+    for artifact, expected_digest in expected.items():
+        if artifact.is_symlink() or not artifact.is_file():
+            raise ActivationFailure(
+                "ROLLBACK_EXPORT_INVALID",
+                "Rollback export contains an unsafe artifact.",
+            )
+        observed = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if observed != expected_digest:
+            raise ActivationFailure(
+                "ROLLBACK_EXPORT_CHECKSUM_MISMATCH",
+                f"Rollback checksum mismatch for {artifact.name}.",
+            )
+
+    preflight_path = rollback / "ownership-preflight.json"
+    if preflight_path.resolve(strict=False) not in expected:
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback preflight is not covered by the checksum manifest.",
+        )
+    try:
+        preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ActivationFailure(
+            "ROLLBACK_EXPORT_INVALID",
+            "Rollback ownership preflight is unreadable.",
+        ) from error
+    if preflight.get("passed") is not True or preflight.get("conflicts"):
+        raise ActivationFailure(
+            "ROLLBACK_OWNERSHIP_PREFLIGHT_FAILED",
+            "Rollback ownership preflight did not pass.",
+        )
+    required = {
+        "account": EXPECTED_ACCOUNT,
+        "region": EXPECTED_REGION,
+        "targetStack": STACK_NAME,
+        "bootstrapStack": BOOTSTRAP_STACK_NAME,
+    }
+    for key, value in required.items():
+        if preflight.get(key) != value:
+            raise ActivationFailure(
+                "ROLLBACK_EXPORT_INVALID",
+                f"Rollback preflight has an unexpected {key}.",
+            )
+    return {
+        "passed": True,
+        "path": str(rollback),
+        "artifactCount": len(expected),
+    }
+
+
 def safe_text(value: Any, limit: int = 500) -> str:
     """Bound diagnostics and redact credential-shaped values."""
 
@@ -252,6 +446,21 @@ def numeric_value(value: Any, default: float = 0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def exact_integer(value: Any) -> int | None:
+    """Accept only lossless DynamoDB-style integer values."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if (
+        isinstance(value, Decimal)
+        and value.is_finite()
+        and value == value.to_integral_value()
+    ):
+        return int(value)
+    return None
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -330,7 +539,12 @@ def aws_call(prefix: str, callback: Callable[[], Any]) -> Any:
         raise normalize_aws_error(prefix, error) from None
 
 
-def validate_identity(identity: Mapping[str, Any], *, region: str) -> dict[str, str]:
+def validate_identity(
+    identity: Mapping[str, Any],
+    *,
+    region: str,
+    require_sso: bool = False,
+) -> dict[str, str]:
     account = str(identity.get("Account") or "")
     arn = str(identity.get("Arn") or "")
     if account != EXPECTED_ACCOUNT:
@@ -347,6 +561,13 @@ def validate_identity(identity: Mapping[str, Any], *, region: str) -> dict[str, 
         raise ActivationFailure(
             "AWS_IDENTITY_INVALID",
             "STS returned an identity ARN outside the expected account.",
+        )
+    if require_sso and not arn.startswith(
+        f"arn:aws:sts::{EXPECTED_ACCOUNT}:assumed-role/AWSReservedSSO_"
+    ):
+        raise ActivationFailure(
+            "AWS_SSO_IDENTITY_REQUIRED",
+            "Apply mode requires an AWS IAM Identity Center/SSO assumed role.",
         )
     return {"account": account, "arn": arn, "region": region}
 
@@ -404,10 +625,45 @@ def target_control_state(
                 "STACK_CONTROL_STATE_INVALID",
                 f"{name} has unsupported state {current}.",
             )
-        # Rollout is monotonic: no activation phase silently disables a
-        # schedule or alarm action that is already on.
-        target[name] = "ENABLED" if current == "ENABLED" or name in enables else "DISABLED"
+        # Every phase is an exact, fail-closed desired state. This prevents a
+        # later-stage schedule or alarm from surviving an earlier recovery
+        # phase and makes the Developer -> Gmail -> Security -> Analyst order
+        # auditable from CloudFormation parameters.
+        target[name] = "ENABLED" if name in enables else "DISABLED"
     return target
+
+
+def heartbeat_observation_pending(result: Mapping[str, Any]) -> bool:
+    """Return true only for an incomplete, otherwise non-failing new window."""
+
+    failures = result.get("failures") or []
+    return bool(failures) and all(
+        str(failure.get("code") or "") in PENDING_HEARTBEAT_FAILURE_CODES
+        for failure in failures
+    )
+
+
+def heartbeats_after_watermark(
+    rows: Sequence[Mapping[str, Any]],
+    observed_after: Any | None,
+) -> list[Mapping[str, Any]]:
+    """Exclude heartbeat rows that existed before a schedule was enabled."""
+
+    if observed_after is None:
+        return list(rows)
+    watermark = parse_timestamp(observed_after)
+    if watermark is None:
+        raise ActivationFailure(
+            "HEARTBEAT_WATERMARK_INVALID",
+            "The pre-enable heartbeat watermark is missing or invalid.",
+        )
+    filtered: list[Mapping[str, Any]] = []
+    for row in rows:
+        observed_at = parse_timestamp(row.get("observedAt"))
+        # Preserve malformed rows so the heartbeat validator can fail closed.
+        if observed_at is None or observed_at > watermark:
+            filtered.append(row)
+    return filtered
 
 
 def deployment_parameters(
@@ -416,6 +672,13 @@ def deployment_parameters(
     *,
     build_version: str,
 ) -> dict[str, str]:
+    try:
+        release_commit = require_commit(build_version)
+    except ReleaseReceiptError as error:
+        raise ActivationFailure(
+            "TESTED_RELEASE_COMMIT_INVALID",
+            str(error),
+        ) from error
     missing = [name for name in ALL_PARAMETER_NAMES if name not in current_parameters]
     if missing:
         raise ActivationFailure(
@@ -423,9 +686,21 @@ def deployment_parameters(
             "Cannot safely preserve every deployed parameter.",
             detail={"parameters": missing},
         )
+    if str(current_parameters["BuildVersion"]) != release_commit:
+        raise ActivationFailure(
+            "STACK_BUILD_VERSION_MISMATCH",
+            (
+                "Staged activation may only preserve the already deployed "
+                f"tested release {release_commit}."
+            ),
+            detail={
+                "expected": release_commit,
+                "actual": str(current_parameters["BuildVersion"]),
+            },
+        )
     result = {name: str(current_parameters[name]) for name in ALL_PARAMETER_NAMES}
     result.update({name: str(value) for name, value in controls.items()})
-    result["BuildVersion"] = build_version
+    result["BuildVersion"] = release_commit
     for name, value in result.items():
         if not value or any(character in value for character in "\r\n"):
             raise ActivationFailure(
@@ -479,17 +754,22 @@ def heartbeat_window(
                     "message": f"{observed}: heartbeat was not emitted by the exact Scheduler job.",
                 }
             )
-        counts = row.get("counts") or {}
+        counts = row.get("counts")
+        if isinstance(counts, Mapping):
+            gmail_errors = exact_integer(counts.get("errors"))
+            gmail_dropped = exact_integer(counts.get("dropped"))
+        else:
+            gmail_errors = None
+            gmail_dropped = None
         if service_id.startswith("gmail:") and (
-            integer_value(counts.get("errors")) != 0
-            or integer_value(counts.get("dropped")) != 0
+            gmail_errors != 0 or gmail_dropped != 0
         ):
             failures.append(
                 {
                     "code": "GMAIL_HEARTBEAT_DATA_ERROR",
                     "message": (
-                        f"{observed}: errors={counts.get('errors', 0)}, "
-                        f"dropped={counts.get('dropped', 0)}."
+                        f"{observed}: errors={gmail_errors}, "
+                        f"dropped={gmail_dropped}."
                     ),
                 }
             )
@@ -640,6 +920,7 @@ def validate_bridge_snapshot(
     snapshot: Mapping[str, Any] | None,
     *,
     expected_capabilities: set[str],
+    snapshot_type: str = "operations",
     max_age_minutes: float = 3,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -663,12 +944,36 @@ def validate_bridge_snapshot(
             typed_code(snapshot.get("errorCode"), "HERMES_BRIDGE_DEGRADED"),
             safe_text(snapshot.get("detail") or "The outbound bridge is not ready."),
         )
+    if (
+        snapshot.get("schemaVersion") != 2
+        or snapshot.get("snapshotType") != snapshot_type
+    ):
+        raise ActivationFailure(
+            "HERMES_INPUT_PARTITION_INVALID",
+            f"Expected versioned {snapshot_type} bridge telemetry.",
+        )
     capabilities = snapshot.get("capabilities")
-    if not isinstance(capabilities, Mapping) or set(capabilities) != expected_capabilities:
+    required_capabilities = (
+        {"portfolio.live"} if snapshot_type == "portfolio" else expected_capabilities
+    )
+    if not isinstance(capabilities, Mapping) or set(capabilities) != required_capabilities:
         raise ActivationFailure(
             "SYSTEM_READINESS_CAPABILITY_CONTRACT_INVALID",
             "The bridge snapshot does not contain the exact readiness capability set.",
         )
+    if snapshot_type == "operations":
+        if "portfolio" in snapshot or "positions" in snapshot:
+            raise ActivationFailure(
+                "OPERATIONS_TELEMETRY_CONTAINS_PORTFOLIO",
+                "Operations bridge telemetry must not contain portfolio data.",
+            )
+        return {
+            "passed": True,
+            "capturedAt": snapshot.get("capturedAt"),
+            "ageMinutes": age,
+            "bridgeStatus": "ready",
+            "snapshotType": "operations",
+        }
     portfolio_capability = capabilities.get("portfolio.live") or {}
     if (
         portfolio_capability.get("ready") is not True
@@ -698,6 +1003,7 @@ def validate_bridge_snapshot(
         "capturedAt": snapshot.get("capturedAt"),
         "ageMinutes": age,
         "bridgeStatus": "ready",
+        "snapshotType": "portfolio",
     }
 
 
@@ -811,6 +1117,37 @@ def verify_schedule(
         "name": name,
         "state": schedule.get("State"),
         "expression": schedule.get("ScheduleExpression"),
+        "failures": failures,
+    }
+
+def verify_watchdog_rule(
+    rule: Mapping[str, Any],
+    *,
+    expected_state: str,
+) -> dict[str, Any]:
+    expected_name = "market-dashboard-hermes-cloud-watchdog-v1"
+    failures: list[dict[str, str]] = []
+    if rule.get("Name") != expected_name:
+        failures.append({
+            "code": "WATCHDOG_RULE_NAME_MISMATCH",
+            "message": f"Expected EventBridge rule {expected_name}.",
+        })
+    if rule.get("State") != expected_state:
+        failures.append({
+            "code": "WATCHDOG_RULE_STATE_MISMATCH",
+            "message": (
+                f"{expected_name} is {rule.get('State')}, expected {expected_state}."
+            ),
+        })
+    if rule.get("ScheduleExpression") != "rate(5 minutes)":
+        failures.append({
+            "code": "WATCHDOG_RULE_CADENCE_MISMATCH",
+            "message": "The watchdog EventBridge rule is not on its five-minute cadence.",
+        })
+    return {
+        "passed": not failures,
+        "name": expected_name,
+        "state": rule.get("State"),
         "failures": failures,
     }
 
@@ -946,6 +1283,25 @@ def require_check(result: Mapping[str, Any], fallback_code: str) -> None:
     )
 
 
+def validate_artifact_bucket_ownership(
+    response: Mapping[str, Any],
+) -> dict[str, Any]:
+    tags = {
+        str(item.get("Key")): str(item.get("Value"))
+        for item in response.get("TagSet") or []
+    }
+    expected = {
+        "market-dashboard:owner": "market-dashboard-readiness-v2",
+        "market-dashboard:purpose": "sam-artifacts",
+    }
+    if any(tags.get(key) != value for key, value in expected.items()):
+        raise ActivationFailure(
+            "ARTIFACT_BUCKET_OWNERSHIP_MISMATCH",
+            "SAM artifact bucket ownership tags are missing or incompatible.",
+        )
+    return {"passed": True, "bucket": EXPECTED_ARTIFACT_BUCKET}
+
+
 class AwsRuntime:
     """Narrow AWS adapter used by the activation controller."""
 
@@ -963,8 +1319,10 @@ class AwsRuntime:
         self.lambda_client = self.session.client("lambda", config=config)
         self.dynamodb = self.session.client("dynamodb", config=config)
         self.scheduler = self.session.client("scheduler", config=config)
+        self.events = self.session.client("events", config=config)
         self.cloudwatch = self.session.client("cloudwatch", config=config)
         self.sns = self.session.client("sns", config=config)
+        self.s3 = self.session.client("s3", config=config)
 
     def identity(self) -> Mapping[str, Any]:
         return aws_call("STS", lambda: self.sts.get_caller_identity())
@@ -982,11 +1340,40 @@ class AwsRuntime:
             )
         return stacks[0]
 
+    def stack_template(self) -> Mapping[str, Any]:
+        return aws_call(
+            "STACK_TEMPLATE",
+            lambda: self.cloudformation.get_template(
+                StackName=STACK_NAME,
+                TemplateStage="Original",
+            ),
+        )
+
     def secret_description(self, name: str) -> Mapping[str, Any]:
         # Deliberately metadata-only. Never call GetSecretValue here.
         return aws_call(
             "GMAIL_OAUTH_SECRET",
             lambda: self.secretsmanager.describe_secret(SecretId=name),
+        )
+
+    def artifact_bucket_tags(self) -> Mapping[str, Any]:
+        return aws_call(
+            "SAM_ARTIFACT_BUCKET_TAGS",
+            lambda: self.s3.get_bucket_tagging(
+                Bucket=EXPECTED_ARTIFACT_BUCKET,
+                ExpectedBucketOwner=EXPECTED_ACCOUNT,
+            ),
+        )
+
+    def release_artifact(self, artifact: Mapping[str, str]) -> Mapping[str, Any]:
+        return aws_call(
+            "RELEASE_ARTIFACT",
+            lambda: self.s3.get_object(
+                Bucket=artifact["bucket"],
+                Key=artifact["key"],
+                VersionId=artifact["versionId"],
+                ExpectedBucketOwner=EXPECTED_ACCOUNT,
+            ),
         )
 
     def function_configuration(self, name: str) -> Mapping[str, Any]:
@@ -1044,12 +1431,73 @@ class AwsRuntime:
             lambda: self.scheduler.get_schedule(GroupName="default", Name=name),
         )
 
+    def disable_schedule(
+        self,
+        name: str,
+        current: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        required = ("ScheduleExpression", "FlexibleTimeWindow", "Target")
+        missing = [key for key in required if key not in current]
+        if missing:
+            raise ActivationFailure(
+                "SCHEDULE_DISABLE_INPUT_INCOMPLETE",
+                f"Cannot safely disable {name}; its current definition is incomplete.",
+                detail={"schedule": name, "missing": missing},
+            )
+        request: dict[str, Any] = {
+            "GroupName": "default",
+            "Name": name,
+            "State": "DISABLED",
+        }
+        for key in (
+            "ActionAfterCompletion",
+            "Description",
+            "EndDate",
+            "FlexibleTimeWindow",
+            "KmsKeyArn",
+            "ScheduleExpression",
+            "ScheduleExpressionTimezone",
+            "StartDate",
+            "Target",
+        ):
+            if key in current:
+                request[key] = current[key]
+        return aws_call(
+            "SCHEDULE_DISABLE",
+            lambda: self.scheduler.update_schedule(**request),
+        )
+
+    def watchdog_rule(self) -> Mapping[str, Any]:
+        return aws_call(
+            "WATCHDOG_RULE",
+            lambda: self.events.describe_rule(
+                Name="market-dashboard-hermes-cloud-watchdog-v1",
+            ),
+        )
+
+    def disable_watchdog_rule(self) -> Mapping[str, Any]:
+        return aws_call(
+            "WATCHDOG_RULE_DISABLE",
+            lambda: self.events.disable_rule(
+                Name="market-dashboard-hermes-cloud-watchdog-v1",
+            ),
+        )
+
     def alarms(self) -> Sequence[Mapping[str, Any]]:
         response = aws_call(
             "ALARMS",
             lambda: self.cloudwatch.describe_alarms(AlarmNames=list(ALARM_NAMES)),
         )
         return response.get("MetricAlarms") or []
+
+    def disable_alarm_actions(self, alarm_names: Sequence[str]) -> Mapping[str, Any]:
+        names = [name for name in alarm_names if name in ALARM_NAMES]
+        if not names:
+            return {}
+        return aws_call(
+            "ALARM_ACTIONS_DISABLE",
+            lambda: self.cloudwatch.disable_alarm_actions(AlarmNames=names),
+        )
 
     def subscriptions(self, topic_arn: str) -> Sequence[Mapping[str, Any]]:
         items: list[Mapping[str, Any]] = []
@@ -1077,12 +1525,22 @@ class ActivationController:
         apply: bool,
         admin_profile: str | None,
         cloudformation_role_arn: str | None,
+        rollback_export: str | os.PathLike[str] | None = None,
+        release_receipt: str | os.PathLike[str] | None = None,
+        release_receipt_key: str | os.PathLike[str] | None = None,
+        auth_probe_only: bool = False,
     ) -> None:
         self.runtime = runtime
         self.phase = phase
         self.apply = apply
         self.admin_profile = admin_profile
         self.cloudformation_role_arn = cloudformation_role_arn
+        self.rollback_export = rollback_export
+        self.release_receipt = release_receipt
+        self.release_receipt_key = release_receipt_key
+        self.auth_probe_only = auth_probe_only
+        self.rollback_verification: dict[str, Any] | None = None
+        self.release_verification: dict[str, Any] | None = None
         self.manifest, self.contract = manifest_contracts()
         self.resources = self.manifest["aws"]["resources"]
         self.services = {
@@ -1093,7 +1551,11 @@ class ActivationController:
         self.outputs: dict[str, str] = {}
 
     def initialize(self) -> dict[str, Any]:
-        identity = validate_identity(self.runtime.identity(), region=self.runtime.region)
+        identity = validate_identity(
+            self.runtime.identity(),
+            region=self.runtime.region,
+            require_sso=self.apply,
+        )
         self.stack = self.runtime.stack()
         validate_stack(self.stack)
         self.parameters = stack_parameters(self.stack)
@@ -1113,18 +1575,157 @@ class ActivationController:
                 "CLOUDFORMATION_ROLE_REQUIRED",
                 f"--apply requires {DEPLOYMENT_ROLE_ARN}.",
             )
+        artifact_bucket = os.environ.get("MARKET_DASHBOARD_SAM_ARTIFACT_BUCKET")
+        if artifact_bucket != EXPECTED_ARTIFACT_BUCKET:
+            raise ActivationFailure(
+                "SAM_ARTIFACT_BUCKET_REQUIRED",
+                (
+                    "--apply requires "
+                    "MARKET_DASHBOARD_SAM_ARTIFACT_BUCKET="
+                    f"{EXPECTED_ARTIFACT_BUCKET}."
+                ),
+            )
+        if getattr(self, "rollback_verification", None) is None:
+            self.rollback_verification = verify_rollback_export(
+                getattr(self, "rollback_export", None)
+            )
+        validate_artifact_bucket_ownership(
+            self.runtime.artifact_bucket_tags()
+        )
+        if getattr(self, "auth_probe_only", False):
+            return
         if not shutil.which("sam"):
             raise ActivationFailure("SAM_CLI_REQUIRED", "AWS SAM CLI is not installed.")
+        if getattr(self, "release_verification", None) is None:
+            raw_receipt = getattr(self, "release_receipt", None)
+            if not raw_receipt:
+                raise ActivationFailure(
+                    "TESTED_RELEASE_RECEIPT_REQUIRED",
+                    (
+                        "--apply requires --release-receipt or "
+                        "MARKET_DASHBOARD_RELEASE_RECEIPT."
+                    ),
+                )
+            current_build = str(self.parameters.get("BuildVersion") or "")
+            try:
+                release_commit = require_commit(current_build)
+                verification_kwargs: dict[str, Any] = {
+                    "expected_commit": release_commit,
+                    "repo_root": REPO_ROOT,
+                }
+                receipt_key = getattr(self, "release_receipt_key", None)
+                if receipt_key:
+                    verification_kwargs["key_path"] = receipt_key
+                self.release_verification = verify_release_receipt(
+                    raw_receipt,
+                    **verification_kwargs,
+                )
+            except ReleaseReceiptError as error:
+                raise ActivationFailure(
+                    "TESTED_RELEASE_RECEIPT_INVALID",
+                    str(error),
+                    detail={"receiptErrorCode": error.code},
+                ) from error
+        self.verify_deployed_tested_release()
+
+    def verify_deployed_tested_release(self) -> dict[str, Any]:
+        release = getattr(self, "release_verification", None)
+        if not isinstance(release, Mapping):
+            raise ActivationFailure(
+                "TESTED_RELEASE_RECEIPT_REQUIRED",
+                "No verified tested release is available for staged activation.",
+            )
+        expected_commit = str(release["releaseCommit"])
+        actual_commit = str(self.parameters.get("BuildVersion") or "")
+        if actual_commit != expected_commit:
+            raise ActivationFailure(
+                "STACK_BUILD_VERSION_MISMATCH",
+                "CloudFormation BuildVersion does not match the tested release.",
+                detail={"expected": expected_commit, "actual": actual_commit},
+            )
+        template_response = self.runtime.stack_template()
+        template_body = template_response.get("TemplateBody")
+        try:
+            deployed_template_sha = canonical_template_sha256(template_body)
+        except ReleaseReceiptError as error:
+            raise ActivationFailure(
+                "STACK_TEMPLATE_INVALID",
+                str(error),
+            ) from error
+        if deployed_template_sha != release["templateCanonicalSha256"]:
+            raise ActivationFailure(
+                "STACK_TESTED_TEMPLATE_MISMATCH",
+                "The deployed CloudFormation template is not the tested base template.",
+                detail={
+                    "expected": release["templateCanonicalSha256"],
+                    "actual": deployed_template_sha,
+                },
+            )
+        immutable_objects = [
+            ("template", release.get("templateObject")),
+            *[
+                ("artifact", artifact)
+                for artifact in release.get("artifacts") or []
+            ],
+        ]
+        for object_kind, artifact in immutable_objects:
+            if not isinstance(artifact, Mapping):
+                raise ActivationFailure(
+                    "TESTED_RELEASE_OBJECT_EVIDENCE_MISSING",
+                    f"Tested release has no immutable {object_kind} evidence.",
+                )
+            response = self.runtime.release_artifact(artifact)
+            if str(response.get("VersionId") or "") != artifact["versionId"]:
+                raise ActivationFailure(
+                    "TESTED_RELEASE_ARTIFACT_VERSION_MISMATCH",
+                    "A tested SAM artifact version could not be verified in S3.",
+                    detail={
+                        "bucket": artifact["bucket"],
+                        "key": artifact["key"],
+                        "expectedVersionId": artifact["versionId"],
+                        "actualVersionId": response.get("VersionId"),
+                    },
+                )
+            body_stream = response.get("Body")
+            body = body_stream.read() if hasattr(body_stream, "read") else body_stream
+            if (
+                not isinstance(body, bytes)
+                or len(body) != int(artifact["contentLength"])
+                or hashlib.sha256(body).hexdigest()
+                != artifact["contentSha256"]
+            ):
+                raise ActivationFailure(
+                    "TESTED_RELEASE_ARTIFACT_CHECKSUM_MISMATCH",
+                    (
+                        f"The immutable SAM {object_kind} no longer matches "
+                        "the tested receipt."
+                    ),
+                    detail={
+                        "bucket": artifact["bucket"],
+                        "key": artifact["key"],
+                        "versionId": artifact["versionId"],
+                    },
+                )
+        return {
+            "passed": True,
+            "releaseCommit": expected_commit,
+            "templateCanonicalSha256": deployed_template_sha,
+            "artifactCount": len(release.get("artifacts") or []),
+            "templateVersionId": release["templateObject"]["versionId"],
+        }
 
     def gmail_contract(self) -> Mapping[str, Any]:
         return self.services["gmail.ingestion"]
 
-    def gmail_heartbeat(self) -> dict[str, Any]:
+    def gmail_heartbeat(
+        self, *, observed_after: Any | None = None
+    ) -> dict[str, Any]:
         service = self.gmail_contract()
         service_id = service["aws"]["heartbeatServiceId"]
         rows = self.runtime.heartbeat_rows(
             self.resources["serviceHeartbeatTable"], service_id, limit=4
         )
+        rows = heartbeats_after_watermark(rows, observed_after)
         return heartbeat_window(
             rows,
             service_id=service_id,
@@ -1134,19 +1735,23 @@ class ActivationController:
             allowed_statuses={"success"},
         )
 
-    def worker_heartbeat(self, worker: str) -> dict[str, Any]:
+    def worker_heartbeat(
+        self, worker: str, *, observed_after: Any | None = None
+    ) -> dict[str, Any]:
         worker_contract = self.contract["workers"][worker]
         service_id = worker_contract["serviceId"]
+        required = WORKER_HEARTBEAT_REQUIRED[worker]
         rows = self.runtime.heartbeat_rows(
-            self.resources["serviceHeartbeatTable"], service_id, limit=3
+            self.resources["serviceHeartbeatTable"], service_id, limit=required
         )
+        rows = heartbeats_after_watermark(rows, observed_after)
         # A warning is still a proven, scheduled monitoring invocation. The
         # Healthy alarm carries the underlying typed capability failure.
         return heartbeat_window(
             rows,
             service_id=service_id,
             schedule_id=worker_contract["scheduleId"],
-            required=3,
+            required=required,
             cadence_minutes=int(worker_contract["cadenceMinutes"]),
             allowed_statuses={"success", "warning"},
         )
@@ -1169,14 +1774,16 @@ class ActivationController:
     def function_checks(self) -> list[dict[str, Any]]:
         return [self.function_check("GMAIL"), self.function_check("HERMES")]
 
-    def bridge_check(self) -> dict[str, Any]:
+    def bridge_check(self, worker: str = "quant-developer") -> dict[str, Any]:
+        snapshot_type = "portfolio" if worker == "quant-analyst" else "operations"
         snapshot = self.runtime.latest_snapshot(
             self.resources["hermesInputSnapshotTable"],
-            self.parameters["BridgeHostId"],
+            f"{self.parameters['BridgeHostId']}#{snapshot_type}",
         )
         return validate_bridge_snapshot(
             snapshot,
             expected_capabilities=set(self.contract["capabilityIds"]),
+            snapshot_type=snapshot_type,
         )
 
     def canary_gmail(self) -> dict[str, Any]:
@@ -1262,6 +1869,12 @@ class ActivationController:
             for specification in self.schedule_specifications(controls)
         ]
 
+    def watchdog_rule_check(self, controls: Mapping[str, str]) -> dict[str, Any]:
+        return verify_watchdog_rule(
+            self.runtime.watchdog_rule(),
+            expected_state=controls["CloudWatchdogScheduleState"],
+        )
+
     def operations_topic_arn(self) -> str:
         topic_arn = self.outputs.get("OperationsTopicArn")
         expected_topic = (
@@ -1289,13 +1902,48 @@ class ActivationController:
 
     def require_rollout_prerequisites(self) -> list[dict[str, Any]]:
         checks: list[dict[str, Any]] = []
+        if self.phase == "disabled":
+            # Emergency recovery is intentionally independent of OAuth,
+            # Lambda, bridge, subscription, and heartbeat health. Its only
+            # purpose is to force every runtime control off.
+            return checks
         if self.phase == "gmail":
+            if not getattr(self, "auth_probe_only", False):
+                developer = self.worker_heartbeat("quant-developer")
+                require_heartbeat(
+                    developer,
+                    "HERMES_QUANT_DEVELOPER_SCHEDULE_CANARY_FAILED",
+                )
+                checks.append(developer)
+                checks.append(self.bridge_check("quant-developer"))
             checks.append(self.secret_check())
             checks.append(self.function_check("GMAIL"))
-            if self.parameters["GmailScheduleState"] == "ENABLED":
-                gmail = self.gmail_heartbeat()
-                require_heartbeat(gmail, "GMAIL_SCHEDULE_CANARY_FAILED")
-                checks.append(gmail)
+            if getattr(self, "auth_probe_only", False):
+                checks.append(self.canary_gmail())
+            elif self.parameters["GmailScheduleState"] == "ENABLED":
+                if self.apply:
+                    # An apply rerun is the post-cutover verification/recovery
+                    # path. Defer the heartbeat read until after the exact
+                    # control resources are re-read so any failure is covered
+                    # by the all-disabled compensating deployment.
+                    checks.append(
+                        {
+                            "passed": True,
+                            "verificationDeferred": True,
+                            "code": "GMAIL_HEARTBEAT_VERIFICATION_DEFERRED",
+                            "message": (
+                                "The exact four-heartbeat Scheduler gate will "
+                                "run inside post-deploy compensation coverage."
+                            ),
+                        }
+                    )
+                else:
+                    gmail = self.gmail_heartbeat()
+                    require_heartbeat(
+                        gmail,
+                        "GMAIL_SCHEDULE_CANARY_FAILED",
+                    )
+                    checks.append(gmail)
             elif self.apply:
                 checks.append(self.canary_gmail())
             else:
@@ -1312,7 +1960,10 @@ class ActivationController:
                 )
             return checks
 
-        if self.phase in {"analyst", "developer", "security", "alarms", "full"}:
+        if self.phase == "developer":
+            checks.append(self.function_check("HERMES"))
+
+        if self.phase in {"analyst", "security", "alarms", "full"}:
             checks.append(self.secret_check())
             checks.extend(self.function_checks())
             gmail = self.gmail_heartbeat()
@@ -1328,7 +1979,7 @@ class ActivationController:
                     f"HERMES_{prior.upper().replace('-', '_')}_SCHEDULE_CANARY_FAILED",
                 )
                 checks.append(result)
-            checks.append(self.bridge_check())
+            checks.append(self.bridge_check(worker))
             if self.parameters[WORKER_PARAMETER[worker]] == "ENABLED":
                 result = self.worker_heartbeat(worker)
                 require_heartbeat(
@@ -1384,6 +2035,7 @@ class ActivationController:
                 f"schedule:{name}",
                 lambda specification=specification: self.schedule_check(specification),
             )
+        capture("event-rule:cloud-watchdog", lambda: self.watchdog_rule_check(controls))
         capture("alarms", lambda: self.alarm_check(controls))
         if controls["OperationalAlarmsState"] == "ENABLED":
             capture("operationsSubscription", self.subscription_check)
@@ -1411,80 +2063,387 @@ class ActivationController:
         self, parameters: Mapping[str, str], *, build_version: str
     ) -> dict[str, Any]:
         self.validate_apply_configuration()
-        role_arn = str(self.cloudformation_role_arn or "")
-
-        steps = (
-            [
-                sys.executable,
-                str(INFRA_DIR / "scripts" / "render_hermes_contract.py"),
-                "--check",
-            ],
-            [
-                "sam",
-                "validate",
-                "--lint",
-                "--template-file",
-                "template.yaml",
-                "--region",
-                EXPECTED_REGION,
-                "--profile",
-                self.admin_profile,
-            ],
-            ["sam", "build", "--template-file", "template.yaml"],
-            [
-                "sam",
-                "deploy",
-                "--config-file",
-                "samconfig.toml",
-                "--region",
-                EXPECTED_REGION,
-                "--profile",
-                self.admin_profile,
-                "--role-arn",
-                role_arn,
-                "--no-confirm-changeset",
-                "--no-fail-on-empty-changeset",
-                "--parameter-overrides",
-                *[f"{key}={value}" for key, value in parameters.items()],
-            ],
-        )
-        names = ("CONTRACT_CHECK", "SAM_VALIDATE", "SAM_BUILD", "SAM_DEPLOY")
-        for name, command in zip(names, steps):
-            completed = subprocess.run(
-                command,
-                cwd=INFRA_DIR,
-                check=False,
-                capture_output=True,
-                text=True,
-                env={
-                    **os.environ,
-                    "AWS_PROFILE": self.admin_profile,
-                    "AWS_REGION": EXPECTED_REGION,
-                    "AWS_DEFAULT_REGION": EXPECTED_REGION,
-                },
+        release = getattr(self, "release_verification", None) or {}
+        release_commit = str(release.get("releaseCommit") or "")
+        if build_version != release_commit:
+            raise ActivationFailure(
+                "TESTED_RELEASE_COMMIT_MISMATCH",
+                "Deployment BuildVersion must equal the verified tested-release commit.",
             )
-            if completed.returncode:
-                diagnostic = safe_text(
-                    (completed.stderr or completed.stdout or "command failed")[-1000:]
-                )
-                raise ActivationFailure(
-                    f"{name}_FAILED",
-                    f"{name} exited {completed.returncode}: {diagnostic}",
-                )
+        missing = [name for name in ALL_PARAMETER_NAMES if name not in parameters]
+        if missing:
+            raise ActivationFailure(
+                "STACK_PARAMETER_MISSING",
+                "Activation deployment omitted existing stack parameters.",
+                detail={"parameters": missing},
+            )
+        changed_non_controls = {
+            name: {
+                "current": str(self.parameters.get(name) or ""),
+                "requested": str(parameters.get(name) or ""),
+            }
+            for name in ALL_PARAMETER_NAMES
+            if name not in CONTROL_PARAMETERS
+            and str(parameters.get(name) or "")
+            != str(self.parameters.get(name) or "")
+        }
+        if changed_non_controls:
+            raise ActivationFailure(
+                "ACTIVATION_NON_CONTROL_PARAMETER_CHANGE",
+                "Staged activation may change control parameters only.",
+                detail={"changes": changed_non_controls},
+            )
+        role_arn = str(self.cloudformation_role_arn or "")
+        artifact_bucket = os.environ["MARKET_DASHBOARD_SAM_ARTIFACT_BUCKET"]
+        command = [
+            "sam",
+            "deploy",
+            "--template-file",
+            str(release["templatePath"]),
+            "--stack-name",
+            STACK_NAME,
+            "--region",
+            EXPECTED_REGION,
+            "--profile",
+            self.admin_profile,
+            "--role-arn",
+            role_arn,
+            "--s3-bucket",
+            artifact_bucket,
+            "--capabilities",
+            "CAPABILITY_IAM",
+            "CAPABILITY_NAMED_IAM",
+            "--no-confirm-changeset",
+            "--no-fail-on-empty-changeset",
+            "--parameter-overrides",
+            *[f"{key}={value}" for key, value in parameters.items()],
+            "--tags",
+            "market-dashboard:owner=market-dashboard-readiness-v2",
+            "market-dashboard:purpose=readiness-stack",
+        ]
+        subprocess_environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            not in {
+                "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY",
+                "AWS_SESSION_TOKEN",
+                "AWS_SECURITY_TOKEN",
+                "AWS_PROFILE",
+                "AWS_DEFAULT_PROFILE",
+                "AWS_ROLE_ARN",
+                "AWS_ROLE_SESSION_NAME",
+                "AWS_WEB_IDENTITY_TOKEN_FILE",
+                "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+                "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+                "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+                "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+                "AWS_SHARED_CREDENTIALS_FILE",
+                "AWS_CONFIG_FILE",
+            }
+        }
+        subprocess_environment.update(
+            {
+                "AWS_PROFILE": str(self.admin_profile),
+                "AWS_DEFAULT_PROFILE": str(self.admin_profile),
+                "AWS_REGION": EXPECTED_REGION,
+                "AWS_DEFAULT_REGION": EXPECTED_REGION,
+                "AWS_PAGER": "",
+                "AWS_CLI_AUTO_PROMPT": "off",
+                "AWS_EC2_METADATA_DISABLED": "true",
+            }
+        )
+        completed = subprocess.run(
+            command,
+            cwd=Path(str(release["templatePath"])).parent,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=subprocess_environment,
+        )
+        if completed.returncode:
+            diagnostic = safe_text(
+                (completed.stderr or completed.stdout or "command failed")[-1000:]
+            )
+            raise ActivationFailure(
+                "SAM_DEPLOY_FAILED",
+                f"SAM_DEPLOY exited {completed.returncode}: {diagnostic}",
+            )
         return {
             "passed": True,
             "stack": STACK_NAME,
             "buildVersion": build_version,
+            "testedReleaseReceipt": release["receiptPath"],
+            "templateSha256": release["templateSha256"],
             "controls": {name: parameters[name] for name in CONTROL_PARAMETERS},
         }
+
+    def verify_post_deploy_controls(
+        self, expected_controls: Mapping[str, str]
+    ) -> dict[str, Any]:
+        """Re-read and verify all authoritative control resources."""
+
+        self.stack = self.runtime.stack()
+        validate_stack(self.stack)
+        self.parameters = stack_parameters(self.stack)
+        self.outputs = stack_outputs(self.stack)
+        deployed_controls = {
+            name: self.parameters[name] for name in CONTROL_PARAMETERS
+        }
+        if deployed_controls != dict(expected_controls):
+            raise ActivationFailure(
+                "STACK_CONTROL_STATE_MISMATCH",
+                "CloudFormation completed but deployed controls differ from the request.",
+                detail={
+                    "expected": dict(expected_controls),
+                    "actual": deployed_controls,
+                },
+            )
+        release_check = self.verify_deployed_tested_release()
+
+        schedule_checks = self.schedule_checks(expected_controls)
+        for check in schedule_checks:
+            require_check(check, "SCHEDULE_VERIFICATION_FAILED")
+        watchdog_rule_check = self.watchdog_rule_check(expected_controls)
+        require_check(watchdog_rule_check, "WATCHDOG_RULE_VERIFICATION_FAILED")
+        alarm_check = self.alarm_check(expected_controls)
+        require_check(alarm_check, "ALARM_VERIFICATION_FAILED")
+        subscription_check = (
+            self.subscription_check()
+            if expected_controls["OperationalAlarmsState"] == "ENABLED"
+            else {"passed": True, "notApplicable": True}
+        )
+        return {
+            "passed": True,
+            "controls": deployed_controls,
+            "testedRelease": release_check,
+            "schedules": schedule_checks,
+            "watchdogRule": watchdog_rule_check,
+            "alarms": alarm_check,
+            "operationsSubscription": subscription_check,
+        }
+
+    def repair_all_controls_disabled(self) -> dict[str, Any]:
+        """Best-effort repair of every exact owned control without enabling one."""
+
+        disabled_controls = {
+            name: "DISABLED" for name in CONTROL_PARAMETERS
+        }
+        repaired_schedules: list[str] = []
+        failures: list[dict[str, Any]] = []
+
+        def record_failure(
+            resource_type: str,
+            name: str,
+            error: Exception,
+        ) -> None:
+            failure = (
+                error
+                if isinstance(error, ActivationFailure)
+                else ActivationFailure(
+                    "CONTROL_DISABLE_UNEXPECTED",
+                    safe_text(error),
+                )
+            )
+            failures.append(
+                {
+                    "resourceType": resource_type,
+                    "name": name,
+                    "error": failure.as_dict(),
+                }
+            )
+
+        try:
+            specifications = self.schedule_specifications(disabled_controls)
+        except Exception as error:
+            record_failure("schedule-catalog", "owned-schedules", error)
+            specifications = []
+
+        for specification in specifications:
+            name = str(specification["name"])
+            try:
+                current = self.runtime.schedule(name)
+                if str(current.get("State") or "").upper() != "DISABLED":
+                    self.runtime.disable_schedule(name, current)
+                    repaired_schedules.append(name)
+            except Exception as error:
+                record_failure("schedule", name, error)
+
+        watchdog_repaired = False
+        try:
+            watchdog = self.runtime.watchdog_rule()
+            watchdog_needs_disable = (
+                str(watchdog.get("State") or "").upper() != "DISABLED"
+            )
+        except Exception:
+            # DisableRule is itself idempotent, exact-name, and safer than
+            # leaving the rule potentially enabled after a failed read.
+            watchdog_needs_disable = True
+        if watchdog_needs_disable:
+            try:
+                self.runtime.disable_watchdog_rule()
+                watchdog_repaired = True
+            except Exception as error:
+                record_failure(
+                    "event-rule",
+                    "market-dashboard-hermes-cloud-watchdog-v1",
+                    error,
+                )
+
+        try:
+            alarm_names = [
+                str(alarm.get("AlarmName") or "")
+                for alarm in self.runtime.alarms()
+                if alarm.get("ActionsEnabled") is True
+                and str(alarm.get("AlarmName") or "") in ALARM_NAMES
+            ]
+        except Exception:
+            # DisableAlarmActions is idempotent. If the read failed, attempt
+            # every exact allowlisted alarm independently and let the final
+            # authoritative verification decide the outcome.
+            alarm_names = list(ALARM_NAMES)
+        disabled_alarm_names: list[str] = []
+        for alarm_name in alarm_names:
+            try:
+                self.runtime.disable_alarm_actions([alarm_name])
+                disabled_alarm_names.append(alarm_name)
+            except Exception as error:
+                record_failure("alarm", alarm_name, error)
+
+        return {
+            "passed": not failures,
+            "performed": bool(
+                repaired_schedules
+                or watchdog_repaired
+                or disabled_alarm_names
+            ),
+            "schedulesDisabled": repaired_schedules,
+            "watchdogRuleDisabled": watchdog_repaired,
+            "alarmActionsDisabled": disabled_alarm_names,
+            "failures": failures,
+        }
+
+    def compensate_all_controls_disabled(
+        self,
+        *,
+        parameter_source: Mapping[str, str],
+        build_version: str,
+    ) -> dict[str, Any]:
+        """Deploy and authoritatively verify the fail-closed control state."""
+
+        disabled_controls = {
+            name: "DISABLED" for name in CONTROL_PARAMETERS
+        }
+        result: dict[str, Any] = {
+            "attempted": True,
+            "succeeded": False,
+            "deploymentSucceeded": False,
+            "verificationSucceeded": False,
+            "targetControls": disabled_controls,
+        }
+        deployment_failure: ActivationFailure | None = None
+        try:
+            parameters = deployment_parameters(
+                parameter_source,
+                disabled_controls,
+                build_version=build_version,
+            )
+            result["deployment"] = self.deploy(
+                parameters,
+                build_version=build_version,
+            )
+            result["deploymentSucceeded"] = True
+        except Exception as error:
+            deployment_failure = (
+                error
+                if isinstance(error, ActivationFailure)
+                else ActivationFailure(
+                    "COMPENSATING_DEPLOY_UNEXPECTED",
+                    safe_text(error),
+                )
+            )
+            result["deploymentFailure"] = deployment_failure.as_dict()
+
+        try:
+            result["driftRepair"] = self.repair_all_controls_disabled()
+        except Exception as error:
+            repair_failure = (
+                error
+                if isinstance(error, ActivationFailure)
+                else ActivationFailure(
+                    "COMPENSATING_REPAIR_UNEXPECTED",
+                    safe_text(error),
+                )
+            )
+            result["driftRepair"] = {
+                "passed": False,
+                "performed": False,
+                "failures": [
+                    {
+                        "resourceType": "control-repair",
+                        "name": "owned-controls",
+                        "error": repair_failure.as_dict(),
+                    }
+                ],
+            }
+
+        try:
+            result["verification"] = self.verify_post_deploy_controls(
+                disabled_controls
+            )
+            result["verificationSucceeded"] = True
+            result["succeeded"] = True
+        except Exception as error:
+            verification_failure = (
+                error
+                if isinstance(error, ActivationFailure)
+                else ActivationFailure(
+                    "COMPENSATING_VERIFY_UNEXPECTED",
+                    safe_text(error),
+                )
+            )
+            result["verificationFailure"] = verification_failure.as_dict()
+            result["failure"] = (
+                deployment_failure or verification_failure
+            ).as_dict()
+        if not result["succeeded"] and "failure" not in result:
+            result["failure"] = (
+                deployment_failure
+                or ActivationFailure(
+                    "COMPENSATING_RECOVERY_UNVERIFIED",
+                    "The compensating recovery was not authoritatively verified.",
+                )
+            ).as_dict()
+        return result
 
     def run_rollout(self) -> dict[str, Any]:
         self.validate_apply_configuration()
         checks = self.require_rollout_prerequisites()
-        controls = target_control_state(self.phase, self.parameters)
         previous_controls = {
             name: self.parameters[name] for name in CONTROL_PARAMETERS
         }
+        if getattr(self, "auth_probe_only", False):
+            return {
+                "passed": True,
+                "mode": "auth-probe-only",
+                "phase": self.phase,
+                "currentControls": previous_controls,
+                "targetControls": previous_controls,
+                "preflight": checks,
+                "rollbackExport": getattr(
+                    self, "rollback_verification", None
+                ),
+                "mutation": {
+                    "performed": False,
+                    "code": "AUTH_PROBE_ONLY",
+                    "message": (
+                        "The bounded Gmail OAuth/profile canary passed; no "
+                        "schedule, alarm, or stack control was changed."
+                    ),
+                },
+            }
+        controls = target_control_state(self.phase, self.parameters)
         report: dict[str, Any] = {
             "passed": True,
             "mode": "apply" if self.apply else "dry-run",
@@ -1493,6 +2452,10 @@ class ActivationController:
             "targetControls": controls,
             "preflight": checks,
         }
+        if self.apply:
+            report["rollbackExport"] = getattr(
+                self, "rollback_verification", None
+            )
         if not self.apply:
             report["mutation"] = {
                 "performed": False,
@@ -1501,87 +2464,241 @@ class ActivationController:
             }
             return report
 
-        build_version = str(load_json(REPO_ROOT / "package.json")["version"])
+        release = getattr(self, "release_verification", None)
+        if not isinstance(release, Mapping):
+            raise ActivationFailure(
+                "TESTED_RELEASE_RECEIPT_REQUIRED",
+                "Staged activation has no verified tested release.",
+            )
+        build_version = str(release["releaseCommit"])
+        report["testedRelease"] = {
+            "releaseCommit": build_version,
+            "receiptPath": release["receiptPath"],
+            "templateSha256": release["templateSha256"],
+            "artifactCount": len(release.get("artifacts") or []),
+        }
+        compensation_parameter_source = dict(self.parameters)
         parameters = deployment_parameters(
             self.parameters, controls, build_version=build_version
         )
-        report["deployment"] = self.deploy(parameters, build_version=build_version)
-
-        # SAM waits for the stack update. Re-read every authoritative resource
-        # instead of trusting the requested parameter values.
-        self.stack = self.runtime.stack()
-        validate_stack(self.stack)
-        self.parameters = stack_parameters(self.stack)
-        self.outputs = stack_outputs(self.stack)
-        deployed_controls = {
-            name: self.parameters[name] for name in CONTROL_PARAMETERS
-        }
-        if deployed_controls != controls:
-            raise ActivationFailure(
-                "STACK_CONTROL_STATE_MISMATCH",
-                "CloudFormation completed but deployed controls differ from the request.",
-                detail={"expected": controls, "actual": deployed_controls},
-            )
-        schedule_checks = self.schedule_checks(controls)
-        for check in schedule_checks:
-            require_check(check, "SCHEDULE_VERIFICATION_FAILED")
-        alarm_check = self.alarm_check(controls)
-        require_check(alarm_check, "ALARM_VERIFICATION_FAILED")
-        subscription_check = (
-            self.subscription_check()
-            if controls["OperationalAlarmsState"] == "ENABLED"
-            else {"passed": True, "notApplicable": True}
-        )
-
         transitioned = {
             name
             for name in CONTROL_PARAMETERS
             if previous_controls.get(name) != controls.get(name)
         }
-        heartbeat_checks: list[dict[str, Any]] = []
-        gmail_result = self.gmail_heartbeat()
-        if not gmail_result["passed"] and "GmailScheduleState" not in transitioned:
-            require_heartbeat(gmail_result, "GMAIL_SCHEDULE_CANARY_FAILED")
-        if not gmail_result["passed"]:
-            gmail_result = {
-                **gmail_result,
-                "pending": True,
-                "code": "GMAIL_SCHEDULE_OBSERVATION_PENDING",
-            }
-        heartbeat_checks.append(gmail_result)
-        for worker in self.contract["workers"]:
-            if controls[WORKER_PARAMETER[worker]] != "ENABLED":
-                continue
-            result = self.worker_heartbeat(worker)
-            if not result["passed"] and WORKER_PARAMETER[worker] not in transitioned:
-                require_heartbeat(
-                    result,
-                    f"HERMES_{worker.upper().replace('-', '_')}_SCHEDULE_CANARY_FAILED",
-                )
-            if not result["passed"]:
-                result = {
-                    **result,
-                    "pending": True,
-                    "code": "HERMES_SCHEDULE_OBSERVATION_PENDING",
-                }
-            heartbeat_checks.append(result)
-
-        heartbeat_windows_passed = all(
-            result.get("passed") for result in heartbeat_checks
-        )
-        report["verification"] = {
-            "passed": True,
-            "schedules": schedule_checks,
-            "alarms": alarm_check,
-            "operationsSubscription": subscription_check,
-            "heartbeats": heartbeat_checks,
-            "heartbeatWindowsPassed": heartbeat_windows_passed,
-            "heartbeatObservationPending": not heartbeat_windows_passed,
-            "note": (
-                "A newly enabled schedule must accumulate its required 24/7 heartbeat "
-                "window before the next rollout phase."
-            ),
+        pre_enable_watermark = datetime.now(timezone.utc)
+        heartbeat_watermarks = {
+            name: pre_enable_watermark
+            for name in transitioned
+            if controls.get(name) == "ENABLED"
+            and (
+                name == "GmailScheduleState"
+                or name in WORKER_PARAMETER.values()
+            )
         }
+        initial_deployment_succeeded = False
+        try:
+            report["deployment"] = self.deploy(
+                parameters,
+                build_version=build_version,
+            )
+            initial_deployment_succeeded = True
+            if all(value == "DISABLED" for value in controls.values()):
+                report["driftRepair"] = self.repair_all_controls_disabled()
+            # SAM waits for the stack update. Re-read every authoritative
+            # resource instead of trusting the requested parameter values.
+            control_verification = self.verify_post_deploy_controls(controls)
+
+            heartbeat_checks: list[dict[str, Any]] = []
+            if controls["GmailScheduleState"] == "ENABLED":
+                newly_enabled = "GmailScheduleState" in heartbeat_watermarks
+                gmail_result = (
+                    self.gmail_heartbeat(
+                        observed_after=heartbeat_watermarks[
+                            "GmailScheduleState"
+                        ]
+                    )
+                    if newly_enabled
+                    else self.gmail_heartbeat()
+                )
+                if not gmail_result["passed"]:
+                    if not (
+                        newly_enabled
+                        and heartbeat_observation_pending(gmail_result)
+                    ):
+                        require_heartbeat(
+                            gmail_result,
+                            "GMAIL_SCHEDULE_CANARY_FAILED",
+                        )
+                    gmail_result = {
+                        **gmail_result,
+                        "pending": True,
+                        "code": "GMAIL_SCHEDULE_OBSERVATION_PENDING",
+                    }
+                heartbeat_checks.append(gmail_result)
+
+            for worker in self.contract["workers"]:
+                parameter_name = WORKER_PARAMETER[worker]
+                if controls[parameter_name] != "ENABLED":
+                    continue
+                newly_enabled = parameter_name in heartbeat_watermarks
+                result = (
+                    self.worker_heartbeat(
+                        worker,
+                        observed_after=heartbeat_watermarks[parameter_name],
+                    )
+                    if newly_enabled
+                    else self.worker_heartbeat(worker)
+                )
+                if not result["passed"]:
+                    if not (
+                        newly_enabled and heartbeat_observation_pending(result)
+                    ):
+                        require_heartbeat(
+                            result,
+                            (
+                                f"HERMES_{worker.upper().replace('-', '_')}"
+                                "_SCHEDULE_CANARY_FAILED"
+                            ),
+                        )
+                    result = {
+                        **result,
+                        "pending": True,
+                        "code": "HERMES_SCHEDULE_OBSERVATION_PENDING",
+                    }
+                heartbeat_checks.append(result)
+
+            heartbeat_windows_passed = all(
+                result.get("passed") for result in heartbeat_checks
+            )
+            report["verification"] = {
+                **control_verification,
+                "heartbeats": heartbeat_checks,
+                "heartbeatWindowsPassed": heartbeat_windows_passed,
+                "heartbeatObservationPending": not heartbeat_windows_passed,
+                "note": (
+                    (
+                        "A newly enabled schedule must accumulate its required 24/7 "
+                        "heartbeat window before the next rollout phase."
+                    )
+                    if heartbeat_checks
+                    else (
+                        "All controls are disabled; heartbeat verification is "
+                        "intentionally not applicable."
+                    )
+                ),
+            }
+        except Exception as error:
+            rollout_failure = (
+                error
+                if isinstance(error, ActivationFailure)
+                else ActivationFailure(
+                    (
+                        "POST_DEPLOY_VERIFICATION_UNEXPECTED"
+                        if initial_deployment_succeeded
+                        else "ROLLOUT_DEPLOYMENT_UNEXPECTED"
+                    ),
+                    safe_text(error),
+                )
+            )
+            if self.phase == "disabled":
+                # The recovery phase already targets the fail-closed state.
+                # Never recursively invoke itself. Always attempt every direct
+                # disable even if SAM failed or only partially applied, then
+                # make a separate authoritative verification attempt.
+                if "driftRepair" not in report:
+                    try:
+                        report["driftRepair"] = (
+                            self.repair_all_controls_disabled()
+                        )
+                    except Exception as repair_error:
+                        repair_failure = (
+                            repair_error
+                            if isinstance(repair_error, ActivationFailure)
+                            else ActivationFailure(
+                                "DISABLED_REPAIR_UNEXPECTED",
+                                safe_text(repair_error),
+                            )
+                        )
+                        report["driftRepair"] = {
+                            "passed": False,
+                            "performed": False,
+                            "failures": [
+                                {
+                                    "resourceType": "control-repair",
+                                    "name": "owned-controls",
+                                    "error": repair_failure.as_dict(),
+                                }
+                            ],
+                        }
+                disabled_verification: dict[str, Any]
+                try:
+                    disabled_verification = (
+                        self.verify_post_deploy_controls(controls)
+                    )
+                    controls_verified_disabled = True
+                except Exception as verification_error:
+                    verification_failure = (
+                        verification_error
+                        if isinstance(verification_error, ActivationFailure)
+                        else ActivationFailure(
+                            "DISABLED_VERIFY_UNEXPECTED",
+                            safe_text(verification_error),
+                        )
+                    )
+                    disabled_verification = {
+                        "passed": False,
+                        "error": verification_failure.as_dict(),
+                    }
+                    controls_verified_disabled = False
+                raise ActivationFailure(
+                    rollout_failure.code,
+                    rollout_failure.message,
+                    detail={
+                        "failure": rollout_failure.as_dict(),
+                        "driftRepair": report["driftRepair"],
+                        "controlsVerifiedDisabled": (
+                            controls_verified_disabled
+                        ),
+                        "verification": disabled_verification,
+                    },
+                ) from None
+            compensation = self.compensate_all_controls_disabled(
+                parameter_source=compensation_parameter_source,
+                build_version=build_version,
+            )
+            if compensation["succeeded"]:
+                outcome = (
+                    "A compensating deployment was verified with every control "
+                    "DISABLED."
+                )
+            else:
+                outcome = (
+                    "The compensating deployment could not be verified; treat "
+                    "all controls as potentially enabled until manually checked."
+                )
+            wrapper_code = (
+                "POST_DEPLOY_VERIFICATION_FAILED"
+                if initial_deployment_succeeded
+                else "ROLLOUT_DEPLOYMENT_FAILED"
+            )
+            initial_deployment = report.get("deployment")
+            detail: dict[str, Any] = {
+                "initialDeploymentSucceeded": initial_deployment_succeeded,
+                (
+                    "verificationFailure"
+                    if initial_deployment_succeeded
+                    else "deploymentFailure"
+                ): rollout_failure.as_dict(),
+                "compensation": compensation,
+            }
+            if initial_deployment is not None:
+                detail["initialDeployment"] = initial_deployment
+            raise ActivationFailure(
+                wrapper_code,
+                f"{rollout_failure.message} {outcome}",
+                detail=detail,
+            ) from None
         return report
 
 
@@ -1594,9 +2711,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--phase",
-        choices=("status", "gmail", "analyst", "developer", "security", "alarms", "full"),
+        choices=(
+            "status",
+            "disabled",
+            "developer",
+            "gmail",
+            "security",
+            "analyst",
+            "alarms",
+            "full",
+        ),
         default="status",
-        help="Rollout gate to inspect/apply (default: status).",
+        help=(
+            "Rollout gate to inspect/apply; disabled is the apply-only "
+            "all-controls-off recovery phase (default: status)."
+        ),
     )
     parser.add_argument(
         "--apply",
@@ -1616,12 +2745,58 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=os.environ.get("MARKET_DASHBOARD_CF_ROLE_ARN"),
         help="Exact-account CloudFormation execution role; required with --apply.",
     )
+    parser.add_argument(
+        "--rollback-export",
+        default=os.environ.get("MARKET_DASHBOARD_ROLLBACK_EXPORT"),
+        help=(
+            "Absolute verified predeployment rollback export; required with "
+            "--apply."
+        ),
+    )
+    parser.add_argument(
+        "--release-receipt",
+        default=os.environ.get("MARKET_DASHBOARD_RELEASE_RECEIPT"),
+        help=(
+            "Absolute mode-0600 tested-release receipt used by base deployment; "
+            "required for every stack-changing apply phase."
+        ),
+    )
+    parser.add_argument(
+        "--release-receipt-key",
+        default=os.environ.get(
+            "MARKET_DASHBOARD_RELEASE_RECEIPT_KEY",
+            str(DEFAULT_RELEASE_RECEIPT_KEY),
+        ),
+        help="Private HMAC key used to authenticate the tested-release receipt.",
+    )
+    parser.add_argument(
+        "--auth-probe-only",
+        action="store_true",
+        help=(
+            "For --phase gmail --apply, run only the bounded OAuth/profile "
+            "canary and do not deploy or change controls."
+        ),
+    )
     parser.add_argument("--region", default=EXPECTED_REGION)
     args = parser.parse_args(argv)
     if args.apply and args.phase == "status":
         parser.error("--apply requires an explicit rollout --phase.")
+    if args.phase == "disabled" and not args.apply:
+        parser.error("--phase disabled is an apply-only recovery command.")
     if args.apply and not args.admin_profile:
         parser.error("--apply requires an explicit --admin-profile.")
+    if args.apply and not args.rollback_export:
+        parser.error(
+            "--apply requires --rollback-export or "
+            "MARKET_DASHBOARD_ROLLBACK_EXPORT."
+        )
+    if args.auth_probe_only and (not args.apply or args.phase != "gmail"):
+        parser.error("--auth-probe-only requires --phase gmail --apply.")
+    if args.apply and not args.auth_probe_only and not args.release_receipt:
+        parser.error(
+            "--apply requires --release-receipt or "
+            "MARKET_DASHBOARD_RELEASE_RECEIPT."
+        )
     if args.region != EXPECTED_REGION:
         parser.error(f"this stack is pinned to --region {EXPECTED_REGION}.")
     return args
@@ -1638,6 +2813,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             apply=args.apply,
             admin_profile=args.admin_profile,
             cloudformation_role_arn=args.cloudformation_role_arn,
+            rollback_export=args.rollback_export,
+            release_receipt=args.release_receipt,
+            release_receipt_key=args.release_receipt_key,
+            auth_probe_only=args.auth_probe_only,
         )
         identity = controller.initialize()
         report = (

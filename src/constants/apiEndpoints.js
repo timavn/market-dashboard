@@ -16,6 +16,9 @@ export const ENDPOINTS = {
   PROVIDERS_STATUS: '/api/providers/status',
   IBKR_FLEX_STATUS: '/api/ibkr/flex/status',
   IBKR_FLEX_SYNC: '/api/ibkr/flex/sync',
+  IBKR_INTEREST_VALIDATION_STATUS: '/api/ibkr/interest-validation/status',
+  IBKR_INTEREST_VALIDATION_HISTORY: '/api/ibkr/interest-validation/history',
+  IBKR_INTEREST_VALIDATION_RUN: '/api/ibkr/interest-validation/run',
   POSITIONS: '/api/positions',
   PERFORMANCE: '/api/performance',
   PERFORMANCE_HISTORY: '/api/performance/history',
@@ -37,6 +40,7 @@ export const ENDPOINTS = {
   RISK_RANGES: '/api/risk-ranges',
 
   // Workflow status
+  SYSTEM_STATUS: '/api/system-status',
   SYSTEM_READINESS: '/api/system-readiness',
   WORKFLOW_STATUS: '/api/workflow-status',
   HERMES_DIRECTOR_STATUS: '/api/hermes/director/status',
