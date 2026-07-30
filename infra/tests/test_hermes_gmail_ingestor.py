@@ -21,7 +21,6 @@ sys.path.insert(
 )
 
 from botocore.exceptions import ClientError
-from boto3.dynamodb.types import TypeDeserializer
 
 import hermes_gmail_ingestor as ingestor
 import parse_hedgeye_email_html as email_parser
@@ -231,14 +230,9 @@ class FakeTransactionClient:
         self.client_request_tokens.append(ClientRequestToken)
         if self.error:
             raise self.error
-        deserializer = TypeDeserializer()
         for operation in TransactItems:
             put = operation["Put"]
-            item = {
-                key: deserializer.deserialize(value)
-                for key, value in put["Item"].items()
-            }
-            self.tables[put["TableName"]].store_transaction_item(item)
+            self.tables[put["TableName"]].store_transaction_item(put["Item"])
         return {}
 
 
@@ -2662,11 +2656,11 @@ class HermesGmailIngestorTests(unittest.TestCase):
             )
             self.assertEqual(
                 put["ExpressionAttributeValues"][":incomingPublicationOrder"],
-                {"N": str(expected_order)},
+                expected_order,
             )
             self.assertEqual(
                 put["Item"]["publicationOrder"],
-                {"N": str(expected_order)},
+                expected_order,
             )
         manifest_table = database.tables["RiskRangePublicationManifestsV2"]
         self.assertEqual(
@@ -2890,8 +2884,8 @@ class HermesGmailIngestorTests(unittest.TestCase):
             for entry in transaction
             if entry["Put"]["TableName"] == "HedgeyeDailySnapshot"
         )
-        self.assertEqual(set(daily_snapshot["data"]["M"]), {"SPX"})
-        self.assertEqual(daily_snapshot["riskRangeCount"], {"N": "1"})
+        self.assertEqual(set(daily_snapshot["data"]), {"SPX"})
+        self.assertEqual(daily_snapshot["riskRangeCount"], 1)
 
     def test_conflicting_normalized_ticker_duplicates_fail_typed_before_any_write(self):
         database = FakeRiskRangeDynamoDb()

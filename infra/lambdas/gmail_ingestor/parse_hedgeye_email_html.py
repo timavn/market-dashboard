@@ -1550,14 +1550,21 @@ def _serialized_item(
     }
 
 
-def _serialized_values(
+def _serialized_transaction_write(
     serializer: TypeSerializer,
-    values: Dict[str, Any],
+    operation: Dict[str, Any],
 ) -> Dict[str, Any]:
-    return {
-        key: serializer.serialize(value)
-        for key, value in values.items()
+    put = operation["Put"]
+    serialized_put = {
+        **put,
+        "Item": _serialized_item(serializer, put["Item"]),
     }
+    if "ExpressionAttributeValues" in put:
+        serialized_put["ExpressionAttributeValues"] = {
+            key: serializer.serialize(value)
+            for key, value in put["ExpressionAttributeValues"].items()
+        }
+    return {"Put": serialized_put}
 
 
 def _projection_matches(
@@ -1782,13 +1789,18 @@ def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
         return {
             "Put": {
                 "TableName": table_name,
-                "Item": _serialized_item(serializer, item_value),
+                # db.meta.client belongs to the high-level DynamoDB resource
+                # and already has boto3's native-value transformer installed.
+                # Pre-serializing here double-wraps numbers as maps (M), which
+                # makes the monotonic numeric condition fail in production.
+                "Item": {
+                    key: value
+                    for key, value in item_value.items()
+                    if value is not None
+                },
                 "ConditionExpression": monotonic_condition,
                 "ExpressionAttributeNames": dict(monotonic_names),
-                "ExpressionAttributeValues": _serialized_values(
-                    serializer,
-                    monotonic_values,
-                ),
+                "ExpressionAttributeValues": dict(monotonic_values),
             }
         }
 
@@ -1802,7 +1814,10 @@ def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
         ])
 
     for operation in projection_writes:
-        serialized = operation["Put"]["Item"]
+        serialized = _serialized_item(
+            serializer,
+            operation["Put"]["Item"],
+        )
         item_size = len(
             json.dumps(serialized, sort_keys=True, separators=(",", ":")).encode(
                 "utf-8"
@@ -1862,10 +1877,16 @@ def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
             chunk = projection_writes[
                 offset : offset + DYNAMODB_TRANSACTION_CHUNK_SIZE
             ]
+            serialized_chunk = [
+                _serialized_transaction_write(serializer, operation)
+                for operation in chunk
+            ]
             chunk_size = len(
-                json.dumps(chunk, sort_keys=True, separators=(",", ":")).encode(
-                    "utf-8"
-                )
+                json.dumps(
+                    serialized_chunk,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
             )
             if (
                 len(chunk) > DYNAMODB_TRANSACTION_MAX_OPERATIONS
