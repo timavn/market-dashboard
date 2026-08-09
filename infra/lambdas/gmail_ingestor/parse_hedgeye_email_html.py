@@ -293,6 +293,214 @@ def _fetch_market_situation_image(url: str) -> bytes:
     return payload
 
 
+def _textract_tables(textract_response: Dict[str, Any]) -> List[List[List[str]]]:
+    """Return each Textract TABLE as its own ordered row collection."""
+    blocks = textract_response.get("Blocks") or []
+    blocks_by_id = {block.get("Id"): block for block in blocks if block.get("Id")}
+    tables: List[List[List[str]]] = []
+    for table in (block for block in blocks if block.get("BlockType") == "TABLE"):
+        cells_by_row: Dict[int, Dict[int, str]] = {}
+        for relationship in table.get("Relationships") or []:
+            if relationship.get("Type") != "CHILD":
+                continue
+            for cell_id in relationship.get("Ids") or []:
+                cell = blocks_by_id.get(cell_id)
+                if not cell or cell.get("BlockType") != "CELL":
+                    continue
+                value_parts: List[str] = []
+                for cell_relationship in cell.get("Relationships") or []:
+                    if cell_relationship.get("Type") != "CHILD":
+                        continue
+                    for word_id in cell_relationship.get("Ids") or []:
+                        word = blocks_by_id.get(word_id)
+                        if word and word.get("BlockType") == "WORD":
+                            value_parts.append(str(word.get("Text") or ""))
+                row_index = int(cell.get("RowIndex") or 0)
+                column_index = int(cell.get("ColumnIndex") or 0)
+                cells_by_row.setdefault(row_index, {})[column_index] = " ".join(
+                    value_parts
+                ).strip()
+        rows: List[List[str]] = []
+        for row_index in sorted(cells_by_row):
+            row_cells = cells_by_row[row_index]
+            rows.append([row_cells[column] for column in sorted(row_cells)])
+        if rows:
+            tables.append(rows)
+    return tables
+
+
+TRACKER_TRENDS = frozenset({"BULLISH", "BEARISH", "NEUTRAL"})
+TRACKER_TICKER_PATTERN = re.compile(r"[A-Z][A-Z0-9]{0,9}(?:[./-][A-Z0-9]{1,6})?")
+
+
+class TrackerTableHeaderError(ValueError):
+    """A Textract table is not one of the approved tracker table shapes."""
+
+
+def _sanitized_chart_items(html_body: str) -> List[Dict[str, str]]:
+    charts: List[Dict[str, str]] = []
+    for item in _extract_chart_items(html_body):
+        source_url = _sanitize_research_image_url(item["url"])
+        if source_url:
+            charts.append({**item, "url": source_url})
+    return charts
+
+
+def _select_tracker_chart(
+    charts: List[Dict[str, str]],
+    *,
+    preferred_name: str,
+    fallback_index: int,
+) -> Dict[str, str]:
+    preferred = next(
+        (
+            item
+            for item in charts
+            if str(item.get("name") or "").strip().lower() == preferred_name.lower()
+        ),
+        None,
+    )
+    selected = preferred or (
+        charts[fallback_index] if 0 <= fallback_index < len(charts) else None
+    )
+    if not selected:
+        raise ValueError(f"Required tracker chart {preferred_name} is missing")
+    source_url = _sanitize_research_image_url(selected.get("url") or "")
+    if not source_url:
+        raise ValueError(f"Required tracker chart {preferred_name} has an unsafe URL")
+    return {**selected, "url": source_url}
+
+
+def _tracker_header_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _tracker_column_map(
+    rows: List[List[str]],
+    *,
+    required_fields: Tuple[str, ...],
+) -> Tuple[int, Dict[str, int]]:
+    for row_index, row in enumerate(rows[:6]):
+        columns: Dict[str, int] = {}
+        for index, value in enumerate(row):
+            header = _tracker_header_key(value)
+            if header in {"ticker", "symbol", "crypto", "cryptocurrency"}:
+                columns["ticker"] = index
+            elif header in {"price", "current price", "last price"}:
+                columns["price"] = index
+            elif header == "buy trade" or header.startswith("buy trade "):
+                columns["buyTrade"] = index
+            elif header == "sell trade" or header.startswith("sell trade "):
+                columns["sellTrade"] = index
+            elif header == "upside" or header.startswith("upside "):
+                columns["upside"] = index
+            elif header == "downside" or header.startswith("downside "):
+                columns["downside"] = index
+            elif header == "trend" or header.startswith("trend "):
+                columns["trend"] = index
+
+        if "ticker" not in columns and columns.get("buyTrade", 0) > 0:
+            columns["ticker"] = 0
+        if all(field in columns for field in required_fields):
+            return row_index, columns
+    raise TrackerTableHeaderError(
+        "Tracker table does not contain the recognized required headers"
+    )
+
+
+def _parse_tracker_number(value: Any, *, field: str, ticker: str) -> Decimal:
+    normalized = str(value or "").strip().replace(",", "")
+    normalized = re.sub(r"^[+$]\s*", "", normalized)
+    normalized = re.sub(r"%$", "", normalized).strip()
+    if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", normalized):
+        raise ValueError(f"Tracker row {ticker} has invalid {field}")
+    parsed = Decimal(normalized)
+    if not parsed.is_finite():
+        raise ValueError(f"Tracker row {ticker} has invalid {field}")
+    return parsed
+
+
+def _parse_tracker_table(
+    rows: List[List[str]],
+    *,
+    required_fields: Tuple[str, ...],
+) -> Dict[str, Dict[str, Any]]:
+    header_index, columns = _tracker_column_map(
+        rows,
+        required_fields=required_fields,
+    )
+    parsed: Dict[str, Dict[str, Any]] = {}
+    for row in rows[header_index + 1:]:
+        if not any(str(value or "").strip() for value in row):
+            continue
+        ticker_index = columns["ticker"]
+        ticker = str(
+            row[ticker_index] if ticker_index < len(row) else ""
+        ).strip().upper()
+        if not TRACKER_TICKER_PATTERN.fullmatch(ticker):
+            raise ValueError("Tracker table contains an incomplete or invalid ticker row")
+        if ticker in parsed:
+            raise ValueError(f"Tracker table contains duplicate ticker {ticker}")
+
+        record: Dict[str, Any] = {}
+        for field in required_fields:
+            if field == "ticker":
+                continue
+            column_index = columns[field]
+            raw_value = row[column_index] if column_index < len(row) else ""
+            if field == "trend":
+                trend = str(raw_value or "").strip().upper()
+                if trend not in TRACKER_TRENDS:
+                    raise ValueError(f"Tracker row {ticker} has invalid trend")
+                record[field] = trend
+            else:
+                record[field] = _parse_tracker_number(
+                    raw_value,
+                    field=field,
+                    ticker=ticker,
+                )
+
+        for price_field in ("price", "buyTrade", "sellTrade"):
+            if price_field in record and record[price_field] <= 0:
+                raise ValueError(f"Tracker row {ticker} has non-positive {price_field}")
+        if record.get("buyTrade") is not None and record.get("sellTrade") is not None:
+            if record["buyTrade"] >= record["sellTrade"]:
+                raise ValueError(f"Tracker row {ticker} has an unordered trade range")
+        parsed[ticker] = record
+
+    if not parsed:
+        raise ValueError("Tracker table contains no complete security rows")
+    return parsed
+
+
+def _extract_tracker_chart_table(
+    *,
+    chart: Dict[str, str],
+    textract_client: Any,
+    image_fetcher: Optional[Callable[[str], bytes]],
+    required_fields: Tuple[str, ...],
+) -> Dict[str, Dict[str, Any]]:
+    payload = (image_fetcher or _fetch_market_situation_image)(chart["url"])
+    response = textract_client.analyze_document(
+        Document={"Bytes": payload},
+        FeatureTypes=["TABLES"],
+    )
+    parsed_tables: List[Dict[str, Dict[str, Any]]] = []
+    for table_rows in _textract_tables(response):
+        try:
+            parsed_tables.append(_parse_tracker_table(
+                table_rows,
+                required_fields=required_fields,
+            ))
+        except TrackerTableHeaderError:
+            continue
+    if len(parsed_tables) != 1:
+        raise ValueError(
+            "Tracker chart must contain exactly one recognized complete table"
+        )
+    return parsed_tables[0]
+
+
 def _paeth_predictor(left: int, above: int, upper_left: int) -> int:
     estimate = left + above - upper_left
     left_distance = abs(estimate - left)
@@ -1285,6 +1493,7 @@ def parse_html_snapshot(
     message_id: str,
     subject: Optional[str] = None,
     image_fetcher: Optional[Callable[[str], bytes]] = None,
+    textract_client: Any = None,
 ) -> Optional[Dict[str, Any]]:
     text = _strip_tags(html_body)
 
@@ -1497,8 +1706,9 @@ def parse_html_snapshot(
         return snapshot
 
     if report_type == "momo-tracker":
-        charts = _extract_chart_items(html_body)
-        if not charts:
+        raw_charts = _extract_chart_items(html_body)
+        charts = _sanitized_chart_items(html_body)
+        if not raw_charts or not charts:
             return None
         snapshot = _base_snapshot(
             snapshot_type="momo-tracker",
@@ -1509,19 +1719,41 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
+        tracker_rows: Dict[str, Dict[str, Any]] = {}
+        if textract_client is not None:
+            table_chart = _select_tracker_chart(
+                raw_charts,
+                preferred_name="6.png",
+                fallback_index=5,
+            )
+            tracker_rows = _extract_tracker_chart_table(
+                chart=table_chart,
+                textract_client=textract_client,
+                image_fetcher=image_fetcher,
+                required_fields=(
+                    "ticker",
+                    "buyTrade",
+                    "sellTrade",
+                    "upside",
+                    "downside",
+                    "trend",
+                ),
+            )
         snapshot["chartCount"] = len(charts)
-        snapshot["data"] = {
-            item["name"]: {"chartUrl": item["url"]}
-            for item in charts
+        snapshot["stockCount"] = len(tracker_rows)
+        snapshot["data"] = tracker_rows or {
+            item["name"]: {"chartUrl": item["url"]} for item in charts
         }
+        snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
         snapshot["article"]["charts"] = charts
         return snapshot
 
     if report_type in {"crypto-quant", "bitcoin-trend-tracker"}:
-        charts = _extract_chart_items(html_body)
+        raw_charts = _extract_chart_items(html_body)
+        charts = _sanitized_chart_items(html_body)
         headline = _extract_headline(html_body, text)
-        cryptos = _extract_crypto_title_data(headline)
-        if not charts and not cryptos:
+        headline_cryptos = _extract_crypto_title_data(headline)
+        if not raw_charts and not headline_cryptos:
             return None
         snapshot = _base_snapshot(
             snapshot_type="bitcoin-trend-tracker",
@@ -1532,12 +1764,58 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
-        snapshot["cryptoCount"] = len(cryptos) or len(charts)
+        cryptos: Dict[str, Dict[str, Any]] = headline_cryptos
+        stocks: Dict[str, Dict[str, Any]] = {}
+        if textract_client is not None:
+            crypto_chart = _select_tracker_chart(
+                raw_charts,
+                preferred_name="BTC_2.png",
+                fallback_index=2,
+            )
+            equity_chart = _select_tracker_chart(
+                raw_charts,
+                preferred_name="BTC_9.png",
+                fallback_index=9,
+            )
+            cryptos = _extract_tracker_chart_table(
+                chart=crypto_chart,
+                textract_client=textract_client,
+                image_fetcher=image_fetcher,
+                required_fields=(
+                    "ticker",
+                    "price",
+                    "buyTrade",
+                    "sellTrade",
+                    "trend",
+                ),
+            )
+            stocks = _extract_tracker_chart_table(
+                chart=equity_chart,
+                textract_client=textract_client,
+                image_fetcher=image_fetcher,
+                required_fields=(
+                    "ticker",
+                    "price",
+                    "buyTrade",
+                    "sellTrade",
+                    "upside",
+                    "downside",
+                    "trend",
+                ),
+            )
+            for ticker, title_values in headline_cryptos.items():
+                if ticker in cryptos:
+                    cryptos[ticker].update(title_values)
+
+        snapshot["cryptoCount"] = len(cryptos)
+        snapshot["stockCount"] = len(stocks)
+        snapshot["chartCount"] = len(charts)
         snapshot["data"] = {
             "cryptos": cryptos,
-            "stocks": {},
+            "stocks": stocks,
             "charts": charts,
         }
+        snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
         snapshot["article"]["charts"] = charts
         return snapshot
 

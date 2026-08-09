@@ -1549,8 +1549,8 @@ describe('PortfolioBreakdown correlation cleanup', () => {
     expect(screen.getByRole('button', {
       name: 'Show research intelligence for GLD',
     })).toBeInTheDocument();
-    expect(screen.getByText('Longs')).toBeInTheDocument();
-    expect(screen.getByText('Shorts')).toBeInTheDocument();
+    expect(screen.getByText(/^LONG \(2\)$/)).toBeInTheDocument();
+    expect(screen.getByText(/^SHORT \(0\)$/)).toBeInTheDocument();
     expect(screen.getByText('No short positions')).toBeInTheDocument();
     expect(screen.queryByText('Side:')).not.toBeInTheDocument();
   });

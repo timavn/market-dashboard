@@ -105,7 +105,13 @@ MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
 MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
-MATERIALIZED_DATA_VERSION = "gmail-materialized-v4-canonical-verification"
+MATERIALIZED_DATA_VERSION = "gmail-materialized-v5-tracker-chart-tables"
+HTML_TEXTRACT_REPORT_TYPES = frozenset({
+    "signal-strength",
+    "momo-tracker",
+    "crypto-quant",
+    "bitcoin-trend-tracker",
+})
 RESEARCH_PARSER_VERSION = "research-event-ledger-v2"
 MATERIALIZATION_WRITE_RETRIES = 3
 MATERIALIZATION_MAX_ATTEMPTS = 3
@@ -171,6 +177,7 @@ dynamodb = boto3.resource(
     config=AWS_CLIENT_CONFIG,
 )
 s3 = boto3.client("s3", region_name=AWS_REGION, config=AWS_CLIENT_CONFIG)
+textract = boto3.client("textract", region_name=AWS_REGION, config=AWS_CLIENT_CONFIG)
 cloudwatch = boto3.client(
     "cloudwatch",
     region_name=AWS_REGION,
@@ -2343,6 +2350,9 @@ def backfill_html_snapshot(
             s3_key=item["s3Key"],
             message_id=message_id,
             subject=item.get("subject", ""),
+            textract_client=(
+                textract if report_type in HTML_TEXTRACT_REPORT_TYPES else None
+            ),
         )
         if not snapshot:
             if report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
@@ -2673,6 +2683,9 @@ def upload_attachment(
                     s3_key=s3_key,
                     message_id=message_id,
                     subject=subject,
+                    textract_client=(
+                        textract if report_type in HTML_TEXTRACT_REPORT_TYPES else None
+                    ),
                 )
                 if snapshot:
                     event_count = persist_research_event_ledger(

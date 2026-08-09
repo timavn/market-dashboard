@@ -403,7 +403,6 @@ const RISK_METRICS_BATCH_SIZE = 50;
 const RESEARCH_FALLBACK_PRODUCTS = Object.freeze([
   ['risk-ranges', 'Risk Ranges', 'market_day_0800'],
   ['early-look', 'Early Look', 'event_driven'],
-  ['crypto-quant', 'Crypto Quant', 'event_driven'],
   ['bitcoin-trend-tracker', 'Bitcoin Tracker', 'event_driven'],
   ['portfolio-solutions', 'Portfolio Solutions', 'event_driven'],
   ['momo-tracker', 'MOMO Tracker', 'event_driven'],
@@ -411,11 +410,14 @@ const RESEARCH_FALLBACK_PRODUCTS = Object.freeze([
   ['real-time-alert', 'Real-Time Alerts', 'event_driven'],
   ['the-macro-show', 'Macro Show', 'event_driven'],
   ['the-call', 'The Call', 'event_driven'],
-  ['volume', 'Volume / Market Structure', 'event_driven'],
   ['market-structure', 'Market Situation Report', 'event_driven'],
-  ['cftc-positioning', 'CFTC Positioning', 'weekly'],
   ['etf-pro', 'ETF Pro', 'event_driven'],
   ['investing-ideas', 'Investing Ideas', 'event_driven'],
+]);
+const SECURITY_RESEARCH_EXCLUDED_PRODUCTS = new Set([
+  'cftc-positioning',
+  'crypto-quant',
+  'volume',
 ]);
 const RESEARCH_REFERENCE_KIND_PRIORITY = Object.freeze({
   primary_risk_range: 130,
@@ -3675,7 +3677,11 @@ const PortfolioBreakdown = ({
           ? hasLastVerifiedDecision ? 'Refresh failed · last verified retained' : 'Refresh failed'
           : 'Product coverage incomplete');
 
-    const apiResearchProducts = asArray(researchPayload?.products);
+    const apiResearchProducts = asArray(researchPayload?.products).filter((product) => (
+      !SECURITY_RESEARCH_EXCLUDED_PRODUCTS.has(
+        String(product?.id || '').trim().toLowerCase(),
+      )
+    ));
     const apiProductsById = new Map(
       apiResearchProducts
         .map((product) => [String(product?.id || '').trim().toLowerCase(), product])

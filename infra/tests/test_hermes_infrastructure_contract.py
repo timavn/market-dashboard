@@ -878,6 +878,8 @@ class HermesInfrastructureContractTests(unittest.TestCase):
             invoke["Resource"],
             {"tag": "GetAtt", "value": "HedgeyePdfProcessorFunction.Arn"},
         )
+        gmail_textract = statement_for_action(gmail, "textract:AnalyzeDocument")
+        self.assertEqual(gmail_textract["Resource"], "*")
         textract = statement_for_action(processor, "textract:AnalyzeDocument")
         self.assertEqual(textract["Resource"], "*")
         snapshot_access = statement_for_action(processor, "dynamodb:UpdateItem")

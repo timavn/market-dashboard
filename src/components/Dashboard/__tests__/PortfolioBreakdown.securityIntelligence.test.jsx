@@ -289,7 +289,6 @@ const currentEnvelope = () => {
 const registeredResearchProducts = [
   ['risk-ranges', 'Risk Ranges'],
   ['early-look', 'Early Look'],
-  ['crypto-quant', 'Crypto Quant'],
   ['bitcoin-trend-tracker', 'Bitcoin Tracker'],
   ['portfolio-solutions', 'Portfolio Solutions'],
   ['momo-tracker', 'MOMO Tracker'],
@@ -297,9 +296,7 @@ const registeredResearchProducts = [
   ['real-time-alert', 'Real-Time Alerts'],
   ['the-macro-show', 'Macro Show'],
   ['the-call', 'The Call'],
-  ['volume', 'Volume / Market Structure'],
   ['market-structure', 'Market Situation Report'],
-  ['cftc-positioning', 'CFTC Positioning'],
   ['etf-pro', 'ETF Pro'],
   ['investing-ideas', 'Investing Ideas'],
 ];
@@ -1058,7 +1055,11 @@ test('renders the registered product roster once in registry order', async () =>
     label,
     status: 'indexed',
     marketDate: today,
-  }));
+  })).concat([
+    { id: 'cftc-positioning', label: 'CFTC Positioning', status: 'indexed', marketDate: today },
+    { id: 'crypto-quant', label: 'Crypto Quant', status: 'indexed', marketDate: today },
+    { id: 'volume', label: 'Volume / Market Structure', status: 'indexed', marketDate: today },
+  ]);
   MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
 
   render(<PortfolioBreakdown portfolioData={{
@@ -1077,6 +1078,10 @@ test('renders the registered product roster once in registry order', async () =>
   registeredResearchProducts.forEach(([, label], index) => {
     expect(within(rows[index]).getByText(label)).toBeInTheDocument();
   });
+  expect(rows).toHaveLength(12);
+  expect(within(panel).queryByText('CFTC Positioning')).not.toBeInTheDocument();
+  expect(within(panel).queryByText('Crypto Quant')).not.toBeInTheDocument();
+  expect(within(panel).queryByText('Volume / Market Structure')).not.toBeInTheDocument();
   expect(within(panel).queryByText('unknown')).not.toBeInTheDocument();
 });
 

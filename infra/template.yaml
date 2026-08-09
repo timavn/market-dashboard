@@ -350,6 +350,9 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt HedgeyePdfProcessorFunction.Arn
+            - Effect: Allow
+              Action: textract:AnalyzeDocument
+              Resource: '*'
 
   HedgeyePdfProcessorFunction:
     Type: AWS::Serverless::Function
