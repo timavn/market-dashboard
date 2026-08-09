@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Card } from '@tremor/react';
-import { ChevronDown, Download, Filter, RefreshCw, Search, X } from 'lucide-react';
+import { CalendarClock, ChevronDown, Download, Filter, RefreshCw, Search, X } from 'lucide-react';
 import {
   separateLongsAndShorts,
   formatPerformance
@@ -19,6 +19,8 @@ import {
 } from '../../constants/quadExposureCatalog';
 import expectedValuesData from '../../constants/expectedValuesData';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { retainHistoricalVolatilityRows } from '../../hooks/useVolatilitySnapshot';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 import { resolveSizingVolatility } from '../../utils/realizedVolatility.cjs';
 import {
   FACTOR_EXPOSURE_TABS,
@@ -394,10 +396,54 @@ const csvEscape = (value) => {
 const RESEARCH_HISTORY_DAYS = 5;
 const RESEARCH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const RISK_METRICS_BATCH_SIZE = 50;
-const RESEARCH_PRODUCT_ROWS = Object.freeze([
-  Object.freeze({ id: 'the-call', label: 'The Call' }),
-  Object.freeze({ id: 'the-macro-show', label: 'Macro Show' }),
+// The API's productCoverage array is authoritative. This small mirror only
+// keeps the fail-closed UI useful before a first response (or after a request
+// failure), without introducing another request or coupling the bundle to
+// the infra-only registry file.
+const RESEARCH_FALLBACK_PRODUCTS = Object.freeze([
+  ['risk-ranges', 'Risk Ranges', 'market_day_0800'],
+  ['early-look', 'Early Look', 'event_driven'],
+  ['crypto-quant', 'Crypto Quant', 'event_driven'],
+  ['bitcoin-trend-tracker', 'Bitcoin Tracker', 'event_driven'],
+  ['portfolio-solutions', 'Portfolio Solutions', 'event_driven'],
+  ['momo-tracker', 'MOMO Tracker', 'event_driven'],
+  ['signal-strength', 'Signal Strength', 'event_driven'],
+  ['real-time-alert', 'Real-Time Alerts', 'event_driven'],
+  ['the-macro-show', 'Macro Show', 'event_driven'],
+  ['the-call', 'The Call', 'event_driven'],
+  ['volume', 'Volume / Market Structure', 'event_driven'],
+  ['market-structure', 'Market Situation Report', 'event_driven'],
+  ['cftc-positioning', 'CFTC Positioning', 'weekly'],
+  ['etf-pro', 'ETF Pro', 'event_driven'],
+  ['investing-ideas', 'Investing Ideas', 'event_driven'],
 ]);
+const RESEARCH_REFERENCE_KIND_PRIORITY = Object.freeze({
+  primary_risk_range: 130,
+  supplemental_risk_range: 125,
+  historical_risk_range: 125,
+  portfolio_solutions_rank: 125,
+  tracker_trade: 125,
+  trade_signal: 125,
+  signal_strength_added: 125,
+  signal_strength_removed: 125,
+  signal_strength_listed: 125,
+  signal_strength_membership: 125,
+  etf_pro_change: 120,
+  real_time_alert: 120,
+  portfolio_solutions_mover: 115,
+  position_mention: 115,
+  position_change: 110,
+  position_reference: 90,
+  risk_range: 85,
+  portfolio_rank: 80,
+  commodity_mention: 70,
+  factor_mention: 70,
+  sector_mention: 70,
+  country_mention: 70,
+  macro_mention: 70,
+  summary_mention: 60,
+  mention: 60,
+});
 const VOLATILITY_INDEX_META = Object.freeze({
   VIX: Object.freeze({ key: 'VIX', label: 'VIX', symbol: 'VIX' }),
   RVX: Object.freeze({ key: 'RVX', label: 'RVX', symbol: 'RVX' }),
@@ -511,6 +557,18 @@ const formatResearchDateLabel = (value) => {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
+    timeZone: 'UTC',
+  }).format(parsed);
+};
+
+const formatResearchSourceDate = (value) => {
+  const date = normalizeResearchDate(value);
+  if (!date) return 'Date unavailable';
+  const parsed = new Date(`${date}T12:00:00Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
     timeZone: 'UTC',
   }).format(parsed);
 };
@@ -766,10 +824,615 @@ const researchSourceLabel = (datum) => {
 const safeResearchUrl = (value) => {
   if (!value || typeof value !== 'string') return null;
   const trimmed = value.trim();
-  return /^(https?:\/\/|\/)/i.test(trimmed) ? trimmed : null;
+  if (/^\/\//.test(trimmed)) return null;
+  return /^(https?:\/\/|\/(?!\/))/i.test(trimmed) ? trimmed : null;
 };
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const researchReferenceText = (reference) => (
+  reference?.excerpt
+  || reference?.description
+  || reference?.summary
+  || reference?.headline
+  || ''
+);
+
+const normalizeResearchReferenceText = (value) => String(value || '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const researchEvidenceExcerpt = (reference) => {
+  const rawText = normalizeResearchReferenceText(researchReferenceText(reference));
+  if (!rawText) return '';
+  if (!/\b(unsubscribe|manage (?:your )?preferences|prepared exclusively|having trouble viewing)\b/i.test(rawText)) {
+    return rawText;
+  }
+  const tokens = [reference?.matchedText, reference?.exposureLabel]
+    .map((value) => normalizeResearchReferenceText(value))
+    .filter((value) => value.length > 1);
+  if (tokens.length === 0) return '';
+  const sentences = rawText.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((sentence) => sentence.trim()).filter(Boolean) || [];
+  const relevant = sentences.filter((sentence) => (
+    !/\b(unsubscribe|manage (?:your )?preferences|prepared exclusively|having trouble viewing)\b/i.test(sentence)
+      && tokens.some((token) => new RegExp(
+        `(^|[^A-Za-z0-9])${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^A-Za-z0-9])`,
+        'i',
+      ).test(sentence))
+  ));
+  return normalizeResearchReferenceText(relevant.join(' '));
+};
+
+const formatResearchReferenceNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    : null;
+};
+
+const formatEmbeddedResearchJson = (value) => {
+  const text = normalizeResearchReferenceText(value);
+  if (!(text.startsWith('{') && text.endsWith('}'))) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const symbol = String(parsed.ticker || parsed.symbol || parsed.security || '').trim().toUpperCase();
+    const lrr = formatResearchReferenceNumber(parsed.lrr ?? parsed.low ?? parsed.riskRangeLow);
+    const hrr = formatResearchReferenceNumber(parsed.hrr ?? parsed.high ?? parsed.riskRangeHigh);
+    if (lrr !== null || hrr !== null) {
+      return [
+        symbol || null,
+        `LRR ${lrr || '—'} – HRR ${hrr || '—'}`,
+        parsed.trend ? `Trend ${String(parsed.trend).toUpperCase()}` : null,
+      ].filter(Boolean).join(' · ');
+    }
+    const rank = formatResearchReferenceNumber(parsed.rank);
+    if (symbol && rank !== null) {
+      return [
+        `${symbol} ranked #${rank}`,
+        parsed.positionSizing ? `Sizing ${parsed.positionSizing}` : null,
+        parsed.weekAgo ? `Weekly ${parsed.weekAgo}` : null,
+        parsed.monthAgo ? `Monthly ${parsed.monthAgo}` : null,
+      ].filter(Boolean).join('; ');
+    }
+    const change = formatResearchReferenceNumber(parsed.change);
+    if (symbol && change !== null) return `${symbol} rank change ${change}`;
+  } catch (_error) {
+    return null;
+  }
+  return null;
+};
+
+const formatResearchReferenceDetail = (reference) => {
+  const rawText = researchEvidenceExcerpt(reference);
+  const text = formatEmbeddedResearchJson(rawText)
+    || normalizeResearchReferenceText(rawText);
+  if (!text) return null;
+  const direction = String(reference?.direction || '').trim().toUpperCase();
+  if (!direction) return text;
+  const escapedDirection = direction.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const directionAlreadyLabeled = new RegExp(
+    `(^|[·—:;])\\s*${escapedDirection}\\b|\\b(?:trend|trade)\\s+${escapedDirection}\\b`,
+    'i',
+  ).test(text);
+  return directionAlreadyLabeled
+    ? text
+    : `${direction} · ${text}`;
+};
+
+const researchReferenceScore = (reference, detail) => {
+  const kind = String(reference?.kind || '').trim().toLowerCase();
+  let score = RESEARCH_REFERENCE_KIND_PRIORITY[kind] || 50;
+  const matchType = String(reference?.matchType || '').trim().toLowerCase();
+  if (matchType === 'direct') score += 20;
+  else if (matchType === 'direct_alias') score += 15;
+  if (reference?.direction) score += 5;
+  if (reference?.value !== undefined && reference?.value !== null) score += 5;
+  if (detail.length <= 240) score += 8;
+  if (detail.length > 420) score -= 12;
+  if (detail.length > 600) score -= 18;
+  if (/\b(unsubscribe|manage your preferences|prepared exclusively|having trouble viewing)\b/i.test(detail)) {
+    score -= 90;
+  }
+  if (/^[A-Z0-9./=^_-]{1,20}$/.test(detail)) score -= 18;
+  if (/^[{[]/.test(normalizeResearchReferenceText(researchReferenceText(reference)))) score -= 20;
+  return score;
+};
+
+const isResearchBoilerplate = (value) => {
+  const text = normalizeResearchReferenceText(value);
+  if (!text) return true;
+  if (/\b(unsubscribe|manage (?:your )?preferences|prepared exclusively|having trouble viewing)\b/i.test(text)) {
+    return true;
+  }
+  return /^[A-Z0-9./=^_-]{1,20}$/.test(text);
+};
+
+const researchReferenceIsMapped = (reference) => (
+  String(reference?.matchType || '').trim().toLowerCase() === 'inferred_exposure'
+);
+
+const researchEvidenceScore = (reference, detail) => (
+  researchReferenceScore(reference, detail)
+  + (researchReferenceIsMapped(reference) ? -18 : 0)
+  + (reference?.matchedText ? 5 : 0)
+);
+
+const compactResearchEvidence = (productId, references) => {
+  const ranked = asArray(references).map((reference) => {
+    const rawText = researchEvidenceExcerpt(reference);
+    const detail = formatResearchReferenceDetail(reference);
+    const kind = String(reference?.kind || '').trim().toLowerCase();
+    return {
+      reference,
+      rawText,
+      detail,
+      kind,
+      score: detail && !isResearchBoilerplate(rawText)
+        ? researchEvidenceScore(reference, detail)
+        : Number.NEGATIVE_INFINITY,
+    };
+  }).filter((item) => item.detail && Number.isFinite(item.score)).sort((left, right) => (
+    Number(researchReferenceIsMapped(left.reference)) - Number(researchReferenceIsMapped(right.reference))
+    || right.score - left.score
+    || String(left.reference?.publishedAt || '').localeCompare(String(right.reference?.publishedAt || ''))
+    || right.rawText.length - left.rawText.length
+  ));
+
+  const selected = [];
+  ranked.forEach((candidate) => {
+    const normalized = candidate.rawText.toLowerCase();
+    const duplicate = selected.some((item) => {
+      const existing = item.rawText.toLowerCase();
+      if (existing === normalized) return true;
+      // A short structured/ticker-only match is redundant when a richer
+      // excerpt from the same publication already contains it.
+      if (Math.min(existing.length, normalized.length) < 40) {
+        return existing.includes(normalized) || normalized.includes(existing);
+      }
+      if (item.reference?.sourceEventId && item.reference.sourceEventId === candidate.reference?.sourceEventId) {
+        return existing.includes(normalized) || normalized.includes(existing);
+      }
+      if (productId === 'portfolio-solutions' && item.kind === candidate.kind) {
+        return existing.includes(normalized) || normalized.includes(existing);
+      }
+      return existing.includes(normalized) || normalized.includes(existing);
+    });
+    if (!duplicate) selected.push(candidate);
+  });
+  return selected;
+};
+
+const RESEARCH_FACT_LINE_LIMIT = 4;
+const RESEARCH_FACT_ORDER = Object.freeze({
+  rank: 10,
+  sizing: 20,
+  weeklyChange: 30,
+  monthlyChange: 40,
+  riskRange: 50,
+  trend: 60,
+  trade: 70,
+  buyTrade: 80,
+  sellTrade: 90,
+  signalStrength: 100,
+  position: 110,
+  etfPro: 120,
+});
+
+const ensureResearchSentence = (value) => {
+  const text = normalizeResearchReferenceText(value);
+  if (!text) return null;
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+};
+
+const formatResearchSignedChange = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const text = normalizeResearchReferenceText(value);
+  const arrowMatch = text.match(/^([▲△↑▼▽↓])\s*([+-]?\d+(?:\.\d+)?)$/);
+  if (arrowMatch) {
+    const magnitude = Math.abs(Number(arrowMatch[2]));
+    return /[▲△↑]/.test(arrowMatch[1]) ? `+${magnitude}` : `-${magnitude}`;
+  }
+  const numeric = Number(text.replace(/,/g, ''));
+  if (!Number.isFinite(numeric)) return text;
+  const formatted = formatResearchReferenceNumber(numeric);
+  return numeric > 0 ? `+${formatted}` : formatted;
+};
+
+const researchLabeledValue = (value, labelPattern) => {
+  const text = normalizeResearchReferenceText(value);
+  if (!text) return null;
+  const match = text.match(new RegExp(
+    `\\b(?:${labelPattern})\\b\\s*(?::|=|is)?\\s*([^;·|]+?)(?=\\s*(?:[;·|]|$))`,
+    'i',
+  ));
+  return normalizeResearchReferenceText(match?.[1]);
+};
+
+const buildStructuredResearchFacts = (productId, evidence, symbol) => {
+  const reference = evidence?.reference || {};
+  const kind = String(evidence?.kind || reference.kind || '').trim().toLowerCase();
+  const text = normalizeResearchReferenceText(evidence?.rawText || researchReferenceText(reference));
+  const normalizedSymbol = String(symbol || reference.matchedText || '').trim().toUpperCase();
+  const facts = [];
+  const add = (key, factText) => {
+    const sentence = ensureResearchSentence(factText);
+    if (sentence) facts.push({ key, text: sentence });
+  };
+
+  if (productId === 'portfolio-solutions') {
+    const rankValue = finiteOptionalNumber(reference.value);
+    const rankMatch = text.match(/\branked?\s*#?\s*(\d+(?:\.\d+)?)/i);
+    const rank = rankValue === null
+      ? formatResearchReferenceNumber(rankMatch?.[1])
+      : formatResearchReferenceNumber(rankValue);
+    if (rank && normalizedSymbol) {
+      add('rank', `${normalizedSymbol} is ranked #${rank} in today’s ETF re-rank`);
+    }
+
+    const sizing = researchLabeledValue(text, '(?:position\\s+)?sizing');
+    if (sizing) add('sizing', `Recommended position sizing is ${sizing}`);
+
+    const weekly = researchLabeledValue(text, 'weekly(?:\\s+rank\\s+change)?');
+    if (weekly) add('weeklyChange', `Weekly rank change is ${formatResearchSignedChange(weekly)}`);
+    const monthly = researchLabeledValue(text, 'monthly(?:\\s+rank\\s+change)?');
+    if (monthly) add('monthlyChange', `Monthly rank change is ${formatResearchSignedChange(monthly)}`);
+
+    if (kind === 'portfolio_solutions_mover') {
+      const period = text.match(/\b(weekly|monthly)\b/i)?.[1]?.toLowerCase();
+      const change = formatResearchSignedChange(
+        finiteOptionalNumber(reference.value) ?? text.match(/\brank\s+change\s+([▲△↑▼▽↓]?\s*[+-]?\d+(?:\.\d+)?)/i)?.[1],
+      );
+      if (period && change) {
+        add(
+          period === 'weekly' ? 'weeklyChange' : 'monthlyChange',
+          `${period === 'weekly' ? 'Weekly' : 'Monthly'} rank change is ${change}`,
+        );
+      }
+    }
+    return facts;
+  }
+
+  if (['primary_risk_range', 'supplemental_risk_range', 'historical_risk_range', 'risk_range'].includes(kind)) {
+    const rangeValue = reference.value && typeof reference.value === 'object' ? reference.value : {};
+    const lrrMatch = text.match(/\bLRR\s*\$?([\d,.]+)/i);
+    const hrrMatch = text.match(/\bHRR\s*\$?([\d,.]+)/i);
+    const lrr = formatResearchReferenceNumber(
+      rangeValue.lrr ?? rangeValue.low ?? (lrrMatch ? Number(lrrMatch[1].replace(/,/g, '')) : null),
+    );
+    const hrr = formatResearchReferenceNumber(
+      rangeValue.hrr ?? rangeValue.high ?? (hrrMatch ? Number(hrrMatch[1].replace(/,/g, '')) : null),
+    );
+    if (lrr && hrr && normalizedSymbol) add('riskRange', `${normalizedSymbol} risk range is ${lrr}–${hrr}`);
+    const trend = String(reference.direction || rangeValue.trend || '').trim().toUpperCase();
+    if (trend && normalizedSymbol) add('trend', `${normalizedSymbol} trend is ${trend}`);
+    return facts;
+  }
+
+  if (['tracker_trade', 'trade_signal'].includes(kind)) {
+    const trade = String(reference.direction || reference.value || '').trim().toUpperCase();
+    if (trade && normalizedSymbol) add('trade', `${normalizedSymbol} trade signal is ${trade}`);
+    const buyTrade = researchLabeledValue(text, 'buy\\s+trade');
+    if (buyTrade) add('buyTrade', `Buy Trade is ${buyTrade}`);
+    const sellTrade = researchLabeledValue(text, 'sell\\s+trade');
+    if (sellTrade) add('sellTrade', `Sell Trade is ${sellTrade}`);
+    return facts;
+  }
+
+  if (kind.startsWith('signal_strength_')) {
+    if (!normalizedSymbol) return facts;
+    if (kind === 'signal_strength_added') add('signalStrength', `${normalizedSymbol} was added to Signal Strength`);
+    else if (kind === 'signal_strength_removed') add('signalStrength', `${normalizedSymbol} was removed from Signal Strength`);
+    else {
+      const direction = String(reference.direction || reference.value || '').trim().toUpperCase();
+      if (direction) add('signalStrength', `${normalizedSymbol} Signal Strength status is ${direction}`);
+    }
+    return facts;
+  }
+
+  if (kind === 'position_mention') {
+    const direction = String(reference.direction || reference.value || '').trim().toUpperCase();
+    if (direction && normalizedSymbol) {
+      add('position', `${normalizedSymbol} is listed ${direction} in ${researchSourceLabel(reference)}`);
+    }
+    return facts;
+  }
+
+  if (kind === 'etf_pro_change') {
+    const direction = String(reference.direction || reference.value || '').trim().toUpperCase();
+    if (direction && normalizedSymbol) {
+      const action = direction === 'ADD' || direction === 'ADDED'
+        ? 'was added to'
+        : direction === 'REMOVE' || direction === 'REMOVED' ? 'was removed from' : `has a ${direction} update in`;
+      add('etfPro', `${normalizedSymbol} ${action} ETF Pro`);
+    }
+    return facts;
+  }
+
+  return facts;
+};
+
+const clipResearchFocusText = (value, tokens, maxLength = 280) => {
+  const text = normalizeResearchReferenceText(value);
+  if (!text || text.length <= maxLength) return text;
+  const lowerText = text.toLowerCase();
+  const tokenIndex = tokens.map((token) => lowerText.indexOf(token.toLowerCase()))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0] ?? 0;
+  let start = Math.max(0, tokenIndex - Math.floor(maxLength * 0.3));
+  let end = Math.min(text.length, start + maxLength);
+  if (end - start < maxLength) start = Math.max(0, end - maxLength);
+  if (start > 0) {
+    const nextSpace = text.indexOf(' ', start);
+    if (nextSpace > start && nextSpace < end) start = nextSpace + 1;
+  }
+  if (end < text.length) {
+    const previousSpace = text.lastIndexOf(' ', end);
+    if (previousSpace > start) end = previousSpace;
+  }
+  const excerpt = text.slice(start, end).trim();
+  return `${start > 0 ? '… ' : ''}${excerpt}${end < text.length ? ' …' : ''}`;
+};
+
+const researchFocusSentence = (reference, symbol, fallbackText = null) => {
+  const text = normalizeResearchReferenceText(fallbackText || researchEvidenceExcerpt(reference));
+  if (!text) return null;
+  const tokens = [
+    reference?.matchedText,
+    reference?.exposureLabel,
+    symbol,
+  ].map((value) => normalizeResearchReferenceText(value)).filter(Boolean);
+  const tokenMatcher = tokens.length > 0
+    ? new RegExp(
+      `(^|[^A-Za-z0-9])(?:${tokens.map((token) => token.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')).join('|')})(?=$|[^A-Za-z0-9])`,
+      'i',
+    )
+    : null;
+  const sentences = text.match(/[^.!?]+(?:[.!?]+|$)/g)
+    ?.map((sentence) => sentence.trim())
+    .filter(Boolean) || [];
+  let focus = sentences.find((sentence) => tokenMatcher?.test(sentence)) || sentences[0] || text;
+  if (focus.length > 280) {
+    const clauses = focus.split(/\s*(?:;|\||•)\s*/).filter(Boolean);
+    const matchedClause = clauses.find((clause) => tokenMatcher?.test(clause));
+    if (matchedClause) focus = matchedClause;
+  }
+  return clipResearchFocusText(focus, tokens);
+};
+
+const buildResearchFactLines = (productId, evidence, symbol) => {
+  const rankedEvidence = asArray(evidence);
+  const structuredFacts = [];
+  rankedEvidence.forEach((item, evidenceIndex) => {
+    buildStructuredResearchFacts(productId, item, symbol).forEach((fact, factIndex) => {
+      structuredFacts.push({
+        ...fact,
+        reference: item.reference,
+        evidenceIndex,
+        factIndex,
+      });
+    });
+  });
+
+  const candidates = structuredFacts.length > 0
+    ? structuredFacts.sort((left, right) => (
+      (RESEARCH_FACT_ORDER[left.key] ?? 500) - (RESEARCH_FACT_ORDER[right.key] ?? 500)
+      || left.evidenceIndex - right.evidenceIndex
+      || left.factIndex - right.factIndex
+    ))
+    : rankedEvidence.map((item, evidenceIndex) => ({
+      key: `source-${evidenceIndex}`,
+      text: researchFocusSentence(item.reference, symbol, item.rawText),
+      reference: item.reference,
+      evidenceIndex,
+      factIndex: 0,
+    }));
+
+  const selected = [];
+  candidates.some((candidate) => {
+    if (!candidate.text) return false;
+    const mapped = researchReferenceIsMapped(candidate.reference);
+    const mappedLabel = normalizeResearchReferenceText(
+      candidate.reference?.exposureLabel || candidate.reference?.matchedText || 'controlled exposure',
+    );
+    const text = mapped ? `Mapped from ${mappedLabel}: ${candidate.text}` : candidate.text;
+    const normalized = normalizeResearchReferenceText(text).toLowerCase();
+    const duplicate = selected.some((item) => (
+      item.key === candidate.key
+      || normalizeResearchReferenceText(item.text).toLowerCase() === normalized
+    ));
+    if (!duplicate) selected.push({ ...candidate, text });
+    return selected.length >= RESEARCH_FACT_LINE_LIMIT;
+  });
+  return selected;
+};
+
+const selectResearchProductDetails = (productId, references) => {
+  const ranked = references.map((reference) => {
+    const detail = formatResearchReferenceDetail(reference);
+    const kind = String(reference?.kind || '').trim().toLowerCase();
+    return {
+      reference,
+      detail,
+      kind,
+      kindPriority: RESEARCH_REFERENCE_KIND_PRIORITY[kind] || 50,
+      score: detail ? researchReferenceScore(reference, detail) : Number.NEGATIVE_INFINITY,
+    };
+  }).filter((item) => item.detail && !isResearchBoilerplate(researchEvidenceExcerpt(item.reference))).sort((left, right) => (
+    right.score - left.score
+    || String(right.reference?.publishedAt || '').localeCompare(String(left.reference?.publishedAt || ''))
+    || left.detail.length - right.detail.length
+  ));
+
+  if (ranked.length === 0) return { selected: [], details: [] };
+  const top = ranked[0];
+  const candidates = ranked.filter((item) => (
+    top.kindPriority >= 110
+      ? item.kindPriority >= top.kindPriority - 15
+      : item.score >= top.score - 32
+  ));
+  const limit = ['portfolio-solutions', 'real-time-alert', 'etf-pro', 'signal-strength'].includes(productId)
+    ? 4
+    : 3;
+  const selected = [];
+  candidates.some((candidate) => {
+    const normalized = candidate.detail.toLowerCase();
+    const moverPeriod = candidate.kind === 'portfolio_solutions_mover'
+      ? normalized.match(/\b(weekly|monthly)\b/)?.[1]
+      : null;
+    const duplicate = selected.some((item) => {
+      const existing = item.detail.toLowerCase();
+      if (existing === normalized) return true;
+      if (
+        productId === 'portfolio-solutions'
+        && moverPeriod
+        && item.kind === 'portfolio_solutions_rank'
+        && existing.includes(moverPeriod)
+      ) return true;
+      return item.kind === candidate.kind
+        && Math.min(existing.length, normalized.length) >= 8
+        && (existing.includes(normalized) || normalized.includes(existing));
+    });
+    if (!duplicate) selected.push(candidate);
+    return selected.length >= limit;
+  });
+  if (selected.length === 0) selected.push(top);
+  return {
+    selected,
+    details: selected.map((item) => item.detail),
+  };
+};
+
+const latestResearchPublicationTime = (references, product = null) => {
+  const validCandidates = (values) => values.filter(Boolean)
+    .map((value) => ({ value, timestamp: Date.parse(value) }))
+    .filter((candidate) => Number.isFinite(candidate.timestamp));
+  const referenceCandidates = validCandidates(
+    references.map((reference) => reference?.publishedAt)
+      .filter((value) => !/T00:00(?::00(?:\.000)?)?(?:Z|[+-]00:00)?$/i.test(String(value || ''))),
+  );
+  const productCandidates = validCandidates([product?.publishedAt, product?.latestPublishedAt]);
+  const fallbackCandidates = validCandidates(references.map((reference) => reference?.publishedAt));
+  return [referenceCandidates, productCandidates, fallbackCandidates]
+    .find((candidates) => candidates.length > 0)
+    ?.sort((left, right) => right.timestamp - left.timestamp)[0]?.value || null;
+};
+
+const buildResearchProductRows = ({
+  references,
+  symbol = null,
+  productsById = new Map(),
+  productOrder = new Map(),
+  marketDate = null,
+  requireCurrentIndexed = false,
+  groupByDate = false,
+  includeEmptyProducts = false,
+}) => {
+  const groups = new Map();
+  if (includeEmptyProducts && !groupByDate) {
+    productsById.forEach((product, productId) => {
+      if (!productId || productId === 'unknown' || product?.cadence === 'unsupported') return;
+      groups.set(productId, {
+        key: productId,
+        productId,
+        product,
+        marketDate: normalizeResearchDate(product.marketDate || marketDate) || marketDate,
+        references: [],
+      });
+    });
+  }
+  references.forEach((reference) => {
+    const productId = getResearchProductId(reference);
+    const referenceDate = getResearchDatumDate(reference);
+    if (!productId || productId === 'unknown' || !referenceDate) return;
+    const product = productsById.get(productId) || null;
+    if (requireCurrentIndexed && (
+      !product
+      || !['indexed', 'not_due'].includes(String(product.status || '').toLowerCase())
+      || normalizeResearchDate(product.marketDate || marketDate) !== marketDate
+    )) return;
+    const key = groupByDate ? `${referenceDate}\u0000${productId}` : productId;
+    const group = groups.get(key) || {
+      key,
+      productId,
+      product,
+      marketDate: referenceDate,
+      references: [],
+    };
+    group.references.push(reference);
+    groups.set(key, group);
+  });
+
+  return [...groups.values()].map((group) => {
+    const selection = selectResearchProductDetails(group.productId, group.references);
+    const evidence = compactResearchEvidence(group.productId, group.references);
+    const factEntries = buildResearchFactLines(group.productId, evidence, symbol);
+    const selectedReference = selection.selected[0]?.reference || group.references[0];
+    const sourceReference = factEntries
+      .map((item) => item.reference)
+      .find((reference) => safeResearchUrl(reference?.sourceUrl || reference?.url))
+      || selection.selected.map((item) => item.reference)
+      .find((reference) => safeResearchUrl(reference?.sourceUrl || reference?.url))
+      || group.references.find((reference) => safeResearchUrl(reference?.sourceUrl || reference?.url))
+      || selectedReference;
+    const productLabel = group.product?.label || researchSourceLabel(selectedReference);
+    const publishedAt = latestResearchPublicationTime(group.references, group.product);
+    const productStatus = String(group.product?.status || '').trim().toLowerCase();
+    const hasEvidence = evidence.length > 0;
+    const productDateMismatch = Boolean(
+      !groupByDate
+      && marketDate
+      && normalizeResearchDate(group.product?.marketDate || group.marketDate) !== normalizeResearchDate(marketDate)
+    );
+    const isUnavailable = !hasEvidence && (
+      productDateMismatch || !['indexed', 'not_due'].includes(productStatus)
+    );
+    return {
+      key: group.key,
+      productId: group.productId,
+      productLabel,
+      marketDate: group.marketDate,
+      publishedAt,
+      referenceCount: group.references.length,
+      references: group.references,
+      evidence,
+      factLines: factEntries.map((item) => item.text),
+      status: productStatus || null,
+      state: hasEvidence ? 'available' : isUnavailable ? 'unavailable' : 'empty',
+      reference: {
+        ...selectedReference,
+        id: `${group.marketDate}-${group.productId}-product-row`,
+        productId: group.productId,
+        productLabel,
+        marketDate: group.marketDate,
+        publishedAt,
+        direction: null,
+        excerpt: selection.details.join(' · ') || null,
+        sourceUrl: sourceReference?.sourceUrl || sourceReference?.url || null,
+      },
+    };
+  }).sort((left, right) => {
+    if (groupByDate && left.marketDate !== right.marketDate) {
+      return String(right.marketDate).localeCompare(String(left.marketDate));
+    }
+    if (!groupByDate) {
+      const orderDelta = (productOrder.get(left.productId) ?? Number.MAX_SAFE_INTEGER)
+        - (productOrder.get(right.productId) ?? Number.MAX_SAFE_INTEGER);
+      if (orderDelta !== 0) return orderDelta;
+    }
+    const leftTime = Date.parse(left.publishedAt || '');
+    const rightTime = Date.parse(right.publishedAt || '');
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+    if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) return Number.isFinite(leftTime) ? -1 : 1;
+    return (productOrder.get(left.productId) ?? Number.MAX_SAFE_INTEGER)
+      - (productOrder.get(right.productId) ?? Number.MAX_SAFE_INTEGER)
+      || left.productLabel.localeCompare(right.productLabel);
+  });
+};
+
 const CONTROLLED_EXPOSURE_TYPES = new Set([
   'factor',
   'sector',
@@ -809,6 +1472,7 @@ const PortfolioBreakdown = ({
   isRefreshing = false,
   onRefresh = null,
 }) => {
+  const active = useSurfaceActivity();
   const holdings = useMemo(() => portfolioData?.holdings || [], [portfolioData?.holdings]);
 
   const holdingRowIds = useMemo(() => {
@@ -831,6 +1495,7 @@ const PortfolioBreakdown = ({
   }, [holdings]);
 
   const [expandedResearchRows, setExpandedResearchRows] = useState(() => new Set());
+  const [expandedResearchProducts, setExpandedResearchProducts] = useState(() => new Set());
   const [metricVerification, setMetricVerification] = useState(null);
   const [researchMarketDate, setResearchMarketDate] = useState(null);
   const [researchState, setResearchState] = useState({
@@ -851,18 +1516,18 @@ const PortfolioBreakdown = ({
   const [manualResearchRefreshKey, setManualResearchRefreshKey] = useState(0);
   const researchRequestSequence = useRef(0);
   const marketContextRequestSequence = useRef(0);
+  const researchProductRowsCacheRef = useRef(new WeakMap());
+  const researchFallbackPayloadRef = useRef({});
   const lastVerifiedRiskMetricsRef = useRef(null);
-  const pendingLedgerSnapRef = useRef(null);
-  const ledgerPaneRefs = useRef({ longs: null, shorts: null });
 
   useEffect(() => {
-    if (!metricVerification) return undefined;
+    if (!active || !metricVerification) return undefined;
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') setMetricVerification(null);
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [metricVerification]);
+  }, [active, metricVerification]);
 
   const researchSymbols = useMemo(() => [...new Set(
     holdings
@@ -909,7 +1574,7 @@ const PortfolioBreakdown = ({
   ]);
 
   useEffect(() => {
-    if (!Number.isFinite(liveEvidenceExpiryAt)) return undefined;
+    if (!active || !Number.isFinite(liveEvidenceExpiryAt)) return undefined;
     const delayMs = liveEvidenceExpiryAt - Date.now() + 25;
     if (delayMs <= 0) return undefined;
     const timeoutId = window.setTimeout(() => {
@@ -918,7 +1583,7 @@ const PortfolioBreakdown = ({
       setLiveEvidenceTick((value) => value + 1);
     }, Math.min(delayMs, 2_147_483_647));
     return () => window.clearTimeout(timeoutId);
-  }, [liveEvidenceExpiryAt]);
+  }, [active, liveEvidenceExpiryAt]);
 
   const loadSecurityIntelligence = useCallback(async (signal) => {
     const symbols = researchSymbolsKey ? researchSymbolsKey.split(',') : [];
@@ -992,8 +1657,8 @@ const PortfolioBreakdown = ({
     setMarketContextState((current) => ({
       status: 'loading',
       riskMetrics: current.riskMetrics || lastVerifiedRiskMetricsRef.current,
-      volatility: null,
-      usdCorrelations: null,
+      volatility: current.volatility,
+      usdCorrelations: current.usdCorrelations,
       errors: {},
     }));
 
@@ -1056,16 +1721,21 @@ const PortfolioBreakdown = ({
       errors.usdCorrelations = usdResult.reason?.message || 'USD correlations are unavailable.';
     }
 
-    setMarketContextState({
+    setMarketContextState((current) => ({
       status: Object.keys(errors).length > 0 ? 'partial' : 'ready',
       riskMetrics,
-      volatility: volatilityResult.status === 'fulfilled' ? volatilityResult.value : null,
-      usdCorrelations: usdResult.status === 'fulfilled' ? usdResult.value : null,
+      volatility: volatilityResult.status === 'fulfilled'
+        ? volatilityResult.value
+        : retainHistoricalVolatilityRows(current.volatility),
+      usdCorrelations: usdResult.status === 'fulfilled'
+        ? usdResult.value
+        : current.usdCorrelations,
       errors,
-    });
+    }));
   }, [researchSymbolsKey, researchAssetTypesKey]);
 
   useEffect(() => {
+    if (!active) return undefined;
     const controller = new AbortController();
     loadSecurityIntelligence(controller.signal);
 
@@ -1077,16 +1747,17 @@ const PortfolioBreakdown = ({
       controller.abort();
       window.clearInterval(intervalId);
     };
-  }, [loadSecurityIntelligence, manualResearchRefreshKey]);
+  }, [active, loadSecurityIntelligence, manualResearchRefreshKey]);
 
   useEffect(() => {
+    if (!active) return undefined;
     loadMarketContext();
     const intervalId = window.setInterval(loadMarketContext, RESEARCH_REFRESH_INTERVAL_MS);
     return () => {
       marketContextRequestSequence.current += 1;
       window.clearInterval(intervalId);
     };
-  }, [loadMarketContext, manualResearchRefreshKey]);
+  }, [active, loadMarketContext, manualResearchRefreshKey]);
 
   const handleManualRefresh = useCallback(() => {
     setManualResearchRefreshKey((current) => current + 1);
@@ -1105,45 +1776,6 @@ const PortfolioBreakdown = ({
       return next.size === current.size ? current : next;
     });
   }, [holdingRowIds]);
-
-  React.useLayoutEffect(() => {
-    const getTargetScrollTop = (pane, row, headerHeight) => Math.max(
-      0,
-      pane.scrollTop
-        + row.getBoundingClientRect().top
-        - pane.getBoundingClientRect().top
-        - headerHeight
-    );
-
-    Object.values(ledgerPaneRefs.current).forEach((pane) => {
-      if (!pane?.isConnected) return;
-      const bottomSpacer = pane.querySelector('.pcv2-ledger-bottom-spacer');
-      if (!bottomSpacer) return;
-
-      bottomSpacer.style.height = '0px';
-      const expandedRows = pane.querySelectorAll('.pcv2-ledger-row.is-expanded');
-      if (expandedRows.length === 0) return;
-
-      const headerHeight = pane.querySelector('thead')?.getBoundingClientRect().height || 28;
-      const lowestExpandedRow = expandedRows[expandedRows.length - 1];
-      const targetScrollTop = getTargetScrollTop(pane, lowestExpandedRow, headerHeight);
-      const naturalMaxScrollTop = Math.max(0, pane.scrollHeight - pane.clientHeight);
-      const missingScrollRoom = Math.max(
-        0,
-        Math.ceil(targetScrollTop - naturalMaxScrollTop)
-      );
-      bottomSpacer.style.height = `${missingScrollRoom}px`;
-    });
-
-    const pendingSnap = pendingLedgerSnapRef.current;
-    pendingLedgerSnapRef.current = null;
-    if (!pendingSnap || !expandedResearchRows.has(pendingSnap.rowId)) return;
-
-    const { pane, row } = pendingSnap;
-    if (!pane?.isConnected || !row?.isConnected) return;
-    const headerHeight = pane.querySelector('thead')?.getBoundingClientRect().height || 28;
-    pane.scrollTop = getTargetScrollTop(pane, row, headerHeight);
-  }, [expandedResearchRows]);
 
   const totalValue = portfolioData?.summary?.totalValue || 0;
   const hasVerifiedPortfolioMarks = Boolean(
@@ -1218,6 +1850,7 @@ const PortfolioBreakdown = ({
 
   // Update search input width to match button row width
   useEffect(() => {
+    if (!active) return undefined;
     const updateWidths = () => {
       if (longsButtonRowRef.current && longsInputRef.current) {
         longsInputRef.current.style.width = `${longsButtonRowRef.current.offsetWidth}px`;
@@ -1230,7 +1863,7 @@ const PortfolioBreakdown = ({
     updateWidths();
     window.addEventListener('resize', updateWidths);
     return () => window.removeEventListener('resize', updateWidths);
-  }, [columnVisibility]);
+  }, [active, columnVisibility]);
 
   // Sorting state for longs and shorts tables
   const [longsSortConfig, setLongsSortConfig] = useState({ field: null, direction: 'desc' });
@@ -2369,23 +3002,32 @@ const PortfolioBreakdown = ({
 
     const state = hasError ? 'error' : historicalReference ? 'reference' : markLoading ? 'loading' : 'error';
     const title = state === 'reference'
-      ? `Reference close${holding.priceSessionDate ? ` from ${holding.priceSessionDate}` : ''}; not a live executable mark`
+      ? `EOD close${holding.priceSessionDate ? ` from ${holding.priceSessionDate}` : ''}; reference only, not a live executable mark`
       : state === 'loading'
-        ? 'IBKR market mark is still loading; no executable price is shown'
+        ? 'Live IBKR market mark is still loading; no executable price is shown'
         : holding.warning || 'Verified live market mark is unavailable';
     const ariaLabel = state === 'reference'
-      ? 'Reference close'
+      ? 'EOD reference close'
       : state === 'loading'
         ? 'Market mark loading'
         : 'Bad data warning';
 
     return (
       <span
-        className={`pcv2-warning-icon pcv2-warning-icon--${state === 'error' ? 'error' : 'reference'}`}
+        className={`pcv2-mark-status pcv2-mark-status--${state}`}
         aria-label={ariaLabel}
         title={title}
       >
-        ⚠
+        {state === 'reference' ? (
+          <>
+            <CalendarClock size={11} strokeWidth={2} aria-hidden="true" />
+            <span aria-hidden="true">EOD</span>
+          </>
+        ) : state === 'loading' ? (
+          <RefreshCw size={10} strokeWidth={2} aria-hidden="true" />
+        ) : (
+          <span aria-hidden="true">⚠</span>
+        )}
       </span>
     );
   };
@@ -2625,14 +3267,6 @@ const PortfolioBreakdown = ({
     );
   };
 
-  const referenceText = (reference) => (
-    reference?.excerpt
-    || reference?.description
-    || reference?.summary
-    || reference?.headline
-    || 'Structured reference'
-  );
-
   const renderCompactReferenceRow = ({
     reference = null,
     productLabel,
@@ -2642,7 +3276,7 @@ const PortfolioBreakdown = ({
   }) => {
     const sourceUrl = safeResearchUrl(reference?.sourceUrl || reference?.url);
     const direction = reference?.direction ? String(reference.direction).toUpperCase() : null;
-    const rawNote = reference ? referenceText(reference) : emptyState?.note;
+    const rawNote = reference ? researchReferenceText(reference) : emptyState?.note;
     const note = direction ? `${direction} · ${rawNote}` : rawNote;
     const sourceLabel = sourceUrl
       ? 'SOURCE ›'
@@ -3041,93 +3675,226 @@ const PortfolioBreakdown = ({
           ? hasLastVerifiedDecision ? 'Refresh failed · last verified retained' : 'Refresh failed'
           : 'Product coverage incomplete');
 
-    const productsById = new Map(
-      asArray(researchPayload?.products).map((product) => [String(product.id || '').toLowerCase(), product])
+    const apiResearchProducts = asArray(researchPayload?.products);
+    const apiProductsById = new Map(
+      apiResearchProducts
+        .map((product) => [String(product?.id || '').trim().toLowerCase(), product])
+        .filter(([id]) => id)
     );
-    const latestVerifiedByProduct = researchPayload?.latestVerifiedByProduct || {};
-    const permanentRows = RESEARCH_PRODUCT_ROWS.flatMap(({ id, label }) => {
-      const product = productsById.get(id);
-      const productIndexed = Boolean(
-        researchEnvelopeIsCurrent
-        && product?.status === 'indexed'
-        && normalizeResearchDate(product?.marketDate || researchMarketDate) === expectedResearchMarketDate
-      );
-      const historicalProduct = !productIndexed ? latestVerifiedByProduct[id] : null;
-      const historicalProductDate = normalizeResearchDate(historicalProduct?.marketDate);
-      const productHistorical = Boolean(
-        historicalProductDate
-        && ['indexed', 'validated'].includes(String(historicalProduct?.status || '').toLowerCase())
-        && historicalProduct?.executable === false
-      );
-      const references = productIndexed
-        ? currentReferences.filter((reference) => getResearchProductId(reference) === id)
-        : productHistorical
-          ? historicalReferences.filter((reference) => (
-            getResearchProductId(reference) === id
-            && getResearchDatumDate(reference) === historicalProductDate
-          ))
-          : [];
-      if (references.length > 0) {
-        return references.map((reference, index) => renderCompactReferenceRow({
-          reference,
-          productLabel: index === 0 ? label : '',
-          rowKey: `${rowId}-${id}-${reference.id || index}`,
-          historical: productHistorical || researchEnvelopeIsRetained,
-        }));
+    const fallbackProductRows = RESEARCH_FALLBACK_PRODUCTS.map(([id, label, cadence]) => (
+      apiProductsById.get(id) || {
+        id,
+        label,
+        cadence,
+        status: researchState.status === 'loading' ? 'missing' : 'failed',
+        marketDate: expectedResearchMarketDate,
+        publishedAt: null,
       }
-      return [renderCompactReferenceRow({
-        productLabel: label,
-        rowKey: `${rowId}-${id}-empty`,
-        historical: productHistorical || researchEnvelopeIsRetained,
-        emptyState: productIndexed || productHistorical
-          ? {
-            kind: 'indexed-empty',
-            note: 'N/A',
-            sourceLabel: 'INDEXED ✓',
-            marketDate: historicalProductDate || researchMarketDate,
-            publishedAt:
-              product?.publishedAt
-              || product?.latestPublishedAt
-              || historicalProduct?.publishedAt
-              || null,
-          }
-          : {
-            kind: 'unavailable',
-            note: researchState.status === 'loading' && !researchPayload ? 'Loading…' : 'Unavailable',
-            sourceLabel: product?.status ? String(product.status).toUpperCase() : 'UNAVAILABLE',
-            marketDate: researchMarketDate || expectedResearchMarketDate,
-            publishedAt: product?.publishedAt || product?.latestPublishedAt || null,
-          },
-      })];
-    });
-    const permanentProductIds = new Set(RESEARCH_PRODUCT_ROWS.map(({ id }) => id));
-    const otherCurrentReferenceRows = currentReferences
-      .filter((reference) => {
-        const productId = getResearchProductId(reference);
-        return !permanentProductIds.has(productId)
-          && productsById.get(productId)?.status === 'indexed';
+    ));
+    const researchProducts = [
+      ...fallbackProductRows,
+      ...apiResearchProducts.filter((product) => (
+        !RESEARCH_FALLBACK_PRODUCTS.some(([id]) => id === String(product?.id || '').trim().toLowerCase())
+      )),
+    ];
+    const productsById = new Map(
+      researchProducts.map((product) => [String(product.id || '').toLowerCase(), product])
+    );
+    const fallbackProductOrder = new Map(
+      RESEARCH_FALLBACK_PRODUCTS.map(([id], index) => [id, index])
+    );
+    const productOrder = new Map(
+      researchProducts.map((product, index) => {
+        const productId = String(product.id || '').toLowerCase();
+        return [productId, fallbackProductOrder.get(productId) ?? index];
       })
-      .map((reference, index) => renderCompactReferenceRow({
-        reference,
-        productLabel: researchSourceLabel(reference),
-        rowKey: `${rowId}-other-${reference.id || index}`,
-      }));
+    );
+    const displayCurrentReferences = [...currentReferences];
     const hasSupplementalReference = currentReferences.some((reference) => (
       getResearchProductId(reference) === 'early-look'
     ));
     if (verifiedSupplementalRange && !hasSupplementalReference) {
-      otherCurrentReferenceRows.push(renderCompactReferenceRow({
-        reference: {
-          productId: 'early-look',
-          productLabel: 'Early Look',
-          publishedAt: verifiedSupplementalRange.publishedAt,
-          sourceUrl: verifiedSupplementalRange.sourceUrl,
-          excerpt: `Supplemental ${formatResearchNumber(researchValue(verifiedSupplementalRange, ['lrr', 'low']))} – ${formatResearchNumber(researchValue(verifiedSupplementalRange, ['hrr', 'high']))} · not decision eligible`,
-        },
+      const supplementalTrend = researchValue(verifiedSupplementalRange, ['trend']);
+      displayCurrentReferences.push({
+        productId: 'early-look',
         productLabel: 'Early Look',
-        rowKey: `${rowId}-early-look-supplemental`,
-      }));
+        marketDate: getResearchDatumDate(verifiedSupplementalRange) || researchMarketDate,
+        publishedAt: verifiedSupplementalRange.publishedAt,
+        sourceUrl: verifiedSupplementalRange.sourceUrl,
+        kind: 'supplemental_risk_range',
+        qualityStatus: 'indexed',
+        matchType: 'direct',
+        decisionEligible: false,
+        excerpt: [
+          `Supplemental LRR ${formatResearchNumber(researchValue(verifiedSupplementalRange, ['lrr', 'low']))} – HRR ${formatResearchNumber(researchValue(verifiedSupplementalRange, ['hrr', 'high']))}`,
+          supplementalTrend ? `Trend ${String(supplementalTrend).toUpperCase()}` : null,
+          'reference only',
+        ].filter(Boolean).join(' · '),
+      });
     }
+    const referenceCacheToken = (references) => references.map((reference) => [
+      reference?.id,
+      reference?.sourceEventId,
+      getResearchProductId(reference),
+      getResearchDatumDate(reference),
+      reference?.kind,
+      reference?.matchType,
+      reference?.matchedText,
+      normalizeResearchReferenceText(researchReferenceText(reference)).slice(0, 96),
+    ].join('|')).join('~');
+    const productCacheKey = [
+      symbol,
+      expectedResearchMarketDate,
+      researchMarketDate,
+      researchEnvelopeIsCurrent,
+      researchEnvelopeIsRetained,
+      referenceCacheToken(displayCurrentReferences),
+      referenceCacheToken(historicalReferences),
+    ].join('::');
+    const cachePayload = researchPayload && typeof researchPayload === 'object'
+      ? researchPayload
+      : researchFallbackPayloadRef.current;
+    let payloadCache = researchProductRowsCacheRef.current.get(cachePayload);
+    if (!payloadCache) {
+      payloadCache = new Map();
+      researchProductRowsCacheRef.current.set(cachePayload, payloadCache);
+    }
+    let cachedProductRows = payloadCache.get(productCacheKey) || null;
+    if (!cachedProductRows) {
+      cachedProductRows = {
+        current: buildResearchProductRows({
+          references: displayCurrentReferences,
+          symbol,
+          productsById,
+          productOrder,
+          marketDate: expectedResearchMarketDate,
+          requireCurrentIndexed: true,
+          includeEmptyProducts: true,
+        }),
+        historical: buildResearchProductRows({
+          references: historicalReferences,
+          symbol,
+          productOrder,
+          groupByDate: true,
+        }),
+      };
+      payloadCache.set(productCacheKey, cachedProductRows);
+    }
+    const currentProductRows = cachedProductRows.current;
+    const historicalProductRows = cachedProductRows.historical;
+
+    const researchProductExpansionKey = (row) => `${rowId}:${row.productId}`;
+    const renderResearchProductContext = (row) => {
+      const sourceUrl = safeResearchUrl(row.reference?.sourceUrl || row.reference?.url);
+      const sourceTime = formatResearchTime(row.publishedAt);
+      const sourceMeta = [
+        row.productLabel,
+        formatResearchSourceDate(row.marketDate),
+        sourceTime === '—' ? null : `${sourceTime} ET`,
+      ].filter(Boolean).join(' · ');
+      return (
+        <div
+          className="pcv2-intel-grid pcv2-intel-reference-context"
+          id={`research-product-context-${rowId}-${row.productId}`}
+          role="region"
+          aria-label={`${row.productLabel} facts for ${symbol}`}
+          data-testid={`research-product-context-${rowId}-${row.productId}`}
+        >
+          <div className="pcv2-intel-cell pcv2-intel-span-20">
+            <div
+              className="pcv2-intel-reference-facts"
+              role="list"
+              aria-label={`${row.productLabel} fact list for ${symbol}`}
+            >
+              {row.factLines.map((fact, index) => (
+                <p
+                  className="pcv2-intel-reference-fact"
+                  role="listitem"
+                  key={`${row.productId}-fact-${index}`}
+                >
+                  {fact}
+                </p>
+              ))}
+            </div>
+            <div className="pcv2-intel-reference-context-source">
+              <span>Source: {sourceMeta}</span>
+              {sourceUrl ? (
+                <a href={sourceUrl} target="_blank" rel="noreferrer">
+                  OPEN SOURCE ↗
+                </a>
+              ) : (
+                <span aria-disabled="true">SOURCE UNAVAILABLE</span>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const renderCurrentResearchProductRow = (row) => {
+      const expansionKey = researchProductExpansionKey(row);
+      const isExpanded = expandedResearchProducts.has(expansionKey);
+      const detail = row.state === 'available'
+        ? `${row.factLines.length} ${row.factLines.length === 1 ? 'fact' : 'facts'} for ${symbol}`
+        : row.state === 'unavailable' ? 'UNAVAILABLE' : 'N/A';
+      const statusLabel = row.state === 'available'
+        ? `Verified ${row.productLabel} evidence for ${symbol}`
+        : row.state === 'unavailable'
+          ? `${row.productLabel} evidence is unavailable for ${symbol}`
+          : `${row.productLabel} has no verified mention for ${symbol}`;
+      return (
+        <React.Fragment key={`${rowId}-current-${row.key}`}>
+          <div
+            className={`pcv2-intel-grid pcv2-intel-reference-row ${isExpanded ? 'is-expanded' : ''} ${row.state !== 'available' ? 'is-empty' : ''} ${row.state === 'unavailable' ? 'is-unavailable' : ''}`}
+            data-product-id={row.productId}
+            data-testid={`research-product-row-${rowId}-${row.productId}`}
+          >
+            <div className="pcv2-intel-cell pcv2-intel-span-2 pcv2-intel-reference-time">
+              {formatResearchTime(row.publishedAt)}
+            </div>
+            <div className="pcv2-intel-cell pcv2-intel-span-2 pcv2-intel-reference-product">
+              {row.productLabel}
+            </div>
+            <div
+              className={`pcv2-intel-cell pcv2-intel-span-14 pcv2-intel-reference-note ${row.state !== 'available' ? 'is-empty' : ''}`}
+              title={detail}
+            >
+              {detail}
+            </div>
+            <div className="pcv2-intel-cell pcv2-intel-span-2 pcv2-intel-reference-source">
+              {row.state === 'available' ? (
+                <button
+                  type="button"
+                  className="pcv2-intel-reference-toggle"
+                  aria-expanded={isExpanded}
+                  aria-controls={`research-product-context-${rowId}-${row.productId}`}
+                  aria-label={`${isExpanded ? 'Collapse' : 'View'} ${row.productLabel} context for ${symbol}`}
+                  onClick={() => {
+                    setExpandedResearchProducts((current) => {
+                      const next = new Set(current);
+                      if (next.has(expansionKey)) next.delete(expansionKey);
+                      else next.add(expansionKey);
+                      return next;
+                    });
+                  }}
+                >
+                  {isExpanded ? 'HIDE ↑' : 'VIEW ›'}
+                </button>
+              ) : (
+                <span
+                  className="pcv2-intel-reference-source-disabled"
+                  aria-disabled="true"
+                  title={statusLabel}
+                >
+                  VIEW ›
+                </span>
+              )}
+            </div>
+          </div>
+          {isExpanded && row.state === 'available' && renderResearchProductContext(row)}
+        </React.Fragment>
+      );
+    };
 
     return (
       <div
@@ -3379,17 +4146,22 @@ const PortfolioBreakdown = ({
           })}
         </div>
 
-        {permanentRows}
-        {otherCurrentReferenceRows}
+        <div className="pcv2-intel-grid pcv2-intel-header pcv2-intel-reference-header" aria-label={`${symbol} research product references`}>
+          <div className="pcv2-intel-cell pcv2-intel-span-2">TIME</div>
+          <div className="pcv2-intel-cell pcv2-intel-span-2">PRODUCT</div>
+          <div className="pcv2-intel-cell pcv2-intel-span-14">DETAIL</div>
+          <div className="pcv2-intel-cell pcv2-intel-span-2">SOURCE</div>
+        </div>
+        {currentProductRows.map((row) => renderCurrentResearchProductRow(row))}
 
         <details className="pcv2-intel-history">
-          <summary>Previous {RESEARCH_HISTORY_DAYS} market days ({historicalReferences.length})</summary>
+          <summary>Previous {RESEARCH_HISTORY_DAYS} market days ({historicalProductRows.length} product rows)</summary>
           <div className="pcv2-intel-history-body">
-            {historicalReferences.length > 0
-              ? historicalReferences.map((reference, index) => renderCompactReferenceRow({
-                reference,
-                productLabel: researchSourceLabel(reference),
-                rowKey: `${rowId}-history-${reference.id || index}`,
+            {historicalProductRows.length > 0
+              ? historicalProductRows.map((row) => renderCompactReferenceRow({
+                reference: row.reference,
+                productLabel: row.productLabel,
+                rowKey: `${rowId}-history-${row.key}`,
                 historical: true,
               }))
               : (
@@ -3406,7 +4178,7 @@ const PortfolioBreakdown = ({
   };
 
   const renderMetricVerification = () => {
-    if (!metricVerification) return null;
+    if (!active || !metricVerification) return null;
     return createPortal(
       <div
         className="pcv2-verification-backdrop"
@@ -3590,14 +4362,7 @@ const PortfolioBreakdown = ({
                 aria-expanded={isExpanded}
                 aria-controls={`portfolio-research-${rowId}`}
                 aria-label={`${isExpanded ? 'Hide' : 'Show'} research intelligence for ${holding.symbol}`}
-                onClick={(event) => {
-                  if (!isExpanded) {
-                    const row = event.currentTarget.closest('.pcv2-ledger-row');
-                    const pane = event.currentTarget.closest('.pcv2-ledger-pane-scroll');
-                    if (row && pane) {
-                      pendingLedgerSnapRef.current = { pane, row, rowId };
-                    }
-                  }
+                onClick={() => {
                   setExpandedResearchRows((current) => {
                     const next = new Set(current);
                     if (next.has(rowId)) next.delete(rowId);
@@ -3606,7 +4371,28 @@ const PortfolioBreakdown = ({
                   });
                 }}
               >
-                <span aria-hidden="true">{isExpanded ? '−' : '+'}</span>
+                <svg
+                  className="pcv2-research-toggle__icon"
+                  viewBox="0 0 16 16"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 8h10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeWidth="1.7"
+                  />
+                  {!isExpanded && (
+                    <path
+                      d="M8 3v10"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeWidth="1.7"
+                    />
+                  )}
+                </svg>
               </button>
               <span title={holdingSourceTitle(holding) || undefined}>
                 {holding.symbol}
@@ -3693,28 +4479,14 @@ const PortfolioBreakdown = ({
   );
 
   const renderLedgerPane = ({ label, rows, isLongs }) => {
-    const rowWeights = rows.map((holding) => getPortfolioWeight(holding, totalValue));
-    const visibleWeight = rowWeights.every((weight) => weight !== null)
-      ? rowWeights.reduce((sum, weight) => sum + weight, 0)
-      : null;
-
     return (
       <div className={`pcv2-ledger-pane ${isLongs ? 'pcv2-ledger-pane--long' : 'pcv2-ledger-pane--short'}`}>
         <div className="pcv2-ledger-pane-head">
-          <span>{label}</span>
-          <div className="pcv2-ledger-pane-stats">
-            <span>{rows.length} positions</span>
-            <span>
-              {visibleWeight === null ? '—' : formatPct(visibleWeight, 1)} {isLongs ? 'long' : 'short'}
-            </span>
-          </div>
+          <span>{label} ({rows.length})</span>
         </div>
         <div
           className="pcv2-ledger-pane-scroll"
           data-layout="fit-columns"
-          ref={(node) => {
-            ledgerPaneRefs.current[isLongs ? 'longs' : 'shorts'] = node;
-          }}
         >
           <table className="pcv2-ledger-table" data-column-count="10">
             <colgroup>
@@ -3734,7 +4506,6 @@ const PortfolioBreakdown = ({
               {renderLedgerRows(rows, isLongs)}
             </tbody>
           </table>
-          <div className="pcv2-ledger-bottom-spacer" aria-hidden="true" />
         </div>
       </div>
     );
@@ -3898,11 +4669,8 @@ const PortfolioBreakdown = ({
         </button>
       </div>
       <div className="pcv2-ledger-split">
-        {renderLedgerPane({ label: 'Longs', rows: ledgerLongs, isLongs: true })}
-        {renderLedgerPane({ label: 'Shorts', rows: ledgerShorts, isLongs: false })}
-      </div>
-      <div className="pcv2-ledger-note">
-        Weights and targets are % of Net Liquidation Value (NAV). Price is a verified IBKR live last or latest completed-session close. Day G/L is the session percentage move.
+        {renderLedgerPane({ label: 'LONG', rows: ledgerLongs, isLongs: true })}
+        {renderLedgerPane({ label: 'SHORT', rows: ledgerShorts, isLongs: false })}
       </div>
     </section>
   );

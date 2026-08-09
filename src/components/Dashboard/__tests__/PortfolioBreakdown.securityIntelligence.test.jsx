@@ -286,6 +286,24 @@ const currentEnvelope = () => {
   };
 };
 
+const registeredResearchProducts = [
+  ['risk-ranges', 'Risk Ranges'],
+  ['early-look', 'Early Look'],
+  ['crypto-quant', 'Crypto Quant'],
+  ['bitcoin-trend-tracker', 'Bitcoin Tracker'],
+  ['portfolio-solutions', 'Portfolio Solutions'],
+  ['momo-tracker', 'MOMO Tracker'],
+  ['signal-strength', 'Signal Strength'],
+  ['real-time-alert', 'Real-Time Alerts'],
+  ['the-macro-show', 'Macro Show'],
+  ['the-call', 'The Call'],
+  ['volume', 'Volume / Market Structure'],
+  ['market-structure', 'Market Situation Report'],
+  ['cftc-positioning', 'CFTC Positioning'],
+  ['etf-pro', 'ETF Pro'],
+  ['investing-ideas', 'Investing Ideas'],
+];
+
 beforeEach(() => {
   MarketDataService.getSecurityIntelligence.mockReset();
   MarketDataService.getSecurityRiskMetrics.mockReset();
@@ -727,8 +745,9 @@ test('keeps Longs and Shorts as sibling panes in the split ledger', async () => 
   expect([...splitLedger.children]).toHaveLength(2);
   expect(splitLedger.children[0]).toHaveClass('pcv2-ledger-pane', 'pcv2-ledger-pane--long');
   expect(splitLedger.children[1]).toHaveClass('pcv2-ledger-pane', 'pcv2-ledger-pane--short');
-  expect(within(splitLedger.children[0]).getByText('Longs')).toBeInTheDocument();
-  expect(within(splitLedger.children[1]).getByText('Shorts')).toBeInTheDocument();
+  expect(within(splitLedger.children[0]).getByText(/^LONG \(3\)$/)).toBeInTheDocument();
+  expect(within(splitLedger.children[1]).getByText(/^SHORT \(0\)$/)).toBeInTheDocument();
+  expect(screen.queryByText(/Weights and targets are/)).not.toBeInTheDocument();
 });
 
 test('keeps the portfolio ledger mounted during initial live-data loading', () => {
@@ -738,8 +757,8 @@ test('keeps the portfolio ledger mounted during initial live-data loading', () =
 
   expect(screen.queryByText('Loading portfolio data...')).not.toBeInTheDocument();
   expect(screen.getByRole('status')).toHaveTextContent('Connecting to live portfolio');
-  expect(screen.getByText('Longs')).toBeInTheDocument();
-  expect(screen.getByText('Shorts')).toBeInTheDocument();
+  expect(screen.getByText(/^LONG \(0\)$/)).toBeInTheDocument();
+  expect(screen.getByText(/^SHORT \(0\)$/)).toBeInTheDocument();
   expect(getLedgerTables()).toHaveLength(2);
 });
 
@@ -864,20 +883,13 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
 
   const firstExpandedRow = toggles[0].closest('.pcv2-ledger-row');
   const firstPane = firstExpandedRow.closest('.pcv2-ledger-pane-scroll');
-  const firstLedgerHead = firstPane.querySelector('thead');
-  const firstBottomSpacer = firstPane.querySelector('.pcv2-ledger-bottom-spacer');
-  Object.defineProperty(firstPane, 'scrollHeight', { configurable: true, value: 360 });
-  Object.defineProperty(firstPane, 'clientHeight', { configurable: true, value: 300 });
   firstPane.scrollTop = 40;
-  firstPane.getBoundingClientRect = jest.fn(() => ({ top: 100 }));
-  firstLedgerHead.getBoundingClientRect = jest.fn(() => ({ height: 28 }));
-  firstExpandedRow.getBoundingClientRect = jest.fn(() => ({ top: 300 }));
 
   fireEvent.click(toggles[0]);
   expect(toggles[0]).toHaveAttribute('aria-expanded', 'true');
   expect(toggles[1]).toHaveAttribute('aria-expanded', 'false');
-  expect(firstPane.scrollTop).toBe(212);
-  expect(firstBottomSpacer).toHaveStyle({ height: '152px' });
+  expect(firstPane.scrollTop).toBe(40);
+  expect(firstPane.querySelector('.pcv2-ledger-bottom-spacer')).not.toBeInTheDocument();
 
   const firstPanel = screen.getByLabelText('Research intelligence for GLD');
   expect(firstExpandedRow).toHaveClass('is-expanded');
@@ -919,13 +931,13 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   fireEvent.click(within(betaDialog).getByRole('button', { name: 'Close calculation' }));
   expect(screen.queryByRole('dialog', { name: 'Beta calculation' })).not.toBeInTheDocument();
 
-  expect(within(firstPanel).getByText('LONG · Gold remains a preferred long.')).toBeInTheDocument();
-  expect(within(firstPanel).getByText('POSITIVE · Gold exposure remains supported.')).toBeInTheDocument();
   expect(within(firstPanel).queryByText('Direct mention')).not.toBeInTheDocument();
   expect(within(firstPanel).queryByText('Inferred exposure')).not.toBeInTheDocument();
   expect(within(firstPanel).queryByText('Today’s references')).not.toBeInTheDocument();
   const callRow = within(firstPanel).getByText('The Call').closest('.pcv2-intel-reference-row');
   const macroRow = within(firstPanel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
+  expect(within(callRow).getByText('1 fact for GLD')).toBeInTheDocument();
+  expect(within(macroRow).getByText('1 fact for GLD')).toBeInTheDocument();
   expect(within(callRow).getByText(/^\d{2}:\d{2}$/)).toBeInTheDocument();
   expect(within(macroRow).getByText(/^\d{2}:\d{2}$/)).toBeInTheDocument();
 
@@ -996,19 +1008,11 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
 
   const secondExpandedRow = toggles[1].closest('.pcv2-ledger-row');
   const secondPane = secondExpandedRow.closest('.pcv2-ledger-pane-scroll');
-  const secondLedgerHead = secondPane.querySelector('thead');
-  const secondBottomSpacer = secondPane.querySelector('.pcv2-ledger-bottom-spacer');
-  Object.defineProperty(secondPane, 'scrollHeight', { configurable: true, value: 500 });
-  Object.defineProperty(secondPane, 'clientHeight', { configurable: true, value: 300 });
   secondPane.scrollTop = 75;
-  secondPane.getBoundingClientRect = jest.fn(() => ({ top: 100 }));
-  secondLedgerHead.getBoundingClientRect = jest.fn(() => ({ height: 28 }));
-  secondExpandedRow.getBoundingClientRect = jest.fn(() => ({ top: 340 }));
 
   fireEvent.click(toggles[1]);
   expect(screen.getAllByLabelText('Research intelligence for GLD')).toHaveLength(2);
-  expect(secondPane.scrollTop).toBe(287);
-  expect(secondBottomSpacer).toHaveStyle({ height: '87px' });
+  expect(secondPane.scrollTop).toBe(75);
 
   const scrollTopBeforeCollapse = firstPane.scrollTop;
   fireEvent.click(screen.getAllByRole('button', { name: 'Hide research intelligence for GLD' })[0]);
@@ -1017,11 +1021,10 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
 
   fireEvent.click(screen.getByRole('button', { name: 'Hide research intelligence for GLD' }));
   expect(screen.queryByLabelText('Research intelligence for GLD')).not.toBeInTheDocument();
-  expect(secondBottomSpacer).toHaveStyle({ height: '0px' });
   expect(firstPane.scrollTop).toBe(scrollTopBeforeCollapse);
 });
 
-test('uses N/A only for an indexed Call or Macro product with zero matching references', async () => {
+test('renders indexed products without evidence as N/A with a disabled source control', async () => {
   const envelope = currentEnvelope();
   envelope.bySymbol.GLD.inferredReferences = [];
   MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
@@ -1037,15 +1040,166 @@ test('uses N/A only for an indexed Call or Macro product with zero matching refe
   await within(panel).findByText('FULL');
   const macroRow = within(panel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
   expect(within(macroRow).getByText('N/A')).toBeInTheDocument();
-  expect(within(macroRow).getByText('INDEXED ✓')).toBeInTheDocument();
-  expect(macroRow.children).toHaveLength(4);
-  expect(macroRow.children[0]).toHaveClass('pcv2-intel-span-2');
-  expect(macroRow.children[1]).toHaveClass('pcv2-intel-span-2');
-  expect(macroRow.children[2]).toHaveClass('pcv2-intel-span-14');
-  expect(macroRow.children[3]).toHaveClass('pcv2-intel-span-2');
+  expect(within(macroRow).queryByRole('button')).not.toBeInTheDocument();
+  expect(within(macroRow).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
+  const callRow = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
+  expect(callRow.children).toHaveLength(4);
+  expect(callRow.children[0]).toHaveClass('pcv2-intel-span-2');
+  expect(callRow.children[1]).toHaveClass('pcv2-intel-span-2');
+  expect(callRow.children[2]).toHaveClass('pcv2-intel-span-14');
+  expect(callRow.children[3]).toHaveClass('pcv2-intel-span-2');
 });
 
-test('renders an incomplete Macro product as unavailable instead of a verified empty mention', async () => {
+test('renders the registered product roster once in registry order', async () => {
+  const envelope = currentEnvelope();
+  const today = marketDate();
+  envelope.products = registeredResearchProducts.map(([id, label]) => ({
+    id,
+    label,
+    status: 'indexed',
+    marketDate: today,
+  }));
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [portfolioData.holdings[0]],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
+
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  await within(panel).findByText('FULL');
+  const rows = within(panel).getAllByTestId(/research-product-row-/);
+  expect(rows).toHaveLength(registeredResearchProducts.length);
+  expect(rows.map((row) => row.querySelector('.pcv2-intel-reference-product')?.textContent))
+    .toEqual(registeredResearchProducts.map(([, label]) => label));
+  registeredResearchProducts.forEach(([, label], index) => {
+    expect(within(rows[index]).getByText(label)).toBeInTheDocument();
+  });
+  expect(within(panel).queryByText('unknown')).not.toBeInTheDocument();
+});
+
+test('fails closed with an unavailable roster when the bulk research request fails', async () => {
+  MarketDataService.getSecurityIntelligence.mockRejectedValueOnce(new Error('research unavailable'));
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [portfolioData.holdings[0]],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
+
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  await waitFor(() => expect(within(panel).getAllByTestId(/research-product-row-/))
+    .toHaveLength(registeredResearchProducts.length));
+  const rows = within(panel).getAllByTestId(/research-product-row-/);
+  expect(rows).toHaveLength(registeredResearchProducts.length);
+  rows.forEach((row) => {
+    expect(within(row).getByText('UNAVAILABLE')).toBeInTheDocument();
+    expect(within(row).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
+    expect(within(row).queryByRole('button')).not.toBeInTheDocument();
+  });
+});
+
+test('expands direct and mapped evidence as independent plain-text fact lists', async () => {
+  const envelope = currentEnvelope();
+  envelope.bySymbol.GLD.directReferences[0] = {
+    ...envelope.bySymbol.GLD.directReferences[0],
+    matchedText: 'Gold',
+    excerpt: 'The desk reviewed the macro backdrop. Gold remains a preferred long. Risk stays contained.',
+    sourceUrl: 'javascript:alert(1)',
+  };
+  envelope.bySymbol.GLD.directReferences.push({
+    ...envelope.bySymbol.GLD.directReferences[0],
+    id: 'direct-nested-duplicate',
+    excerpt: 'Gold remains a preferred long.',
+  });
+  envelope.bySymbol.GLD.inferredReferences[0] = {
+    ...envelope.bySymbol.GLD.inferredReferences[0],
+    matchedText: 'Gold',
+    excerpt: 'Commodity exposure is constructive. Gold exposure remains supported. Keep sizing disciplined.',
+  };
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [portfolioData.holdings[0]],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
+
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  await within(panel).findByText('FULL');
+  const callRow = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
+  const macroRow = within(panel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
+  fireEvent.click(within(callRow).getByRole('button', { name: 'View The Call context for GLD' }));
+  fireEvent.click(within(macroRow).getByRole('button', { name: 'View Macro Show context for GLD' }));
+
+  const callContext = within(panel).getByRole('region', { name: 'The Call facts for GLD' });
+  const macroContext = within(panel).getByRole('region', { name: 'Macro Show facts for GLD' });
+  expect(callContext).toBeInTheDocument();
+  expect(macroContext).toBeInTheDocument();
+  expect(within(callContext).getByText('Gold remains a preferred long.')).toBeInTheDocument();
+  expect(within(macroContext).getByText(
+    'Mapped from Gold: Gold exposure remains supported.'
+  )).toBeInTheDocument();
+  expect(within(callContext).getAllByRole('listitem')).toHaveLength(1);
+  expect(within(macroContext).getAllByRole('listitem')).toHaveLength(1);
+  expect(within(panel).queryByText(/^(BEFORE|FOCUS|AFTER|DIRECT|MAPPED ·)/)).not.toBeInTheDocument();
+  expect(within(callContext).getByText('SOURCE UNAVAILABLE')).toBeInTheDocument();
+  expect(within(callContext).queryByRole('link', { name: 'OPEN SOURCE ↗' })).not.toBeInTheDocument();
+  expect(within(callRow).getByRole('button', {
+    name: 'Collapse The Call context for GLD',
+  })).toHaveTextContent('HIDE ↑');
+  expect(within(macroRow).getByRole('button', {
+    name: 'Collapse Macro Show context for GLD',
+  })).toHaveTextContent('HIDE ↑');
+  expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(within(callRow).getByRole('button', { name: 'Collapse The Call context for GLD' }));
+  expect(within(panel).queryByRole('region', { name: 'The Call facts for GLD' })).not.toBeInTheDocument();
+  expect(within(panel).getByRole('region', { name: 'Macro Show facts for GLD' })).toBeInTheDocument();
+});
+
+test('caps narrative fallback at four exact source sentences and one source link', async () => {
+  const envelope = currentEnvelope();
+  envelope.bySymbol.GLD.directReferences = [1, 2, 3, 4, 5].map((number) => ({
+    id: `call-fact-${number}`,
+    marketDate: marketDate(),
+    productId: 'the-call',
+    productLabel: 'The Call',
+    kind: 'summary_mention',
+    excerpt: `GLD fact ${number}.`,
+    matchedText: 'GLD',
+    matchType: 'direct',
+    qualityStatus: 'indexed',
+    publishedAt: `${marketDate()}T13:42:00Z`,
+    sourceUrl: `/research/the-call/fact-${number}`,
+  }));
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [portfolioData.holdings[0]],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
+
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  await within(panel).findByText('FULL');
+  const row = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
+  expect(within(row).getByText('4 facts for GLD')).toBeInTheDocument();
+  fireEvent.click(within(row).getByRole('button', { name: 'View The Call context for GLD' }));
+
+  const context = within(panel).getByRole('region', { name: 'The Call facts for GLD' });
+  expect(within(context).getAllByRole('listitem')).toHaveLength(4);
+  expect(within(context).getByText('GLD fact 1.')).toBeInTheDocument();
+  expect(within(context).queryByText('GLD fact 5.')).not.toBeInTheDocument();
+  expect(within(context).getAllByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveLength(1);
+});
+
+test('renders missing ingestion as UNAVAILABLE instead of N/A', async () => {
   const envelope = currentEnvelope();
   envelope.bySymbol.GLD.inferredReferences = [];
   envelope.products = envelope.products.map((product) => (
@@ -1063,9 +1217,107 @@ test('renders an incomplete Macro product as unavailable instead of a verified e
   const panel = screen.getByLabelText('Research intelligence for GLD');
   await within(panel).findByText('FULL');
   const macroRow = within(panel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
-  expect(within(macroRow).getByText('Unavailable')).toBeInTheDocument();
-  expect(within(macroRow).getByText('MISSING')).toBeInTheDocument();
-  expect(within(macroRow).queryByText('N/A')).not.toBeInTheDocument();
+  expect(within(macroRow).getByText('UNAVAILABLE')).toBeInTheDocument();
+  expect(within(macroRow).queryByRole('button')).not.toBeInTheDocument();
+  expect(within(macroRow).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
+});
+
+test('renders Portfolio Solutions as four deterministic fact sentences and one source link', async () => {
+  const envelope = currentEnvelope();
+  envelope.products.push({
+    id: 'portfolio-solutions',
+    label: 'Portfolio Solutions',
+    status: 'indexed',
+    marketDate: marketDate(),
+    publishedAt: `${marketDate()}T14:26:05.000Z`,
+  });
+  envelope.bySymbol.GLD.directReferences.push(
+    {
+      id: 'portfolio-rank',
+      marketDate: marketDate(),
+      productId: 'portfolio-solutions',
+      productLabel: 'Portfolio Solutions',
+      kind: 'portfolio_solutions_rank',
+      excerpt: 'GLD ranked #4; Sizing 2% – 6%; Weekly ▲ 3',
+      value: 4,
+      matchType: 'direct',
+      qualityStatus: 'indexed',
+      sourceUrl: '/research/portfolio-solutions',
+    },
+    {
+      id: 'portfolio-weekly',
+      marketDate: marketDate(),
+      productId: 'portfolio-solutions',
+      productLabel: 'Portfolio Solutions',
+      kind: 'portfolio_solutions_mover',
+      direction: 'UP',
+      excerpt: 'GLD weekly rank change 3',
+      value: 3,
+      matchType: 'direct',
+      qualityStatus: 'indexed',
+    },
+    {
+      id: 'portfolio-monthly',
+      marketDate: marketDate(),
+      productId: 'portfolio-solutions',
+      productLabel: 'Portfolio Solutions',
+      kind: 'portfolio_solutions_mover',
+      direction: 'UP',
+      excerpt: 'GLD monthly rank change 7',
+      value: 7,
+      matchType: 'direct',
+      qualityStatus: 'indexed',
+    },
+    {
+      id: 'portfolio-email-body',
+      marketDate: marketDate(),
+      productId: 'portfolio-solutions',
+      productLabel: 'Portfolio Solutions',
+      kind: 'summary_mention',
+      excerpt: 'HEDGEYE This research was prepared exclusively for a subscriber. Having trouble viewing this email?',
+      matchType: 'direct',
+      qualityStatus: 'indexed',
+    },
+  );
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [portfolioData.holdings[0]],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
+
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  await within(panel).findByText('FULL');
+  expect(within(panel).getAllByText('Portfolio Solutions')).toHaveLength(1);
+  const row = within(panel).getByText('Portfolio Solutions').closest('.pcv2-intel-reference-row');
+  expect(within(row).getByText('4 facts for GLD')).toBeInTheDocument();
+  fireEvent.click(within(row).getByRole('button', {
+    name: 'View Portfolio Solutions context for GLD',
+  }));
+  const context = within(panel).getByRole('region', {
+    name: 'Portfolio Solutions facts for GLD',
+  });
+  expect(within(context).getByText(
+    'GLD is ranked #4 in today’s ETF re-rank.'
+  )).toBeInTheDocument();
+  expect(within(context).getByText(
+    'Recommended position sizing is 2% – 6%.'
+  )).toBeInTheDocument();
+  expect(within(context).getByText('Weekly rank change is +3.')).toBeInTheDocument();
+  expect(within(context).getByText('Monthly rank change is +7.')).toBeInTheDocument();
+  expect(within(context).getAllByRole('listitem')).toHaveLength(4);
+  expect(within(context).getByText(/Source: Portfolio Solutions · .+ · 10:26 ET/)).toBeInTheDocument();
+  expect(within(context).getAllByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveLength(1);
+  expect(within(context).getByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveAttribute(
+    'href',
+    '/research/portfolio-solutions',
+  );
+  expect(within(row).getByRole('button', {
+    name: 'Collapse Portfolio Solutions context for GLD',
+  })).toHaveTextContent('HIDE ↑');
+  expect(within(panel).queryByText(/prepared exclusively/i)).not.toBeInTheDocument();
 });
 
 test('shows the canonical beta-derived position-size band and calculation', async () => {
@@ -1375,6 +1627,10 @@ test('does not promote stale or unauthorized products into current decision fiel
     schemaVersion: 1,
     marketDate: today,
     coverage: { state: 'partial', reasons: ['Risk Ranges missing'] },
+    products: currentEnvelope().products.map((product) => ({
+      ...product,
+      marketDate: today,
+    })),
     bySymbol: {
       GLD: {
         symbol: 'GLD',
@@ -1420,7 +1676,10 @@ test('does not promote stale or unauthorized products into current decision fiel
   expect(screen.queryByText('SHOULD_NOT_RENDER')).not.toBeInTheDocument();
   expect(screen.queryByText('STALE_TREND')).not.toBeInTheDocument();
   expect(screen.queryByText('1 – 2')).not.toBeInTheDocument();
-  expect(screen.getAllByText('Unavailable').length).toBeGreaterThanOrEqual(2);
+  const callRow = within(screen.getByLabelText('Research intelligence for GLD'))
+    .getByText('The Call').closest('.pcv2-intel-reference-row');
+  expect(within(callRow).getByText('N/A')).toBeInTheDocument();
+  expect(within(callRow).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
   const coverageCell = screen.getByText('PARTIAL').closest('.pcv2-intel-cell');
   expectCellProvenance(coverageCell, /Risk Ranges missing/);
   expect(screen.queryByText('Risk Ranges missing')).not.toBeInTheDocument();
@@ -1455,6 +1714,9 @@ test('does not treat an entire prior-market-day envelope as current research', a
   fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
 
   const panel = screen.getByLabelText('Research intelligence for GLD');
+  await waitFor(() => expect(within(panel).getByText('The Call')).toBeInTheDocument());
+  const callRow = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
+  expect(within(callRow).getByText('UNAVAILABLE')).toBeInTheDocument();
   expect(within(panel).queryByText('BUY')).not.toBeInTheDocument();
   expect(within(panel).queryByText('BULLISH')).not.toBeInTheDocument();
   expect(within(panel).getAllByText('UNAVAILABLE').length).toBeGreaterThanOrEqual(1);
@@ -1512,12 +1774,12 @@ test('shows completed IBKR closes as reference values without enabling sizing or
   expect(within(row).queryByText('$198.00')).not.toBeInTheDocument();
   expect(within(row).getByRole('cell', { name: 'Reference only' })).toHaveTextContent('Ref only');
   expect(within(row).queryByRole('textbox')).not.toBeInTheDocument();
-  const referenceIcon = within(row).getByLabelText('Reference close');
-  expect(referenceIcon).toHaveClass('pcv2-warning-icon--reference');
-  expect(referenceIcon).not.toHaveClass('pcv2-warning-icon--error');
+  const referenceIcon = within(row).getByLabelText('EOD reference close');
+  expect(referenceIcon).toHaveClass('pcv2-mark-status--reference');
+  expect(referenceIcon).not.toHaveClass('pcv2-mark-status--error');
   expect(referenceIcon).toHaveAttribute(
     'title',
-    'Reference close from 2026-07-24; not a live executable mark',
+    'EOD close from 2026-07-24; reference only, not a live executable mark',
   );
 });
 
@@ -1599,8 +1861,8 @@ test('reserves the red warning state for unavailable or invalid marks', async ()
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
   const row = getLedgerRowBySymbol('GLD');
   const errorIcon = within(row).getByLabelText('Bad data warning');
-  expect(errorIcon).toHaveClass('pcv2-warning-icon--error');
-  expect(errorIcon).not.toHaveClass('pcv2-warning-icon--reference');
+  expect(errorIcon).toHaveClass('pcv2-mark-status--error');
+  expect(errorIcon).not.toHaveClass('pcv2-mark-status--reference');
   expect(errorIcon).toHaveAttribute('title', 'missing_market_value');
 });
 
@@ -1626,9 +1888,9 @@ test('lets a hard mark failure override an otherwise valid reference-close warni
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
   const row = getLedgerRowBySymbol('GLD');
   const errorIcon = within(row).getByLabelText('Bad data warning');
-  expect(errorIcon).toHaveClass('pcv2-warning-icon--error');
-  expect(errorIcon).not.toHaveClass('pcv2-warning-icon--reference');
-  expect(within(row).queryByLabelText('Reference close')).not.toBeInTheDocument();
+  expect(errorIcon).toHaveClass('pcv2-mark-status--error');
+  expect(errorIcon).not.toHaveClass('pcv2-mark-status--reference');
+  expect(within(row).queryByLabelText('EOD reference close')).not.toBeInTheDocument();
 });
 
 test('shows a warming-only market mark as yellow while keeping sizing unavailable', async () => {
@@ -1649,8 +1911,8 @@ test('shows a warming-only market mark as yellow while keeping sizing unavailabl
   await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
   const row = getLedgerRowBySymbol('GLD');
   const loadingIcon = within(row).getByLabelText('Market mark loading');
-  expect(loadingIcon).toHaveClass('pcv2-warning-icon--reference');
-  expect(loadingIcon).not.toHaveClass('pcv2-warning-icon--error');
+  expect(loadingIcon).toHaveClass('pcv2-mark-status--loading');
+  expect(loadingIcon).not.toHaveClass('pcv2-mark-status--error');
   expect(within(row).getByRole('cell', { name: 'Unavailable' })).toHaveTextContent('No live');
   expect(within(row).queryByRole('textbox')).not.toBeInTheDocument();
 });
