@@ -105,7 +105,8 @@ MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
 MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
-MATERIALIZED_DATA_VERSION = "gmail-materialized-v5-tracker-chart-tables"
+MATERIALIZED_DATA_VERSION = "gmail-materialized-v8-market-structure-markets-only"
+MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
 HTML_TEXTRACT_REPORT_TYPES = frozenset({
     "signal-strength",
     "momo-tracker",
@@ -937,6 +938,19 @@ def get_message(access_token: str, user_id: str, message_id: str) -> Dict[str, A
     )
 
 
+def get_message_metadata(access_token: str, user_id: str, message_id: str) -> Dict[str, Any]:
+    """Fetch only immutable routing headers before any message body is requested."""
+    return http_json(
+        "GET",
+        gmail_path(user_id, f"messages/{urllib.parse.quote(message_id, safe='')}"),
+        access_token=access_token,
+        params={
+            "format": "metadata",
+            "metadataHeaders": ["Subject", "From", "Date"],
+        },
+    )
+
+
 def get_attachment_data(access_token: str, user_id: str, message_id: str, attachment_id: str) -> bytes:
     data = http_json(
         "GET",
@@ -1054,7 +1068,17 @@ def sanitize_filename(filename: str) -> str:
     return base[:180] or "attachment.bin"
 
 
+def is_market_structure_webcast_subject(subject: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(subject or "")).strip().casefold()
+    return (
+        "market situation report" in normalized
+        and bool(re.search(r"\b(?:video|webcast)\b", normalized))
+    )
+
+
 def infer_report_type(filename: str, subject: str) -> str:
+    if is_market_structure_webcast_subject(subject):
+        return "unknown"
     haystack = f"{filename} {subject}".lower().replace("_", " ")
     for report_type, needles in REPORT_RULES:
         if any(needle in haystack for needle in needles):
@@ -1158,6 +1182,14 @@ def attachment_records_are_terminal(items: Iterable[Dict[str, Any]]) -> bool:
 def message_is_fully_processed(items: Iterable[Dict[str, Any]]) -> bool:
     """Return true when an immutable Gmail message has no unfinished ledger work."""
     records = list(items)
+    if any(
+        item.get("attachmentId") == MESSAGE_LEDGER_ATTACHMENT_ID
+        and item.get("status") == "MESSAGE_IGNORED"
+        for item in records
+    ):
+        # A metadata-only ignore decision is terminal even if a pre-upgrade
+        # deployment previously left body-derived artifacts in the ledger.
+        return True
     has_message_sentinel = any(
         item.get("attachmentId") == MESSAGE_LEDGER_ATTACHMENT_ID
         and item.get("status") == "MESSAGE_PROCESSED"
@@ -1190,6 +1222,32 @@ def mark_message_processed(
             "subject": headers.get("subject", ""),
             "sender": headers.get("from", ""),
             "attachmentCount": attachment_count,
+            "createdAt": now,
+            "updatedAt": now,
+            "ttl": ttl_epoch(),
+        }
+    )
+
+
+def mark_message_ignored(
+    table: Any,
+    *,
+    message_id: str,
+    headers: Dict[str, str],
+    reason: str,
+) -> None:
+    """Persist a terminal metadata-only decision so ignored mail is never retried."""
+    now = utc_now().isoformat()
+    table.put_item(
+        Item={
+            "messageId": message_id,
+            "attachmentId": MESSAGE_LEDGER_ATTACHMENT_ID,
+            "status": "MESSAGE_IGNORED",
+            "subject": headers.get("subject", ""),
+            "sender": headers.get("from", ""),
+            "attachmentCount": 0,
+            "ignoredReason": reason,
+            "bodyFetched": False,
             "createdAt": now,
             "updatedAt": now,
             "ttl": ttl_epoch(),
@@ -2144,6 +2202,46 @@ def put_immutable_s3_object(
     return False
 
 
+def archive_market_structure_chart(
+    *,
+    chart: Dict[str, str],
+    payload: bytes,
+    content_type: str,
+    extension: str,
+    content_sha256: str,
+) -> Dict[str, str]:
+    """Store one verified report chart under a private content-addressed key."""
+    if not re.fullmatch(r"[a-f0-9]{64}", content_sha256):
+        raise ValueError("Market Situation chart checksum is invalid")
+    if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+        raise ValueError("Market Situation chart content type is not allowlisted")
+    expected_extension = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/webp": "webp",
+    }[content_type]
+    if extension != expected_extension:
+        raise ValueError("Market Situation chart extension does not match its content")
+
+    s3_key = f"{MARKET_STRUCTURE_ASSET_PREFIX}{content_sha256}.{extension}"
+    put_immutable_s3_object(
+        bucket=S3_BUCKET,
+        key=s3_key,
+        body=payload,
+        content_type=content_type,
+        metadata={
+            "source": "gmail-market-structure",
+            "report-type": "market-structure",
+            "content-sha256": content_sha256,
+        },
+        content_sha256=content_sha256,
+    )
+    return {
+        "id": content_sha256,
+        "s3Key": s3_key,
+    }
+
+
 def claim_textract_content(
     table: Any,
     *,
@@ -2328,6 +2426,8 @@ def backfill_html_snapshot(
     ).get("Item")
     if not item or not item.get("s3Bucket") or not item.get("s3Key"):
         return False
+    if is_market_structure_webcast_subject(str(item.get("subject") or "")):
+        return False
     is_investing_ideas_change = bool(
         re.search(r"\b\d+\s+Changes?:", str(item.get("subject") or ""), re.IGNORECASE)
     )
@@ -2350,6 +2450,11 @@ def backfill_html_snapshot(
             s3_key=item["s3Key"],
             message_id=message_id,
             subject=item.get("subject", ""),
+            chart_archiver=(
+                archive_market_structure_chart
+                if report_type == "market-structure"
+                else None
+            ),
             textract_client=(
                 textract if report_type in HTML_TEXTRACT_REPORT_TYPES else None
             ),
@@ -2482,6 +2587,8 @@ def _should_backfill_materialized_snapshot(
 
     report_type = str(item.get("snapshotType") or item.get("reportType") or "unknown")
     subject = str(item.get("subject") or "")
+    if is_market_structure_webcast_subject(subject):
+        return False
     if allow_version_upgrade:
         inferred_report_type = infer_report_type(
             str(item.get("filename") or ""),
@@ -2683,6 +2790,11 @@ def upload_attachment(
                     s3_key=s3_key,
                     message_id=message_id,
                     subject=subject,
+                    chart_archiver=(
+                        archive_market_structure_chart
+                        if report_type == "market-structure"
+                        else None
+                    ),
                     textract_client=(
                         textract if report_type in HTML_TEXTRACT_REPORT_TYPES else None
                     ),
@@ -2863,6 +2975,27 @@ def process_message(
             "skipped": [],
         }
 
+        ignored_sentinel = next(
+            (
+                item
+                for item in ledger_items
+                if item.get("attachmentId") == MESSAGE_LEDGER_ATTACHMENT_ID
+                and item.get("status") == "MESSAGE_IGNORED"
+            ),
+            None,
+        )
+        if ignored_sentinel:
+            result["ignored"] = True
+            result["skipped"].append(
+                {
+                    "filename": "",
+                    "detail": str(
+                        ignored_sentinel.get("ignoredReason")
+                        or "metadata-only-ignore"
+                    ),
+                }
+            )
+
         for item in attachment_items:
             require_work_budget()
             filename = item.get("filename", "")
@@ -2910,6 +3043,28 @@ def process_message(
                 attachment_count=len(attachment_items),
             )
         return result
+
+    require_work_budget()
+    metadata = get_message_metadata(access_token, user_id, message_id)
+    metadata_headers = get_headers(metadata)
+    if is_market_structure_webcast_subject(metadata_headers.get("subject", "")):
+        mark_message_ignored(
+            table,
+            message_id=message_id,
+            headers=metadata_headers,
+            reason="market-structure-webcast",
+        )
+        return {
+            "messageId": message_id,
+            "subject": metadata_headers.get("subject", ""),
+            "sender": metadata_headers.get("from", ""),
+            "attachmentCount": 0,
+            "stored": [],
+            "skipped": [
+                {"filename": "", "detail": "market-structure-webcast"}
+            ],
+            "ignored": True,
+        }
 
     require_work_budget()
     message = get_message(access_token, user_id, message_id)

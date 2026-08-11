@@ -69,6 +69,24 @@ def market_situation_signal_png(
     )
 
 
+def archive_market_situation_chart(
+    *,
+    chart,
+    payload,
+    content_type,
+    extension,
+    content_sha256,
+):
+    del chart, payload, content_type
+    return {
+        "id": content_sha256,
+        "s3Key": (
+            "hedgeye-email/assets/market-structure/"
+            f"{content_sha256}.{extension}"
+        ),
+    }
+
+
 def conditional_failure() -> ClientError:
     return ClientError(
         {
@@ -477,7 +495,16 @@ def etf_full_book_snapshot(message_id: str, scraped_at: str) -> dict:
 
 
 class HermesGmailIngestorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.metadata_patcher = patch.object(
+            ingestor,
+            "get_message_metadata",
+            return_value={"payload": {"headers": []}},
+        )
+        self.metadata_patcher.start()
+
     def tearDown(self) -> None:
+        self.metadata_patcher.stop()
         ingestor.clear_oauth_secret_cache()
 
     def test_oauth_secret_is_cached_for_warm_invocations(self):
@@ -2342,6 +2369,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             message_id="market-situation-2026-07-30",
             subject=subject,
             image_fetcher=lambda _url: market_situation_signal_png(),
+            chart_archiver=archive_market_situation_chart,
         )
 
         self.assertIsNotNone(snapshot)
@@ -2359,33 +2387,173 @@ class HermesGmailIngestorTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            snapshot["data"]["signalMatrixImageUrl"],
-            f"{source_root}/signals.png",
+            snapshot["data"]["signalMatrixChartId"],
+            snapshot["data"]["charts"][0]["sha256"],
+        )
+        self.assertEqual(snapshot["schemaVersion"], "market-structure-v3")
+        self.assertTrue(snapshot["contentComplete"])
+        self.assertEqual(
+            [block["type"] for block in snapshot["data"]["blocks"]],
+            ["chart", "chart", "paragraph"],
         )
         self.assertNotIn("subscriber@example.com", json.dumps(snapshot))
+        self.assertNotIn("cloudfront.net", json.dumps(snapshot))
+        self.assertNotIn("sourceAttribution", snapshot["data"])
+        self.assertNotIn("headline", snapshot["article"])
+        self.assertNotIn("byline", snapshot["article"])
+        self.assertNotIn("disclaimer", snapshot["article"])
+        self.assertNotIn("publisher", snapshot["article"])
         self.assertIn(
             "structurally vulnerable",
-            snapshot["article"]["summary"].lower(),
+            snapshot["article"]["bodyText"].lower(),
         )
 
-    def test_market_situation_report_fails_closed_when_signal_matrix_is_incomplete(self):
+    def test_market_situation_report_keeps_complete_source_when_signal_matrix_is_incomplete(self):
         html_body = """
             <div>07/30/2026 06:30 AM EDT</div>
+            <p>Substantive market structure research remains available.</p>
             <img class="chart"
                  src="https://d1yhils6iwh5l5.cloudfront.net/charts/signals.png">
         """
 
-        with self.assertRaisesRegex(ValueError, "four verified selections"):
-            ingestor.parse_html_snapshot(
-                report_type="market-structure",
-                html_body=html_body,
-                received_at=datetime(2026, 7, 30, 13, 30, tzinfo=timezone.utc),
-                s3_key="market-structure/message.html",
-                message_id="incomplete-market-situation",
-                image_fetcher=lambda _url: market_situation_signal_png(
-                    selections=(2, 2, 1),
-                ),
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 7, 30, 13, 30, tzinfo=timezone.utc),
+            s3_key="market-structure/message.html",
+            message_id="incomplete-market-situation",
+            image_fetcher=lambda _url: market_situation_signal_png(
+                selections=(2, 2, 1),
+            ),
+            chart_archiver=archive_market_situation_chart,
+        )
+
+        self.assertTrue(snapshot["contentComplete"])
+        self.assertEqual(snapshot["data"]["signals"], [])
+        self.assertEqual(snapshot["signalCount"], 0)
+        self.assertIn("Signal summary unavailable", snapshot["warnings"][0])
+
+    def test_market_situation_report_preserves_seven_charts_and_only_market_text(self):
+        root = "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/weekly"
+        chart_tags = [
+            f'<img class="chart" alt="Chart {index}" '
+            f'src="{root}/chart-{index}.png?email=subscriber@example.com">'
+            for index in range(1, 8)
+        ]
+        html_body = f"""
+            <html><body>
+              <div>This research was prepared exclusively for subscriber@example.com.</div>
+              <div>Having trouble viewing this email?<br>View it in your browser</div>
+              <div>08/10/2026 06:30 AM EDT</div>
+              <h1>MARKET SITUATION REPORT: August 10th, 2026</h1>
+              <p>The research note below was written by Tier 1 Alpha and Presented by Hedgeye®.</p>
+              {chart_tags[0]}
+              <h2>WEEKLY GAME PLAN</h2>
+              <p>To access the full report, please Click Here!</p>
+              <p>Important Note: This report is dated research, not an executable quote.</p>
+              <p>SPX remained in positive gamma. First complete narrative paragraph.</p>
+              {chart_tags[1]}
+              <p>Second complete narrative paragraph.</p>
+              {chart_tags[2]}
+              <p>Third complete narrative paragraph.</p>
+              {chart_tags[3]}
+              <p>Fourth complete narrative paragraph.</p>
+              {chart_tags[4]}
+              <p>Fifth complete narrative paragraph.</p>
+              {chart_tags[5]}
+              <p>Sixth complete narrative paragraph.</p>
+              {chart_tags[6]}
+              <p>By Craig Peterson</p>
+              <div id="disclaimer">
+                <div>Legal Disclaimer: subscriber-only research.</div>
+                <div>All rights reserved.</div>
+              </div>
+              <img src="https://tracking.example.com/pixel.gif">
+            </body></html>
+        """
+        signal_payload = market_situation_signal_png()
+        payloads = {
+            f"{root}/chart-{index}.png": signal_payload
+            for index in range(1, 8)
+        }
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 10, 10, 30, tzinfo=timezone.utc),
+            s3_key="hedgeye-email/messages/2026-08-10/market-structure/message.html",
+            message_id="market-situation-2026-08-10",
+            subject="MARKET SITUATION REPORT: August 10th, 2026 | WEEKLY GAME PLAN",
+            image_fetcher=lambda url: payloads[url],
+            chart_archiver=archive_market_situation_chart,
+        )
+
+        blocks = snapshot["data"]["blocks"]
+        self.assertEqual(snapshot["chartCount"], 7)
+        self.assertEqual(len(snapshot["data"]["charts"]), 7)
+        self.assertEqual(
+            [block["type"] for block in blocks],
+            [
+                "chart", "heading", "callout", "paragraph",
+                "chart", "paragraph", "chart", "paragraph", "chart",
+                "paragraph", "chart", "paragraph", "chart", "paragraph",
+                "chart",
+            ],
+        )
+        self.assertEqual(snapshot["article"]["reportHeading"], "WEEKLY GAME PLAN")
+        self.assertNotIn("byline", snapshot["article"])
+        self.assertNotIn("disclaimer", snapshot["article"])
+        self.assertNotIn("publisher", snapshot["article"])
+        self.assertNotIn("headline", snapshot["article"])
+        self.assertNotIn("sourceAttribution", snapshot["data"])
+        serialized = json.dumps(snapshot)
+        self.assertNotIn("subscriber@example.com", serialized)
+        self.assertNotIn("tracking.example.com", serialized)
+        self.assertNotIn("?email=", serialized)
+        self.assertNotIn("Having trouble viewing", serialized)
+        self.assertNotIn("Tier 1 Alpha", serialized)
+        self.assertNotIn("Click Here", serialized)
+        self.assertNotIn("By Craig Peterson", serialized)
+        self.assertNotIn("Legal Disclaimer", serialized)
+
+    def test_market_situation_webcast_is_ignored_from_metadata_without_fetching_body(self):
+        table = FakeLedgerTable()
+        subject = (
+            "MARKET SITUATION REPORT: VIDEO | Market Situation Report Webcast | "
+            "August 10, 2026"
+        )
+        metadata = {
+            "internalDate": "1786357800000",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": subject},
+                    {"name": "From", "value": "Hedgeye <research@hedgeye.com>"},
+                    {"name": "Date", "value": "Mon, 10 Aug 2026 03:30:00 -0400"},
+                ]
+            },
+        }
+
+        with patch.object(
+            ingestor, "get_message_metadata", return_value=metadata
+        ) as get_metadata, patch.object(
+            ingestor, "get_message"
+        ) as get_message, patch.object(
+            ingestor, "s3"
+        ) as s3_client:
+            result = ingestor.process_message(
+                "token", "me", "gmail-market-webcast", table
             )
+
+        get_metadata.assert_called_once()
+        get_message.assert_not_called()
+        s3_client.put_object.assert_not_called()
+        self.assertTrue(result["ignored"])
+        sentinel = table.items[
+            ("gmail-market-webcast", ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)
+        ]
+        self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
+        self.assertEqual(sentinel["ignoredReason"], "market-structure-webcast")
+        self.assertFalse(sentinel["bodyFetched"])
 
     def test_explicit_version_backfill_reclassifies_previously_unknown_market_situation_email(self):
         legacy_item = {
@@ -4096,7 +4264,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
     def test_message_budget_is_checked_before_each_attachment(self):
         table = FakeLedgerTable()
         budget_check = MagicMock(
-            side_effect=[None, None, "GMAIL_INVOCATION_NEAR_TIMEOUT"]
+            side_effect=[None, None, None, "GMAIL_INVOCATION_NEAR_TIMEOUT"]
         )
         message = {
             "internalDate": "1784120400000",
@@ -4117,6 +4285,8 @@ class HermesGmailIngestorTests(unittest.TestCase):
         }
 
         with patch.object(
+            ingestor, "get_message_metadata", return_value=message
+        ), patch.object(
             ingestor, "get_message", return_value=message
         ) as get_message, patch.object(
             ingestor, "upload_attachment"
@@ -4138,7 +4308,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         )
         get_message.assert_called_once()
         upload_attachment.assert_not_called()
-        self.assertEqual(budget_check.call_count, 3)
+        self.assertEqual(budget_check.call_count, 4)
 
 
 if __name__ == "__main__":

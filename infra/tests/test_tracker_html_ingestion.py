@@ -181,7 +181,7 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
         )
         self.assertEqual(
             ingestor.MATERIALIZED_DATA_VERSION,
-            "gmail-materialized-v5-tracker-chart-tables",
+            "gmail-materialized-v8-market-structure-markets-only",
         )
 
 

@@ -17,6 +17,7 @@ import urllib.request
 import zlib
 from datetime import datetime, timezone
 from decimal import Decimal
+from html.parser import HTMLParser
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from boto3.dynamodb.types import TypeSerializer
@@ -46,6 +47,8 @@ DYNAMODB_ITEM_MAX_BYTES = 400 * 1024
 DYNAMODB_TRANSACTION_MAX_BYTES = 4 * 1024 * 1024
 MARKET_SITUATION_IMAGE_HOST = "d1yhils6iwh5l5.cloudfront.net"
 MARKET_SITUATION_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+MARKET_SITUATION_CHART_MAX_COUNT = 12
+MARKET_SITUATION_SCHEMA_VERSION = "market-structure-v3"
 MARKET_SITUATION_SIGNAL_ROWS = (
     (
         "spxGammaExposure",
@@ -70,8 +73,10 @@ MARKET_SITUATION_SIGNAL_ROWS = (
 )
 MARKET_SITUATION_SIGNAL_COLORS = {
     (0, 128, 0): (0, "positive"),
+    (55, 126, 34): (0, "positive"),
     (255, 165, 0): (1, "neutral"),
     (255, 0, 0): (2, "negative"),
+    (233, 51, 35): (2, "negative"),
 }
 
 
@@ -291,6 +296,259 @@ def _fetch_market_situation_image(url: str) -> bytes:
     if len(payload) > MARKET_SITUATION_IMAGE_MAX_BYTES:
         raise ValueError("Market Situation image exceeds the ingestion size limit")
     return payload
+
+
+def _market_situation_image_type(payload: bytes) -> Tuple[str, str]:
+    """Return the verified MIME type and safe extension for a chart payload."""
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png", "png"
+    if payload.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg", "jpg"
+    if len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    raise ValueError("Market Situation chart has an unsupported or invalid image signature")
+
+
+_MARKET_SITUATION_EMAIL_PATTERN = re.compile(
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+    re.IGNORECASE,
+)
+_MARKET_SITUATION_IGNORED_TEXT = (
+    "prepared exclusively for",
+    "having trouble viewing this email",
+    "view larger image",
+    "view this email in your browser",
+    "view it in your browser",
+    "the research note below was written by",
+    "presented by hedgeye",
+    "manage preferences",
+    "unsubscribe",
+    "to access the full market situation report",
+    "to access the full report",
+    "click here",
+    "all rights reserved",
+)
+_MARKET_SITUATION_DISCLAIMER_PREFIXES = (
+    "disclaimer",
+    "legal disclaimer",
+    "important disclosures",
+    "the information contained in this report",
+    "hedgeye risk management, llc",
+)
+
+
+def _clean_market_situation_text(value: str) -> Optional[str]:
+    text = html.unescape(str(value or "")).replace("\xa0", " ")
+    text = _MARKET_SITUATION_EMAIL_PATTERN.sub("", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\s*\n\s*", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip(" \n-|·")
+    if not text:
+        return None
+    normalized = text.casefold()
+    if any(phrase in normalized for phrase in _MARKET_SITUATION_IGNORED_TEXT):
+        return None
+    if re.fullmatch(
+        r"\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s+[ap]m(?:\s+[a-z]{2,5})?",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return None
+    if re.match(r"^market situation report\s*:", normalized, re.IGNORECASE):
+        return None
+    if normalized in {"click here", "read more", "source", "view online"}:
+        return None
+    return text
+
+
+def _is_market_situation_disclaimer(text: str) -> bool:
+    normalized = str(text or "").strip().casefold()
+    return any(normalized.startswith(prefix) for prefix in _MARKET_SITUATION_DISCLAIMER_PREFIXES)
+
+
+def _market_situation_text_block_type(tag: str, text: str, attributes: Dict[str, str]) -> str:
+    normalized = text.strip()
+    class_name = attributes.get("class", "").casefold()
+    if re.fullmatch(
+        r"\d{1,2}/\d{1,2}/\d{4}(?:\s+\d{1,2}:\d{2}\s+[AP]M(?:\s+[A-Z]{2,5})?)?",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return "paragraph"
+    if re.match(r"^by\s+\S", normalized, re.IGNORECASE) or re.fullmatch(
+        r"(?:craig\s+peterson)(?:\s*[|·,-].*)?",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return "byline"
+    if "important note" in normalized.casefold() or "callout" in class_name or "note" in class_name:
+        return "callout"
+    if tag in {"h1", "h2", "h3", "h4", "h5", "h6"} or "headline" in class_name or "title" in class_name:
+        return "heading"
+    if (
+        len(normalized) <= 140
+        and normalized == normalized.upper()
+        and re.search(r"[A-Z]", normalized)
+        and not normalized.endswith(".")
+    ):
+        return "heading"
+    return "paragraph"
+
+
+class _MarketSituationContentParser(HTMLParser):
+    """Extract source-ordered narrative blocks and approved chart placeholders."""
+
+    _TEXT_TAGS = {
+        "blockquote",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "p",
+        "td",
+    }
+    _IGNORED_TAGS = {"head", "script", "style"}
+
+    def __init__(self, chart_urls: List[str]) -> None:
+        super().__init__(convert_charrefs=True)
+        self.blocks: List[Dict[str, Any]] = []
+        self.disclaimer_parts: List[str] = []
+        self._chart_urls = set(chart_urls)
+        self._seen_charts = set()
+        self._seen_text = set()
+        self._text_stack: List[Dict[str, Any]] = []
+        self._ignored_depth = 0
+        self._in_disclaimer = False
+
+    @staticmethod
+    def _attributes(attrs: List[Tuple[str, Optional[str]]]) -> Dict[str, str]:
+        return {
+            str(name or "").casefold(): str(value or "")
+            for name, value in attrs
+            if name
+        }
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        tag = tag.casefold()
+        if tag in self._IGNORED_TAGS:
+            self._ignored_depth += 1
+            return
+        if self._ignored_depth:
+            return
+
+        attributes = self._attributes(attrs)
+        if tag == "img":
+            source_url = _sanitize_research_image_url(attributes.get("src", ""))
+            if source_url in self._chart_urls and source_url not in self._seen_charts:
+                self._seen_charts.add(source_url)
+                self.blocks.append(
+                    {
+                        "type": "chart-source",
+                        "sourceUrl": source_url,
+                        "name": _chart_name_from_url(source_url),
+                        "caption": _clean_market_situation_text(
+                            attributes.get("alt", "")
+                        ),
+                    }
+                )
+            return
+
+        if tag == "br":
+            for candidate in self._text_stack:
+                candidate["parts"].append("\n")
+            return
+
+        if tag not in self._TEXT_TAGS:
+            return
+        inherited_disclaimer = any(
+            candidate.get("isDisclaimer") for candidate in self._text_stack
+        )
+        for candidate in self._text_stack:
+            candidate["hasTextChild"] = True
+        self._text_stack.append(
+            {
+                "tag": tag,
+                "attributes": attributes,
+                "parts": [],
+                "hasTextChild": False,
+                "isDisclaimer": inherited_disclaimer or any(
+                    "disclaimer" in attributes.get(name, "").casefold()
+                    for name in ("id", "class")
+                ),
+            }
+        )
+
+    def handle_startendtag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_depth:
+            return
+        for candidate in self._text_stack:
+            candidate["parts"].append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.casefold()
+        if tag in self._IGNORED_TAGS:
+            if self._ignored_depth:
+                self._ignored_depth -= 1
+            return
+        if self._ignored_depth or tag not in self._TEXT_TAGS:
+            return
+
+        candidate_index = next(
+            (
+                index
+                for index in range(len(self._text_stack) - 1, -1, -1)
+                if self._text_stack[index]["tag"] == tag
+            ),
+            None,
+        )
+        if candidate_index is None:
+            return
+        candidate = self._text_stack.pop(candidate_index)
+        if candidate["hasTextChild"]:
+            return
+        text = _clean_market_situation_text("".join(candidate["parts"]))
+        if not text:
+            return
+        if (
+            candidate.get("isDisclaimer")
+            or self._in_disclaimer
+            or _is_market_situation_disclaimer(text)
+        ):
+            self._in_disclaimer = True
+            self.disclaimer_parts.append(text)
+            return
+        dedupe_key = re.sub(r"\s+", " ", text).casefold()
+        if dedupe_key in self._seen_text:
+            return
+        self._seen_text.add(dedupe_key)
+        self.blocks.append(
+            {
+                "type": _market_situation_text_block_type(
+                    candidate["tag"],
+                    text,
+                    candidate["attributes"],
+                ),
+                "text": text,
+            }
+        )
+
+
+def _extract_market_situation_content(
+    html_body: str,
+    charts: List[Dict[str, str]],
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    parser = _MarketSituationContentParser([chart["url"] for chart in charts])
+    parser.feed(html_body)
+    parser.close()
+    disclaimer = "\n\n".join(parser.disclaimer_parts).strip() or None
+    return parser.blocks, disclaimer
 
 
 def _textract_tables(textract_response: Dict[str, Any]) -> List[List[List[str]]]:
@@ -650,7 +908,11 @@ def _extract_market_situation_signals(payload: bytes) -> List[Dict[str, str]]:
         )
 
     signals = []
-    expected_centers = (0.412, 0.585, 0.758)
+    expected_centers = (
+        (0.432, 0.658, 0.884)
+        if width >= 1000
+        else (0.412, 0.585, 0.758)
+    )
     for row_definition, band in zip(MARKET_SITUATION_SIGNAL_ROWS, signal_bands):
         signal_id, label, choices = row_definition
         x_center = (band["xSum"] / band["count"]) / width
@@ -1493,24 +1755,122 @@ def parse_html_snapshot(
     message_id: str,
     subject: Optional[str] = None,
     image_fetcher: Optional[Callable[[str], bytes]] = None,
+    chart_archiver: Optional[Callable[..., Dict[str, Any]]] = None,
     textract_client: Any = None,
 ) -> Optional[Dict[str, Any]]:
     text = _strip_tags(html_body)
 
     if report_type == "market-structure":
-        charts = []
+        source_charts = []
         for item in _extract_chart_items(html_body):
             sanitized_url = _sanitize_research_image_url(item["url"])
             if sanitized_url:
-                charts.append({**item, "url": sanitized_url})
-        if not charts:
+                source_charts.append({**item, "url": sanitized_url})
+        if not source_charts:
             return None
+        if len(source_charts) > MARKET_SITUATION_CHART_MAX_COUNT:
+            raise ValueError(
+                "Market Situation report exceeds the approved chart-count limit"
+            )
+        if chart_archiver is None:
+            raise ValueError(
+                "Market Situation reports require a private chart archiver"
+            )
 
-        signal_matrix = charts[0]
-        signal_image = (image_fetcher or _fetch_market_situation_image)(
-            signal_matrix["url"]
+        ordered_source_blocks, _disclaimer = _extract_market_situation_content(
+            html_body,
+            source_charts,
         )
-        signals = _extract_market_situation_signals(signal_image)
+        source_urls_in_order = [
+            block["sourceUrl"]
+            for block in ordered_source_blocks
+            if block.get("type") == "chart-source"
+        ]
+        if source_urls_in_order != [chart["url"] for chart in source_charts]:
+            raise ValueError(
+                "Market Situation chart ordering could not be verified from the source HTML"
+            )
+
+        archived_charts: List[Dict[str, Any]] = []
+        archived_by_source: Dict[str, Dict[str, Any]] = {}
+        signal_image: Optional[bytes] = None
+        for index, chart in enumerate(source_charts):
+            payload = (image_fetcher or _fetch_market_situation_image)(chart["url"])
+            if len(payload) > MARKET_SITUATION_IMAGE_MAX_BYTES:
+                raise ValueError("Market Situation image exceeds the ingestion size limit")
+            content_type, extension = _market_situation_image_type(payload)
+            content_sha256 = hashlib.sha256(payload).hexdigest()
+            archived = chart_archiver(
+                chart=chart,
+                payload=payload,
+                content_type=content_type,
+                extension=extension,
+                content_sha256=content_sha256,
+            )
+            s3_key = str((archived or {}).get("s3Key") or "").strip()
+            if not s3_key:
+                raise ValueError("Market Situation chart archive did not return an S3 key")
+            chart_id = str((archived or {}).get("id") or content_sha256).strip()
+            archived_chart = {
+                "id": chart_id,
+                "name": chart["name"],
+                "sha256": content_sha256,
+                "contentType": content_type,
+                "s3Key": s3_key,
+            }
+            archived_charts.append(archived_chart)
+            archived_by_source[chart["url"]] = archived_chart
+            if index == 0:
+                signal_image = payload
+
+        signals: List[Dict[str, str]] = []
+        warnings: List[str] = []
+        try:
+            signals = _extract_market_situation_signals(signal_image or b"")
+        except Exception as error:
+            warnings.append(f"Signal summary unavailable: {error}")
+
+        ordered_blocks: List[Dict[str, Any]] = []
+        body_text_parts: List[str] = []
+        report_heading: Optional[str] = None
+        for index, source_block in enumerate(ordered_source_blocks, start=1):
+            block_type = source_block.get("type")
+            if block_type == "chart-source":
+                chart = archived_by_source[source_block["sourceUrl"]]
+                ordered_blocks.append(
+                    {
+                        "id": f"block-{index}",
+                        "type": "chart",
+                        "chartId": chart["id"],
+                        **(
+                            {"caption": source_block["caption"]}
+                            if source_block.get("caption")
+                            else {}
+                        ),
+                    }
+                )
+                continue
+            block_text = str(source_block.get("text") or "").strip()
+            if not block_text or block_type == "byline":
+                continue
+            ordered_blocks.append(
+                {
+                    "id": f"block-{index}",
+                    "type": block_type,
+                    "text": block_text,
+                }
+            )
+            body_text_parts.append(block_text)
+            if (
+                block_type == "heading"
+                and not report_heading
+                and "market situation report" not in block_text.casefold()
+            ):
+                report_heading = block_text
+
+        body_text = "\n\n".join(body_text_parts).strip()
+        if not body_text:
+            raise ValueError("Market Situation report contains no substantive narrative text")
         snapshot = _base_snapshot(
             snapshot_type="market-structure",
             report_type=report_type,
@@ -1520,22 +1880,28 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
-        snapshot["article"]["headline"] = (
-            snapshot["article"].get("headline") or subject
-        )
-        snapshot["article"]["summary"] = _extract_market_situation_summary(text)
-        snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
-        snapshot["article"]["charts"] = charts
-        snapshot["article"].pop("bodyText", None)
+        snapshot["article"]["reportHeading"] = report_heading
+        snapshot["article"]["bodyText"] = body_text[:40_000]
+        snapshot["article"]["charts"] = archived_charts
+        snapshot["article"].pop("headline", None)
+        snapshot["article"].pop("summary", None)
+        snapshot["article"].pop("byline", None)
+        snapshot["article"].pop("disclaimer", None)
+        snapshot["article"].pop("publisher", None)
+        snapshot["article"].pop("imageUrls", None)
         snapshot["article"].pop("teaser", None)
         snapshot["signalCount"] = len(signals)
-        snapshot["chartCount"] = len(charts)
+        snapshot["chartCount"] = len(archived_charts)
+        snapshot["schemaVersion"] = MARKET_SITUATION_SCHEMA_VERSION
+        snapshot["contentComplete"] = True
         snapshot["data"] = {
             "signals": signals,
-            "signalMatrixImageUrl": signal_matrix["url"],
-            "charts": charts,
-            "sourceAttribution": "Tier 1 Alpha · presented by Hedgeye",
+            "signalMatrixChartId": archived_charts[0]["id"],
+            "blocks": ordered_blocks,
+            "charts": archived_charts,
         }
+        if warnings:
+            snapshot["warnings"] = warnings
         return snapshot
 
     if report_type == "early-look":
