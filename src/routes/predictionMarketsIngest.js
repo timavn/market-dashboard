@@ -100,13 +100,13 @@ function eventDeadlineMs(event = {}) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function isLiveTradingEvent(event) {
+function isLiveTradingEvent(event, now = new Date()) {
   if (!event || event.source_api === 'IBKR_PORTFOLIO' || event.heldPosition) return false;
   if (nonLiveFlagsForEvent(event).some((flag) => NON_LIVE_TRADING_FLAGS.has(flag))) return false;
   const status = String(event.status || 'open').toLowerCase();
   if (!['open', 'active'].includes(status)) return false;
   const expiresAt = eventDeadlineMs(event);
-  if (expiresAt != null && expiresAt <= Date.now()) return false;
+  if (expiresAt != null && expiresAt <= new Date(now).getTime()) return false;
   return true;
 }
 
@@ -274,7 +274,7 @@ function buildCpiReadiness({
 } = {}) {
   const currentLive = events.filter((event) => (
     eventMatchesRelease(event, release)
-    && isLiveTradingEvent(event)
+    && isLiveTradingEvent(event, now)
     && isFreshQuote(event, now, maxAgeSeconds)
     && hasNativeExecutableBook(event)
   ));

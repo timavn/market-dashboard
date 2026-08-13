@@ -22,7 +22,9 @@ const JULY_NOWCAST = {
 
 describe('server-owned current CPI release', () => {
   test('builds one canonical release key and venue request from the live nowcast', () => {
-    const release = buildCurrentCpiRelease(JULY_NOWCAST);
+    const release = buildCurrentCpiRelease(JULY_NOWCAST, {
+      now: new Date('2026-08-01T12:00:00Z'),
+    });
 
     expect(release).toMatchObject({
       releaseKey: 'KXCPIYOY#2026-07',
