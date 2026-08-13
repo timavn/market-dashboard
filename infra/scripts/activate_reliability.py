@@ -142,6 +142,7 @@ PRIOR_WORKERS = {
 }
 ALARM_NAMES = (
     "market-dashboard-runtime-failure-queue-v2",
+    "market-dashboard-runtime-failure-arrival-v2",
     "market-dashboard-gmail-heartbeat-missing-v2",
     "market-dashboard-gmail-unhealthy-v2",
     "market-dashboard-hermes-analyst-heartbeat-missing-v2",
@@ -161,6 +162,16 @@ ALARM_CONTRACTS = {
         "period": 300,
         "comparison": "GreaterThanOrEqualToThreshold",
         "missingData": "notBreaching",
+        "notify": False,
+    },
+    "market-dashboard-runtime-failure-arrival-v2": {
+        "namespace": "AWS/SQS",
+        "metric": "NumberOfMessagesSent",
+        "statistic": "Sum",
+        "period": 300,
+        "comparison": "GreaterThanOrEqualToThreshold",
+        "missingData": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-gmail-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -171,6 +182,7 @@ ALARM_CONTRACTS = {
         "serviceId": "gmail:timsmithaviation@gmail.com",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-gmail-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -180,6 +192,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "gmail:timsmithaviation@gmail.com",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-analyst-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -190,6 +203,7 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:quant-analyst",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-hermes-analyst-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -199,6 +213,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:quant-analyst",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-developer-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -209,6 +224,7 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:quant-developer",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-hermes-developer-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -218,6 +234,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:quant-developer",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-security-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -228,6 +245,7 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:security",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-hermes-security-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -237,6 +255,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:security",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-cloud-watchdog-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -247,6 +266,7 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:cloud-watchdog",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-hermes-cloud-watchdog-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -256,6 +276,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:cloud-watchdog",
         "missingData": "notBreaching",
+        "notify": False,
     },
 }
 
@@ -1221,28 +1242,30 @@ def verify_alarms(
                         "message": f"{name} does not monitor {service_id}.",
                     }
                 )
-        if alarm.get("ActionsEnabled") is not actions_enabled:
+        expected_actions_enabled = actions_enabled if contract.get("notify") else False
+        if alarm.get("ActionsEnabled") is not expected_actions_enabled:
             failures.append(
                 {
                     "code": "ALARM_ACTION_STATE_MISMATCH",
                     "message": (
                         f"{name} ActionsEnabled={alarm.get('ActionsEnabled')}; "
-                        f"expected {actions_enabled}."
+                        f"expected {expected_actions_enabled}."
                     ),
                 }
             )
-        if set(alarm.get("AlarmActions") or []) != {topic_arn}:
+        expected_alarm_actions = {topic_arn} if contract.get("notify") else set()
+        if set(alarm.get("AlarmActions") or []) != expected_alarm_actions:
             failures.append(
                 {
                     "code": "ALARM_ACTION_TARGET_MISMATCH",
-                    "message": f"{name} alarm action is not the exact operations topic.",
+                    "message": f"{name} alarm action does not match its publication policy.",
                 }
             )
-        if set(alarm.get("OKActions") or []) != {topic_arn}:
+        if set(alarm.get("OKActions") or []) != set():
             failures.append(
                 {
                     "code": "ALARM_OK_ACTION_TARGET_MISMATCH",
-                    "message": f"{name} recovery action is not the exact operations topic.",
+                    "message": f"{name} must not publish an OK recovery transition.",
                 }
             )
     return {
@@ -1254,21 +1277,37 @@ def verify_alarms(
     }
 
 
-def confirmed_operations_subscription(
+def internal_only_operations_subscription(
     subscriptions: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    confirmed = [
+    email_routes = [
         item
         for item in subscriptions
         if item.get("Protocol") in {"email", "email-json"}
-        and item.get("SubscriptionArn") not in {None, "", "PendingConfirmation"}
     ]
-    if not confirmed:
+    if email_routes:
         raise ActivationFailure(
-            "SNS_SUBSCRIPTION_UNCONFIRMED",
-            "No confirmed email subscription exists on the operations topic.",
+            "SNS_OPERATIONAL_EMAIL_ROUTE_PRESENT",
+            "The operations topic must not have email or email-json subscriptions.",
+            detail={
+                "emailSubscriptionCount": len(email_routes),
+                "pendingEmailSubscriptionCount": sum(
+                    1
+                    for item in email_routes
+                    if item.get("SubscriptionArn")
+                    in {None, "", "PendingConfirmation"}
+                ),
+            },
         )
-    return {"passed": True, "confirmedEmailSubscriptions": len(confirmed)}
+    protocols: dict[str, int] = {}
+    for item in subscriptions:
+        protocol = str(item.get("Protocol") or "unknown")
+        protocols[protocol] = protocols.get(protocol, 0) + 1
+    return {
+        "passed": True,
+        "emailSubscriptionCount": 0,
+        "protocolCounts": protocols,
+    }
 
 
 def require_check(result: Mapping[str, Any], fallback_code: str) -> None:
@@ -1896,7 +1935,7 @@ class ActivationController:
         )
 
     def subscription_check(self) -> dict[str, Any]:
-        return confirmed_operations_subscription(
+        return internal_only_operations_subscription(
             self.runtime.subscriptions(self.operations_topic_arn())
         )
 
@@ -2037,8 +2076,7 @@ class ActivationController:
             )
         capture("event-rule:cloud-watchdog", lambda: self.watchdog_rule_check(controls))
         capture("alarms", lambda: self.alarm_check(controls))
-        if controls["OperationalAlarmsState"] == "ENABLED":
-            capture("operationsSubscription", self.subscription_check)
+        capture("operationsSubscription", self.subscription_check)
         if controls["GmailScheduleState"] == "ENABLED":
             capture("heartbeat:gmail", self.gmail_heartbeat)
         for worker in self.contract["workers"]:
@@ -2209,11 +2247,7 @@ class ActivationController:
         require_check(watchdog_rule_check, "WATCHDOG_RULE_VERIFICATION_FAILED")
         alarm_check = self.alarm_check(expected_controls)
         require_check(alarm_check, "ALARM_VERIFICATION_FAILED")
-        subscription_check = (
-            self.subscription_check()
-            if expected_controls["OperationalAlarmsState"] == "ENABLED"
-            else {"passed": True, "notApplicable": True}
-        )
+        subscription_check = self.subscription_check()
         return {
             "passed": True,
             "controls": deployed_controls,

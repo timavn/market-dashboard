@@ -420,17 +420,10 @@ def inspect_heartbeats(
                 component=f"heartbeat:{service_id}",
             )
             continue
-        if str(heartbeat.get("status") or "").lower() not in HEALTHY_HEARTBEAT_STATUSES:
-            heartbeat_code = str(
-                heartbeat.get("errorCode") or "SCHEDULED_HEARTBEAT_UNHEALTHY"
-            )
-            add_finding(
-                findings,
-                heartbeat_code,
-                f"The latest {service_id} Scheduler heartbeat is "
-                f"{heartbeat.get('status') or 'unknown'}.",
-                component=f"heartbeat:{service_id}",
-            )
+        # The worker owns readiness/root-cause publications. Re-emitting its
+        # heartbeat error code from this watchdog created duplicate incidents.
+        # The watchdog remains responsible for missing, stale, and provenance
+        # failures above; the dashboard retains the worker status here.
     return results
 
 
@@ -993,15 +986,7 @@ def write_watchdog_alert(
                 transition=event_type,
                 observed_at=now,
             )
-            notification_failure = try_publish_lifecycle_notification(
-                error_code=error_code,
-                event_type=event_type,
-                message=message,
-                source_run_id=source_run_id,
-                observed_at=now,
-            )
-            if notification_failure:
-                notification_failures.append(notification_failure)
+            # Opening is dashboard-only. Publication begins after escalation.
             transitions.append({"eventType": event_type, "errorCode": error_code})
             next_active[error_code] = {
                 "component": component,
@@ -1090,15 +1075,20 @@ def write_watchdog_alert(
             opened_at=str(root_item.get("createdAt") or now),
             observation_count=int(root_details.get("observationCount") or 1),
         )
-        notification_failure = try_publish_lifecycle_notification(
-            error_code=error_code,
-            event_type="incident_recovered",
-            message=message,
-            source_run_id=source_run_id,
-            observed_at=now,
+        was_escalated = bool(
+            root_item.get("escalatedAt")
+            or root_details.get("transition") == "incident_escalated"
         )
-        if notification_failure:
-            notification_failures.append(notification_failure)
+        if was_escalated:
+            notification_failure = try_publish_lifecycle_notification(
+                error_code=error_code,
+                event_type="incident_recovered",
+                message=message,
+                source_run_id=source_run_id,
+                observed_at=now,
+            )
+            if notification_failure:
+                notification_failures.append(notification_failure)
         transitions.append(
             {"eventType": "incident_recovered", "errorCode": error_code}
         )

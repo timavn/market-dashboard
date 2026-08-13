@@ -273,9 +273,6 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: market-dashboard-operations-v2
-      Subscription:
-        - Protocol: email
-          Endpoint: !Ref AlertEmail
 
   GmailIngestorFunction:
     Type: AWS::Serverless::Function
@@ -671,8 +668,8 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-runtime-failure-queue-v2
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
-      AlarmDescription: Unexpected Lambda failures reached the no-retry operations queue.
+      ActionsEnabled: false
+      AlarmDescription: Audit-only backlog view; arrival notifications are emitted by the companion arrival alarm.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -684,8 +681,25 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+
+  RuntimeFailureArrivalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-runtime-failure-arrival-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      AlarmDescription: A new Lambda failure entered the no-retry operations queue in the last five minutes.
+      Namespace: AWS/SQS
+      MetricName: NumberOfMessagesSent
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RuntimeFailureQueue.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   GmailHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -704,13 +718,12 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   GmailUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-gmail-unhealthy-v2
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -722,8 +735,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   AnalystHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -742,14 +753,13 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   AnalystUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-analyst-unhealthy-v2
       AlarmDescription: Analyst ran on schedule but rejected its input or reported an unhealthy result.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -761,8 +771,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   DeveloperHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -781,14 +789,13 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   DeveloperUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-developer-unhealthy-v2
       AlarmDescription: Developer ran on schedule but rejected its input or reported an unhealthy result.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -800,8 +807,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   SecurityHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -820,14 +825,13 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   SecurityUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-security-unhealthy-v2
       AlarmDescription: Security ran on schedule but rejected its input or reported an unhealthy result.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -839,8 +843,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   CloudWatchdogHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -860,14 +862,13 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   CloudWatchdogUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-cloud-watchdog-unhealthy-v2
       AlarmDescription: The independent cloud watchdog detected a cloud reliability root cause.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -879,8 +880,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
 Outputs:
   ServiceHeartbeatTableName:

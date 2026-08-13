@@ -696,10 +696,14 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                 properties = resources[logical_id]["Properties"]
                 self.assertEqual(
                     properties["ActionsEnabled"],
-                    {
-                        "tag": "If",
-                        "value": ["OperationalAlarmsEnabled", True, False],
-                    },
+                    (
+                        {
+                            "tag": "If",
+                            "value": ["OperationalAlarmsEnabled", True, False],
+                        }
+                        if logical_id == "CloudWatchdogHeartbeatMissingAlarm"
+                        else False
+                    ),
                 )
                 self.assertEqual(
                     properties["Namespace"], "MarketDashboard/Readiness"
@@ -711,13 +715,14 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     watchdog.WATCHDOG_SERVICE_ID,
                 )
                 self.assertEqual(
-                    properties["AlarmActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
+                    properties.get("AlarmActions"),
+                    (
+                        [{"tag": "Ref", "value": "OperationsTopic"}]
+                        if logical_id == "CloudWatchdogHeartbeatMissingAlarm"
+                        else None
+                    ),
                 )
-                self.assertEqual(
-                    properties["OKActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
+                self.assertNotIn("OKActions", properties)
 
         self.assertEqual(
             resources["CloudWatchdogHeartbeatMissingAlarm"]["Properties"][
@@ -764,6 +769,10 @@ class HermesInfrastructureContractTests(unittest.TestCase):
         self.assertEqual(
             self.template["Parameters"]["AlertEmail"]["Default"],
             gmail_ingestor.GMAIL_ACCOUNT,
+        )
+        self.assertNotIn(
+            "Subscription",
+            resources["OperationsTopic"]["Properties"],
         )
         self.assertEqual(
             schedule["Target"]["Arn"],
@@ -1005,16 +1014,10 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                 self.assertEqual(dimension_value(unhealthy, "ServiceId"), contract["serviceId"])
                 self.assertEqual(
                     unhealthy["ActionsEnabled"],
-                    {"tag": "If", "value": ["OperationalAlarmsEnabled", True, False]},
+                    False,
                 )
-                self.assertEqual(
-                    unhealthy["AlarmActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
-                self.assertEqual(
-                    unhealthy["OKActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
+                self.assertNotIn("AlarmActions", unhealthy)
+                self.assertNotIn("OKActions", unhealthy)
 
                 missing = resources[MISSING_ALARM_RESOURCES[job_type]]["Properties"]
                 self.assertEqual(missing["MetricName"], "Heartbeat")
@@ -1040,10 +1043,7 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     missing["AlarmActions"],
                     [{"tag": "Ref", "value": "OperationsTopic"}],
                 )
-                self.assertEqual(
-                    missing["OKActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
+                self.assertNotIn("OKActions", missing)
 
 
 if __name__ == "__main__":

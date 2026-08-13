@@ -1760,7 +1760,7 @@ class ReliabilityActivationTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "GMAIL_AUTH_REQUIRED")
 
-    def test_alarm_verification_requires_failure_and_recovery_actions(self):
+    def test_alarm_verification_requires_only_intentional_failure_actions(self):
         topic = (
             "arn:aws:sns:us-west-1:915328198276:"
             "market-dashboard-operations-v2"
@@ -1780,9 +1780,9 @@ class ReliabilityActivationTests(unittest.TestCase):
                 "TreatMissingData": contract.get(
                     "missingData", contract.get("missingDataWhenEnabled")
                 ),
-                "ActionsEnabled": True,
-                "AlarmActions": [topic],
-                "OKActions": [topic],
+                "ActionsEnabled": True if contract.get("notify") else False,
+                "AlarmActions": [topic] if contract.get("notify") else [],
+                "OKActions": [],
             }
             if contract.get("serviceId"):
                 alarm["Dimensions"] = [
@@ -1794,14 +1794,47 @@ class ReliabilityActivationTests(unittest.TestCase):
                 alarms, actions_enabled=True, topic_arn=topic
             )["passed"]
         )
-        alarms[0]["OKActions"] = []
+        alarms[0]["AlarmActions"] = [topic]
         result = activation.verify_alarms(
             alarms, actions_enabled=True, topic_arn=topic
         )
         self.assertFalse(result["passed"])
         self.assertEqual(
-            result["failures"][0]["code"], "ALARM_OK_ACTION_TARGET_MISMATCH"
+            result["failures"][0]["code"], "ALARM_ACTION_TARGET_MISMATCH"
         )
+
+    def test_operations_topic_verification_rejects_all_email_protocols(self):
+        for protocol, subscription_arn in (
+            ("email", "arn:aws:sns:us-west-1:915328198276:topic:confirmed"),
+            ("email-json", "PendingConfirmation"),
+        ):
+            with self.subTest(protocol=protocol):
+                with self.assertRaises(activation.ActivationFailure) as caught:
+                    activation.internal_only_operations_subscription(
+                        [
+                            {
+                                "Protocol": protocol,
+                                "SubscriptionArn": subscription_arn,
+                                "Endpoint": "operator@example.com",
+                            }
+                        ]
+                    )
+                self.assertEqual(
+                    caught.exception.code,
+                    "SNS_OPERATIONAL_EMAIL_ROUTE_PRESENT",
+                )
+
+    def test_operations_topic_verification_allows_internal_consumers(self):
+        result = activation.internal_only_operations_subscription(
+            [
+                {"Protocol": "lambda", "SubscriptionArn": "lambda-subscription"},
+                {"Protocol": "sqs", "SubscriptionArn": "queue-subscription"},
+            ]
+        )
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["emailSubscriptionCount"], 0)
+        self.assertEqual(result["protocolCounts"], {"lambda": 1, "sqs": 1})
 
     def test_script_has_no_secret_read_or_access_key_creation_call(self):
         source = (

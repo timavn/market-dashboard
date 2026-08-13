@@ -701,16 +701,8 @@ def reconcile_alert_lifecycle(
                 transition=event_type,
                 observed_at=observed_at,
             )
-            notification_failure = try_publish_lifecycle_notification(
-                service=job_type,
-                error_code=error_code,
-                event_type=event_type,
-                message=detail,
-                source_run_id=source_run_id,
-                observed_at=observed_at,
-            )
-            if notification_failure:
-                notification_failures.append(notification_failure)
+            # Opening is dashboard-only. Publication begins only after the root
+            # survives the bounded escalation observation count.
             transitions.append({"eventType": event_type, "errorCode": error_code})
             next_active[error_code] = {
                 "openedAt": observed_at,
@@ -797,16 +789,21 @@ def reconcile_alert_lifecycle(
             opened_at=str(root_item.get("createdAt") or observed_at),
             observation_count=int(root_details.get("observationCount") or 1),
         )
-        notification_failure = try_publish_lifecycle_notification(
-            service=job_type,
-            error_code=error_code,
-            event_type="incident_recovered",
-            message=message,
-            source_run_id=source_run_id,
-            observed_at=observed_at,
+        was_escalated = bool(
+            root_item.get("escalatedAt")
+            or root_details.get("transition") == "incident_escalated"
         )
-        if notification_failure:
-            notification_failures.append(notification_failure)
+        if was_escalated:
+            notification_failure = try_publish_lifecycle_notification(
+                service=job_type,
+                error_code=error_code,
+                event_type="incident_recovered",
+                message=message,
+                source_run_id=source_run_id,
+                observed_at=observed_at,
+            )
+            if notification_failure:
+                notification_failures.append(notification_failure)
         transitions.append(
             {"eventType": "incident_recovered", "errorCode": error_code}
         )

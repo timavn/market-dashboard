@@ -585,7 +585,6 @@ class HermesWorkerTests(unittest.TestCase):
         self.assertEqual(
             lifecycle_events,
             [
-                "incident_opened",
                 "incident_escalated",
                 "incident_recovered",
             ],
@@ -615,7 +614,7 @@ class HermesWorkerTests(unittest.TestCase):
         ]
         self.assertEqual(unresolved, [])
 
-    def test_circuit_open_notification_is_deduplicated_by_service_and_root(self):
+    def test_circuit_open_is_dashboard_only_until_escalated(self):
         now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
         database = FakeDynamo(None)
         notifications = FakeSns()
@@ -645,13 +644,7 @@ class HermesWorkerTests(unittest.TestCase):
                 source_run_id="quant-developer#run-2",
             )
 
-        self.assertEqual(len(notifications.calls), 1)
-        payload = json.loads(notifications.calls[0]["Message"])
-        self.assertEqual(payload["eventType"], "circuit_opened")
-        self.assertEqual(
-            payload["dedupeKey"],
-            "quant-developer#HERMES_CONTROLLER_CIRCUIT_OPEN",
-        )
+        self.assertEqual(notifications.calls, [])
 
     def test_interrupted_open_uses_exact_root_row_without_duplicate_notification(self):
         now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
@@ -710,7 +703,7 @@ class HermesWorkerTests(unittest.TestCase):
 
         self.assertEqual(
             [json.loads(call["Message"])["eventType"] for call in notifications.calls],
-            ["incident_recovered"],
+            [],
         )
         root_item = database.tables[worker.ALERTS_TABLE].keyed_items[
             worker.alert_id("quant-developer", error_code)
@@ -760,18 +753,15 @@ class HermesWorkerTests(unittest.TestCase):
             response = worker.lambda_handler(event, None)
 
         body = json.loads(response["body"])
-        self.assertEqual(body["status"], "DEGRADED")
-        self.assertIn("HERMES_ALERT_SNS_PUBLISH_FAILED", body["errorCodes"])
+        self.assertEqual(body["status"], "SUCCESS")
+        self.assertNotIn("HERMES_ALERT_SNS_PUBLISH_FAILED", body["errorCodes"])
         self.assertEqual(
             database.tables[worker.RUNS_TABLE].writes[-1]["status"],
-            "warning",
+            "succeeded",
         )
         heartbeat = database.tables[worker.HEARTBEAT_TABLE].writes[-1]
-        self.assertEqual(heartbeat["status"], "warning")
-        self.assertEqual(
-            heartbeat["errorCode"],
-            "HERMES_ALERT_SNS_PUBLISH_FAILED",
-        )
+        self.assertEqual(heartbeat["status"], "success")
+        self.assertIsNone(heartbeat.get("errorCode"))
         root_item = database.tables[worker.ALERTS_TABLE].keyed_items[
             worker.alert_id(
                 "security",

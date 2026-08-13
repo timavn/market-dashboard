@@ -632,7 +632,6 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(
             [payload["eventType"] for payload in payloads],
             [
-                "incident_opened",
                 "incident_escalated",
                 "incident_recovered",
             ],
@@ -714,7 +713,7 @@ class WatchdogTests(unittest.TestCase):
 
         self.assertEqual(
             [json.loads(call["Message"])["eventType"] for call in notifications.calls],
-            ["incident_recovered"],
+            [],
         )
         root_item = watchdog.from_dynamodb_item(
             database.alert_items[watchdog.watchdog_alert_id(error_code)]
@@ -735,8 +734,8 @@ class WatchdogTests(unittest.TestCase):
             notifications=FakeSns(fail=True),
         )
 
-        self.assertEqual(result["status"], "warning")
-        self.assertIn(
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn(
             "WATCHDOG_SNS_NOTIFICATION_FAILED",
             [finding["errorCode"] for finding in result["findings"]],
         )
@@ -747,11 +746,8 @@ class WatchdogTests(unittest.TestCase):
                 if write["TableName"] == watchdog.HEARTBEAT_TABLE
             )
         )
-        self.assertEqual(heartbeat["status"], "warning")
-        self.assertEqual(
-            heartbeat["errorCode"],
-            "WATCHDOG_SNS_NOTIFICATION_FAILED",
-        )
+        self.assertEqual(heartbeat["status"], "success")
+        self.assertIsNone(heartbeat.get("errorCode"))
         root_item = watchdog.from_dynamodb_item(
             database.alert_items[
                 watchdog.watchdog_alert_id("RUNTIME_FAILURE_QUEUE_BACKLOG")
