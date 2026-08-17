@@ -574,6 +574,14 @@ def _textract_tables(textract_response: Dict[str, Any]) -> List[List[List[str]]]
 
 TRACKER_TRENDS = frozenset({"BULLISH", "BEARISH", "NEUTRAL"})
 TRACKER_TICKER_PATTERN = re.compile(r"[A-Z][A-Z0-9]{0,9}(?:[./-][A-Z0-9]{1,6})?")
+TRACKER_OUTBUCKET_PATTERN = re.compile(
+    r"#?OUT\s*BUCKET(?:\s*\(\s*(\d{1,2})\s*/\s*(\d{1,2})\s*\))?",
+    re.IGNORECASE,
+)
+TRACKER_UNAVAILABLE_PATTERN = re.compile(
+    r"(?:N\.?/?A\.?|NOT\s+AVAILABLE|UNAVAILABLE|[-\u2013\u2014]+)",
+    re.IGNORECASE,
+)
 
 
 class TrackerTableHeaderError(ValueError):
@@ -663,10 +671,42 @@ def _parse_tracker_number(value: Any, *, field: str, ticker: str) -> Decimal:
     return parsed
 
 
+def _parse_tracker_outbucket_marker(
+    value: Any,
+    *,
+    field: str,
+    ticker: str,
+) -> Tuple[bool, Optional[str]]:
+    normalized = str(value or "").strip()
+    match = TRACKER_OUTBUCKET_PATTERN.fullmatch(normalized)
+    if not match:
+        return False, None
+    if not match.group(1):
+        return True, None
+
+    month = int(match.group(1))
+    day = int(match.group(2))
+    try:
+        # A leap year accepts every valid month/day pair without inferring the
+        # publication year from the partial date printed in the chart.
+        datetime(2000, month, day)
+    except ValueError as error:
+        raise ValueError(
+            f"Tracker row {ticker} has invalid {field} outbucket date"
+        ) from error
+    return True, f"{month:02d}/{day:02d}"
+
+
+def _tracker_value_is_unavailable(value: Any) -> bool:
+    normalized = str(value or "").strip()
+    return not normalized or bool(TRACKER_UNAVAILABLE_PATTERN.fullmatch(normalized))
+
+
 def _parse_tracker_table(
     rows: List[List[str]],
     *,
     required_fields: Tuple[str, ...],
+    allow_outbucket_rows: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     header_index, columns = _tracker_column_map(
         rows,
@@ -685,23 +725,71 @@ def _parse_tracker_table(
         if ticker in parsed:
             raise ValueError(f"Tracker table contains duplicate ticker {ticker}")
 
+        raw_values = {
+            field: (
+                row[columns[field]] if columns[field] < len(row) else ""
+            )
+            for field in required_fields
+            if field != "ticker"
+        }
+        trend = str(raw_values.get("trend") or "").strip().upper()
+        if "trend" in required_fields and trend not in TRACKER_TRENDS:
+            raise ValueError(f"Tracker row {ticker} has invalid trend")
+
+        buy_is_outbucket, buy_status_date = _parse_tracker_outbucket_marker(
+            raw_values.get("buyTrade"),
+            field="buyTrade",
+            ticker=ticker,
+        )
+        sell_is_outbucket, sell_status_date = _parse_tracker_outbucket_marker(
+            raw_values.get("sellTrade"),
+            field="sellTrade",
+            ticker=ticker,
+        )
+        is_outbucket_row = buy_is_outbucket or sell_is_outbucket
+        if is_outbucket_row:
+            if not allow_outbucket_rows:
+                raise ValueError(f"Tracker row {ticker} has an unsupported outbucket range")
+            if not (buy_is_outbucket and sell_is_outbucket):
+                raise ValueError(f"Tracker row {ticker} has a partial outbucket range")
+            if buy_status_date != sell_status_date:
+                raise ValueError(f"Tracker row {ticker} has mismatched outbucket dates")
+            for field in ("upside", "downside"):
+                if field in required_fields and not _tracker_value_is_unavailable(
+                    raw_values.get(field)
+                ):
+                    raise ValueError(
+                        f"Tracker row {ticker} has {field} for an outbucket range"
+                    )
+
+            record = {
+                field: None
+                for field in required_fields
+                if field not in {"ticker", "trend"}
+            }
+            if "trend" in required_fields:
+                record["trend"] = trend
+            record["rangeStatus"] = "outbucket"
+            if buy_status_date:
+                record["rangeStatusDate"] = buy_status_date
+            parsed[ticker] = record
+            continue
+
         record: Dict[str, Any] = {}
         for field in required_fields:
             if field == "ticker":
                 continue
-            column_index = columns[field]
-            raw_value = row[column_index] if column_index < len(row) else ""
             if field == "trend":
-                trend = str(raw_value or "").strip().upper()
-                if trend not in TRACKER_TRENDS:
-                    raise ValueError(f"Tracker row {ticker} has invalid trend")
                 record[field] = trend
             else:
                 record[field] = _parse_tracker_number(
-                    raw_value,
+                    raw_values.get(field),
                     field=field,
                     ticker=ticker,
                 )
+
+        if allow_outbucket_rows:
+            record["rangeStatus"] = "available"
 
         for price_field in ("price", "buyTrade", "sellTrade"):
             if price_field in record and record[price_field] <= 0:
@@ -722,6 +810,7 @@ def _extract_tracker_chart_table(
     textract_client: Any,
     image_fetcher: Optional[Callable[[str], bytes]],
     required_fields: Tuple[str, ...],
+    allow_outbucket_rows: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     payload = (image_fetcher or _fetch_market_situation_image)(chart["url"])
     response = textract_client.analyze_document(
@@ -734,6 +823,7 @@ def _extract_tracker_chart_table(
             parsed_tables.append(_parse_tracker_table(
                 table_rows,
                 required_fields=required_fields,
+                allow_outbucket_rows=allow_outbucket_rows,
             ))
         except TrackerTableHeaderError:
             continue
@@ -2095,9 +2185,18 @@ def parse_html_snapshot(
                     "downside",
                     "trend",
                 ),
+                allow_outbucket_rows=True,
             )
         snapshot["chartCount"] = len(charts)
         snapshot["stockCount"] = len(tracker_rows)
+        snapshot["rangeAvailableCount"] = sum(
+            row.get("rangeStatus") == "available"
+            for row in tracker_rows.values()
+        )
+        snapshot["outbucketCount"] = sum(
+            row.get("rangeStatus") == "outbucket"
+            for row in tracker_rows.values()
+        )
         snapshot["data"] = tracker_rows or {
             item["name"]: {"chartUrl": item["url"]} for item in charts
         }

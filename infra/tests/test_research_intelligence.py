@@ -316,6 +316,37 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertEqual(manifest["parsedCount"], 1)
         self.assertEqual(manifest["indexedCount"], 0)
 
+    def test_momo_outbucket_row_indexes_its_explicit_trend_without_a_range(self):
+        item = snapshot(
+            "momo-tracker",
+            "momo-outbucket",
+            {
+                "ORCL": {
+                    "buyTrade": None,
+                    "sellTrade": None,
+                    "upside": None,
+                    "downside": None,
+                    "trend": "BULLISH",
+                    "rangeStatus": "outbucket",
+                    "rangeStatusDate": "08/13",
+                }
+            },
+        )
+
+        events = intelligence.build_entity_events(
+            item,
+            content_sha256="d" * 64,
+        )
+        oracle_events = [
+            event for event in events if event["entityKey"] == "ticker#ORCL"
+        ]
+
+        self.assertTrue(oracle_events)
+        self.assertTrue(all(event["signalValue"] == "BULLISH" for event in oracle_events))
+        self.assertTrue(all(event["direction"] == "positive" for event in oracle_events))
+        self.assertTrue(all(event["decisionEligible"] for event in oracle_events))
+        self.assertIn('"buyTrade": null', oracle_events[0]["excerpt"])
+
     def test_nested_bitcoin_tracker_rows_are_signals_not_container_tickers(self):
         item = snapshot(
             "bitcoin-trend-tracker",

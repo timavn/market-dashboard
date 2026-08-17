@@ -105,7 +105,7 @@ MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
 MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
-MATERIALIZED_DATA_VERSION = "gmail-materialized-v7-market-structure-archive"
+MATERIALIZED_DATA_VERSION = "gmail-materialized-v10-quarantine-recovery"
 MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
 HTML_TEXTRACT_REPORT_TYPES = frozenset({
     "signal-strength",

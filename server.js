@@ -43,6 +43,7 @@ const {
   normalizeMarketStructureRecord,
   sortRecordsDescending
 } = require('./src/utils/marketStructureVolume.cjs');
+const { buildMomoTrackerCsvRows } = require('./src/utils/momoTrackerCsv.cjs');
 const {
   buildHedgeyeVolumeSnapshotResponse
 } = require('./src/utils/hedgeyeVolumeSnapshot.cjs');
@@ -3838,7 +3839,17 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
     // LIST OF COLUMNS FOR EACH TYPE
     const COLUMNS = {
       'risk-ranges': ['ticker', 'lrr', 'close', 'hrr', 'trend'],
-      'momo-tracker': ['ticker', 'buyTrade', 'sellTrade', 'upside', 'downside', 'trend', 'index']
+      'momo-tracker': [
+        'ticker',
+        'rangeStatus',
+        'rangeStatusDate',
+        'buyTrade',
+        'sellTrade',
+        'upside',
+        'downside',
+        'trend',
+        'index'
+      ]
     };
 
     // If we have data but no pre-generated CSV in S3 (or if we want to enforce sorting),
@@ -3850,19 +3861,7 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
 
       let items = [];
       if (type === 'momo-tracker') {
-        items = Object.entries(data).map(([ticker, info]) => ({
-          ticker,
-          ...info,
-          // Ensure numbers are formatted nicely
-          buyTrade: parseFloat(info.buyTrade || 0).toFixed(2),
-          sellTrade: parseFloat(info.sellTrade || 0).toFixed(2),
-          upside: parseFloat(info.upside || 0).toFixed(2) + '%',
-          downside: parseFloat(info.downside || 0).toFixed(2) + '%',
-          index: info.index ?? 999
-        }));
-
-        // Sort by index
-        items.sort((a, b) => a.index - b.index);
+        items = buildMomoTrackerCsvRows(data);
       } else if (type === 'risk-ranges') {
         // Fallback logic for risk-ranges if needed
         items = Object.entries(data).map(([ticker, info]) => ({

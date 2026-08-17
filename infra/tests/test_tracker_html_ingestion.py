@@ -67,6 +67,25 @@ class FakeTextract:
         return response
 
 
+class CaptureTable:
+    def __init__(self):
+        self.items = []
+
+    def put_item(self, *, Item, **_kwargs):
+        self.items.append(Item)
+        return {}
+
+
+class CaptureDynamoDb:
+    def __init__(self):
+        self.snapshots = CaptureTable()
+
+    def Table(self, name):
+        if name != "HedgeyeDailySnapshot":
+            raise AssertionError(name)
+        return self.snapshots
+
+
 class TrackerHtmlIngestionTests(unittest.TestCase):
     def test_momo_uses_only_sixth_chart_and_sanitizes_urls(self):
         source_root = "https://d1yhils6iwh5l5.cloudfront.net/charts/momo"
@@ -77,6 +96,7 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
         textract = FakeTextract(textract_tables_response([
             ["", "Buy Trade", "Sell Trade", "Upside", "Downside", "Trend"],
             ["NVDA", "203", "225", "2.74%", "-7.3%", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/13)", "", "", "BULLISH"],
         ]))
         fetched = []
 
@@ -97,10 +117,31 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
                 "upside": Decimal("2.74"),
                 "downside": Decimal("-7.3"),
                 "trend": "BULLISH",
+                "rangeStatus": "available",
+            },
+            "ORCL": {
+                "buyTrade": None,
+                "sellTrade": None,
+                "upside": None,
+                "downside": None,
+                "trend": "BULLISH",
+                "rangeStatus": "outbucket",
+                "rangeStatusDate": "08/13",
             },
         })
+        self.assertEqual(snapshot["stockCount"], 2)
+        self.assertEqual(snapshot["rangeAvailableCount"], 1)
+        self.assertEqual(snapshot["outbucketCount"], 1)
         self.assertEqual(fetched, [f"{source_root}/6.png"])
         self.assertNotIn("private", json.dumps(snapshot, default=str))
+
+        database = CaptureDynamoDb()
+        email_parser.save_snapshot_to_dynamodb(snapshot, database)
+        stored = database.snapshots.items[-1]
+        self.assertIsNone(stored["data"]["ORCL"]["buyTrade"])
+        self.assertIsNone(stored["data"]["ORCL"]["sellTrade"])
+        self.assertEqual(stored["data"]["ORCL"]["trend"], "BULLISH")
+        self.assertEqual(stored["data"]["ORCL"]["rangeStatus"], "outbucket")
 
     def test_bitcoin_ignores_volume_table_and_extracts_crypto_and_equities(self):
         source_root = "https://d1yhils6iwh5l5.cloudfront.net/charts/bitcoin"
@@ -169,6 +210,37 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
         self.assertIsNone(snapshot)
         self.assertEqual(textract.calls, [])
 
+    def test_momo_outbucket_contract_rejects_partial_or_contradictory_rows(self):
+        required = (
+            "ticker", "buyTrade", "sellTrade", "upside", "downside", "trend",
+        )
+        invalid_rows = (
+            ["ORCL", "Outbucket (08/13)", "130", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/14)", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/13)", "1.2%", "", "BULLISH"],
+            ["ORCL", "Outbuckat (08/13)", "Outbuckat (08/13)", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/13)", "", "", "UNKNOWN"],
+        )
+        header = ["Ticker", "Buy Trade", "Sell Trade", "Upside", "Downside", "Trend"]
+        for row in invalid_rows:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                email_parser._parse_tracker_table(
+                    [header, row],
+                    required_fields=required,
+                    allow_outbucket_rows=True,
+                )
+
+    def test_bitcoin_tracker_does_not_accept_outbucket_rows(self):
+        required = ("ticker", "price", "buyTrade", "sellTrade", "trend")
+        rows = [
+            ["Crypto", "Price", "Buy Trade", "Sell Trade", "Trend"],
+            ["BTC", "64517", "Outbucket (08/13)", "Outbucket (08/13)", "BULLISH"],
+        ]
+
+        with self.assertRaises(ValueError):
+            email_parser._parse_tracker_table(rows, required_fields=required)
+
     def test_tracker_products_receive_textract_on_fresh_and_backfill_paths(self):
         self.assertEqual(
             ingestor.HTML_TEXTRACT_REPORT_TYPES,
@@ -181,7 +253,7 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
         )
         self.assertEqual(
             ingestor.MATERIALIZED_DATA_VERSION,
-            "gmail-materialized-v8-market-structure-markets-only",
+            "gmail-materialized-v10-quarantine-recovery",
         )
 
 

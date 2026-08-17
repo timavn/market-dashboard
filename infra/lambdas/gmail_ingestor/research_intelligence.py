@@ -233,6 +233,22 @@ def _iter_content_blocks(
 
 def _direction_from_path(path: str, text: str = "") -> Optional[str]:
     haystack = f"{path} {text[:80]}".lower()
+    # Structured tracker trends are authoritative. Neighboring JSON keys such
+    # as sellTrade or downside must not turn an explicit bullish/neutral row
+    # into a negative event.
+    explicit = re.search(
+        r'"?(?:trade|tradeBias|signal|trend)"?\s*[:=]\s*"?\s*'
+        r"(BULLISH|BEARISH|NEUTRAL|LONG|SHORT|BUY|SELL)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if explicit:
+        value = explicit.group(1).upper()
+        if value == "NEUTRAL":
+            return "neutral"
+        if value in {"BULLISH", "LONG", "BUY"}:
+            return "positive"
+        return "negative"
     if any(token in haystack for token in ("removed", "remove", "short", "bear", "sell")):
         return "negative"
     if any(token in haystack for token in ("added", "add", "long", "bull", "buy")):
