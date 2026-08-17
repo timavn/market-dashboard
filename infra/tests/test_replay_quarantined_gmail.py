@@ -336,8 +336,8 @@ class ReplayQuarantinedGmailTests(unittest.TestCase):
         )
         deleted_keys = {
             (
-                operation["Delete"]["Key"]["entityKey"]["S"],
-                operation["Delete"]["Key"]["eventKey"]["S"],
+                operation["Delete"]["Key"]["entityKey"],
+                operation["Delete"]["Key"]["eventKey"],
             )
             for call in client.calls
             for operation in call["TransactItems"]

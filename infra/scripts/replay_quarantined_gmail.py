@@ -29,7 +29,6 @@ from typing import Any, Mapping, Sequence
 
 import boto3
 from boto3.dynamodb.conditions import Key
-from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 INGESTOR_MODULE_DIR = Path(__file__).resolve().parents[1] / "lambdas" / "gmail_ingestor"
@@ -762,7 +761,6 @@ def replace_artifact_entity_projection(
     if not verified_rows:
         return 0
 
-    serializer = TypeSerializer()
     for offset in range(0, len(verified_rows), TRANSACT_WRITE_LIMIT):
         chunk = verified_rows[offset : offset + TRANSACT_WRITE_LIMIT]
         transaction = [
@@ -770,8 +768,8 @@ def replace_artifact_entity_projection(
                 "Delete": {
                     "TableName": ENTITY_EVENTS_TABLE,
                     "Key": {
-                        "entityKey": serializer.serialize(row["entityKey"]),
-                        "eventKey": serializer.serialize(row["eventKey"]),
+                        "entityKey": row["entityKey"],
+                        "eventKey": row["eventKey"],
                     },
                     "ConditionExpression": (
                         "#sourceMessageId = :sourceMessageId AND "
@@ -782,8 +780,8 @@ def replace_artifact_entity_projection(
                         "#contentSha256": "contentSha256",
                     },
                     "ExpressionAttributeValues": {
-                        ":sourceMessageId": serializer.serialize(source_message_id),
-                        ":contentSha256": serializer.serialize(content_sha256),
+                        ":sourceMessageId": source_message_id,
+                        ":contentSha256": content_sha256,
                     },
                 }
             }

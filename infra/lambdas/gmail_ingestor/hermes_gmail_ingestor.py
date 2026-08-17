@@ -2577,7 +2577,7 @@ def backfill_html_snapshot(
                 event_count=entity_event_count,
             )
             source_product_id = str(
-                item.get("snapshotType") or item.get("reportType") or ""
+                item.get("reportType") or item.get("snapshotType") or ""
             )
             if (
                 source_product_id in RESEARCH_EVENT_SNAPSHOT_TYPES

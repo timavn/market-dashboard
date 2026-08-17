@@ -4456,6 +4456,71 @@ class HermesGmailIngestorTests(unittest.TestCase):
         failed = table.items[(message_id, "message-body-html-0")]
         self.assertEqual(failed["errorCode"], "GMAIL_IMMUTABLE_ARTIFACT_DRIFT")
 
+    def test_retry_reclassifies_from_original_report_after_target_snapshot_was_recorded(self):
+        message_id = "abcdef0123456789"
+        archived_body = b"<html><body>Crypto Quant tracker</body></html>"
+        item = {
+            "messageId": message_id,
+            "attachmentId": "message-body-html-0",
+            "status": "ERROR",
+            "filename": "message-body.html",
+            "mimeType": "text/html",
+            "reportType": "crypto-quant",
+            "snapshotType": "bitcoin-trend-tracker",
+            "subject": "Crypto Quant",
+            "s3Bucket": "test-bucket",
+            "s3Key": "immutable/crypto.html",
+            "contentSha256": hashlib.sha256(archived_body).hexdigest(),
+            "receivedAt": "2026-08-13T10:00:00+00:00",
+            "materializationAttemptVersion": ingestor.MATERIALIZED_DATA_VERSION,
+            "materializationAttemptCount": 1,
+            "materializationStatus": "ERROR",
+        }
+        table = FakeLedgerTable([item])
+        body = MagicMock()
+        body.read.return_value = archived_body
+        s3_client = MagicMock()
+        s3_client.get_object.return_value = {"Body": body}
+        snapshot = {
+            "date": "2026-08-13",
+            "reportType": "crypto-quant",
+            "snapshotType": "bitcoin-trend-tracker",
+            "source": "gmail",
+        }
+
+        with patch.object(ingestor, "s3", s3_client), patch.object(
+            ingestor, "dynamodb", MagicMock()
+        ), patch.object(
+            ingestor, "parse_html_snapshot", return_value=snapshot
+        ), patch.object(
+            ingestor, "persist_research_event_ledger", return_value=0
+        ), patch.object(
+            ingestor, "persist_snapshot_intelligence", return_value=1
+        ), patch.object(
+            ingestor, "materialize_email_snapshot", return_value=({}, False)
+        ), patch.object(
+            ingestor, "finalize_snapshot_intelligence"
+        ), patch.object(
+            ingestor, "reclassify_manifest_artifact"
+        ) as reclassify:
+            backfilled = ingestor.backfill_html_snapshot(
+                table=table,
+                message_id=message_id,
+                attachment_id="message-body-html-0",
+                report_type="crypto-quant",
+                mime_type="text/html",
+                received_at=datetime(2026, 8, 13, 10, tzinfo=timezone.utc),
+                ledger_item=item,
+                replace_entity_projection=True,
+            )
+
+        self.assertTrue(backfilled)
+        reclassify.assert_called_once()
+        self.assertEqual(
+            reclassify.call_args.kwargs["source_product_id"],
+            "crypto-quant",
+        )
+
     def test_textract_content_claim_is_shared_by_content_hash(self):
         table = FakeLedgerTable()
         digest = "a" * 64
