@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import stat
 import subprocess
@@ -28,6 +29,7 @@ from typing import Any, Mapping, Sequence
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 INGESTOR_MODULE_DIR = Path(__file__).resolve().parents[1] / "lambdas" / "gmail_ingestor"
@@ -76,6 +78,8 @@ MAX_SELECTED = 8
 EXPECTED_ARTIFACT_COUNT = 8
 MAX_INVOCATIONS_PER_ARTIFACT = 5
 MAX_HEARTBEAT_AGE_SECONDS = 45 * 60
+MAX_REPLACED_ENTITY_EVENTS = 500
+TRANSACT_WRITE_LIMIT = 100
 RECEIPT_SCHEMA_VERSION = 3
 RECEIPT_KIND = "market-dashboard-gmail-quarantine-replay"
 EVENT_VERIFICATION_HASH_VERSION = "research-event-content-v1"
@@ -698,6 +702,118 @@ def _query_all(table: Any, **kwargs: Any) -> list[Mapping[str, Any]]:
             return items
 
 
+def replace_artifact_entity_projection(
+    resources: Any,
+    selected: Mapping[str, Any],
+) -> int:
+    """Delete only the prior entity rows bound to one receipted artifact."""
+    market_date = str(selected.get("snapshotDate") or "")
+    source_message_id = str(selected.get("messageId") or "")
+    content_sha256 = str(selected.get("contentSha256") or "")
+    if (
+        not re.fullmatch(r"\d{4}-\d{2}-\d{2}", market_date)
+        or not source_message_id
+        or not re.fullmatch(r"[0-9a-f]{64}", content_sha256)
+    ):
+        raise ReplayFailure(
+            "GMAIL_REPLAY_ENTITY_SCOPE_INVALID",
+            "Entity projection replacement evidence is invalid.",
+        )
+
+    table = resources.Table(ENTITY_EVENTS_TABLE)
+    rows = [
+        row
+        for row in _query_all(
+            table,
+            IndexName="marketDate-index",
+            KeyConditionExpression=Key("marketDate").eq(market_date),
+        )
+        if row.get("sourceMessageId") == source_message_id
+        and row.get("contentSha256") == content_sha256
+    ]
+    if len(rows) > MAX_REPLACED_ENTITY_EVENTS:
+        raise ReplayFailure(
+            "GMAIL_REPLAY_ENTITY_SCOPE_INVALID",
+            "Entity projection replacement exceeded its bounded scope.",
+        )
+    if any(not row.get("entityKey") or not row.get("eventKey") for row in rows):
+        raise ReplayFailure(
+            "GMAIL_REPLAY_ENTITY_SCOPE_INVALID",
+            "Entity projection replacement found an invalid primary key.",
+        )
+
+    verified_rows: list[Mapping[str, Any]] = []
+    for row in rows:
+        current = table.get_item(
+            Key={"entityKey": row["entityKey"], "eventKey": row["eventKey"]},
+            ConsistentRead=True,
+        ).get("Item")
+        if not current:
+            continue
+        if (
+            current.get("sourceMessageId") != source_message_id
+            or current.get("contentSha256") != content_sha256
+        ):
+            raise ReplayFailure(
+                "GMAIL_REPLAY_ENTITY_SCOPE_DRIFT",
+                "An entity projection changed during replacement.",
+            )
+        verified_rows.append(current)
+    if not verified_rows:
+        return 0
+
+    serializer = TypeSerializer()
+    for offset in range(0, len(verified_rows), TRANSACT_WRITE_LIMIT):
+        chunk = verified_rows[offset : offset + TRANSACT_WRITE_LIMIT]
+        transaction = [
+            {
+                "Delete": {
+                    "TableName": ENTITY_EVENTS_TABLE,
+                    "Key": {
+                        "entityKey": serializer.serialize(row["entityKey"]),
+                        "eventKey": serializer.serialize(row["eventKey"]),
+                    },
+                    "ConditionExpression": (
+                        "#sourceMessageId = :sourceMessageId AND "
+                        "#contentSha256 = :contentSha256"
+                    ),
+                    "ExpressionAttributeNames": {
+                        "#sourceMessageId": "sourceMessageId",
+                        "#contentSha256": "contentSha256",
+                    },
+                    "ExpressionAttributeValues": {
+                        ":sourceMessageId": serializer.serialize(source_message_id),
+                        ":contentSha256": serializer.serialize(content_sha256),
+                    },
+                }
+            }
+            for row in chunk
+        ]
+        token_material = "|".join(
+            [
+                SECURITY_INTELLIGENCE_PARSER_VERSION,
+                content_sha256,
+                *[
+                    f"{row['entityKey']}#{row['eventKey']}"
+                    for row in chunk
+                ],
+            ]
+        )
+        try:
+            resources.meta.client.transact_write_items(
+                TransactItems=transaction,
+                ClientRequestToken=hashlib.sha256(
+                    token_material.encode("utf-8")
+                ).hexdigest()[:36],
+            )
+        except ClientError as error:
+            raise ReplayFailure(
+                "GMAIL_REPLAY_ENTITY_REPLACEMENT_FAILED",
+                "The exact entity projection transaction failed.",
+            ) from error
+    return len(verified_rows)
+
+
 def _manifest_checksum(artifacts: Sequence[Mapping[str, Any]]) -> str:
     canonical = [
         {
@@ -1165,6 +1281,7 @@ def apply(
     )
     invoked = 0
     skipped = 0
+    replaced_entity_events = 0
     for artifact in ordered:
         if not artifact["needsRetry"]:
             current = ledger.get_item(
@@ -1184,6 +1301,11 @@ def apply(
             )
         if not current_active:
             require_idle(current_state)
+        if artifact["expectedAction"] == FORCE_VERSION_REPLAY:
+            replaced_entity_events += replace_artifact_entity_projection(
+                resources,
+                artifact,
+            )
         invoke_until_complete(
             lambda_client,
             artifact["messageId"],
@@ -1231,6 +1353,7 @@ def apply(
         "selectedCount": len(selected),
         "invocationCount": invoked,
         "skippedCount": skipped,
+        "replacedEntityEventCount": replaced_entity_events,
         "quarantinedCount": 0,
         "status": "SUCCESS",
     }

@@ -36,11 +36,22 @@ class Table:
 
 
 class Resource:
-    def __init__(self, tables):
+    def __init__(self, tables, client=None):
         self.tables = tables
+        self.meta = type("Meta", (), {})()
+        self.meta.client = client
 
     def Table(self, name):
         return self.tables[name]
+
+
+class TransactionClient:
+    def __init__(self):
+        self.calls = []
+
+    def transact_write_items(self, **kwargs):
+        self.calls.append(kwargs)
+        return {}
 
 
 class S3:
@@ -271,6 +282,74 @@ class ReplayQuarantinedGmailTests(unittest.TestCase):
         )
         ledger.rows = [row]
         self.assertFalse(replay.verify_receipt_rows(ledger, receipt)[0]["needsRetry"])
+
+    def test_admin_replay_replaces_only_the_exact_artifact_entity_rows(self):
+        source_message_id = "0000000000000004"
+        content_sha256 = "a" * 64
+        rows = [
+            {
+                "entityKey": f"ticker#TICKER{index}",
+                "eventKey": f"2026-08-13#event-{index}",
+                "marketDate": "2026-08-13",
+                "sourceMessageId": source_message_id,
+                "contentSha256": content_sha256,
+            }
+            for index in range(101)
+        ]
+        rows.extend(
+            [
+                {
+                    "entityKey": "ticker#OTHER",
+                    "eventKey": "2026-08-13#other-message",
+                    "marketDate": "2026-08-13",
+                    "sourceMessageId": "other-message",
+                    "contentSha256": content_sha256,
+                },
+                {
+                    "entityKey": "ticker#OTHERHASH",
+                    "eventKey": "2026-08-13#other-hash",
+                    "marketDate": "2026-08-13",
+                    "sourceMessageId": source_message_id,
+                    "contentSha256": "b" * 64,
+                },
+            ]
+        )
+        client = TransactionClient()
+        resources = Resource(
+            {replay.ENTITY_EVENTS_TABLE: Table(rows)},
+            client=client,
+        )
+
+        deleted = replay.replace_artifact_entity_projection(
+            resources,
+            {
+                "snapshotDate": "2026-08-13",
+                "messageId": source_message_id,
+                "contentSha256": content_sha256,
+            },
+        )
+
+        self.assertEqual(deleted, 101)
+        self.assertEqual(
+            [len(call["TransactItems"]) for call in client.calls],
+            [100, 1],
+        )
+        deleted_keys = {
+            (
+                operation["Delete"]["Key"]["entityKey"]["S"],
+                operation["Delete"]["Key"]["eventKey"]["S"],
+            )
+            for call in client.calls
+            for operation in call["TransactItems"]
+        }
+        self.assertNotIn(
+            ("ticker#OTHER", "2026-08-13#other-message"),
+            deleted_keys,
+        )
+        self.assertNotIn(
+            ("ticker#OTHERHASH", "2026-08-13#other-hash"),
+            deleted_keys,
+        )
 
     def test_invocation_rejects_quarantine_or_error_response(self):
         class Lambda:

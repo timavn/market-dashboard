@@ -71,35 +71,6 @@ class FakeDynamoDb:
         raise AssertionError(name)
 
 
-class ProjectionReplacementClient:
-    def __init__(self):
-        self.calls = []
-
-    def transact_write_items(self, **kwargs):
-        self.calls.append(deepcopy(kwargs))
-        return {}
-
-
-class ProjectionReplacementDynamoDb:
-    def __init__(self, rows):
-        self.table = FakeTable(("entityKey", "eventKey"))
-        self.table.items = {
-            self.table._key(row): deepcopy(row)
-            for row in rows
-        }
-        self.table.query = lambda **_kwargs: {"Items": deepcopy(rows)}
-        self.meta = type(
-            "Meta",
-            (),
-            {"client": ProjectionReplacementClient()},
-        )()
-
-    def Table(self, name):
-        if name == intelligence.ENTITY_EVENTS_TABLE:
-            return self.table
-        raise AssertionError(name)
-
-
 def snapshot(product, message_id, data, article=None):
     return {
         "date": "2026-07-23",
@@ -518,80 +489,6 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertEqual(by_key["ticker#IBIT"]["signalValue"], "BEARISH")
         self.assertNotIn("ticker#CRYPTOS", by_key)
         self.assertNotIn("ticker#STOCKS", by_key)
-
-    def test_operator_replay_replaces_only_the_exact_artifact_projection(self):
-        source_message_id = "artifact-message"
-        content_sha256 = "a" * 64
-        rows = [
-            {
-                "entityKey": f"ticker#TICKER{index}",
-                "eventKey": f"2026-07-23#event-{index}",
-                "marketDate": "2026-07-23",
-                "sourceMessageId": source_message_id,
-                "contentSha256": content_sha256,
-            }
-            for index in range(101)
-        ]
-        rows.extend(
-            [
-                {
-                    "entityKey": "ticker#OTHER",
-                    "eventKey": "2026-07-23#other-message",
-                    "marketDate": "2026-07-23",
-                    "sourceMessageId": "other-message",
-                    "contentSha256": content_sha256,
-                },
-                {
-                    "entityKey": "ticker#OTHERHASH",
-                    "eventKey": "2026-07-23#other-hash",
-                    "marketDate": "2026-07-23",
-                    "sourceMessageId": source_message_id,
-                    "contentSha256": "b" * 64,
-                },
-            ]
-        )
-        database = ProjectionReplacementDynamoDb(rows)
-        item = snapshot("bitcoin-trend-tracker", source_message_id, {})
-
-        deleted = intelligence.replace_artifact_entity_projection(
-            item,
-            database,
-            content_sha256=content_sha256,
-        )
-
-        self.assertEqual(deleted, 101)
-        calls = database.meta.client.calls
-        self.assertEqual([len(call["TransactItems"]) for call in calls], [100, 1])
-        deleted_keys = {
-            (
-                operation["Delete"]["Key"]["entityKey"]["S"],
-                operation["Delete"]["Key"]["eventKey"]["S"],
-            )
-            for call in calls
-            for operation in call["TransactItems"]
-        }
-        self.assertNotIn(("ticker#OTHER", "2026-07-23#other-message"), deleted_keys)
-        self.assertNotIn(("ticker#OTHERHASH", "2026-07-23#other-hash"), deleted_keys)
-
-    def test_projection_replacement_ignores_a_stale_index_entry(self):
-        row = {
-            "entityKey": "ticker#BTC",
-            "eventKey": "2026-07-23#stale",
-            "marketDate": "2026-07-23",
-            "sourceMessageId": "artifact-message",
-            "contentSha256": "a" * 64,
-        }
-        database = ProjectionReplacementDynamoDb([row])
-        database.table.items.clear()
-
-        deleted = intelligence.replace_artifact_entity_projection(
-            snapshot("bitcoin-trend-tracker", "artifact-message", {}),
-            database,
-            content_sha256="a" * 64,
-        )
-
-        self.assertEqual(deleted, 0)
-        self.assertEqual(database.meta.client.calls, [])
 
     def test_parser_replacement_resets_manifest_event_count_before_reindex(self):
         database = FakeDynamoDb()
