@@ -12,6 +12,7 @@ import math
 import os
 import re
 import struct
+import unicodedata
 import urllib.parse
 import urllib.request
 import zlib
@@ -671,6 +672,17 @@ def _parse_tracker_number(value: Any, *, field: str, ticker: str) -> Decimal:
     return parsed
 
 
+def _normalize_tracker_trend(value: Any, *, ticker: str) -> str:
+    """Normalize OCR separators while rejecting anything but a known trend."""
+    normalized = unicodedata.normalize("NFKC", str(value or "")).strip().upper()
+    if re.search(r"[^A-Z\s._/-]", normalized):
+        raise ValueError(f"Tracker row {ticker} has invalid trend")
+    letters_only = re.sub(r"[\s._/-]+", "", normalized)
+    if letters_only not in TRACKER_TRENDS:
+        raise ValueError(f"Tracker row {ticker} has invalid trend")
+    return letters_only
+
+
 def _parse_tracker_outbucket_marker(
     value: Any,
     *,
@@ -732,9 +744,11 @@ def _parse_tracker_table(
             for field in required_fields
             if field != "ticker"
         }
-        trend = str(raw_values.get("trend") or "").strip().upper()
-        if "trend" in required_fields and trend not in TRACKER_TRENDS:
-            raise ValueError(f"Tracker row {ticker} has invalid trend")
+        trend = (
+            _normalize_tracker_trend(raw_values.get("trend"), ticker=ticker)
+            if "trend" in required_fields
+            else ""
+        )
 
         buy_is_outbucket, buy_status_date = _parse_tracker_outbucket_marker(
             raw_values.get("buyTrade"),
@@ -1105,6 +1119,237 @@ def _extract_symbols(raw_text: str) -> List[str]:
                 items.append(candidate)
 
     return list(dict.fromkeys(items))
+
+
+def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
+    """Extract either supported complete Investing Ideas table layout."""
+
+    def normalize_side(value: Any) -> Optional[str]:
+        normalized = re.sub(r"[^a-z]", "", _strip_tags(str(value or "")).lower())
+        if normalized in {"long", "buy", "bullish"}:
+            return "Long"
+        if normalized in {"short", "sell", "bearish"}:
+            return "Short"
+        return None
+
+    def normalized_header(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", _strip_tags(str(value or "")).lower())
+
+    def header_index(headers: List[str], patterns: Tuple[str, ...]) -> Optional[int]:
+        for index, header in enumerate(headers):
+            if any(pattern in header for pattern in patterns):
+                return index
+        return None
+
+    def parse_row(
+        cells: List[str],
+        side: Optional[str],
+        *,
+        ticker_index: int = 0,
+        side_index: Optional[int] = None,
+        previous_close_index: int = 1,
+        low_index: int = 2,
+        high_index: int = 3,
+    ) -> Optional[Dict[str, Any]]:
+        if side is None and side_index is not None and side_index < len(cells):
+            side = normalize_side(cells[side_index])
+        if side is None or ticker_index >= len(cells):
+            return None
+
+        ticker = _normalize_ticker(_strip_tags(cells[ticker_index]))
+        if not re.fullmatch(r"[A-Z][A-Z0-9./-]{0,9}", ticker):
+            return None
+        required_indexes = (previous_close_index, low_index, high_index)
+        if any(index >= len(cells) for index in required_indexes):
+            raise ValueError(
+                f"Investing Ideas row for {ticker} is missing required risk-range cells"
+            )
+
+        previous_close = _parse_etf_money(_strip_tags(cells[previous_close_index]))
+        low_end = _parse_etf_money(_strip_tags(cells[low_index]))
+        high_end = _parse_etf_money(_strip_tags(cells[high_index]))
+        if (
+            previous_close is None
+            or low_end is None
+            or high_end is None
+            or previous_close <= 0
+            or low_end <= 0
+            or high_end <= 0
+        ):
+            raise ValueError(f"Investing Ideas row for {ticker} has invalid numeric fields")
+        if low_end >= high_end:
+            raise ValueError(f"Investing Ideas row for {ticker} has an invalid LRR/HRR range")
+
+        return {
+            "ticker": ticker,
+            "side": side,
+            "position": side.lower(),
+            "prevClose": previous_close,
+            "lrr": low_end,
+            "hrr": high_end,
+            "originalName": ticker,
+        }
+
+    def direct_cells(row_body: str) -> List[str]:
+        token_pattern = re.compile(
+            r"<(?P<closing>/)?(?P<tag>td|th)\b[^>]*>",
+            re.IGNORECASE,
+        )
+        cells: List[str] = []
+        depth = 0
+        start: Optional[int] = None
+        for token in token_pattern.finditer(row_body):
+            if token.group("closing"):
+                if depth <= 0:
+                    continue
+                depth -= 1
+                if depth == 0 and start is not None:
+                    cells.append(row_body[start:token.start()])
+                    start = None
+            else:
+                if depth == 0:
+                    start = token.end()
+                depth += 1
+        return cells
+
+    def class_rows(source: str) -> List[Tuple[str, str, List[str]]]:
+        token_pattern = re.compile(
+            r"<(?P<closing>/)?tr\b(?P<attrs>[^>]*)>",
+            re.IGNORECASE,
+        )
+        class_open_pattern = re.compile(
+            r"<tr(?P<attrs>[^>]*\bclass\s*=\s*[\"'][^\"']*(?:long|short)[^\"']*[\"'][^>]*)>",
+            re.IGNORECASE,
+        )
+        parsed: List[Tuple[str, str, List[str]]] = []
+        for opening in class_open_pattern.finditer(source):
+            depth = 0
+            closing_start: Optional[int] = None
+            for token in token_pattern.finditer(source, opening.start()):
+                if token.group("closing"):
+                    depth -= 1
+                    if depth == 0:
+                        closing_start = token.start()
+                        break
+                else:
+                    depth += 1
+            if closing_start is None:
+                raise ValueError("Investing Ideas table contains an unclosed position row")
+            row_body = source[opening.end():closing_start]
+            cells = direct_cells(row_body)
+            if not cells:
+                raise ValueError("Investing Ideas table contains an empty position row")
+            parsed.append((opening.group("attrs") or "", row_body, cells))
+        return parsed
+
+    def simple_rows(source: str) -> List[Tuple[str, str, List[str]]]:
+        table_blocks = re.findall(
+            r"<table\b[^>]*>(.*?)</table>",
+            source,
+            re.IGNORECASE | re.DOTALL,
+        ) or [source]
+        row_pattern = re.compile(
+            r"<tr(?P<attrs>[^>]*)>(?P<body>.*?)</tr>",
+            re.IGNORECASE | re.DOTALL,
+        )
+        cell_pattern = re.compile(
+            r"<(?:td|th)\b[^>]*>(.*?)</(?:td|th)>",
+            re.IGNORECASE | re.DOTALL,
+        )
+        parsed: List[Tuple[str, str, List[str]]] = []
+        for table in table_blocks:
+            for match in row_pattern.finditer(table):
+                row_body = match.group("body")
+                cells = cell_pattern.findall(row_body)
+                if cells:
+                    parsed.append((match.group("attrs"), row_body, cells))
+        return parsed
+
+    rows: List[Dict[str, Any]] = []
+    seen: Dict[str, Dict[str, Any]] = {}
+    parsed_rows = class_rows(html_body) or simple_rows(html_body)
+    if not parsed_rows:
+        return rows
+
+    header_row = next(
+        (
+            cells
+            for _attrs, row_body, cells in parsed_rows
+            if "<th" in row_body.lower()
+            or any(
+                header in {
+                    "ticker",
+                    "symbol",
+                    "security",
+                    "side",
+                    "position",
+                    "direction",
+                    "prevclose",
+                    "previousclose",
+                    "lrr",
+                    "hrr",
+                }
+                for header in [normalized_header(cell) for cell in cells]
+            )
+        ),
+        None,
+    )
+    headers = [normalized_header(cell) for cell in header_row] if header_row else []
+    ticker_index = header_index(headers, ("ticker", "symbol", "security", "stock"))
+    side_index = header_index(headers, ("side", "position", "direction", "bias", "call"))
+    previous_close_index = header_index(headers, ("prevclose", "previousclose", "close"))
+    low_index = header_index(headers, ("lrr", "low", "lower"))
+    high_index = header_index(headers, ("hrr", "high", "upper"))
+    header_indexes_complete = all(
+        index is not None
+        for index in (
+            ticker_index,
+            side_index,
+            previous_close_index,
+            low_index,
+            high_index,
+        )
+    )
+
+    for attrs, _row_body, cells in parsed_rows:
+        attrs_lower = attrs.lower()
+        class_side = None
+        if re.search(r"\bclass\s*=\s*[\"'][^\"']*\blong\b", attrs_lower):
+            class_side = "Long"
+        elif re.search(r"\bclass\s*=\s*[\"'][^\"']*\bshort\b", attrs_lower):
+            class_side = "Short"
+
+        is_header = header_row is not None and cells == header_row
+        if class_side:
+            parsed = parse_row(cells, class_side)
+            if parsed is None:
+                raise ValueError("Investing Ideas table contains an invalid classified row")
+        elif header_indexes_complete and not is_header:
+            parsed = parse_row(
+                cells,
+                None,
+                ticker_index=int(ticker_index),
+                side_index=int(side_index),
+                previous_close_index=int(previous_close_index),
+                low_index=int(low_index),
+                high_index=int(high_index),
+            )
+            if parsed is None:
+                raise ValueError("Investing Ideas table contains an invalid data row")
+        else:
+            parsed = None
+
+        if parsed is None:
+            continue
+        ticker = parsed["ticker"]
+        existing = seen.get(ticker)
+        if existing is not None:
+            raise ValueError(
+                f"Investing Ideas table contains duplicate row for {ticker}"
+            )
+        seen[ticker] = parsed
+        rows.append(parsed)
+    return rows
 
 
 def _split_exact_items(raw_text: str) -> List[str]:
@@ -1544,7 +1789,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
 
     normalized = re.sub(r"^[*\s]+", "", headline).strip()
     inline_match = re.search(
-        r"\b(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL(?:\s*-\s*(SHORTING|COVERING|BUYING|SELLING))?\s+([A-Z][A-Z0-9./-]{1,9})\b",
+        r"\b(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL(?:\s*-\s*(SHORTING|COVERING|BUYING|SELLING))?\s+([A-Z][A-Z0-9./-]{0,9})\b",
         normalized,
         re.IGNORECASE,
     )
@@ -1599,7 +1844,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
             name = paren_match.group(1).strip()
             ticker = paren_match.group(2).upper()
         else:
-            ticker_match = re.search(r"\b([A-Z][A-Z0-9./-]{1,9})\b", target)
+            ticker_match = re.search(r"\b([A-Z][A-Z0-9./-]{0,9})\b", target)
             if ticker_match and target == ticker_match.group(1):
                 ticker = ticker_match.group(1).upper()
                 name = ticker
@@ -1615,7 +1860,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
             "analyst": analyst,
         }
 
-    simple_match = re.search(r"^(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL\s+([A-Z][A-Z0-9./-]{1,9})$", normalized, re.IGNORECASE)
+    simple_match = re.search(r"^(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL\s+([A-Z][A-Z0-9./-]{0,9})$", normalized, re.IGNORECASE)
     if simple_match:
         action = simple_match.group(1).upper()
         ticker = simple_match.group(2).upper()
@@ -1983,6 +2228,53 @@ def parse_html_snapshot(
         }
         if warnings:
             snapshot["warnings"] = warnings
+        return snapshot
+
+    if report_type == "investing-ideas":
+        positions = _extract_investing_ideas_table(html_body)
+        long_summary = _extract_section_text(text, "Long", ["Short", "LEVELS"])
+        short_summary = _extract_section_text(text, "Short", ["LEVELS"])
+        headline_longs = _extract_symbols(
+            re.split(r"\n\s*\n", long_summary, maxsplit=1)[0]
+        )
+        headline_shorts = _extract_symbols(
+            re.split(r"\n\s*\n", short_summary, maxsplit=1)[0]
+        )
+        if not positions:
+            return None
+
+        table_longs = [
+            row["ticker"] for row in positions if row["side"] == "Long"
+        ]
+        table_shorts = [
+            row["ticker"] for row in positions if row["side"] == "Short"
+        ]
+        if not set(headline_longs).issubset(table_longs):
+            raise ValueError(
+                "Investing Ideas long summary does not match the position table"
+            )
+        if not set(headline_shorts).issubset(table_shorts):
+            raise ValueError(
+                "Investing Ideas short summary does not match the position table"
+            )
+
+        snapshot = _base_snapshot(
+            snapshot_type="investing-ideas",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        snapshot["positionCount"] = len(positions)
+        snapshot["longCount"] = len(table_longs)
+        snapshot["shortCount"] = len(table_shorts)
+        snapshot["data"] = {
+            "longs": table_longs,
+            "shorts": table_shorts,
+            "positions": positions,
+        }
         return snapshot
 
     if report_type == "early-look":
@@ -2354,8 +2646,22 @@ def parse_html_snapshot(
         return snapshot
 
     if report_type == "real-time-alert":
-        headline = _extract_headline(html_body, text) or subject
+        body_headline = _extract_headline(html_body, text)
+        subject_headline = str(subject or "").strip() or None
+        headline = (
+            subject_headline
+            if subject_headline
+            and re.search(
+                r"\breal[- ]time alert\b",
+                subject_headline,
+                re.IGNORECASE,
+            )
+            else body_headline or subject_headline
+        )
         alert = _extract_real_time_alert(headline, text, html_body)
+        if not alert and body_headline and body_headline != headline:
+            headline = body_headline
+            alert = _extract_real_time_alert(headline, text, html_body)
         if not alert:
             return None
         snapshot = _base_snapshot(

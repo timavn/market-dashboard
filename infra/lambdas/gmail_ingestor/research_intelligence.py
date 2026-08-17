@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
@@ -28,7 +29,7 @@ PRODUCT_MANIFEST_TABLE = os.environ.get(
     "RESEARCH_PRODUCT_MANIFEST_TABLE",
     "ResearchProductManifestsV1",
 )
-PARSER_VERSION = "security-intelligence-v2"
+PARSER_VERSION = "security-intelligence-v3-tracker-contract"
 MAX_MANIFEST_WRITE_RETRIES = 4
 MAX_BODY_TEXT_LENGTH = 40_000
 MANIFEST_STAGES = {"received", "parsed", "validated", "indexed", "failed"}
@@ -812,6 +813,10 @@ def update_product_manifest(
             "updatedAt": now,
             "version": version + 1,
         }
+        if existing.get("reclassifiedArtifacts"):
+            item["reclassifiedArtifacts"] = deepcopy(
+                existing["reclassifiedArtifacts"]
+            )
         try:
             kwargs: Dict[str, Any] = {"Item": item}
             if existing:
@@ -832,6 +837,187 @@ def update_product_manifest(
             if not _conditional_failure(write_error):
                 raise
     raise RuntimeError(f"Unable to update product manifest for {market_date}/{product_id}")
+
+
+def reclassify_manifest_artifact(
+    snapshot: Dict[str, Any],
+    dynamodb: Any,
+    *,
+    source_product_id: str,
+    content_sha256: str,
+) -> Dict[str, Any]:
+    """Move one active manifest artifact only after its target is indexed.
+
+    The source artifact and its complete stage history remain in the optional
+    audit collection. Active counts and checksums intentionally exclude that
+    audit evidence.
+    """
+    target_product_id = str(
+        snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
+    )
+    if source_product_id == target_product_id:
+        raise ValueError("Manifest reclassification requires distinct products")
+    known_products = set(product_ids())
+    if source_product_id not in known_products or target_product_id not in known_products:
+        raise ValueError("Manifest reclassification requires registered products")
+
+    market_date = str(snapshot.get("date") or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", market_date):
+        raise ValueError("Manifest reclassification requires a valid market date")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(content_sha256 or "")):
+        raise ValueError("Manifest reclassification requires an exact content hash")
+
+    table = dynamodb.Table(PRODUCT_MANIFEST_TABLE)
+    artifact_id = _artifact_id(snapshot, content_sha256)
+    target_key = {"marketDate": market_date, "productKey": target_product_id}
+    target_manifest = table.get_item(
+        Key=target_key,
+        ConsistentRead=True,
+    ).get("Item") or {}
+    target_artifact = next(
+        (
+            item
+            for item in target_manifest.get("artifacts", [])
+            if str(item.get("artifactId") or "") == artifact_id
+        ),
+        None,
+    )
+    if (
+        not target_artifact
+        or target_artifact.get("stage") != "indexed"
+        or target_artifact.get("contentSha256") != content_sha256
+    ):
+        raise RuntimeError(
+            "Target manifest does not contain the indexed reclassification artifact"
+        )
+
+    source_key = {"marketDate": market_date, "productKey": source_product_id}
+    reclassification_id = hashlib.sha256(
+        "|".join(
+            (
+                market_date,
+                source_product_id,
+                target_product_id,
+                artifact_id,
+                content_sha256,
+            )
+        ).encode("utf-8")
+    ).hexdigest()
+
+    for _ in range(MAX_MANIFEST_WRITE_RETRIES):
+        existing = table.get_item(
+            Key=source_key,
+            ConsistentRead=True,
+        ).get("Item") or {}
+        if not existing:
+            raise RuntimeError("Source manifest is missing during reclassification")
+        version = int(existing.get("version", 0))
+        audits = deepcopy(existing.get("reclassifiedArtifacts") or [])
+        prior_audit = next(
+            (
+                item
+                for item in audits
+                if item.get("reclassificationId") == reclassification_id
+            ),
+            None,
+        )
+        artifacts = [
+            deepcopy(item) for item in existing.get("artifacts", [])
+        ]
+        source_artifact = next(
+            (
+                item
+                for item in artifacts
+                if str(item.get("artifactId") or "") == artifact_id
+            ),
+            None,
+        )
+        if source_artifact is None:
+            if prior_audit is not None:
+                return existing
+            raise RuntimeError("Source manifest artifact is missing during reclassification")
+        if source_artifact.get("contentSha256") != content_sha256:
+            raise RuntimeError("Source manifest content hash changed before reclassification")
+
+        now = datetime.now(timezone.utc).isoformat()
+        audits.append(
+            {
+                "reclassificationId": reclassification_id,
+                "artifactId": artifact_id,
+                "contentSha256": content_sha256,
+                "sourceProductKey": source_product_id,
+                "targetProductKey": target_product_id,
+                "reclassifiedAt": now,
+                "targetManifestVersion": int(target_manifest.get("version", 0)),
+                "targetManifestChecksum": target_manifest.get("manifestChecksum"),
+                "sourceArtifact": deepcopy(source_artifact),
+            }
+        )
+        active_artifacts = sorted(
+            (
+                item
+                for item in artifacts
+                if str(item.get("artifactId") or "") != artifact_id
+            ),
+            key=lambda item: str(item.get("artifactId") or ""),
+        )
+        counts = {
+            "receivedCount": len(active_artifacts),
+            "parsedCount": sum(
+                item.get("stage") in {"parsed", "validated", "indexed"}
+                for item in active_artifacts
+            ),
+            "validatedCount": sum(
+                item.get("stage") in {"validated", "indexed"}
+                for item in active_artifacts
+            ),
+            "indexedCount": sum(
+                item.get("stage") == "indexed" for item in active_artifacts
+            ),
+            "failedCount": sum(
+                item.get("stage") == "failed" for item in active_artifacts
+            ),
+        }
+        state = (
+            "failed"
+            if counts["failedCount"]
+            else "indexed"
+            if counts["indexedCount"] == counts["receivedCount"]
+            else "validated"
+            if counts["validatedCount"] == counts["receivedCount"]
+            else "parsed"
+            if counts["parsedCount"] == counts["receivedCount"]
+            else "received"
+        )
+        replacement = {
+            **existing,
+            **source_key,
+            "state": state,
+            **counts,
+            "entityEventCount": sum(
+                int(item.get("eventCount", 0)) for item in active_artifacts
+            ),
+            "manifestChecksum": _manifest_checksum(active_artifacts),
+            "artifacts": active_artifacts,
+            "reclassifiedArtifacts": audits,
+            "parserVersion": PARSER_VERSION,
+            "updatedAt": now,
+            "version": version + 1,
+        }
+        try:
+            table.put_item(
+                Item=replacement,
+                ConditionExpression="#version = :expectedVersion",
+                ExpressionAttributeNames={"#version": "version"},
+                ExpressionAttributeValues={":expectedVersion": version},
+            )
+            return replacement
+        except ClientError as write_error:
+            if not _conditional_failure(write_error):
+                raise
+    raise RuntimeError(
+        f"Unable to reclassify manifest artifact for {market_date}/{source_product_id}"
+    )
 
 
 def persist_snapshot_intelligence(

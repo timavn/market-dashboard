@@ -246,6 +246,108 @@ class ResearchIntelligenceTests(unittest.TestCase):
         }
         self.assertEqual(len(event_keys), len(database.events.items))
 
+    def test_reclassification_preserves_failure_audit_after_target_is_indexed(self):
+        database = FakeDynamoDb()
+        content_sha256 = "f" * 64
+        source = snapshot(
+            "signal-strength",
+            "bjri-alert",
+            {"added": [], "removed": []},
+        )
+        target = snapshot(
+            "real-time-alert",
+            "bjri-alert",
+            {
+                "alert": {
+                    "ticker": "BJRI",
+                    "action": "BUY",
+                    "side": "long",
+                },
+                "alerts": [
+                    {"ticker": "BJRI", "action": "BUY", "side": "long"}
+                ],
+            },
+        )
+        intelligence.persist_snapshot_failure(
+            source,
+            database,
+            content_sha256=content_sha256,
+            error="original signal-strength parse failure",
+        )
+        intelligence.persist_snapshot_intelligence(
+            target,
+            database,
+            content_sha256=content_sha256,
+        )
+
+        moved = intelligence.reclassify_manifest_artifact(
+            target,
+            database,
+            source_product_id="signal-strength",
+            content_sha256=content_sha256,
+        )
+
+        self.assertEqual(moved["artifacts"], [])
+        self.assertEqual(moved["failedCount"], 0)
+        self.assertEqual(moved["manifestChecksum"], intelligence._manifest_checksum([]))
+        self.assertEqual(len(moved["reclassifiedArtifacts"]), 1)
+        audit = moved["reclassifiedArtifacts"][0]
+        self.assertEqual(audit["targetProductKey"], "real-time-alert")
+        self.assertEqual(audit["sourceArtifact"]["stage"], "failed")
+        self.assertEqual(
+            audit["sourceArtifact"]["error"],
+            "original signal-strength parse failure",
+        )
+        self.assertEqual(
+            database.manifests.items[("2026-07-23", "real-time-alert")]
+            ["artifacts"][0]["stage"],
+            "indexed",
+        )
+
+        version = moved["version"]
+        replayed = intelligence.reclassify_manifest_artifact(
+            target,
+            database,
+            source_product_id="signal-strength",
+            content_sha256=content_sha256,
+        )
+        self.assertEqual(replayed["version"], version)
+        self.assertEqual(len(replayed["reclassifiedArtifacts"]), 1)
+
+    def test_reclassification_rejects_an_unindexed_target(self):
+        database = FakeDynamoDb()
+        content_sha256 = "9" * 64
+        source = snapshot(
+            "signal-strength",
+            "bjri-unindexed",
+            {"added": [], "removed": []},
+        )
+        target = snapshot(
+            "real-time-alert",
+            "bjri-unindexed",
+            {"alert": {"ticker": "BJRI", "action": "BUY"}},
+        )
+        intelligence.persist_snapshot_failure(
+            source,
+            database,
+            content_sha256=content_sha256,
+            error="original failure",
+        )
+        intelligence.persist_snapshot_intelligence(
+            target,
+            database,
+            content_sha256=content_sha256,
+            finalize=False,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Target manifest"):
+            intelligence.reclassify_manifest_artifact(
+                target,
+                database,
+                source_product_id="signal-strength",
+                content_sha256=content_sha256,
+            )
+
     def test_zero_references_is_indexed_not_a_parse_failure(self):
         database = FakeDynamoDb()
         item = snapshot(

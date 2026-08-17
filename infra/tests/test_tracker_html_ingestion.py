@@ -154,7 +154,7 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
                 [["", "COIN VOLUME"], ["BTC", "4.6%"]],
                 [
                     ["Crypto", "Price", "Buy Trade", "Sell Trade", "Trend"],
-                    ["BTC", "64,517", "62,800", "66,111", "BEARISH"],
+                    ["BTC", "64,517", "62,800", "66,111", "BE ARISH"],
                 ],
             ),
             textract_tables_response([
@@ -193,6 +193,8 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
             [["Ticker", "Price", "Trend"], ["NVDA", "203", "BULLISH"]],
             [list(required), ["NVDA", "203", "225", "203", "2", "-7", "BULLISH"]],
             [list(required), ["NVDA", "203", "190", "225", "2", "-7", "UNKNOWN"]],
+            [list(required), ["NVDA", "203", "190", "225", "2", "-7", "BEARISH123"]],
+            [list(required), ["NVDA", "203", "190", "225", "2", "-7", "BE@ARISH"]],
         )
         for rows in invalid_rows:
             with self.subTest(rows=rows), self.assertRaises(ValueError):

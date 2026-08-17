@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import struct
@@ -2333,6 +2334,99 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertFalse(snapshot["data"]["checkpointAvailable"])
         self.assertEqual([row["ticker"] for row in snapshot["data"]["alerts"]], ["SXT", "SJM", "GTLB"])
 
+    def test_august_17_investing_ideas_materializes_all_fourteen_positions(self):
+        html_body = (
+            GMAIL_FIXTURE_DIR / "investing-ideas-2026-08-17-sanitized.html"
+        ).read_text(encoding="utf-8")
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="investing-ideas",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 17, 13, 0, tzinfo=timezone.utc),
+            s3_key="investing-ideas/2026-08-17-sanitized.html",
+            message_id="sanitized-investing-ideas-2026-08-17",
+            subject="Investing Ideas Newsletter: August 17, 2026",
+        )
+
+        self.assertEqual(snapshot["positionCount"], 14)
+        self.assertEqual(snapshot["longCount"], 12)
+        self.assertEqual(snapshot["shortCount"], 2)
+        self.assertEqual(
+            snapshot["data"]["longs"],
+            [
+                "DDOG", "LLY", "CZR", "SBUX", "KMX", "TXG",
+                "PCAR", "RCL", "AMZN", "PVH", "DT", "EXPGY",
+            ],
+        )
+        self.assertEqual(snapshot["data"]["shorts"], ["WING", "WMT"])
+
+    def test_investing_ideas_rejects_partial_mismatched_and_duplicate_books(self):
+        cases = (
+            (
+                "partial",
+                "<p>Long: DDOG</p><table><tr class='long'>"
+                "<td>DDOG</td><td>$140</td><td>$125</td></tr></table>",
+            ),
+            (
+                "summary-mismatch",
+                "<p>Long: LLY</p><table><tr class='long'>"
+                "<td>DDOG</td><td>$140</td><td>$125</td><td>$152</td>"
+                "</tr></table>",
+            ),
+            (
+                "duplicate",
+                "<table><tr class='long'><td>DDOG</td><td>$140</td>"
+                "<td>$125</td><td>$152</td></tr><tr class='short'>"
+                "<td>DDOG</td><td>$140</td><td>$125</td><td>$152</td>"
+                "</tr></table>",
+            ),
+        )
+        for name, html_body in cases:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                ingestor.parse_html_snapshot(
+                    report_type="investing-ideas",
+                    html_body=html_body,
+                    received_at=datetime(2026, 8, 17, 13, 0, tzinfo=timezone.utc),
+                    s3_key=f"investing-ideas/{name}.html",
+                    message_id=f"sanitized-{name}",
+                    subject="Investing Ideas Newsletter: August 17, 2026",
+                )
+
+    def test_real_time_alert_priority_and_single_letter_subject_are_strict(self):
+        bjri_subject = (
+            "Real-Time Alert: BUY Signal: BJRI (Signal Strength Stock)"
+        )
+        self.assertEqual(
+            ingestor.infer_report_type("message-body.html", bjri_subject),
+            "real-time-alert",
+        )
+
+        visa_subject = (
+            "Real-Time Alert: Sell-SOME Signal "
+            "(consistency and discipline): V -KM"
+        )
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="real-time-alert",
+            html_body="<h1>SELL SIGNAL WRONG</h1><p>SELL SIGNAL V $364.78</p>",
+            received_at=datetime(2026, 8, 14, 15, 0, tzinfo=timezone.utc),
+            s3_key="real-time-alert/visa-sanitized.html",
+            message_id="sanitized-visa-alert",
+            subject=visa_subject,
+        )
+        self.assertEqual(snapshot["data"]["alert"]["ticker"], "V")
+        self.assertEqual(snapshot["data"]["alert"]["action"], "SELL-SOME")
+        self.assertEqual(snapshot["data"]["headline"], visa_subject)
+
+        ambiguous = ingestor.parse_html_snapshot(
+            report_type="real-time-alert",
+            html_body="<h1>Real-Time Alert: portfolio note</h1>",
+            received_at=datetime(2026, 8, 14, 15, 0, tzinfo=timezone.utc),
+            s3_key="real-time-alert/ambiguous.html",
+            message_id="sanitized-ambiguous-alert",
+            subject="Real-Time Alert: portfolio note",
+        )
+        self.assertIsNone(ambiguous)
+
     def test_market_situation_report_is_classified_and_materialized_as_structured_signals(self):
         subject = (
             "MARKET SITUATION REPORT: July 30th 2026 | "
@@ -2390,19 +2484,21 @@ class HermesGmailIngestorTests(unittest.TestCase):
             snapshot["data"]["signalMatrixChartId"],
             snapshot["data"]["charts"][0]["sha256"],
         )
-        self.assertEqual(snapshot["schemaVersion"], "market-structure-v3")
+        self.assertEqual(snapshot["schemaVersion"], "market-structure-v2")
         self.assertTrue(snapshot["contentComplete"])
         self.assertEqual(
             [block["type"] for block in snapshot["data"]["blocks"]],
-            ["chart", "chart", "paragraph"],
+            ["paragraph", "heading", "chart", "chart", "paragraph"],
         )
         self.assertNotIn("subscriber@example.com", json.dumps(snapshot))
         self.assertNotIn("cloudfront.net", json.dumps(snapshot))
-        self.assertNotIn("sourceAttribution", snapshot["data"])
-        self.assertNotIn("headline", snapshot["article"])
-        self.assertNotIn("byline", snapshot["article"])
-        self.assertNotIn("disclaimer", snapshot["article"])
-        self.assertNotIn("publisher", snapshot["article"])
+        self.assertEqual(
+            snapshot["data"]["sourceAttribution"],
+            "Tier 1 Alpha · presented by Hedgeye",
+        )
+        self.assertEqual(snapshot["article"]["headline"], subject)
+        self.assertEqual(snapshot["article"]["publisher"], "Hedgeye")
+        self.assertIn("research use only", snapshot["article"]["disclaimer"])
         self.assertIn(
             "structurally vulnerable",
             snapshot["article"]["bodyText"].lower(),
@@ -2433,7 +2529,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(snapshot["signalCount"], 0)
         self.assertIn("Signal summary unavailable", snapshot["warnings"][0])
 
-    def test_market_situation_report_preserves_seven_charts_and_only_market_text(self):
+    def test_market_situation_report_preserves_seven_charts_and_complete_source_text(self):
         root = "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/weekly"
         chart_tags = [
             f'<img class="chart" alt="Chart {index}" '
@@ -2494,27 +2590,26 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(
             [block["type"] for block in blocks],
             [
-                "chart", "heading", "callout", "paragraph",
-                "chart", "paragraph", "chart", "paragraph", "chart",
+                "paragraph", "paragraph", "heading", "paragraph", "chart",
+                "heading", "paragraph", "callout", "paragraph", "chart",
                 "paragraph", "chart", "paragraph", "chart", "paragraph",
-                "chart",
+                "chart", "paragraph", "chart", "paragraph", "chart", "byline",
             ],
         )
         self.assertEqual(snapshot["article"]["reportHeading"], "WEEKLY GAME PLAN")
-        self.assertNotIn("byline", snapshot["article"])
-        self.assertNotIn("disclaimer", snapshot["article"])
-        self.assertNotIn("publisher", snapshot["article"])
-        self.assertNotIn("headline", snapshot["article"])
-        self.assertNotIn("sourceAttribution", snapshot["data"])
+        self.assertEqual(snapshot["article"]["byline"], "By Craig Peterson")
+        self.assertIn("subscriber-only research", snapshot["article"]["disclaimer"])
+        self.assertEqual(snapshot["article"]["publisher"], "Hedgeye")
+        self.assertIn("sourceAttribution", snapshot["data"])
         serialized = json.dumps(snapshot)
         self.assertNotIn("subscriber@example.com", serialized)
         self.assertNotIn("tracking.example.com", serialized)
         self.assertNotIn("?email=", serialized)
-        self.assertNotIn("Having trouble viewing", serialized)
-        self.assertNotIn("Tier 1 Alpha", serialized)
-        self.assertNotIn("Click Here", serialized)
-        self.assertNotIn("By Craig Peterson", serialized)
-        self.assertNotIn("Legal Disclaimer", serialized)
+        self.assertIn("Having trouble viewing", serialized)
+        self.assertIn("Tier 1 Alpha", serialized)
+        self.assertIn("Click Here", serialized)
+        self.assertIn("By Craig Peterson", serialized)
+        self.assertIn("Legal Disclaimer", serialized)
 
     def test_market_situation_webcast_is_ignored_from_metadata_without_fetching_body(self):
         table = FakeLedgerTable()
@@ -4029,6 +4124,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
                     "sender": "sender@example.com",
                     "s3Bucket": "test-bucket",
                     "s3Key": "hedgeye-email/messages/rta.html",
+                    "contentSha256": hashlib.sha256(
+                        b"<html><body>broken parser input</body></html>"
+                    ).hexdigest(),
                     "createdAt": "2026-07-15T10:00:00+00:00",
                     "updatedAt": "2026-07-15T10:00:00+00:00",
                     "receivedAt": "2026-07-15T10:00:00+00:00",
@@ -4144,6 +4242,141 @@ class HermesGmailIngestorTests(unittest.TestCase):
             migration_result["stored"],
             [{"filename": "message-body.html", "detail": "snapshot-backfilled"}],
         )
+
+    def test_operator_version_replay_uses_only_immutable_ledger_html(self):
+        message_id = "abcdef0123456789"
+        table = FakeLedgerTable(
+            [
+                {
+                    "messageId": message_id,
+                    "attachmentId": "message-body-html-0",
+                    "status": "ERROR",
+                    "filename": "message-body.html",
+                    "mimeType": "text/html",
+                    "reportType": "momo-tracker",
+                    "subject": "MOMO Trend Tracker",
+                    "sender": "sender@example.com",
+                    "s3Bucket": "test-bucket",
+                    "s3Key": "immutable/momo.html",
+                    "contentSha256": "a" * 64,
+                    "receivedAt": "2026-08-13T10:00:00+00:00",
+                    "materializationAttemptVersion": "gmail-materialized-v7-market-structure-archive",
+                    "materializationAttemptCount": 3,
+                    "materializationStatus": "ERROR",
+                }
+            ]
+        )
+
+        with patch.object(
+            ingestor, "backfill_html_snapshot", return_value=True
+        ) as backfill, patch.object(
+            ingestor, "get_message_metadata"
+        ) as get_metadata, patch.object(
+            ingestor, "get_message"
+        ) as get_message:
+            result = ingestor.process_message(
+                "token",
+                "me",
+                message_id,
+                table,
+                allow_version_backfill=True,
+            )
+
+        self.assertEqual(
+            result["stored"],
+            [{"filename": "message-body.html", "detail": "snapshot-backfilled"}],
+        )
+        backfill.assert_called_once()
+        get_metadata.assert_not_called()
+        get_message.assert_not_called()
+
+    def test_operator_replay_rejects_arbitrary_ids_and_wrong_versions(self):
+        valid = {
+            "source": ingestor.OPERATOR_REPLAY_SOURCE,
+            "messageIds": ["abcdef0123456789"],
+            "forceBackfill": True,
+            "materializationVersion": ingestor.MATERIALIZED_DATA_VERSION,
+        }
+        self.assertEqual(
+            ingestor.operator_replay_message_ids(valid),
+            ["abcdef0123456789"],
+        )
+        invalid_events = (
+            {**valid, "messageIds": ["operator-supplied-id"]},
+            {**valid, "materializationVersion": "wrong-version"},
+            {**valid, "unexpected": True},
+            {**valid, "messageIds": ["abcdef0123456789"] * 2},
+        )
+        for event in invalid_events:
+            with self.subTest(event=event), self.assertRaises(
+                ingestor.GmailOperatorReplayError
+            ):
+                ingestor.operator_replay_message_ids(event)
+
+    def test_scheduled_invocation_cannot_request_force_backfill(self):
+        database = FakeRuntimeDynamoDb(FakeLedgerTable())
+        with patch.object(ingestor, "dynamodb", database), patch.object(
+            ingestor, "cloudwatch", MagicMock()
+        ), patch.object(ingestor, "load_oauth_secret") as load_secret:
+            response = ingestor.lambda_handler(
+                {
+                    "source": "aws-scheduler",
+                    "scheduleId": ingestor.GMAIL_SCHEDULE_ID,
+                    "forceBackfill": True,
+                },
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(
+            json.loads(response["body"])["errorCode"],
+            "GMAIL_OPERATOR_REPLAY_INVALID",
+        )
+        load_secret.assert_not_called()
+
+    def test_archived_source_hash_drift_fails_before_parser_execution(self):
+        message_id = "abcdef0123456789"
+        item = {
+            "messageId": message_id,
+            "attachmentId": "message-body-html-0",
+            "status": "ERROR",
+            "filename": "message-body.html",
+            "mimeType": "text/html",
+            "reportType": "real-time-alert",
+            "subject": "Real-Time Alert: BUY Signal: SPY",
+            "s3Bucket": "test-bucket",
+            "s3Key": "immutable/rta.html",
+            "contentSha256": hashlib.sha256(b"original").hexdigest(),
+            "receivedAt": "2026-08-13T10:00:00+00:00",
+            "materializationAttemptVersion": "gmail-materialized-v7-market-structure-archive",
+            "materializationAttemptCount": 3,
+            "materializationStatus": "ERROR",
+        }
+        table = FakeLedgerTable([item])
+        body = MagicMock()
+        body.read.return_value = b"changed"
+        s3_client = MagicMock()
+        s3_client.get_object.return_value = {"Body": body}
+
+        with patch.object(ingestor, "s3", s3_client), patch.object(
+            ingestor, "parse_html_snapshot"
+        ) as parser, patch.object(
+            ingestor, "persist_snapshot_failure"
+        ):
+            with self.assertRaises(ingestor.RetryableResearchMaterializationError):
+                ingestor.backfill_html_snapshot(
+                    table=table,
+                    message_id=message_id,
+                    attachment_id="message-body-html-0",
+                    report_type="real-time-alert",
+                    mime_type="text/html",
+                    received_at=datetime(2026, 8, 13, 10, tzinfo=timezone.utc),
+                    ledger_item=item,
+                )
+
+        parser.assert_not_called()
+        failed = table.items[(message_id, "message-body-html-0")]
+        self.assertEqual(failed["errorCode"], "GMAIL_IMMUTABLE_ARTIFACT_DRIFT")
 
     def test_textract_content_claim_is_shared_by_content_hash(self):
         table = FakeLedgerTable()
