@@ -207,6 +207,27 @@ class ReplayQuarantinedGmailTests(unittest.TestCase):
         self.assertEqual(len(message_ids), 8)
         self.assertEqual(active_ids, [active_message_id])
 
+    def test_apply_can_resume_an_exact_terminal_operator_batch(self):
+        message_id = "0000000000000004"
+        batch_id = "terminal-operator-batch"
+        state = {
+            "status": "IN_PROGRESS",
+            "activeBatchId": batch_id,
+            "pendingPollMode": "operator_replay",
+        }
+        queue = {
+            "messageId": replay.RUNTIME_STATE_KEY["messageId"],
+            "attachmentId": f"message-queue#{batch_id}#0",
+            "batchId": batch_id,
+            "gmailMessageId": message_id,
+            "status": "COMPLETED",
+        }
+
+        self.assertEqual(
+            replay.active_queue_message_ids(Table([queue]), state),
+            [message_id],
+        )
+
     def test_verify_rows_is_idempotent_after_indexing(self):
         row = quarantine(
             status="ERROR",

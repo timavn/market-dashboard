@@ -305,13 +305,28 @@ def active_queue_message_ids(ledger: Any, state: Mapping[str, Any]) -> list[str]
         KeyConditionExpression=Key("messageId").eq(RUNTIME_STATE_KEY["messageId"]),
         ConsistentRead=True,
     ).get("Items") or []
+    batch_rows = [
+        row for row in rows if row.get("batchId") == batch_id
+    ]
     message_ids = {
         str(row.get("gmailMessageId") or "")
-        for row in rows
-        if row.get("batchId") == batch_id
-        and row.get("status") in {"PENDING", "RETRYABLE", "IN_PROGRESS"}
+        for row in batch_rows
+        if row.get("status") in {"PENDING", "RETRYABLE", "IN_PROGRESS"}
         and row.get("gmailMessageId")
     }
+    if (
+        not message_ids
+        and state.get("pendingPollMode") == "operator_replay"
+        and batch_rows
+        and all(
+            row.get("status") in {"COMPLETED", "QUARANTINED"}
+            and row.get("gmailMessageId")
+            for row in batch_rows
+        )
+    ):
+        message_ids = {
+            str(row["gmailMessageId"]) for row in batch_rows
+        }
     if len(message_ids) != 1:
         raise ReplayFailure(
             "GMAIL_ACTIVE_RETRY_SCOPE_INVALID",

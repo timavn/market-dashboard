@@ -4275,6 +4275,51 @@ class HermesGmailIngestorTests(unittest.TestCase):
             )
         )
 
+    def test_operator_batch_identity_and_terminal_rotation_are_parser_versioned(self):
+        kwargs = {
+            "cursor_before": "history-1",
+            "pending_history_id": None,
+            "poll_mode": "operator_replay",
+            "force_backfill": True,
+        }
+        current_batch = ingestor._queue_batch_id((), **kwargs)
+        with patch.object(
+            ingestor,
+            "SECURITY_INTELLIGENCE_PARSER_VERSION",
+            "security-intelligence-v3-tracker-contract",
+        ):
+            prior_batch = ingestor._queue_batch_id((), **kwargs)
+
+        queue = [
+            {
+                "gmailMessageId": "abcdef0123456789",
+                "status": "COMPLETED",
+            }
+        ]
+        self.assertNotEqual(current_batch, prior_batch)
+        self.assertTrue(
+            ingestor.operator_batch_requires_contract_rotation(
+                prior_batch,
+                current_batch,
+                queue,
+                ["abcdef0123456789"],
+            )
+        )
+        self.assertFalse(
+            ingestor.operator_batch_requires_contract_rotation(
+                current_batch,
+                current_batch,
+                queue,
+                ["abcdef0123456789"],
+            )
+        )
+        self.assertFalse(
+            ingestor.operator_terminal_batch_matches(
+                [*queue, {"gmailMessageId": "extra", "status": "COMPLETED"}],
+                ["abcdef0123456789"],
+            )
+        )
+
     def test_operator_version_replay_uses_only_immutable_ledger_html(self):
         message_id = "abcdef0123456789"
         table = FakeLedgerTable(

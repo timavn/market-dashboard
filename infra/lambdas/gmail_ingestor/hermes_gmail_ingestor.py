@@ -518,6 +518,14 @@ def _queue_batch_id(
         "pollMode": poll_mode,
         "forceBackfill": force_backfill,
     }
+    if poll_mode == "operator_replay":
+        payload["operatorReplayContract"] = ":".join(
+            (
+                MATERIALIZED_DATA_VERSION,
+                RESEARCH_PARSER_VERSION,
+                SECURITY_INTELLIGENCE_PARSER_VERSION,
+            )
+        )
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:24]
@@ -632,6 +640,35 @@ def persist_discovered_message_queue(
                 f"Durable Gmail message queue write failed: {type(err).__name__}"
             ) from err
     return batch_id
+
+
+def operator_terminal_batch_matches(
+    queue_items: Iterable[Dict[str, Any]],
+    message_ids: Iterable[str],
+) -> bool:
+    """Return true only for an exact, fully terminal operator batch."""
+    rows = list(queue_items)
+    expected = {str(value) for value in message_ids if str(value)}
+    return bool(rows) and bool(expected) and all(
+        str(row.get("status") or "") in MESSAGE_QUEUE_TERMINAL_STATUSES
+        and str(row.get("gmailMessageId") or "") in expected
+        for row in rows
+    ) and {
+        str(row.get("gmailMessageId") or "") for row in rows
+    } == expected
+
+
+def operator_batch_requires_contract_rotation(
+    active_batch_id: str,
+    current_batch_id: str,
+    queue_items: Iterable[Dict[str, Any]],
+    message_ids: Iterable[str],
+) -> bool:
+    return (
+        bool(active_batch_id)
+        and active_batch_id != current_batch_id
+        and operator_terminal_batch_matches(queue_items, message_ids)
+    )
 
 
 def read_message_queue(table: Any, batch_id: str) -> List[Dict[str, Any]]:
@@ -3788,6 +3825,45 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     ))
     build_recovery_message_ids: List[str] = []
     if (
+        operator_replay_requested
+        and active_batch_id
+        and poll_mode == "operator_replay"
+    ):
+        try:
+            prior_operator_queue = read_message_queue(table, active_batch_id)
+        except Exception as err:
+            return queue_failure_response(err, poll_mode)
+        current_operator_batch_id = _queue_batch_id(
+            (),
+            cursor_before=(
+                str(cursor_before) if cursor_before is not None else None
+            ),
+            pending_history_id=(
+                str(pending_history_id)
+                if pending_history_id is not None
+                else None
+            ),
+            poll_mode="operator_replay",
+            force_backfill=True,
+        )
+        if operator_batch_requires_contract_rotation(
+            active_batch_id,
+            current_operator_batch_id,
+            prior_operator_queue,
+            operator_replay_ids,
+        ):
+            # A prior parser contract completed this exact batch before an
+            # outer acceptance check requested a newer version. Point the
+            # invocation at a contract-versioned batch without broadening its
+            # receipted message scope.
+            active_batch_id = ""
+            pending_history_id = None
+            pending_force_backfill = True
+            poll_mode = "operator_replay"
+            discovered_count = 0
+            discovery_status = ""
+            discovery_in_progress = False
+    if (
         scheduled_invocation
         and not active_batch_id
         and not explicit_message_ids
@@ -4231,7 +4307,13 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             for item in queue_items
             if str(item.get("status") or "") in MESSAGE_QUEUE_ACTIVE_STATUSES
         }
-        if active_queue_ids != set(operator_replay_ids):
+        if (
+            active_queue_ids != set(operator_replay_ids)
+            and not operator_terminal_batch_matches(
+                queue_items,
+                operator_replay_ids,
+            )
+        ):
             return queue_failure_response(
                 GmailOperatorReplayError(
                     "The active Gmail batch does not match the operator replay receipt"
