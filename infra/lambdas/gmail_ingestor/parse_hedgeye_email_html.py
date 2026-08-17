@@ -48,7 +48,7 @@ DYNAMODB_TRANSACTION_MAX_BYTES = 4 * 1024 * 1024
 MARKET_SITUATION_IMAGE_HOST = "d1yhils6iwh5l5.cloudfront.net"
 MARKET_SITUATION_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 MARKET_SITUATION_CHART_MAX_COUNT = 12
-MARKET_SITUATION_SCHEMA_VERSION = "market-structure-v3"
+MARKET_SITUATION_SCHEMA_VERSION = "market-structure-v2"
 MARKET_SITUATION_SIGNAL_ROWS = (
     (
         "spxGammaExposure",
@@ -315,18 +315,11 @@ _MARKET_SITUATION_EMAIL_PATTERN = re.compile(
 )
 _MARKET_SITUATION_IGNORED_TEXT = (
     "prepared exclusively for",
-    "having trouble viewing this email",
     "view larger image",
     "view this email in your browser",
-    "view it in your browser",
-    "the research note below was written by",
-    "presented by hedgeye",
     "manage preferences",
     "unsubscribe",
     "to access the full market situation report",
-    "to access the full report",
-    "click here",
-    "all rights reserved",
 )
 _MARKET_SITUATION_DISCLAIMER_PREFIXES = (
     "disclaimer",
@@ -347,14 +340,6 @@ def _clean_market_situation_text(value: str) -> Optional[str]:
         return None
     normalized = text.casefold()
     if any(phrase in normalized for phrase in _MARKET_SITUATION_IGNORED_TEXT):
-        return None
-    if re.fullmatch(
-        r"\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s+[ap]m(?:\s+[a-z]{2,5})?",
-        normalized,
-        re.IGNORECASE,
-    ):
-        return None
-    if re.match(r"^market situation report\s*:", normalized, re.IGNORECASE):
         return None
     if normalized in {"click here", "read more", "source", "view online"}:
         return None
@@ -1777,7 +1762,7 @@ def parse_html_snapshot(
                 "Market Situation reports require a private chart archiver"
             )
 
-        ordered_source_blocks, _disclaimer = _extract_market_situation_content(
+        ordered_source_blocks, disclaimer = _extract_market_situation_content(
             html_body,
             source_charts,
         )
@@ -1832,6 +1817,7 @@ def parse_html_snapshot(
 
         ordered_blocks: List[Dict[str, Any]] = []
         body_text_parts: List[str] = []
+        byline: Optional[str] = None
         report_heading: Optional[str] = None
         for index, source_block in enumerate(ordered_source_blocks, start=1):
             block_type = source_block.get("type")
@@ -1851,7 +1837,7 @@ def parse_html_snapshot(
                 )
                 continue
             block_text = str(source_block.get("text") or "").strip()
-            if not block_text or block_type == "byline":
+            if not block_text:
                 continue
             ordered_blocks.append(
                 {
@@ -1861,6 +1847,8 @@ def parse_html_snapshot(
                 }
             )
             body_text_parts.append(block_text)
+            if block_type == "byline" and not byline:
+                byline = block_text
             if (
                 block_type == "heading"
                 and not report_heading
@@ -1880,14 +1868,16 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
+        snapshot["article"]["headline"] = (
+            snapshot["article"].get("headline") or subject
+        )
+        snapshot["article"]["summary"] = _extract_market_situation_summary(text)
         snapshot["article"]["reportHeading"] = report_heading
         snapshot["article"]["bodyText"] = body_text[:40_000]
+        snapshot["article"]["byline"] = byline
+        snapshot["article"]["disclaimer"] = disclaimer
+        snapshot["article"]["publisher"] = "Hedgeye"
         snapshot["article"]["charts"] = archived_charts
-        snapshot["article"].pop("headline", None)
-        snapshot["article"].pop("summary", None)
-        snapshot["article"].pop("byline", None)
-        snapshot["article"].pop("disclaimer", None)
-        snapshot["article"].pop("publisher", None)
         snapshot["article"].pop("imageUrls", None)
         snapshot["article"].pop("teaser", None)
         snapshot["signalCount"] = len(signals)
@@ -1899,6 +1889,7 @@ def parse_html_snapshot(
             "signalMatrixChartId": archived_charts[0]["id"],
             "blocks": ordered_blocks,
             "charts": archived_charts,
+            "sourceAttribution": "Tier 1 Alpha · presented by Hedgeye",
         }
         if warnings:
             snapshot["warnings"] = warnings
