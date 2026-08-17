@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
+from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 
@@ -29,10 +31,14 @@ PRODUCT_MANIFEST_TABLE = os.environ.get(
     "RESEARCH_PRODUCT_MANIFEST_TABLE",
     "ResearchProductManifestsV1",
 )
-PARSER_VERSION = "security-intelligence-v3-tracker-contract"
+PARSER_VERSION = "security-intelligence-v4-authoritative-tracker"
 MAX_MANIFEST_WRITE_RETRIES = 4
 MAX_BODY_TEXT_LENGTH = 40_000
+MAX_REPLACED_ENTITY_EVENTS = 500
+TRANSACT_WRITE_LIMIT = 100
 MANIFEST_STAGES = {"received", "parsed", "validated", "indexed", "failed"}
+AUTHORITATIVE_TRACKER_PRODUCTS = {"momo-tracker", "bitcoin-trend-tracker"}
+AUTHORITATIVE_TRACKER_TRENDS = {"BULLISH", "BEARISH", "NEUTRAL"}
 CONTROLLED_EXPOSURE_TYPES = {
     "factor",
     "sector",
@@ -449,11 +455,39 @@ def _structured_ticker_references(
     return references
 
 
+def _deduplicate_entity_references(
+    references: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    deduplicated: Dict[str, Dict[str, Any]] = {}
+    for reference in references:
+        signature = "|".join(
+            [
+                reference["entityKey"],
+                reference["eventType"],
+                str(reference.get("direction") or ""),
+                reference["fieldPath"],
+                reference["excerpt"],
+            ]
+        )
+        deduplicated[hashlib.sha256(signature.encode("utf-8")).hexdigest()] = reference
+    return list(deduplicated.values())
+
+
 def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     product_id = str(
         snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
     )
     references = _structured_ticker_references(snapshot, product_id)
+    if product_id in AUTHORITATIVE_TRACKER_PRODUCTS:
+        # Tracker Trade rows are the only decision-grade authority. OCR prose,
+        # chart labels, image names, and neighboring JSON keys must never be
+        # promoted into ticker signals.
+        return _deduplicate_entity_references(
+            reference
+            for reference in references
+            if reference.get("eventType") == "trade_signal"
+            and reference.get("value") in AUTHORITATIVE_TRACKER_TRENDS
+        )
     searchable = {
         "article": snapshot.get("article") or {},
         "data": snapshot.get("data") or {},
@@ -526,19 +560,7 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
                 )
                 break
 
-    deduplicated: Dict[str, Dict[str, Any]] = {}
-    for reference in references:
-        signature = "|".join(
-            [
-                reference["entityKey"],
-                reference["eventType"],
-                str(reference.get("direction") or ""),
-                reference["fieldPath"],
-                reference["excerpt"],
-            ]
-        )
-        deduplicated[hashlib.sha256(signature.encode("utf-8")).hexdigest()] = reference
-    return list(deduplicated.values())
+    return _deduplicate_entity_references(references)
 
 
 def build_entity_events(
@@ -689,6 +711,123 @@ def persist_entity_events(
     return written
 
 
+def replace_artifact_entity_projection(
+    snapshot: Dict[str, Any],
+    dynamodb: Any,
+    *,
+    content_sha256: str,
+) -> int:
+    """Remove only the prior entity projection for one immutable artifact.
+
+    This is used exclusively by the authenticated operator version-replay path.
+    Exact message and content-hash conditions prevent a parser migration from
+    deleting another publication's projection.
+    """
+    market_date = str(snapshot.get("date") or "")[:10]
+    source_message_id = str(snapshot.get("gmailMessageId") or "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", market_date):
+        raise ValueError("Entity projection replacement requires a valid market date")
+    if not source_message_id:
+        raise ValueError("Entity projection replacement requires a source message")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(content_sha256 or "")):
+        raise ValueError("Entity projection replacement requires an exact content hash")
+
+    table = dynamodb.Table(ENTITY_EVENTS_TABLE)
+    rows: List[Dict[str, Any]] = []
+    last_key = None
+    while True:
+        request: Dict[str, Any] = {
+            "IndexName": "marketDate-index",
+            "KeyConditionExpression": Key("marketDate").eq(market_date),
+        }
+        if last_key:
+            request["ExclusiveStartKey"] = last_key
+        response = table.query(**request)
+        rows.extend(
+            row
+            for row in response.get("Items", [])
+            if row.get("sourceMessageId") == source_message_id
+            and row.get("contentSha256") == content_sha256
+        )
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+
+    if len(rows) > MAX_REPLACED_ENTITY_EVENTS:
+        raise RuntimeError("Entity projection replacement exceeded its bounded scope")
+    if not rows:
+        return 0
+    if any(not row.get("entityKey") or not row.get("eventKey") for row in rows):
+        raise RuntimeError("Entity projection replacement found an invalid primary key")
+
+    # The market-date index is eventually consistent. Resolve every candidate
+    # through a strongly consistent primary-key read before issuing deletes so
+    # a fast retry cannot be tripped by stale index entries from a prior batch.
+    verified_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        current = table.get_item(
+            Key={"entityKey": row["entityKey"], "eventKey": row["eventKey"]},
+            ConsistentRead=True,
+        ).get("Item")
+        if not current:
+            continue
+        if (
+            current.get("sourceMessageId") != source_message_id
+            or current.get("contentSha256") != content_sha256
+        ):
+            raise RuntimeError("Entity projection changed during replacement")
+        verified_rows.append(current)
+    rows = verified_rows
+    if not rows:
+        return 0
+
+    serializer = TypeSerializer()
+    client = dynamodb.meta.client
+    for offset in range(0, len(rows), TRANSACT_WRITE_LIMIT):
+        chunk = rows[offset : offset + TRANSACT_WRITE_LIMIT]
+        transaction = [
+            {
+                "Delete": {
+                    "TableName": ENTITY_EVENTS_TABLE,
+                    "Key": {
+                        "entityKey": serializer.serialize(row["entityKey"]),
+                        "eventKey": serializer.serialize(row["eventKey"]),
+                    },
+                    "ConditionExpression": (
+                        "#sourceMessageId = :sourceMessageId AND "
+                        "#contentSha256 = :contentSha256"
+                    ),
+                    "ExpressionAttributeNames": {
+                        "#sourceMessageId": "sourceMessageId",
+                        "#contentSha256": "contentSha256",
+                    },
+                    "ExpressionAttributeValues": {
+                        ":sourceMessageId": serializer.serialize(source_message_id),
+                        ":contentSha256": serializer.serialize(content_sha256),
+                    },
+                }
+            }
+            for row in chunk
+        ]
+        token_material = "|".join(
+            [
+                PARSER_VERSION,
+                content_sha256,
+                *[
+                    f"{row['entityKey']}#{row['eventKey']}"
+                    for row in chunk
+                ],
+            ]
+        )
+        client.transact_write_items(
+            TransactItems=transaction,
+            ClientRequestToken=hashlib.sha256(
+                token_material.encode("utf-8")
+            ).hexdigest()[:36],
+        )
+    return len(rows)
+
+
 def _artifact_id(
     snapshot: Dict[str, Any],
     content_sha256: Optional[str],
@@ -711,6 +850,7 @@ def update_product_manifest(
     content_sha256: Optional[str] = None,
     event_count: int = 0,
     error: Optional[str] = None,
+    replace_existing: bool = False,
 ) -> Dict[str, Any]:
     if stage not in MANIFEST_STAGES:
         raise ValueError(f"Unsupported manifest stage: {stage}")
@@ -735,11 +875,12 @@ def update_product_manifest(
             if item.get("artifactId")
         }
         previous = artifacts.get(artifact_id, {})
-        effective_stage = (
-            "indexed"
-            if previous.get("stage") == "indexed" and stage != "indexed"
-            else stage
-        )
+        if replace_existing:
+            effective_stage = stage
+        elif previous.get("stage") == "indexed" and stage != "indexed":
+            effective_stage = "indexed"
+        else:
+            effective_stage = stage
         stage_history = list(previous.get("stageHistory") or [])
         transition = {"stage": stage, "at": now}
         if error:
@@ -754,7 +895,11 @@ def update_product_manifest(
             "sourceKey": snapshot.get("htmlSource") or snapshot.get("pdfS3Key"),
             "publishedAt": snapshot.get("publishedAt"),
             "parserVersion": PARSER_VERSION,
-            "eventCount": max(int(previous.get("eventCount", 0)), int(event_count)),
+            "eventCount": (
+                int(event_count)
+                if replace_existing
+                else max(int(previous.get("eventCount", 0)), int(event_count))
+            ),
             "updatedAt": now,
         }
         if content_sha256:
@@ -1026,8 +1171,15 @@ def persist_snapshot_intelligence(
     *,
     content_sha256: Optional[str] = None,
     finalize: bool = True,
+    replace_existing: bool = False,
 ) -> int:
     events = build_entity_events(snapshot, content_sha256=content_sha256)
+    if replace_existing:
+        replace_artifact_entity_projection(
+            snapshot,
+            dynamodb,
+            content_sha256=str(content_sha256 or ""),
+        )
     product_id = str(
         snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
     )
@@ -1044,6 +1196,7 @@ def persist_snapshot_intelligence(
         dynamodb,
         stage="received",
         content_sha256=content_sha256,
+        replace_existing=replace_existing,
     )
     update_product_manifest(
         snapshot,

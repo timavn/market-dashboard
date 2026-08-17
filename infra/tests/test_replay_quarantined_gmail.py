@@ -238,7 +238,16 @@ class ReplayQuarantinedGmailTests(unittest.TestCase):
             "materializationStatus": "INDEXED",
             "materializationAttemptVersion": replay.CURRENT_MATERIALIZATION_VERSION,
             "snapshotType": "momo-tracker",
+            "researchParserVersion": replay.RESEARCH_PARSER_VERSION,
+            "securityIntelligenceParserVersion": (
+                "security-intelligence-v3-tracker-contract"
+            ),
         })
+        ledger.rows = [row]
+        self.assertTrue(replay.verify_receipt_rows(ledger, receipt)[0]["needsRetry"])
+        row["securityIntelligenceParserVersion"] = (
+            replay.SECURITY_INTELLIGENCE_PARSER_VERSION
+        )
         ledger.rows = [row]
         self.assertFalse(replay.verify_receipt_rows(ledger, receipt)[0]["needsRetry"])
 

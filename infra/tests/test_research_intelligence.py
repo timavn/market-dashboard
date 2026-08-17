@@ -71,6 +71,35 @@ class FakeDynamoDb:
         raise AssertionError(name)
 
 
+class ProjectionReplacementClient:
+    def __init__(self):
+        self.calls = []
+
+    def transact_write_items(self, **kwargs):
+        self.calls.append(deepcopy(kwargs))
+        return {}
+
+
+class ProjectionReplacementDynamoDb:
+    def __init__(self, rows):
+        self.table = FakeTable(("entityKey", "eventKey"))
+        self.table.items = {
+            self.table._key(row): deepcopy(row)
+            for row in rows
+        }
+        self.table.query = lambda **_kwargs: {"Items": deepcopy(rows)}
+        self.meta = type(
+            "Meta",
+            (),
+            {"client": ProjectionReplacementClient()},
+        )()
+
+    def Table(self, name):
+        if name == intelligence.ENTITY_EVENTS_TABLE:
+            return self.table
+        raise AssertionError(name)
+
+
 def snapshot(product, message_id, data, article=None):
     return {
         "date": "2026-07-23",
@@ -443,6 +472,7 @@ class ResearchIntelligenceTests(unittest.TestCase):
             event for event in events if event["entityKey"] == "ticker#ORCL"
         ]
 
+        self.assertEqual(len(events), 1)
         self.assertTrue(oracle_events)
         self.assertTrue(all(event["signalValue"] == "BULLISH" for event in oracle_events))
         self.assertTrue(all(event["direction"] == "positive" for event in oracle_events))
@@ -469,6 +499,11 @@ class ResearchIntelligenceTests(unittest.TestCase):
                     }
                 },
             },
+            {
+                "bodyText": (
+                    "CRYPTO QUANT IMAGE BEARISH VIEW LARGER BTC charts and OCR labels"
+                )
+            },
         )
 
         events = intelligence.build_entity_events(
@@ -477,10 +512,129 @@ class ResearchIntelligenceTests(unittest.TestCase):
         )
         by_key = {event["entityKey"]: event for event in events}
 
+        self.assertEqual(set(by_key), {"ticker#BTC", "ticker#IBIT"})
+        self.assertEqual(len(events), 2)
         self.assertEqual(by_key["ticker#BTC"]["signalValue"], "BULLISH")
         self.assertEqual(by_key["ticker#IBIT"]["signalValue"], "BEARISH")
         self.assertNotIn("ticker#CRYPTOS", by_key)
         self.assertNotIn("ticker#STOCKS", by_key)
+
+    def test_operator_replay_replaces_only_the_exact_artifact_projection(self):
+        source_message_id = "artifact-message"
+        content_sha256 = "a" * 64
+        rows = [
+            {
+                "entityKey": f"ticker#TICKER{index}",
+                "eventKey": f"2026-07-23#event-{index}",
+                "marketDate": "2026-07-23",
+                "sourceMessageId": source_message_id,
+                "contentSha256": content_sha256,
+            }
+            for index in range(101)
+        ]
+        rows.extend(
+            [
+                {
+                    "entityKey": "ticker#OTHER",
+                    "eventKey": "2026-07-23#other-message",
+                    "marketDate": "2026-07-23",
+                    "sourceMessageId": "other-message",
+                    "contentSha256": content_sha256,
+                },
+                {
+                    "entityKey": "ticker#OTHERHASH",
+                    "eventKey": "2026-07-23#other-hash",
+                    "marketDate": "2026-07-23",
+                    "sourceMessageId": source_message_id,
+                    "contentSha256": "b" * 64,
+                },
+            ]
+        )
+        database = ProjectionReplacementDynamoDb(rows)
+        item = snapshot("bitcoin-trend-tracker", source_message_id, {})
+
+        deleted = intelligence.replace_artifact_entity_projection(
+            item,
+            database,
+            content_sha256=content_sha256,
+        )
+
+        self.assertEqual(deleted, 101)
+        calls = database.meta.client.calls
+        self.assertEqual([len(call["TransactItems"]) for call in calls], [100, 1])
+        deleted_keys = {
+            (
+                operation["Delete"]["Key"]["entityKey"]["S"],
+                operation["Delete"]["Key"]["eventKey"]["S"],
+            )
+            for call in calls
+            for operation in call["TransactItems"]
+        }
+        self.assertNotIn(("ticker#OTHER", "2026-07-23#other-message"), deleted_keys)
+        self.assertNotIn(("ticker#OTHERHASH", "2026-07-23#other-hash"), deleted_keys)
+
+    def test_projection_replacement_ignores_a_stale_index_entry(self):
+        row = {
+            "entityKey": "ticker#BTC",
+            "eventKey": "2026-07-23#stale",
+            "marketDate": "2026-07-23",
+            "sourceMessageId": "artifact-message",
+            "contentSha256": "a" * 64,
+        }
+        database = ProjectionReplacementDynamoDb([row])
+        database.table.items.clear()
+
+        deleted = intelligence.replace_artifact_entity_projection(
+            snapshot("bitcoin-trend-tracker", "artifact-message", {}),
+            database,
+            content_sha256="a" * 64,
+        )
+
+        self.assertEqual(deleted, 0)
+        self.assertEqual(database.meta.client.calls, [])
+
+    def test_parser_replacement_resets_manifest_event_count_before_reindex(self):
+        database = FakeDynamoDb()
+        item = snapshot(
+            "bitcoin-trend-tracker",
+            "crypto-replacement",
+            {"cryptos": {"BTC": {"trend": "BEARISH"}}},
+        )
+        content_sha256 = "c" * 64
+        database.manifests.items[("2026-07-23", "bitcoin-trend-tracker")] = {
+            "marketDate": "2026-07-23",
+            "productKey": "bitcoin-trend-tracker",
+            "version": 1,
+            "state": "indexed",
+            "artifacts": [
+                {
+                    "artifactId": content_sha256,
+                    "contentSha256": content_sha256,
+                    "sourceMessageId": "crypto-replacement",
+                    "stage": "indexed",
+                    "eventCount": 160,
+                    "parserVersion": "security-intelligence-v3-tracker-contract",
+                    "stageHistory": [{"stage": "indexed", "at": "before"}],
+                }
+            ],
+        }
+
+        manifest = intelligence.update_product_manifest(
+            item,
+            database,
+            stage="received",
+            content_sha256=content_sha256,
+            replace_existing=True,
+        )
+
+        artifact = manifest["artifacts"][0]
+        self.assertEqual(artifact["stage"], "received")
+        self.assertEqual(artifact["eventCount"], 0)
+        self.assertEqual(artifact["parserVersion"], intelligence.PARSER_VERSION)
+        self.assertEqual(
+            [transition["stage"] for transition in artifact["stageHistory"]],
+            ["indexed", "received"],
+        )
 
     def test_content_hash_deduplicates_replayed_publication_across_messages(self):
         first = snapshot(

@@ -611,6 +611,9 @@ def verify_receipt_rows(ledger: Any, receipt: Mapping[str, Any]) -> list[dict[st
             and current.get("materializationAttemptVersion")
             == receipt.get("currentMaterializationVersion")
             and current.get("snapshotType") == selected.get("targetProductType")
+            and current.get("researchParserVersion") == RESEARCH_PARSER_VERSION
+            and current.get("securityIntelligenceParserVersion")
+            == SECURITY_INTELLIGENCE_PARSER_VERSION
         ):
             result.append({**dict(selected), "needsRetry": False})
             continue
@@ -638,7 +641,19 @@ def verify_receipt_rows(ledger: Any, receipt: Mapping[str, Any]) -> list[dict[st
             and current.get("reportType")
             in {selected.get("sourceReportType"), selected.get("targetProductType")}
         )
-        if not (original_state or retry_state):
+        parser_upgrade_state = (
+            current.get("status") == "INDEXED"
+            and current.get("materializationStatus") == "INDEXED"
+            and current.get("materializationAttemptVersion")
+            == receipt.get("currentMaterializationVersion")
+            and current.get("snapshotType") == selected.get("targetProductType")
+            and (
+                current.get("researchParserVersion") != RESEARCH_PARSER_VERSION
+                or current.get("securityIntelligenceParserVersion")
+                != SECURITY_INTELLIGENCE_PARSER_VERSION
+            )
+        )
+        if not (original_state or retry_state or parser_upgrade_state):
             raise ReplayFailure("GMAIL_REPLAY_EVIDENCE_DRIFT", "A selected quarantine changed before replay.")
         result.append({**dict(selected), "needsRetry": True})
     return result

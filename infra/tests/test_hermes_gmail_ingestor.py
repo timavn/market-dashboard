@@ -4243,6 +4243,38 @@ class HermesGmailIngestorTests(unittest.TestCase):
             [{"filename": "message-body.html", "detail": "snapshot-backfilled"}],
         )
 
+    def test_current_materialization_with_older_entity_parser_requires_operator_replay(self):
+        item = {
+            "status": "INDEXED",
+            "attachmentId": "message-body-html-0",
+            "mimeType": "text/html",
+            "filename": "message-body.html",
+            "subject": "Crypto Quant",
+            "reportType": "crypto-quant",
+            "snapshotType": "bitcoin-trend-tracker",
+            "s3Bucket": "test-bucket",
+            "s3Key": "immutable/crypto.html",
+            "materializationAttemptVersion": ingestor.MATERIALIZED_DATA_VERSION,
+            "materializationStatus": "INDEXED",
+            "researchParserVersion": ingestor.RESEARCH_PARSER_VERSION,
+            "securityIntelligenceParserVersion": (
+                "security-intelligence-v3-tracker-contract"
+            ),
+        }
+
+        self.assertFalse(
+            ingestor._should_backfill_materialized_snapshot(
+                item,
+                allow_version_upgrade=False,
+            )
+        )
+        self.assertTrue(
+            ingestor._should_backfill_materialized_snapshot(
+                item,
+                allow_version_upgrade=True,
+            )
+        )
+
     def test_operator_version_replay_uses_only_immutable_ledger_html(self):
         message_id = "abcdef0123456789"
         table = FakeLedgerTable(
@@ -4287,6 +4319,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             [{"filename": "message-body.html", "detail": "snapshot-backfilled"}],
         )
         backfill.assert_called_once()
+        self.assertTrue(backfill.call_args.kwargs["replace_entity_projection"])
         get_metadata.assert_not_called()
         get_message.assert_not_called()
 

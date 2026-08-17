@@ -2434,6 +2434,7 @@ def backfill_html_snapshot(
     mime_type: str,
     received_at: datetime,
     ledger_item: Optional[Dict[str, Any]] = None,
+    replace_entity_projection: bool = False,
 ) -> bool:
     if attachment_id.startswith("message-body-") is False or mime_type != "text/html":
         return False
@@ -2520,6 +2521,7 @@ def backfill_html_snapshot(
             dynamodb,
             content_sha256=item.get("contentSha256"),
             finalize=False,
+            replace_existing=replace_entity_projection,
         )
         materialized, _ = materialize_email_snapshot(snapshot, dynamodb)
         entity_projection_status = (
@@ -2648,6 +2650,12 @@ def _should_backfill_materialized_snapshot(
         # Parser-version migrations are explicit, metered repair work. A
         # scheduled poll must never turn a deployment into a historical replay.
         return allow_version_upgrade
+    if allow_version_upgrade and (
+        item.get("researchParserVersion") != RESEARCH_PARSER_VERSION
+        or item.get("securityIntelligenceParserVersion")
+        != SECURITY_INTELLIGENCE_PARSER_VERSION
+    ):
+        return True
     return (
         item.get("materializationStatus") == "ERROR"
         and _materialization_attempt_count(item) < MATERIALIZATION_MAX_ATTEMPTS
@@ -3043,6 +3051,7 @@ def process_message(
                 mime_type=str(item.get("mimeType") or ""),
                 received_at=_parse_ledger_datetime(item),
                 ledger_item=item,
+                replace_entity_projection=True,
             )
             if backfilled:
                 result["stored"].append(
@@ -3126,6 +3135,7 @@ def process_message(
                     mime_type=item.get("mimeType", ""),
                     received_at=_parse_ledger_datetime(item),
                     ledger_item=item,
+                    replace_entity_projection=allow_version_backfill,
                 )
                 if backfilled:
                     result["stored"].append(
