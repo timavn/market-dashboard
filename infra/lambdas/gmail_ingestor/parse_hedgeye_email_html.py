@@ -1423,6 +1423,103 @@ def _has_positive_article_evidence(snapshot: Dict[str, Any]) -> bool:
     )
 
 
+TOP_THREE_MARKER_PATTERN = re.compile(
+    r"(?:hedgeye(?:'|’)?s\s+)?top\s+(?:3|three)\s+things(?:\s+today)?\s*:?\s*",
+    re.IGNORECASE,
+)
+TOP_THREE_FOOTER_PATTERN = re.compile(
+    r"\n\s*(?:VIEW LINK|CLICK HERE|Please visit|©|If you believe)\b",
+    re.IGNORECASE,
+)
+
+
+def _clean_top_three_item(value: str) -> str:
+    source = _strip_tags(value) if "<" in value else html.unescape(value)
+    source = re.sub(r"^\s*[1-3]\s*[).]\s*", "", source)
+    return re.sub(r"\s+", " ", source).strip(" \t\r\n•")
+
+
+def _parse_top_three_item(value: str, rank: int) -> Optional[Dict[str, Any]]:
+    cleaned = _clean_top_three_item(value)
+    if not cleaned:
+        return None
+    match = re.match(r"^(.{1,80}?)\s+(?:[–—]|-)\s+(.+)$", cleaned, re.DOTALL)
+    if not match:
+        match = re.match(r"^([^:]{1,80}):\s+(.+)$", cleaned, re.DOTALL)
+    if not match:
+        return None
+    title = re.sub(r"\s+", " ", match.group(1)).strip(" .:;–—-")
+    body = re.sub(r"\s+", " ", match.group(2)).strip()
+    if not title or not body:
+        return None
+    return {"rank": rank, "title": title, "body": body}
+
+
+def _top_three_intro(value: str) -> Optional[str]:
+    lines = [
+        line.strip()
+        for line in value.splitlines()
+        if line.strip()
+        and not re.search(r"(?:VIEW LINK|CLICK HERE|ACCESS TODAY)", line, re.IGNORECASE)
+    ]
+    intro = re.sub(r"\s+", " ", " ".join(lines)).strip(" :")
+    return intro[:1200] or None
+
+
+def _extract_top_three_items(
+    html_body: str,
+    text: str,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    markers = list(TOP_THREE_MARKER_PATTERN.finditer(text))
+    if not markers:
+        return [], None
+
+    for marker in reversed(markers):
+        section = text[marker.end():]
+        numbered_markers = list(
+            re.finditer(r"(?m)^\s*([1-3])\s*[).]\s+", section)
+        )
+        if [int(match.group(1)) for match in numbered_markers[:3]] != [1, 2, 3]:
+            continue
+        items: List[Dict[str, Any]] = []
+        for index, item_marker in enumerate(numbered_markers[:3]):
+            end = (
+                numbered_markers[index + 1].start()
+                if index + 1 < 3
+                else len(section)
+            )
+            raw_item = section[item_marker.start():end]
+            footer = TOP_THREE_FOOTER_PATTERN.search(raw_item)
+            if footer:
+                raw_item = raw_item[:footer.start()]
+            parsed = _parse_top_three_item(raw_item, index + 1)
+            if parsed:
+                items.append(parsed)
+        if len(items) == 3:
+            return items, _top_three_intro(section[:numbered_markers[0].start()])
+
+    for ordered_list in re.findall(
+        r"<ol\b[^>]*>(.*?)</ol>",
+        html_body,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        raw_items = re.findall(
+            r"<li\b[^>]*>(.*?)</li>",
+            ordered_list,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if len(raw_items) < 3:
+            continue
+        parsed_items = [
+            _parse_top_three_item(raw_item, index + 1)
+            for index, raw_item in enumerate(raw_items[:3])
+        ]
+        if all(parsed_items):
+            return [item for item in parsed_items if item], None
+
+    return [], None
+
+
 def _extract_symbol_list(raw_text: str) -> List[str]:
     ignored_tokens = {
         "ADDED",
@@ -2312,6 +2409,26 @@ def parse_html_snapshot(
         snapshot["riskRangeCount"] = len(levels)
         snapshot["data"] = levels
         snapshot["trendChanges"] = _extract_trend_changes_from_html(text)
+        return snapshot
+
+    if report_type == "top-3-things":
+        items, intro = _extract_top_three_items(html_body, text)
+        if len(items) != 3:
+            return None
+        snapshot = _base_snapshot(
+            snapshot_type="top-3-things",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        snapshot["itemCount"] = len(items)
+        snapshot["data"] = {"items": items}
+        if intro:
+            snapshot["data"]["intro"] = intro
+            snapshot["article"]["summary"] = intro
         return snapshot
 
     if report_type == "the-call":

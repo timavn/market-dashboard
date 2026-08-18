@@ -255,7 +255,7 @@ class TrackerHtmlIngestionTests(unittest.TestCase):
         )
         self.assertEqual(
             ingestor.MATERIALIZED_DATA_VERSION,
-            "gmail-materialized-v10-quarantine-recovery",
+            "gmail-materialized-v11-top-three-things",
         )
 
 

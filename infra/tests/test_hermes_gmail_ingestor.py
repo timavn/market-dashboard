@@ -495,6 +495,28 @@ def etf_full_book_snapshot(message_id: str, scraped_at: str) -> dict:
     }
 
 
+def top_three_snapshot(message_id: str, scraped_at: str, label: str) -> dict:
+    return {
+        "date": "2026-08-17",
+        "snapshotType": "top-3-things",
+        "scrapedAt": scraped_at,
+        "publishedAt": "2026-08-17T00:00:00+00:00",
+        "source": "gmail-html",
+        "htmlSource": f"message-{message_id}.html",
+        "gmailMessageId": message_id,
+        "article": {"headline": f"Top 3 Things {label}"},
+        "reportType": "top-3-things",
+        "itemCount": 3,
+        "data": {
+            "items": [
+                {"rank": 1, "title": f"{label} One", "body": "First item."},
+                {"rank": 2, "title": f"{label} Two", "body": "Second item."},
+                {"rank": 3, "title": f"{label} Three", "body": "Third item."},
+            ],
+        },
+    }
+
+
 class HermesGmailIngestorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.metadata_patcher = patch.object(
@@ -2679,6 +2701,140 @@ class HermesGmailIngestorTests(unittest.TestCase):
             )
         )
 
+    def test_top_three_classification_preserves_product_precedence(self):
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+            ),
+            "top-3-things",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "THE MACRO SHOW: Summary Notes & Replay | Monday, August 17th, 2026",
+            ),
+            "the-macro-show",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "KM's Top 3 Things (Rates/KOSPI/Volatility)",
+            ),
+            "top-3-things",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "EARLY LOOK: [COMPLIMENTARY] Top 3 Things | USD/Gold/VIX",
+            ),
+            "early-look",
+        )
+
+    def test_top_three_reclassification_requires_explicit_version_backfill(self):
+        legacy_item = {
+            "status": "INDEXED",
+            "attachmentId": "message-body-html-1",
+            "mimeType": "text/html",
+            "filename": "message-body.html",
+            "subject": "THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+            "reportType": "the-macro-show",
+            "snapshotType": "the-macro-show",
+            "s3Bucket": "research",
+            "s3Key": "messages/top-three.html",
+            "materializationAttemptVersion": "gmail-materialized-v7-market-structure-archive",
+            "materializationStatus": "INDEXED",
+        }
+
+        self.assertFalse(
+            ingestor._should_backfill_materialized_snapshot(
+                legacy_item,
+                allow_version_upgrade=False,
+            )
+        )
+        self.assertTrue(
+            ingestor._should_backfill_materialized_snapshot(
+                legacy_item,
+                allow_version_upgrade=True,
+            )
+        )
+
+    def test_top_three_parser_preserves_numbered_macro_show_items(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html><head><meta type="hedgeye-headline"
+                  content="August 17th - Access Show, Slide Deck &amp; Top 3 Things"></head>
+                <body>
+                  <div>08/17/2026 08:41 AM EDT</div>
+                  <p>Hedgeye's top 3 things</p>
+                  <p>SPY was down small on decelerating volume Friday.</p>
+                  <p>1) USD – Dollar Index is making fresh two-month lows.</p>
+                  <p>2) GOLD – Gold has the cleanest inverse correlation to USD.</p>
+                  <p>3) ATHs (all-time highs) – A Top 3 Things repeat; RSP and IWM printed new highs.</p>
+                  <p>VIEW LINK</p>
+                </body></html>
+            """,
+            received_at=datetime(2026, 8, 17, 12, 42, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-macro.html",
+            message_id="top-three-macro",
+            subject="THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+        )
+
+        self.assertEqual(snapshot["snapshotType"], "top-3-things")
+        self.assertEqual(snapshot["itemCount"], 3)
+        self.assertEqual(
+            snapshot["data"]["items"],
+            [
+                {"rank": 1, "title": "USD", "body": "Dollar Index is making fresh two-month lows."},
+                {"rank": 2, "title": "GOLD", "body": "Gold has the cleanest inverse correlation to USD."},
+                {"rank": 3, "title": "ATHs (all-time highs)", "body": "A Top 3 Things repeat; RSP and IWM printed new highs."},
+            ],
+        )
+        self.assertEqual(
+            snapshot["data"]["intro"],
+            "SPY was down small on decelerating volume Friday.",
+        )
+
+    def test_top_three_parser_supports_standalone_ordered_list_and_rejects_partial(self):
+        valid = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html><body>
+                  <div>08/13/2026 07:05 AM EDT</div>
+                  <h1>KM's Top 3 Things (Rates/KOSPI/Volatility)</h1>
+                  <p>Top 3 Things today:</p>
+                  <ol>
+                    <li><b>RATES –</b> The yield curve steepened.</li>
+                    <li><b>KOSPI –</b> The signal improved.</li>
+                    <li><b>VOLATILITY –</b> VIX signaled lower lows.</li>
+                  </ol>
+                </body></html>
+            """,
+            received_at=datetime(2026, 8, 13, 11, 5, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-km.html",
+            message_id="top-three-km",
+            subject="KM's Top 3 Things (Rates/KOSPI/Volatility)",
+        )
+        partial = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html><body><p>Top 3 Things today:</p><ol>
+                  <li>USD – First item.</li><li>GOLD – Second item.</li>
+                </ol></body></html>
+            """,
+            received_at=datetime(2026, 8, 13, 11, 5, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-partial.html",
+            message_id="top-three-partial",
+            subject="KM's Top 3 Things",
+        )
+
+        self.assertEqual(
+            [item["title"] for item in valid["data"]["items"]],
+            ["RATES", "KOSPI", "VOLATILITY"],
+        )
+        self.assertIsNone(partial)
+
     def test_article_only_call_and_macro_show_emails_materialize_without_inventing_positions(self):
         cases = (
             ("the-call", "the-call-article-only.html"),
@@ -3504,6 +3660,48 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(repeated["dataVersion"], merged["dataVersion"])
         self.assertTrue(merged["dataVersion"].startswith(f"{ingestor.MATERIALIZED_DATA_VERSION}:"))
         self.assertIn("materializedAt", merged)
+
+    def test_top_three_materialization_is_latest_wins_and_idempotent(self):
+        table = FakeSnapshotTable()
+        db = FakeDynamoDb(table)
+        later = top_three_snapshot(
+            "message-later",
+            "2026-08-17T12:42:12+00:00",
+            "Later",
+        )
+        earlier = top_three_snapshot(
+            "message-earlier",
+            "2026-08-17T11:07:04+00:00",
+            "Earlier",
+        )
+
+        ingestor.materialize_email_snapshot(later, db)
+        merged, changed = ingestor.materialize_email_snapshot(earlier, db)
+        repeated, repeated_changed = ingestor.materialize_email_snapshot(earlier, db)
+
+        self.assertTrue(changed)
+        self.assertFalse(repeated_changed)
+        self.assertEqual(merged["gmailMessageId"], "message-later")
+        self.assertEqual(merged["data"]["items"][0]["title"], "Later One")
+        self.assertEqual(
+            set(merged["sourceMessageIds"]),
+            {"message-earlier", "message-later"},
+        )
+        self.assertEqual(repeated["dataVersion"], merged["dataVersion"])
+
+    def test_top_three_materialization_rejects_invalid_rank_contract(self):
+        table = FakeSnapshotTable()
+        db = FakeDynamoDb(table)
+        invalid = top_three_snapshot(
+            "message-invalid",
+            "2026-08-17T12:42:12+00:00",
+            "Invalid",
+        )
+        invalid["data"]["items"][2]["rank"] = 4
+
+        with self.assertRaisesRegex(ValueError, "exactly three ranked items"):
+            ingestor.materialize_email_snapshot(invalid, db)
+        self.assertEqual(table.put_count, 0)
 
     def test_etf_materialization_keeps_latest_action_for_position(self):
         table = FakeSnapshotTable()

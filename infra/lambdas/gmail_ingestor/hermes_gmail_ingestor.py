@@ -104,9 +104,9 @@ GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
-MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro"}
+MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "top-3-things"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
-MATERIALIZED_DATA_VERSION = "gmail-materialized-v10-quarantine-recovery"
+MATERIALIZED_DATA_VERSION = "gmail-materialized-v11-top-three-things"
 MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
 HTML_TEXTRACT_REPORT_TYPES = frozenset({
     "signal-strength",
@@ -2082,6 +2082,14 @@ def _compute_materialized_data_version(item: Dict[str, Any]) -> str:
     return f"{MATERIALIZED_DATA_VERSION}:{hashlib.sha256(encoded).hexdigest()}"
 
 
+def _snapshot_recency_key(snapshot: Dict[str, Any]) -> Tuple[str, str]:
+    """Order daily editions by immutable Gmail receipt time, then message ID."""
+    return (
+        str(snapshot.get("scrapedAt") or ""),
+        str(snapshot.get("gmailMessageId") or ""),
+    )
+
+
 def _merge_materialized_snapshot(
     existing: Optional[Dict[str, Any]], incoming: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -2090,7 +2098,7 @@ def _merge_materialized_snapshot(
     existing_sources = _snapshot_source_message_ids(current)
     incoming_sources = _snapshot_source_message_ids(candidate)
 
-    incoming_is_latest = str(candidate.get("scrapedAt") or "") >= str(current.get("scrapedAt") or "")
+    incoming_is_latest = _snapshot_recency_key(candidate) >= _snapshot_recency_key(current)
     merged = deepcopy(candidate if not current or incoming_is_latest else current)
     merged["date"] = candidate["date"]
     merged["snapshotType"] = candidate["snapshotType"]
@@ -2110,6 +2118,19 @@ def _merge_materialized_snapshot(
         )
         merged["itemCount"] = len(merged["data"].get("rows") or [])
         merged["changeCount"] = len(merged["data"].get("changes") or [])
+    elif candidate["snapshotType"] == "top-3-things":
+        items = (merged.get("data") or {}).get("items") or []
+        if (
+            len(items) != 3
+            or [item.get("rank") for item in items] != [1, 2, 3]
+            or any(
+                not str(item.get("title") or "").strip()
+                or not str(item.get("body") or "").strip()
+                for item in items
+            )
+        ):
+            raise ValueError("Top 3 Things materialization requires exactly three ranked items")
+        merged["itemCount"] = 3
 
     merged["sourceMessageIds"] = sorted(
         _ordered_unique([*existing_sources, *incoming_sources])
@@ -2123,7 +2144,7 @@ def _merge_materialized_snapshot(
 def materialize_email_snapshot(
     snapshot: Dict[str, Any], db: Any
 ) -> Tuple[Dict[str, Any], bool]:
-    """Idempotently merge an RTA/ETF email into its daily materialized snapshot."""
+    """Idempotently merge versioned email products into daily snapshots."""
     if snapshot.get("snapshotType") not in MATERIALIZED_SNAPSHOT_TYPES:
         save_snapshot_to_dynamodb(snapshot, db)
         return snapshot, True

@@ -211,6 +211,28 @@
       }
     },
     {
+      "id": "top-3-things",
+      "label": "Top 3 Things",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "top 3 things",
+        "top three things"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
       "id": "the-macro-show",
       "label": "Macro Show",
       "cadence": "event_driven",
