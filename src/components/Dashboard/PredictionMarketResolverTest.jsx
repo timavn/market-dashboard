@@ -4929,7 +4929,7 @@ const SpxRiskRangeChart = ({
           checking={loading && !venueSelection?.venue}
           nowMs={nowMs}
         />
-        {referenceBadge && marketUi.symbol !== 'GOLD' && (
+        {referenceBadge && !['GOLD', 'SPX'].includes(marketUi.symbol) && (
           <span
             className={`pm-spx-reference-badge pm-spx-reference-badge--${xauSpotProxy ? 'proxy' : 'exact'}`}
             aria-label={referenceBadgeDetails}
@@ -4954,7 +4954,7 @@ const SpxRiskRangeChart = ({
             ))}
           </div>
         )}
-        {contractChartReference && contractSeriesState !== 'available' && (
+        {marketUi.symbol !== 'SPX' && contractChartReference && contractSeriesState !== 'available' && (
           <span
             className={`pm-spx-contract-series-state is-${contractSeriesState}`}
             data-testid={`spx-${selectedRange}-contract-state`}
@@ -4974,7 +4974,7 @@ const SpxRiskRangeChart = ({
             ) : ` ${contractSeriesState === 'loading' ? '…' : '—'}`}
           </span>
         )}
-        {supportsRangeSelection && (
+        {supportsRangeSelection && marketUi.symbol !== 'SPX' && (
           <span
             className={`pm-spx-structure-score${structureScoreAvailable ? '' : ' is-unavailable'}`}
             data-testid={`spx-${selectedRange}-rr-structure-summary`}
@@ -5009,7 +5009,14 @@ const SpxRiskRangeChart = ({
             LAST COMPLETE SESSION
           </span>
         )}
-        <span className="pm-spx-chart-time">{formatAsOf(headerAsOf, sectionRefreshDelayed)}</span>
+        {marketUi.symbol !== 'SPX' && (
+          <span
+            className="pm-spx-chart-time"
+            data-testid={`${marketUi.symbol.toLowerCase()}-chart-as-of`}
+          >
+            {formatAsOf(headerAsOf, sectionRefreshDelayed)}
+          </span>
+        )}
         {compactMarketHeader && tradingClock && (
           <div
             className={`pm-spx-contract-clock pm-spx-chart-contract-clock is-${checkingHours ? 'loading' : tradingClock.state}`}

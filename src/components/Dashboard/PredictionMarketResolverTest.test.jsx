@@ -1389,22 +1389,18 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(within(chartRegion).getByRole('tab', { name: '1D' })).toHaveAttribute('aria-selected', 'true');
     expect(within(chartRegion).getByRole('tab', { name: '5D' })).toHaveAttribute('aria-selected', 'false');
     expect(within(chartRegion).getByRole('tab', { name: '10D' })).toHaveAttribute('aria-selected', 'false');
-    const oneDayStructureSummary = within(chartRegion).getByTestId('spx-1d-rr-structure-summary');
-    expect(oneDayStructureSummary).toHaveTextContent('H+9·L+9');
-    expect(oneDayStructureSummary).toHaveAttribute('data-source-range', '10d');
-    expect(oneDayStructureSummary).toHaveAttribute(
-      'aria-label',
-      '1D summary from the ending 10D consecutive Risk Range trends, high plus 9, low plus 9',
-    );
+    expect(within(chartRegion).queryByTestId('spx-1d-rr-structure-summary')).not.toBeInTheDocument();
+    expect(within(chartRegion).queryByTestId('spx-1d-contract-state')).not.toBeInTheDocument();
+    expect(within(chartRegion).queryByTestId('spx-chart-as-of')).not.toBeInTheDocument();
     const spxMeasure = within(chartRegion).getByTestId('spx-header-measure-spx');
     expect(within(spxMeasure).getByText('7,746.25')).toHaveClass('pm-spx-chart-price', 'is-positive');
     expect(within(spxMeasure).getByText('(+0.60%)')).toHaveClass('pm-spx-day-change', 'is-positive');
     expect(within(chartRegion).queryByText('CLOSED')).not.toBeInTheDocument();
     expect(within(chartRegion).queryByText('BULLISH')).not.toBeInTheDocument();
-    expect(within(chartRegion).getByText('EXACT')).toHaveAccessibleName(
-      'Exact reference. CURRENT BAR. Full provenance is labeled on the blue reference marker.',
-    );
+    expect(within(chartRegion).queryByText('EXACT')).not.toBeInTheDocument();
     const chartCanvas = within(chartRegion).getByTestId('spx-chart-canvas');
+    expect(chartCanvas).toHaveAttribute('data-risk-range-high-structure-score', '9');
+    expect(chartCanvas).toHaveAttribute('data-risk-range-low-structure-score', '9');
     expect(chartCanvas).toHaveAttribute('data-session-open-time', '2026-08-17T13:30:00.000Z');
     expect(chartCanvas).toHaveAttribute('data-session-close-time', '2026-08-17T20:00:00.000Z');
     expect(chartCanvas).toHaveAttribute('data-time-tick-count', '8');
@@ -1953,11 +1949,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(screen.getByTestId('spx-5d-low-structure-2026-08-17')).toHaveAttribute('data-boundary-offset', '24');
     expect(screen.getByTestId('spx-5d-low-structure-2026-08-17')).toHaveAccessibleName(/below LRR/);
     expect(screen.getByTestId('spx-5d-lrr-2026-08-17')).toHaveAttribute('data-boundary-placement', 'below');
-    expect(within(chartRegion).getByTestId('spx-5d-rr-structure-summary')).toHaveTextContent('H+4·L+4');
-    expect(within(chartRegion).getByTestId('spx-5d-rr-structure-summary')).toHaveAttribute(
-      'aria-label',
-      '5D consecutive Risk Range trends, high plus 4, low plus 4',
-    );
+    expect(within(chartRegion).queryByTestId('spx-5d-rr-structure-summary')).not.toBeInTheDocument();
   });
 
   test.each(['aligned', 'proxy_context'])('keeps complete Risk Range structure visible for legacy %s basis labels', async (riskRangeStatus) => {
@@ -1975,7 +1967,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(within(chartRegion).getByTestId('spx-chart-canvas')).toHaveAttribute('data-rr-overlay-count', '5');
     expect(within(chartRegion).getByTestId('spx-chart-canvas')).toHaveAttribute('data-risk-range-high-structure-score', '4');
     expect(within(chartRegion).getByTestId('spx-chart-canvas')).toHaveAttribute('data-risk-range-low-structure-score', '4');
-    expect(within(chartRegion).getByTestId('spx-5d-rr-structure-summary')).toHaveTextContent('H+4·L+4');
+    expect(within(chartRegion).queryByTestId('spx-5d-rr-structure-summary')).not.toBeInTheDocument();
   });
 
   test('renders a verified holiday as its own generic closed band with its name only in metadata', async () => {
@@ -2062,7 +2054,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(screen.getByTestId('spx-10d-low-structure-2026-08-17')).toHaveTextContent('+9');
     expect(screen.getByTestId('spx-10d-low-structure-2026-08-17')).toHaveAttribute('data-boundary-placement', 'below');
     expect(screen.getByTestId('spx-10d-low-structure-2026-08-17')).toHaveAttribute('data-boundary-offset', '4');
-    expect(within(chartRegion).getByTestId('spx-10d-rr-structure-summary')).toHaveTextContent('H+9·L+9');
+    expect(within(chartRegion).queryByTestId('spx-10d-rr-structure-summary')).not.toBeInTheDocument();
     expect(screen.getByTestId('spx-10d-ath-reference')).toHaveTextContent('ATH 7,750');
   });
 
@@ -2095,7 +2087,11 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       .toEqual([0, 1, 2, 3, 4, 5, 6, -1, 0, -1]);
     expect(screen.getByTestId('spx-10d-high-structure-2026-08-17')).toHaveAttribute('data-score-tone', 'positive');
     expect(screen.getByTestId('spx-10d-low-structure-2026-08-17')).toHaveAttribute('data-score-tone', 'negative');
-    expect(within(chartRegion).getByTestId('spx-10d-rr-structure-summary')).toHaveTextContent('H+2·L-1');
+    expect(within(chartRegion).getByTestId('spx-chart-canvas'))
+      .toHaveAttribute('data-risk-range-high-structure-score', '2');
+    expect(within(chartRegion).getByTestId('spx-chart-canvas'))
+      .toHaveAttribute('data-risk-range-low-structure-score', '-1');
+    expect(within(chartRegion).queryByTestId('spx-10d-rr-structure-summary')).not.toBeInTheDocument();
   });
 
   test('renders the verified ATH as the only blue chart value without changing five-day price availability', async () => {
@@ -2741,11 +2737,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(chartCanvas).not.toHaveAttribute('data-risk-range-low-structure-score');
     expect(within(chartRegion).queryByTestId(/^spx-5d-high-structure-/)).not.toBeInTheDocument();
     expect(within(chartRegion).queryByTestId(/^spx-5d-low-structure-/)).not.toBeInTheDocument();
-    expect(within(chartRegion).getByTestId('spx-5d-rr-structure-summary')).toHaveTextContent('H—·L—');
-    expect(within(chartRegion).getByTestId('spx-5d-rr-structure-summary')).toHaveAttribute(
-      'aria-label',
-      '5D consecutive Risk Range trends unavailable',
-    );
+    expect(within(chartRegion).queryByTestId('spx-5d-rr-structure-summary')).not.toBeInTheDocument();
     expect(within(chartRegion).queryByText('SPX 5D DATA UNAVAILABLE')).not.toBeInTheDocument();
   });
 
@@ -2766,11 +2758,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     renderPanel();
     const chartRegion = await screen.findByRole('region', { name: 'SPX Risk Range chart' });
 
-    expect(within(chartRegion).getByTestId('spx-1d-rr-structure-summary')).toHaveTextContent('H—·L—');
-    expect(within(chartRegion).getByTestId('spx-1d-rr-structure-summary')).toHaveAttribute(
-      'aria-label',
-      '1D summary from the ending 10D consecutive Risk Range trends unavailable',
-    );
+    expect(within(chartRegion).queryByTestId('spx-1d-rr-structure-summary')).not.toBeInTheDocument();
     expect(within(chartRegion).getByTestId('spx-chart-canvas'))
       .not.toHaveAttribute('data-risk-range-high-structure-score');
   });
@@ -3493,7 +3481,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(within(ladder).getByRole('cell', { name: 'Yes bid: 66¢, displayed size 40 contracts' })).toBeInTheDocument();
     expect(within(ladder).getByRole('cell', { name: 'Yes ask: 68¢, displayed size 50 contracts' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getAllByText(/REFRESH DELAYED/).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('spx-chart-as-of')).not.toBeInTheDocument();
     expect(screen.queryByText('SPX 1D DATA UNAVAILABLE')).not.toBeInTheDocument();
   });
 
@@ -3584,7 +3572,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(screen.queryByRole('cell', { name: 'Yes ask: 87¢, displayed size 30 contracts' })).not.toBeInTheDocument();
     expect(screen.getByTestId('spx-chart-canvas')).toBeInTheDocument();
     expect(screen.queryByText('SPX 1D DATA UNAVAILABLE')).not.toBeInTheDocument();
-    expect(screen.getAllByText(/REFRESH DELAYED/).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('spx-chart-as-of')).not.toBeInTheDocument();
   });
 
   test('clears FES quotes but keeps the prior marker labeled delayed on disconnect', async () => {
