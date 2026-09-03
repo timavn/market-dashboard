@@ -3,6 +3,8 @@ import { ThemeProvider } from './context/ThemeContext';
 import { PortfolioProvider } from './context/PortfolioContext';
 import PortfolioDashboard from './components/Dashboard/PortfolioDashboard';
 import HowItWorksPage from './components/HowItWorks/HowItWorksPage';
+import PersistentSurface from './components/common/PersistentSurface';
+import { isDashboardSessionRetentionEnabled } from './config/dashboardSessionRetention';
 import {
   getProcessDocument,
   getProcessDocumentByRoute,
@@ -34,6 +36,7 @@ const getAppRoute = () => {
 
 function App() {
   const [route, setRoute] = useState(getAppRoute);
+  const retentionEnabled = isDashboardSessionRetentionEnabled();
 
   useEffect(() => {
     const handleNavigation = () => {
@@ -59,8 +62,13 @@ function App() {
   };
 
   const navigateProcess = (targetRoute) => {
-    window.history.replaceState(
-      { ...(window.history.state || {}), processOverlayEntry: true },
+    const historyMethod = route.page === 'process' ? 'replaceState' : 'pushState';
+    const openedFromDashboard = route.page !== 'process'
+      || window.history.state?.processOverlayEntry === true;
+    const nextHistoryState = { ...(window.history.state || {}) };
+    if (openedFromDashboard) nextHistoryState.processOverlayEntry = true;
+    window.history[historyMethod](
+      nextHistoryState,
       '',
       targetRoute,
     );
@@ -165,7 +173,23 @@ function App() {
   return (
     <ThemeProvider>
       <div className="App">
-        {route.page === 'how-it-works' ? (
+        {retentionEnabled ? (
+          <>
+            <PortfolioProvider>
+              <PersistentSurface active={route.page !== 'how-it-works'}>
+                <PortfolioDashboard
+                  processDocumentId={route.page === 'process' ? route.documentId : null}
+                  onOpenProcess={openProcess}
+                  onNavigateProcess={navigateProcess}
+                  onCloseProcess={closeProcess}
+                />
+              </PersistentSurface>
+            </PortfolioProvider>
+            <PersistentSurface active={route.page === 'how-it-works'}>
+              <HowItWorksPage onBack={() => { window.location.hash = ''; }} />
+            </PersistentSurface>
+          </>
+        ) : route.page === 'how-it-works' ? (
           <HowItWorksPage onBack={() => { window.location.hash = ''; }} />
         ) : (
           <PortfolioProvider>

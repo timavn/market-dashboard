@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""
-Parse Hedgeye CFTC Non-Commercial Net Long Positioning PDF using AWS Textract
+"""Parse a Hedgeye CFTC PDF into an audit-only snapshot.
+
+Official CFTC public-reporting data is the sole canonical positioning source.
+This parser intentionally cannot write ``cftc-positioning``.
 """
 
 import os
@@ -126,7 +128,7 @@ def extract_cftc_data(pdf_path):
     print(f"   ✅ Extracted {len(data_rows)} CFTC metrics")
     return {'metrics': data_rows}
 
-def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
+def save_audit_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
     if not data or not data.get('metrics'):
         print("\n❌ No data to save")
         return
@@ -139,7 +141,7 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
     db = boto3.resource('dynamodb', region_name='us-west-1')
     ts = datetime.now(timezone.utc).isoformat()
 
-    snap_table = db.Table('HedgeyeDailySnapshot')
+    snap_table = db.Table(os.environ.get('HEDGEYE_DAILY_SNAPSHOT_TABLE', 'HedgeyeDailySnapshot'))
     
     # Store numerical values as Decimal
     def float_to_dec(f):
@@ -151,6 +153,11 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
         metrics_to_save.append({
             'category': m['category'],
             'metric': m['metric'],
+            'cftcContractMarketCode': None,
+            'seriesType': 'hedgeye-pdf-ocr',
+            'asOf': pdf_date,
+            'status': 'audit-only',
+            'decisionEligible': False,
             'latest': float_to_dec(m['latest']),
             'wwChg': float_to_dec(m['wwChg']),
             'zScore1Y': float_to_dec(m['zScore1Y']),
@@ -159,11 +166,17 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
 
     snapshot_item = {
         'date': pdf_date,
-        'snapshotType': 'cftc-positioning',
+        'reportDate': pdf_date,
+        'snapshotType': 'cftc-positioning-hedgeye-audit',
+        'schemaVersion': 'cftc-positioning-hedgeye-audit-v1',
         'metricsCount': len(metrics_to_save),
         'data': metrics_to_save,
         'scrapedAt': ts,
-        'source': 'textract',
+        'retrievedAt': ts,
+        'source': 'hedgeye-pdf-textract',
+        'contentComplete': False,
+        'decisionEligible': False,
+        'warnings': ['AUDIT_ONLY_NOT_FOR_TRADING_DECISIONS'],
         'ttl': int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))
     }
 
@@ -173,6 +186,10 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
     snap_table.put_item(Item=snapshot_item)
     print(f"   ✅ Saved {len(metrics_to_save)} metrics")
     print("\n🎉 SUCCESS! CFTC data saved.\n")
+
+
+# Compatibility for older manual callers. The destination remains audit-only.
+save_to_dynamodb = save_audit_to_dynamodb
 
 
 if __name__ == '__main__':
@@ -199,6 +216,6 @@ if __name__ == '__main__':
     data = extract_cftc_data(pdf_path)
 
     if data and data.get('metrics'):
-        save_to_dynamodb(data, pdf_date=pdf_date)
+        save_audit_to_dynamodb(data, pdf_date=pdf_date)
     else:
         print("\n❌ No data extracted from PDF")

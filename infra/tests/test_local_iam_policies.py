@@ -169,10 +169,16 @@ class LocalIamPolicyContractTests(unittest.TestCase):
                 "ReadOwnedServiceHeartbeats",
                 "ReadPredictionCatalogV2",
                 "ReconcilePredictionCatalogV2",
+                "ReadPredictionPerformanceLedger",
+                "ReconcilePredictionPerformanceLedger",
                 "ReadCanonicalResearchEvents",
                 "ReadRtaRebuildSources",
+                "ReadLatestHedgeyeSnapshots",
                 "WriteRtaMaterializations",
                 "ReadRtaLegacyArtifacts",
+                "ReadMarketStructureSnapshot",
+                "ReadMarketStructureAssets",
+                "WriteManualInflationNowcastArtifacts",
                 "ReadPortfolioResearchIntelligence",
                 "ReadExpectedRiskRangePublication",
                 "ReadLambdaDiagnostics",
@@ -185,8 +191,11 @@ class LocalIamPolicyContractTests(unittest.TestCase):
             "dynamodb:Scan",
             "dynamodb:PutItem",
             "dynamodb:DeleteItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:TransactWriteItems",
             "s3:GetObject",
             "s3:GetObjectVersion",
+            "s3:PutObject",
             "cloudwatch:GetMetricStatistics",
         }
         observed = set().union(*(actions(statement) for statement in statements.values()))
@@ -209,6 +218,21 @@ class LocalIamPolicyContractTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
+            set(actions(statements["ReconcilePredictionPerformanceLedger"])),
+            {
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+                "dynamodb:UpdateItem",
+                "dynamodb:TransactWriteItems",
+            },
+        )
+        self.assertEqual(
+            statements["ReadLatestHedgeyeSnapshots"]["Resource"],
+            "arn:aws:dynamodb:us-west-1:915328198276:"
+            "table/HedgeyeDailySnapshot/index/snapshotType-date-meta-index",
+        )
+        self.assertEqual(
             statements["WriteRtaMaterializations"]["Resource"],
             "arn:aws:dynamodb:us-west-1:915328198276:"
             "table/HedgeyeDailySnapshot",
@@ -217,6 +241,42 @@ class LocalIamPolicyContractTests(unittest.TestCase):
             statements["ReadRtaLegacyArtifacts"]["Resource"],
             "arn:aws:s3:::market-dashboard-csv-data/"
             "hedgeye-email/messages/*",
+        )
+        self.assertEqual(
+            statements["ReadMarketStructureSnapshot"],
+            {
+                "Sid": "ReadMarketStructureSnapshot",
+                "Effect": "Allow",
+                "Action": "dynamodb:GetItem",
+                "Resource": (
+                    "arn:aws:dynamodb:us-west-1:915328198276:"
+                    "table/HedgeyeDailySnapshot"
+                ),
+            },
+        )
+        self.assertEqual(
+            statements["ReadMarketStructureAssets"],
+            {
+                "Sid": "ReadMarketStructureAssets",
+                "Effect": "Allow",
+                "Action": "s3:GetObject",
+                "Resource": (
+                    "arn:aws:s3:::market-dashboard-csv-data/"
+                    "hedgeye-email/assets/market-structure/*"
+                ),
+            },
+        )
+        self.assertEqual(
+            statements["WriteManualInflationNowcastArtifacts"],
+            {
+                "Sid": "WriteManualInflationNowcastArtifacts",
+                "Effect": "Allow",
+                "Action": "s3:PutObject",
+                "Resource": (
+                    "arn:aws:s3:::market-dashboard-csv-data/hedgeye-email/"
+                    "messages/manual-inflation-nowcast/*"
+                ),
+            },
         )
 
         research_resource = statements["ReadCanonicalResearchEvents"]["Resource"]
@@ -233,6 +293,10 @@ class LocalIamPolicyContractTests(unittest.TestCase):
             },
             {
                 MANIFEST["aws"]["resources"]["hedgeyeDailySnapshotTable"],
+                (
+                    f'{MANIFEST["aws"]["resources"]["hedgeyeDailySnapshotTable"]}'
+                    '/index/snapshotType-date-meta-index'
+                ),
                 MANIFEST["aws"]["resources"]["researchEntityEventsTable"],
                 (
                     f'{MANIFEST["aws"]["resources"]["researchEntityEventsTable"]}'
@@ -284,10 +348,23 @@ class LocalIamPolicyContractTests(unittest.TestCase):
                         }
                     )
 
-    def test_policy_validator_pins_the_only_global_s3_prefix_and_actions(self):
+    def test_policy_validator_pins_global_s3_prefixes_and_actions(self):
         exact_resource = (
             "arn:aws:s3:::market-dashboard-csv-data/"
             "hedgeye-email/messages/*"
+        )
+        manual_write_resource = (
+            "arn:aws:s3:::market-dashboard-csv-data/"
+            "hedgeye-email/messages/manual-inflation-nowcast/*"
+        )
+        market_structure_resource = (
+            "arn:aws:s3:::market-dashboard-csv-data/"
+            "hedgeye-email/assets/market-structure/*"
+        )
+        staging_bucket_resource = "arn:aws:s3:::market-dashboard-csv-data"
+        staging_resource = f"{staging_bucket_resource}/analyst-staging/*"
+        manual_import_resource = (
+            f"{staging_bucket_resource}/hedgeye-uploads/manual/*"
         )
         self.validate_document(
             {
@@ -304,9 +381,70 @@ class LocalIamPolicyContractTests(unittest.TestCase):
                 ],
             }
         )
+        self.validate_document(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "s3:PutObject",
+                        "Resource": manual_write_resource,
+                    }
+                ],
+            }
+        )
+        self.validate_document(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "s3:GetObject",
+                        "Resource": market_structure_resource,
+                    }
+                ],
+            }
+        )
+        self.validate_document(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "s3:ListBucket",
+                        "Resource": staging_bucket_resource,
+                        "Condition": {
+                            "StringEquals": {"s3:prefix": "analyst-staging/"},
+                        },
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:DeleteObject",
+                            "s3:GetObject",
+                            "s3:PutObject",
+                        ],
+                        "Resource": staging_resource,
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["s3:GetObject", "s3:PutObject"],
+                        "Resource": manual_import_resource,
+                    },
+                ],
+            }
+        )
         for action, resource in (
             ("s3:PutObject", exact_resource),
+            (
+                "s3:PutObject",
+                "arn:aws:s3:::market-dashboard-csv-data/"
+                "hedgeye-email/messages/manual-inflation-nowcast-extra/*",
+            ),
             ("s3:GetObject", "arn:aws:s3:::another-bucket/*"),
+            ("s3:PutObject", market_structure_resource),
+            ("s3:DeleteObject", manual_import_resource),
+            ("s3:ListBucket", staging_resource),
         ):
             with self.subTest(action=action, resource=resource):
                 with self.assertRaises(validator.PolicyValidationError):
@@ -322,6 +460,66 @@ class LocalIamPolicyContractTests(unittest.TestCase):
                             ],
                         }
                     )
+        for condition in (
+            None,
+            {"StringEquals": {"s3:prefix": "analyst-staging/*"}},
+            {"StringEquals": {"s3:prefix": ""}},
+        ):
+            with self.subTest(condition=condition):
+                statement = {
+                    "Effect": "Allow",
+                    "Action": "s3:ListBucket",
+                    "Resource": staging_bucket_resource,
+                }
+                if condition is not None:
+                    statement["Condition"] = condition
+                with self.assertRaises(validator.PolicyValidationError):
+                    self.validate_document(
+                        {"Version": "2012-10-17", "Statement": [statement]}
+                    )
+
+    def test_analyst_pdf_intake_policy_is_exact_and_valid(self):
+        policy = load_policy("local-analyst-pdf-intake-policy.json")
+        statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+        self.assertEqual(
+            set(statements),
+            {
+                "ListAnalystStagingObjects",
+                "ManageAnalystStagingObjects",
+                "ReadWriteAnalystManualImports",
+                "InvokeAnalystStructuredPdfParser",
+            },
+        )
+        self.assertEqual(
+            statements["ListAnalystStagingObjects"]["Condition"],
+            {"StringEquals": {"s3:prefix": "analyst-staging/"}},
+        )
+        self.assertEqual(
+            set(actions(statements["ManageAnalystStagingObjects"])),
+            {"s3:DeleteObject", "s3:GetObject", "s3:PutObject"},
+        )
+        self.assertEqual(
+            statements["ManageAnalystStagingObjects"]["Resource"],
+            "arn:aws:s3:::market-dashboard-csv-data/analyst-staging/*",
+        )
+        self.assertEqual(
+            set(actions(statements["ReadWriteAnalystManualImports"])),
+            {"s3:GetObject", "s3:PutObject"},
+        )
+        self.assertEqual(
+            statements["ReadWriteAnalystManualImports"]["Resource"],
+            "arn:aws:s3:::market-dashboard-csv-data/hedgeye-uploads/manual/*",
+        )
+        self.assertEqual(
+            statements["InvokeAnalystStructuredPdfParser"]["Resource"],
+            "arn:aws:lambda:us-west-1:915328198276:function:"
+            "market-dashboard-hedgeye-pdf-processor-v1",
+        )
+        validator.validate_policy(
+            ROOT / "infra" / "iam" / "local-analyst-pdf-intake-policy.json",
+            account="915328198276",
+            region="us-west-1",
+        )
 
 
 if __name__ == "__main__":

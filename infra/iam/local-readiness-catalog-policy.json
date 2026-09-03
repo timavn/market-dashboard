@@ -28,6 +28,24 @@
       "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketCatalogV2"
     },
     {
+      "Sid": "ReadPredictionPerformanceLedger",
+      "Effect": "Allow",
+      "Action": "dynamodb:Query",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketPerformanceLedger"
+    },
+    {
+      "Sid": "ReconcilePredictionPerformanceLedger",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:UpdateItem",
+        "dynamodb:TransactWriteItems"
+      ],
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketPerformanceLedger"
+    },
+    {
       "Sid": "ReadCanonicalResearchEvents",
       "Effect": "Allow",
       "Action": "dynamodb:Query",
@@ -41,6 +59,12 @@
         "arn:aws:dynamodb:us-west-1:915328198276:table/HermesEmailIngestLedger",
         "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot"
       ]
+    },
+    {
+      "Sid": "ReadLatestHedgeyeSnapshots",
+      "Effect": "Allow",
+      "Action": "dynamodb:Query",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot/index/snapshotType-date-meta-index"
     },
     {
       "Sid": "WriteRtaMaterializations",
@@ -58,6 +82,24 @@
       "Resource": "arn:aws:s3:::market-dashboard-csv-data/hedgeye-email/messages/*"
     },
     {
+      "Sid": "ReadMarketStructureSnapshot",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot"
+    },
+    {
+      "Sid": "ReadMarketStructureAssets",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::market-dashboard-csv-data/hedgeye-email/assets/market-structure/*"
+    },
+    {
+      "Sid": "WriteManualInflationNowcastArtifacts",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::market-dashboard-csv-data/hedgeye-email/messages/manual-inflation-nowcast/*"
+    },
+    {
       "Sid": "ReadPortfolioResearchIntelligence",
       "Effect": "Allow",
       "Action": [
@@ -66,6 +108,7 @@
       ],
       "Resource": [
         "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot/index/snapshotType-date-meta-index",
         "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchEntityEventsV1",
         "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchEntityEventsV1/index/marketDate-index",
         "arn:aws:dynamodb:us-west-1:915328198276:table/ResearchProductManifestsV1"

@@ -33,6 +33,32 @@ describe('instrumentResolver provider identity', () => {
     });
   });
 
+  it('resolves an automatic cash-index descriptor to IBKR while retaining its Yahoo identity', () => {
+    const descriptor = {
+      symbol: 'DJI',
+      ibkrSymbol: 'INDU',
+      yahooSymbol: '^DJI',
+      conId: 1935181,
+      secType: 'IND',
+      exchange: 'CME',
+      currency: 'USD',
+      provider: 'auto',
+    };
+
+    expect(resolveInstrument(descriptor)).toMatchObject({
+      symbol: 'INDU',
+      displaySymbol: 'DJI',
+      ibkrSymbol: 'INDU',
+      yahooSymbol: '^DJI',
+      conid: 1935181,
+      secType: 'IND',
+      exchange: 'CME',
+      provider: 'auto',
+      supported: true,
+    });
+    expect(canUseSymbolStream(descriptor)).toBe(false);
+  });
+
   it('keeps a Yahoo cash index out of the IBKR stock route', () => {
     const descriptor = {
       symbol: 'SPX',
@@ -85,5 +111,54 @@ describe('instrumentResolver provider identity', () => {
     expect(canUseSymbolStream({ symbol: 'AAPL', secType: 'STK', exchange: 'ARCA' })).toBe(false);
     expect(canUseSymbolStream({ symbol: 'AAPL', secType: 'STK', currency: 'CAD' })).toBe(false);
     expect(canUseSymbolStream({ symbol: 'AAPL', secType: 'STK', conId: 123 })).toBe(false);
+  });
+
+  it('allows only contract-specific IBKR futures descriptors', () => {
+    const exactFuture = {
+      symbol: 'WTI',
+      secType: 'FUT',
+      exchange: 'IPE',
+      currency: 'USD',
+      provider: 'ibkr',
+      lastTradeDateOrContractMonth: '202609',
+      tradingClass: 'WTI',
+    };
+
+    expect(resolveInstrument(exactFuture)).toMatchObject({
+      ...exactFuture,
+      supported: true,
+    });
+    expect(resolveInstrument({
+      symbol: 'WTI',
+      secType: 'FUT',
+      exchange: 'IPE',
+      provider: 'ibkr',
+    })).toMatchObject({
+      supported: false,
+      reason: 'futures_contract_identity_required',
+    });
+    expect(canUseSymbolStream(exactFuture)).toBe(false);
+  });
+
+  it('routes the exact IBKR spot-gold commodity identity off the stock stream', () => {
+    const spotGold = {
+      symbol: 'XAUUSD',
+      conId: 69067924,
+      secType: 'CMDTY',
+      exchange: 'SMART',
+      currency: 'USD',
+      provider: 'ibkr',
+    };
+
+    expect(resolveInstrument(spotGold)).toMatchObject({
+      symbol: 'XAUUSD',
+      conid: 69067924,
+      secType: 'CMDTY',
+      exchange: 'SMART',
+      currency: 'USD',
+      provider: 'ibkr',
+      supported: true,
+    });
+    expect(canUseSymbolStream(spotGold)).toBe(false);
   });
 });

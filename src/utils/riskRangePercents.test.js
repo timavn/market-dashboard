@@ -1,4 +1,5 @@
 import {
+  computeRiskRangeActionability,
   resolveReferencePrice,
   computeRiskRangePercents,
   formatRiskRangePercent,
@@ -42,6 +43,22 @@ describe('computeRiskRangePercents', () => {
   it('returns null for invalid inputs', () => {
     expect(computeRiskRangePercents(0, 148, 172)).toBeNull();
     expect(computeRiskRangePercents(100, null, 172)).toBeNull();
+  });
+});
+
+describe('computeRiskRangeActionability', () => {
+  it('ranks the largest reported move and preserves separate upside and downside magnitudes', () => {
+    const metrics = computeRiskRangeActionability(100, 80, 110);
+    expect(metrics).toEqual({
+      largestMovePct: 20,
+      upsidePct: 10,
+      downsidePct: 20,
+    });
+  });
+
+  it('does not rank incomplete source ranges', () => {
+    expect(computeRiskRangeActionability(100, null, 110)).toBeNull();
+    expect(computeRiskRangeActionability(null, 80, 110)).toBeNull();
   });
 });
 

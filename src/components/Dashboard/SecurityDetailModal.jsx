@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, Title, Text, Metric, Grid, Badge } from '@tremor/react';
 import {
     ComposedChart,
@@ -16,6 +16,9 @@ import XMarkIcon from '@heroicons/react/24/solid/XMarkIcon';
 import LoadingIndicator from '../common/LoadingIndicator';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';
+import { MarketDataService } from '../../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import { canonicalProductState, getCanonicalRiskRange } from '../../utils/securityIntelligenceV2';
 
 const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
     const { theme } = useTheme();
@@ -23,28 +26,69 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
+    const [researchError, setResearchError] = useState(null);
+    const [canonicalResearch, setCanonicalResearch] = useState(null);
 
-    useEffect(() => {
-        if (isOpen && ticker) {
-            fetchSecurityDetails();
-        }
-    }, [isOpen, ticker]);
-
-    const fetchSecurityDetails = async () => {
+    const fetchSecurityDetails = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
+            setResearchError(null);
+            if (SECURITY_INTELLIGENCE_V2_ENABLED) setCanonicalResearch(null);
             // HARDCODED URL for now to ensure it hits the right port if proxy isn't working
             // Ideally use a service configuration
-            const response = await axios.get(`http://localhost:3001/api/performance/security/${ticker}`);
-            setData(response.data);
+            const [performanceResult, canonicalResult] = await Promise.allSettled([
+                axios.get(`http://localhost:3001/api/performance/security/${ticker}`),
+                SECURITY_INTELLIGENCE_V2_ENABLED
+                    ? MarketDataService.getSecurityIntelligenceV2({ symbols: [ticker], historyDays: 0 })
+                    : Promise.resolve(null),
+            ]);
+            if (performanceResult.status === 'rejected') throw performanceResult.reason;
+
+            let nextData = performanceResult.value.data;
+            let nextCanonicalResearch = null;
+            if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+                if (canonicalResult.status === 'fulfilled' && canonicalResult.value?.schemaVersion === 2) {
+                    nextCanonicalResearch = canonicalResult.value.bySymbol?.[ticker.toUpperCase()] || null;
+                    const canonicalRange = getCanonicalRiskRange(nextCanonicalResearch, { primaryOnly: true });
+                    const canonicalDate = canonicalResult.value.marketDate || canonicalRange?.date || null;
+                    const historicalRanges = Array.isArray(nextData?.riskRanges)
+                        ? nextData.riskRanges.filter((range) => range?.date !== canonicalDate)
+                        : [];
+                    nextData = {
+                        ...nextData,
+                        riskRanges: canonicalRange
+                            ? [...historicalRanges, {
+                                date: canonicalRange.date,
+                                lrr: canonicalRange.lrr,
+                                hrr: canonicalRange.hrr,
+                                trend: canonicalRange.trend,
+                                timestamp: canonicalRange.timestamp,
+                                status: canonicalProductState(nextCanonicalResearch?.products?.['risk-ranges']),
+                            }]
+                            : historicalRanges,
+                    };
+                } else {
+                    setResearchError(
+                        canonicalResult.reason?.message || 'Canonical current security research is unavailable.',
+                    );
+                }
+            }
+            setCanonicalResearch(nextCanonicalResearch);
+            setData(nextData);
         } catch (err) {
             console.error('Error fetching security details:', err);
             setError('Failed to load security details');
         } finally {
             setLoading(false);
         }
-    };
+    }, [ticker]);
+
+    useEffect(() => {
+        if (isOpen && ticker) {
+            fetchSecurityDetails();
+        }
+    }, [fetchSecurityDetails, isOpen, ticker]);
 
     const chartData = useMemo(() => {
         if (!data?.prices) return [];
@@ -109,12 +153,17 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
     }, [data]);
 
     if (!isOpen) return null;
+    const researchNeedsAttention = SECURITY_INTELLIGENCE_V2_ENABLED
+        && !loading
+        && (researchError || !canonicalResearch || canonicalResearch.health?.status !== 'ready');
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 backdrop-blur-sm">
             <div
                 className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-xl shadow-2xl"
-                style={{ backgroundColor: isDark ? '#111827' : '#ffffff' }}
+                style={{
+                    backgroundColor: researchNeedsAttention ? '#fef2f2' : isDark ? '#111827' : '#ffffff',
+                }}
             >
                 {/* Close Button */}
                 <button
@@ -143,6 +192,11 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                     {error && (
                         <div className="p-4 bg-red-100 text-red-700 rounded-lg">
                             {error}
+                        </div>
+                    )}
+                    {researchError && (
+                        <div className="p-4 bg-red-100 text-red-700 rounded-lg">
+                            {researchError}
                         </div>
                     )}
 

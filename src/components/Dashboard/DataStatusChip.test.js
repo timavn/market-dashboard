@@ -21,6 +21,14 @@ describe('DataStatusChip', () => {
     expect(chip).toHaveClass('efr-status-chip--historical');
   });
 
+  it('renders Closed as a separate blue reference-close tone', () => {
+    render(<DataStatusChip status="closed" />);
+
+    const chip = screen.getByLabelText('CLOSED');
+    expect(chip).toHaveAttribute('data-status', 'closed');
+    expect(chip).toHaveClass('efr-status-chip--closed');
+  });
+
   it('supports a color-only indicator without hiding its status from assistive technology', () => {
     render(<DataStatusChip status="delayed" detail="AS OF JUL 10" indicatorOnly />);
 

@@ -10,11 +10,18 @@ If Desktop is in iCloud, the same folder is also tried under Mobile Documents.
 
 import argparse
 import os
+import sys
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import boto3
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "infra" / "scripts"))
+from aws_profile_contract import (  # noqa: E402
+    ADMIN_PROFILE,
+    AwsProfileContractError,
+    verified_session,
+)
 
 
 def _pl_dir_candidates() -> List[Path]:
@@ -58,12 +65,14 @@ def find_realized_csv(pl_dir: Path) -> Optional[Path]:
     return matches[0] if matches else None
 
 
-def upload_file(path: str, bucket: str = "market-dashboard-csv-data") -> bool:
+def upload_file(path: str, bucket: str = "market-dashboard-csv-data", *, session=None) -> bool:
     if not os.path.exists(path):
         print(f"File not found: {path}")
         return False
 
-    s3 = boto3.client("s3")
+    if session is None:
+        raise ValueError("An explicitly verified admin AWS session is required before uploading.")
+    s3 = session.client("s3")
     filename = os.path.basename(path)
     key = f"uploads/{filename}"
 
@@ -102,6 +111,11 @@ def main() -> None:
         default=0,
         help="Optional sleep after upload (e.g. 5) to allow Lambda to start",
     )
+    parser.add_argument(
+        "--admin-profile",
+        default=None,
+        help=f"Required for this S3 upload (must be {ADMIN_PROFILE}).",
+    )
     args = parser.parse_args()
 
     if args.file:
@@ -135,7 +149,18 @@ def main() -> None:
             csv_path = found
         print(f"Using: {csv_path}")
 
-    if not upload_file(str(csv_path), bucket=args.bucket):
+    if args.admin_profile != ADMIN_PROFILE:
+        parser.error(f"the upload requires --admin-profile {ADMIN_PROFILE}")
+    try:
+        session = verified_session(
+            args.admin_profile,
+            purpose="admin",
+            region=os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-west-1")),
+        )
+    except AwsProfileContractError as error:
+        parser.error(f"{error.error_code}: {error.detail}")
+
+    if not upload_file(str(csv_path), bucket=args.bucket, session=session):
         return
     if args.wait_seconds > 0:
         print(f"Waiting {args.wait_seconds}s ...")

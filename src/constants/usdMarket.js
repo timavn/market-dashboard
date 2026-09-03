@@ -3,6 +3,8 @@
 export const USD_METRICS = [
   { symbol: 'FXVL', name: 'G5 FX 1M Vol', provider: 'CME CVOL or Yahoo G5 realized' },
   { symbol: 'SPX', name: 'S&P 500', yahooTicker: '^GSPC' },
+  { symbol: 'NDX', name: 'Nasdaq-100', yahooTicker: '^NDX' },
+  { symbol: 'WTI', name: 'WTI', yahooTicker: 'CL=F' },
   { symbol: 'BRENT', name: 'Brent', yahooTicker: 'BZ=F' },
   { symbol: 'CRB', name: 'CRB Index', yahooTicker: '^TRCCRB' },
   { symbol: 'GOLD', name: 'Gold', yahooTicker: 'GC=F' },
@@ -20,12 +22,11 @@ export const CURRENCY_PAIRS = [
 ];
 
 export const CORRELATION_PERIODS = Object.freeze([
-  Object.freeze({ key: '5D', label: '5D' }),
   Object.freeze({ key: '15D', label: '15D' }),
   Object.freeze({ key: '30D', label: '30D' }),
-  Object.freeze({ key: '1M', label: '1M' }),
-  Object.freeze({ key: '3M', label: '3M' }),
-  Object.freeze({ key: '6M', label: '6M' }),
+  Object.freeze({ key: '90D', label: '90D' }),
+  Object.freeze({ key: '120D', label: '120D' }),
+  Object.freeze({ key: '180D', label: '180D' }),
 ]);
 
 export const CORRELATION_COLORS = {

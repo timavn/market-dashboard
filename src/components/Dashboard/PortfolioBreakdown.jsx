@@ -1,7 +1,7 @@
-import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Card } from '@tremor/react';
-import { CalendarClock, ChevronDown, Download, Filter, RefreshCw, Search, X } from 'lucide-react';
+import { ChevronDown, Download, Filter, RefreshCw, Search, X } from 'lucide-react';
 import {
   separateLongsAndShorts,
   formatPerformance
@@ -18,10 +18,22 @@ import {
   resolveSecurityExposureProfile,
 } from '../../constants/quadExposureCatalog';
 import expectedValuesData from '../../constants/expectedValuesData';
+import { getLeveragedProducts } from '../../constants/leveragedProductCatalog';
 import { MarketDataService } from '../../services/api/marketDataService';
-import { retainHistoricalVolatilityRows } from '../../hooks/useVolatilitySnapshot';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import {
+  canonicalProductState,
+  isCanonicalSecurityIntelligence,
+} from '../../utils/securityIntelligenceV2';
+import {
+  isCanonicalResearchBias,
+  normalizeResearchBias,
+} from '../../utils/researchBias.cjs';
 import { useSurfaceActivity } from '../common/PersistentSurface';
+import DelayedDataMarker from './DelayedDataMarker';
 import { resolveSizingVolatility } from '../../utils/realizedVolatility.cjs';
+import { isRefreshDelayedVolatilityRow } from '../../utils/volatilitySnapshotRows';
+import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 import {
   FACTOR_EXPOSURE_TABS,
   buildPortfolioFactorExposure,
@@ -194,6 +206,82 @@ const ASSET_CLASS_ABBREVIATIONS = {
   Cryptocurrency: 'CRYPTO',
 };
 
+const leveragedDirectionClass = (leverage) => {
+  const normalizedLeverage = String(leverage || '').trim();
+  if (/^[−-]/.test(normalizedLeverage)) return 'is-negative';
+  if (/^\+/.test(normalizedLeverage)) return 'is-positive';
+  return 'is-neutral';
+};
+
+const LEVERAGED_PRODUCTS_FIT_GUTTER_PX = 4;
+
+export const calculateLeveragedProductsFitScale = (availableWidth, contentWidth) => {
+  const available = Number(availableWidth);
+  const content = Number(contentWidth);
+  if (!Number.isFinite(available) || !Number.isFinite(content) || available <= 0 || content <= 0) {
+    return 1;
+  }
+  const usableWidth = Math.max(1, available - LEVERAGED_PRODUCTS_FIT_GUTTER_PX);
+  return Math.min(1, usableWidth / content);
+};
+
+function LeveragedProductsFitRow({ symbol, signature, children }) {
+  const viewportRef = useRef(null);
+  const contentRef = useRef(null);
+  const [scale, setScale] = useState(1);
+
+  const fitContent = useCallback(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    const naturalWidth = Math.max(content.scrollWidth, content.offsetWidth);
+    const nextScale = calculateLeveragedProductsFitScale(viewport.clientWidth, naturalWidth);
+    setScale((currentScale) => (
+      Math.abs(currentScale - nextScale) < 0.0005 ? currentScale : nextScale
+    ));
+  }, []);
+
+  useLayoutEffect(() => {
+    fitContent();
+    let cancelled = false;
+    const ResizeObserverCtor = typeof window !== 'undefined' ? window.ResizeObserver : null;
+    const handleResize = () => fitContent();
+    const observer = ResizeObserverCtor ? new ResizeObserverCtor(handleResize) : null;
+    if (observer) {
+      if (viewportRef.current) observer.observe(viewportRef.current);
+      if (contentRef.current) observer.observe(contentRef.current);
+    } else if (typeof window !== 'undefined') {
+      window.addEventListener('resize', handleResize);
+    }
+    if (typeof document !== 'undefined' && document.fonts?.ready) {
+      document.fonts.ready.then(() => {
+        if (!cancelled) fitContent();
+      });
+    }
+    return () => {
+      cancelled = true;
+      observer?.disconnect();
+      if (!observer && typeof window !== 'undefined') {
+        window.removeEventListener('resize', handleResize);
+      }
+    };
+  }, [fitContent, signature]);
+
+  return (
+    <div
+      ref={viewportRef}
+      className="pcv2-leveraged-products"
+      data-testid={`leveraged-products-${symbol}`}
+      data-fit-scale={scale.toFixed(4)}
+      style={{ '--pcv2-leveraged-products-scale': scale }}
+    >
+      <div ref={contentRef} className="pcv2-leveraged-products-content">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 const isCashHolding = (holding) => {
   const symbol = (holding?.symbol || '').toUpperCase();
   const assetClass = (holding?.assetClass || holding?.assetType || '').toLowerCase();
@@ -344,6 +432,7 @@ const getVerifiedHoldingMark = (holding, verifiedPortfolioMarks) => {
       state: 'live',
       ariaLabel: `Live price ${formatPrice(price)}`,
       title: `Verified live IBKR last · observed ${holding.priceObservedAt}`,
+      updatedAt: holding.priceObservedAt,
     };
   }
   if (isVerifiedHistoricalDisplayMark(holding)) {
@@ -352,6 +441,7 @@ const getVerifiedHoldingMark = (holding, verifiedPortfolioMarks) => {
       state: 'historical_close',
       ariaLabel: `Prior close ${formatPrice(price)} from ${holding.priceSessionDate}`,
       title: `Verified completed-session close from ${holding.priceSessionDate}; reference only`,
+      updatedAt: holding.priceObservedAt || holding.priceSessionDate,
     };
   }
   return null;
@@ -393,9 +483,42 @@ const csvEscape = (value) => {
   return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 };
 
+// The history response normally contains the current envelope too, but merge
+// it with the already-painted current response defensively. This prevents a
+// slower history request from replacing a verified current decision with a
+// partial/older-shaped payload.
+const mergeSecurityIntelligenceResponses = (currentData, historyData) => {
+  if (!currentData || !historyData) return historyData || currentData || null;
+  const currentWrapped = Boolean(currentData?.data?.bySymbol);
+  const historyWrapped = Boolean(historyData?.data?.bySymbol);
+  const currentPayload = currentWrapped ? currentData.data : currentData;
+  const historyPayload = historyWrapped ? historyData.data : historyData;
+  if (!currentPayload?.bySymbol || !historyPayload?.bySymbol) return historyData;
+
+  const bySymbol = { ...historyPayload.bySymbol };
+  Object.entries(currentPayload.bySymbol).forEach(([symbol, currentEntry]) => {
+    bySymbol[symbol] = {
+      ...(historyPayload.bySymbol[symbol] || {}),
+      ...(currentEntry || {}),
+    };
+  });
+  const mergedPayload = {
+    ...historyPayload,
+    ...currentPayload,
+    bySymbol,
+  };
+  return historyWrapped
+    ? { ...historyData, data: mergedPayload }
+    : mergedPayload;
+};
+
+const RESEARCH_CURRENT_HISTORY_DAYS = 0;
 const RESEARCH_HISTORY_DAYS = 5;
 const RESEARCH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const RISK_METRICS_BATCH_SIZE = 50;
+// Keep the first verified risk response small enough to paint quickly. The
+// expanded card can request the remaining rows progressively without making
+// the whole portfolio appear wedged behind one large request.
+const RISK_METRICS_BATCH_SIZE = 8;
 // The API's productCoverage array is authoritative. This small mirror only
 // keeps the fail-closed UI useful before a first response (or after a request
 // failure), without introducing another request or coupling the bundle to
@@ -403,7 +526,6 @@ const RISK_METRICS_BATCH_SIZE = 50;
 const RESEARCH_FALLBACK_PRODUCTS = Object.freeze([
   ['risk-ranges', 'Risk Ranges', 'market_day_0800'],
   ['early-look', 'Early Look', 'event_driven'],
-  ['crypto-quant', 'Crypto Quant', 'event_driven'],
   ['bitcoin-trend-tracker', 'Bitcoin Tracker', 'event_driven'],
   ['portfolio-solutions', 'Portfolio Solutions', 'event_driven'],
   ['momo-tracker', 'MOMO Tracker', 'event_driven'],
@@ -411,12 +533,18 @@ const RESEARCH_FALLBACK_PRODUCTS = Object.freeze([
   ['real-time-alert', 'Real-Time Alerts', 'event_driven'],
   ['the-macro-show', 'Macro Show', 'event_driven'],
   ['the-call', 'The Call', 'event_driven'],
-  ['volume', 'Volume / Market Structure', 'event_driven'],
-  ['market-structure', 'Market Situation Report', 'event_driven'],
-  ['cftc-positioning', 'CFTC Positioning', 'weekly'],
   ['etf-pro', 'ETF Pro', 'event_driven'],
   ['investing-ideas', 'Investing Ideas', 'event_driven'],
 ]);
+const SECURITY_RESEARCH_EXCLUDED_PRODUCTS = new Set([
+  'cftc-positioning',
+  'crypto-quant',
+  'market-structure',
+  'volume',
+]);
+// Security-specific trackers should render only when the publication has a
+// verified reference for this symbol; a blank placeholder implies coverage.
+const SECURITY_RESEARCH_REFERENCE_REQUIRED_PRODUCTS = new Set(['momo-tracker']);
 const RESEARCH_REFERENCE_KIND_PRIORITY = Object.freeze({
   primary_risk_range: 130,
   supplemental_risk_range: 125,
@@ -430,6 +558,7 @@ const RESEARCH_REFERENCE_KIND_PRIORITY = Object.freeze({
   signal_strength_membership: 125,
   etf_pro_change: 120,
   real_time_alert: 120,
+  investing_idea_position: 125,
   portfolio_solutions_mover: 115,
   position_mention: 115,
   position_change: 110,
@@ -444,6 +573,7 @@ const RESEARCH_REFERENCE_KIND_PRIORITY = Object.freeze({
   summary_mention: 60,
   mention: 60,
 });
+const DIRECT_RESEARCH_MATCH_TYPES = new Set(['direct', 'direct_alias']);
 const VOLATILITY_INDEX_META = Object.freeze({
   VIX: Object.freeze({ key: 'VIX', label: 'VIX', symbol: 'VIX' }),
   RVX: Object.freeze({ key: 'RVX', label: 'RVX', symbol: 'RVX' }),
@@ -573,6 +703,24 @@ const formatResearchSourceDate = (value) => {
   }).format(parsed);
 };
 
+const isVerifiedHoldingsOverlap = (value) => {
+  if (
+    value?.available !== true
+    || value?.status !== 'available'
+    || value?.fromCache !== false
+    || !Number.isFinite(Number(value?.weightedOverlapPct))
+    || !Number.isFinite(Number(value?.sharedHoldings))
+    || !normalizeResearchDate(value?.asOf)
+    || !Array.isArray(value?.sources)
+    || value.sources.length < 2
+  ) {
+    return false;
+  }
+  const asOfTimestamp = Date.parse(`${normalizeResearchDate(value.asOf)}T12:00:00Z`);
+  const age = Date.now() - asOfTimestamp;
+  return age >= -(24 * 60 * 60 * 1000) && age <= (7 * 24 * 60 * 60 * 1000);
+};
+
 const formatResearchTime = (value) => {
   if (!value || typeof value !== 'string' || !value.includes('T')) return '—';
   const parsed = new Date(value);
@@ -638,6 +786,7 @@ const metricToneForValue = (value) => {
   if (['HISTORICAL', 'REFERENCE'].includes(normalized)) {
     return 'is-reference';
   }
+  if (normalized === 'NEUTRAL') return 'is-neutral';
   return '';
 };
 
@@ -881,10 +1030,11 @@ const formatEmbeddedResearchJson = (value) => {
     const lrr = formatResearchReferenceNumber(parsed.lrr ?? parsed.low ?? parsed.riskRangeLow);
     const hrr = formatResearchReferenceNumber(parsed.hrr ?? parsed.high ?? parsed.riskRangeHigh);
     if (lrr !== null || hrr !== null) {
+      const trend = normalizeResearchBias(parsed.trend);
       return [
         symbol || null,
         `LRR ${lrr || '—'} – HRR ${hrr || '—'}`,
-        parsed.trend ? `Trend ${String(parsed.trend).toUpperCase()}` : null,
+        trend ? `Trend ${trend}` : null,
       ].filter(Boolean).join(' · ');
     }
     const rank = formatResearchReferenceNumber(parsed.rank);
@@ -909,7 +1059,7 @@ const formatResearchReferenceDetail = (reference) => {
   const text = formatEmbeddedResearchJson(rawText)
     || normalizeResearchReferenceText(rawText);
   if (!text) return null;
-  const direction = String(reference?.direction || '').trim().toUpperCase();
+  const direction = displayDirectionForReference(reference);
   if (!direction) return text;
   const escapedDirection = direction.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const directionAlreadyLabeled = new RegExp(
@@ -949,13 +1099,8 @@ const isResearchBoilerplate = (value) => {
   return /^[A-Z0-9./=^_-]{1,20}$/.test(text);
 };
 
-const researchReferenceIsMapped = (reference) => (
-  String(reference?.matchType || '').trim().toLowerCase() === 'inferred_exposure'
-);
-
 const researchEvidenceScore = (reference, detail) => (
   researchReferenceScore(reference, detail)
-  + (researchReferenceIsMapped(reference) ? -18 : 0)
   + (reference?.matchedText ? 5 : 0)
 );
 
@@ -974,8 +1119,7 @@ const compactResearchEvidence = (productId, references) => {
         : Number.NEGATIVE_INFINITY,
     };
   }).filter((item) => item.detail && Number.isFinite(item.score)).sort((left, right) => (
-    Number(researchReferenceIsMapped(left.reference)) - Number(researchReferenceIsMapped(right.reference))
-    || right.score - left.score
+    right.score - left.score
     || String(left.reference?.publishedAt || '').localeCompare(String(right.reference?.publishedAt || ''))
     || right.rawText.length - left.rawText.length
   ));
@@ -1050,6 +1194,48 @@ const researchLabeledValue = (value, labelPattern) => {
   return normalizeResearchReferenceText(match?.[1]);
 };
 
+const RESEARCH_BIAS_REFERENCE_KINDS = new Set([
+  'primary_risk_range',
+  'historical_risk_range',
+  'risk_range',
+  'supplemental_risk_range',
+  'tracker_trade',
+  'trade_signal',
+  'investing_idea_position',
+]);
+
+const structuredResearchBiasValue = (reference) => {
+  const kind = String(reference?.kind || '').trim().toLowerCase();
+  if (!RESEARCH_BIAS_REFERENCE_KINDS.has(kind)) return null;
+  const rawValue = reference?.value;
+  const valueCandidate = rawValue && typeof rawValue === 'object'
+    ? rawValue.bias
+      ?? rawValue.trend
+      ?? rawValue.direction
+      ?? rawValue.trade
+      ?? rawValue.signal
+      ?? (kind === 'investing_idea_position' ? rawValue.side : null)
+    : rawValue;
+  const fromValue = normalizeResearchBias(valueCandidate);
+  if (fromValue) return fromValue;
+
+  // POSITIVE/NEGATIVE are frequently narrative sentiment markers. Only use
+  // an already-canonical direction as a fallback when no structured value is
+  // present, so prose cannot become a decision-grade bias.
+  return isCanonicalResearchBias(reference?.direction)
+    ? normalizeResearchBias(reference.direction)
+    : null;
+};
+
+const displayDirectionForReference = (reference) => {
+  const kind = String(reference?.kind || '').trim().toLowerCase();
+  if (RESEARCH_BIAS_REFERENCE_KINDS.has(kind)) {
+    return structuredResearchBiasValue(reference);
+  }
+  const direction = String(reference?.direction || '').trim().toUpperCase();
+  return direction || null;
+};
+
 const buildStructuredResearchFacts = (productId, evidence, symbol) => {
   const reference = evidence?.reference || {};
   const kind = String(evidence?.kind || reference.kind || '').trim().toLowerCase();
@@ -1068,7 +1254,7 @@ const buildStructuredResearchFacts = (productId, evidence, symbol) => {
       ? formatResearchReferenceNumber(rankMatch?.[1])
       : formatResearchReferenceNumber(rankValue);
     if (rank && normalizedSymbol) {
-      add('rank', `${normalizedSymbol} is ranked #${rank} in today’s ETF re-rank`);
+      add('rank', `${normalizedSymbol} is ranked #${rank} today`);
     }
 
     const sizing = researchLabeledValue(text, '(?:position\\s+)?sizing');
@@ -1105,13 +1291,34 @@ const buildStructuredResearchFacts = (productId, evidence, symbol) => {
       rangeValue.hrr ?? rangeValue.high ?? (hrrMatch ? Number(hrrMatch[1].replace(/,/g, '')) : null),
     );
     if (lrr && hrr && normalizedSymbol) add('riskRange', `${normalizedSymbol} risk range is ${lrr}–${hrr}`);
-    const trend = String(reference.direction || rangeValue.trend || '').trim().toUpperCase();
+    const trend = structuredResearchBiasValue({
+      ...reference,
+      value: rangeValue,
+    });
     if (trend && normalizedSymbol) add('trend', `${normalizedSymbol} trend is ${trend}`);
     return facts;
   }
 
+  if (kind === 'investing_idea_position') {
+    const value = reference.value && typeof reference.value === 'object' ? reference.value : {};
+    const side = String(value.side || value.position || '').trim().toUpperCase();
+    const bias = normalizeResearchBias(
+      value.bias || (side === 'LONG' ? 'BULLISH' : side === 'SHORT' ? 'BEARISH' : ''),
+    );
+    const previousClose = finiteOptionalNumber(value.prevClose ?? value.previousClose);
+    const lrr = finiteOptionalNumber(value.lrr);
+    const hrr = finiteOptionalNumber(value.hrr);
+    if (side && normalizedSymbol) add('position', `${normalizedSymbol} Investing Ideas position is ${side}`);
+    if (bias && normalizedSymbol) add('bias', `${normalizedSymbol} Investing Ideas bias is ${bias}`);
+    if (previousClose !== null) add('previousClose', `Previous close is ${formatResearchReferenceNumber(previousClose)}`);
+    if (lrr !== null && hrr !== null && lrr <= hrr && normalizedSymbol) {
+      add('riskRange', `${normalizedSymbol} Investing Ideas risk range is ${formatResearchReferenceNumber(lrr)}–${formatResearchReferenceNumber(hrr)}`);
+    }
+    return facts;
+  }
+
   if (['tracker_trade', 'trade_signal'].includes(kind)) {
-    const trade = String(reference.direction || reference.value || '').trim().toUpperCase();
+    const trade = structuredResearchBiasValue(reference);
     if (trade && normalizedSymbol) add('trade', `${normalizedSymbol} trade signal is ${trade}`);
     const buyTrade = researchLabeledValue(text, 'buy\\s+trade');
     if (buyTrade) add('buyTrade', `Buy Trade is ${buyTrade}`);
@@ -1232,11 +1439,7 @@ const buildResearchFactLines = (productId, evidence, symbol) => {
   const selected = [];
   candidates.some((candidate) => {
     if (!candidate.text) return false;
-    const mapped = researchReferenceIsMapped(candidate.reference);
-    const mappedLabel = normalizeResearchReferenceText(
-      candidate.reference?.exposureLabel || candidate.reference?.matchedText || 'controlled exposure',
-    );
-    const text = mapped ? `Mapped from ${mappedLabel}: ${candidate.text}` : candidate.text;
+    const text = candidate.text;
     const normalized = normalizeResearchReferenceText(text).toLowerCase();
     const duplicate = selected.some((item) => (
       item.key === candidate.key
@@ -1332,7 +1535,13 @@ const buildResearchProductRows = ({
   const groups = new Map();
   if (includeEmptyProducts && !groupByDate) {
     productsById.forEach((product, productId) => {
-      if (!productId || productId === 'unknown' || product?.cadence === 'unsupported') return;
+      if (
+        !productId
+        || productId === 'unknown'
+        || SECURITY_RESEARCH_EXCLUDED_PRODUCTS.has(productId)
+        || SECURITY_RESEARCH_REFERENCE_REQUIRED_PRODUCTS.has(productId)
+        || product?.cadence === 'unsupported'
+      ) return;
       groups.set(productId, {
         key: productId,
         productId,
@@ -1345,7 +1554,12 @@ const buildResearchProductRows = ({
   references.forEach((reference) => {
     const productId = getResearchProductId(reference);
     const referenceDate = getResearchDatumDate(reference);
-    if (!productId || productId === 'unknown' || !referenceDate) return;
+    if (
+      !productId
+      || productId === 'unknown'
+      || SECURITY_RESEARCH_EXCLUDED_PRODUCTS.has(productId)
+      || !referenceDate
+    ) return;
     const product = productsById.get(productId) || null;
     if (requireCurrentIndexed && (
       !product
@@ -1433,6 +1647,130 @@ const buildResearchProductRows = ({
   });
 };
 
+const canonicalNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? number.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    : value === null || value === undefined || value === '' ? '—' : String(value);
+};
+
+const buildCanonicalResearchProductRows = ({
+  security,
+  productOrder = new Map(),
+  marketDate = null,
+}) => Object.values(security?.products || {})
+  .filter((product) => {
+    const productId = String(product?.id || '').trim().toLowerCase();
+    return productId
+      && !SECURITY_RESEARCH_EXCLUDED_PRODUCTS.has(productId)
+      && !SECURITY_RESEARCH_REFERENCE_REQUIRED_PRODUCTS.has(productId);
+  })
+  .map((product) => {
+    const productId = String(product.id).trim().toLowerCase();
+    const state = canonicalProductState(product);
+    const fields = product.fields || {};
+    const factLines = [];
+    const addField = (label, field, formatter = canonicalNumber) => {
+      if (!field || field.value === null || field.value === undefined || field.value === '') return;
+      factLines.push(`${label} ${formatter(field.value)}`);
+    };
+    const addBiasField = (label, field) => {
+      const value = normalizeResearchBias(field?.value);
+      if (value) factLines.push(`${label} ${value}`);
+    };
+
+    if (state === 'available') {
+      if (productId === 'portfolio-solutions') {
+        // Portfolio Solutions has a product-specific fact vocabulary. Do not
+        // let the derived BULLISH trade/trend fields displace the useful rank
+        // headline in the collapsed row.
+        const canonicalEvidence = (fields.facts || []).map((fact, index) => ({
+          reference: {
+            ...fact,
+            id: fact?.sourceEventId || `${productId}-${index}`,
+            productId,
+            productLabel: product.label,
+            matchedText: security?.symbol || null,
+            kind: fact?.kind,
+            value: fact?.value,
+            excerpt: fact?.excerpt || null,
+          },
+          rawText: fact?.excerpt || '',
+        }));
+        const structuredFactLines = buildResearchFactLines(
+          productId,
+          canonicalEvidence,
+          security?.symbol,
+        ).map((fact) => fact.text).filter(Boolean);
+        factLines.push(...structuredFactLines);
+        if (factLines.length === 0 && fields.rank?.value !== null && fields.rank?.value !== undefined) {
+          const canonicalSymbol = String(security?.symbol || '').trim().toUpperCase();
+          if (canonicalSymbol) {
+            factLines.push(`${canonicalSymbol} is ranked #${canonicalNumber(fields.rank.value)} today.`);
+          }
+        }
+      } else {
+        addBiasField('Trade', fields.trade);
+        addBiasField('Trend', fields.trend);
+        if (fields.bias?.value) {
+          const bias = normalizeResearchBias(fields.bias.value);
+          factLines.push([
+            fields.side || fields.bias.side || null,
+            bias ? `Bias ${bias}` : null,
+          ].filter(Boolean).join(' · '));
+        }
+        if (fields.riskRange?.value) {
+          const range = fields.riskRange.value;
+          factLines.push(`LRR ${canonicalNumber(range.lrr)} – HRR ${canonicalNumber(range.hrr)}`);
+        }
+        if (fields.previousClose !== null && fields.previousClose !== undefined) {
+          factLines.push(`Previous close ${canonicalNumber(fields.previousClose)}`);
+        }
+        addField('Action', fields.action);
+        addField('Rank', fields.rank);
+        addField('Sizing', fields.sizing);
+        (fields.facts || []).forEach((fact) => {
+          if (fact?.excerpt && !factLines.includes(fact.excerpt)) factLines.push(fact.excerpt);
+        });
+      }
+      if (factLines.length === 0) factLines.push('Verified current structured row');
+    }
+
+    const firstFact = (fields.facts || [])[0] || {};
+    const reference = {
+      id: `${product.marketDate || marketDate || 'current'}-${productId}-canonical-row`,
+      productId,
+      productLabel: product.label,
+      marketDate: product.marketDate || marketDate,
+      publishedAt: product.publishedAt || firstFact.publishedAt || null,
+      sourceUrl: product.sourceUrl || firstFact.sourceUrl || null,
+      sourceEventId: firstFact.sourceEventId || product.evidenceIds?.[0] || null,
+      qualityStatus: product.qualityStatus || firstFact.qualityStatus || null,
+      matchType: 'direct',
+      excerpt: factLines.join(' · ') || null,
+    };
+
+    return {
+      key: productId,
+      productId,
+      productLabel: product.label || productId,
+      marketDate: product.marketDate || marketDate,
+      publishedAt: product.publishedAt || firstFact.publishedAt || null,
+      referenceCount: product.evidenceIds?.length || 0,
+      references: [reference],
+      evidence: fields.facts || [],
+      factLines,
+      status: state,
+      state,
+      reference,
+    };
+  })
+  .sort((left, right) => (
+    (productOrder.get(left.productId) ?? Number.MAX_SAFE_INTEGER)
+      - (productOrder.get(right.productId) ?? Number.MAX_SAFE_INTEGER)
+    || left.productLabel.localeCompare(right.productLabel)
+  ));
+
 const CONTROLLED_EXPOSURE_TYPES = new Set([
   'factor',
   'sector',
@@ -1497,12 +1835,19 @@ const PortfolioBreakdown = ({
   const [expandedResearchRows, setExpandedResearchRows] = useState(() => new Set());
   const [expandedResearchProducts, setExpandedResearchProducts] = useState(() => new Set());
   const [metricVerification, setMetricVerification] = useState(null);
+  const [leveragedProductModal, setLeveragedProductModal] = useState(null);
+  const [leveragedOverlapState, setLeveragedOverlapState] = useState({
+    status: 'idle',
+    data: null,
+  });
   const [researchMarketDate, setResearchMarketDate] = useState(null);
   const [researchState, setResearchState] = useState({
     status: 'idle',
     data: null,
     error: null,
     symbolsKey: null,
+    historyStatus: 'idle',
+    historyError: null,
   });
   const [marketContextState, setMarketContextState] = useState({
     status: 'idle',
@@ -1510,12 +1855,28 @@ const PortfolioBreakdown = ({
     volatility: null,
     usdCorrelations: null,
     errors: {},
+    sourceStatus: {
+      riskMetrics: 'idle',
+      volatility: 'idle',
+      usdCorrelations: 'idle',
+    },
   });
   const [factorExposureDimension, setFactorExposureDimension] = useState('equityStyleFactors');
   const [selectedFactorExposureId, setSelectedFactorExposureId] = useState(null);
   const [manualResearchRefreshKey, setManualResearchRefreshKey] = useState(0);
   const researchRequestSequence = useRef(0);
+  const researchHistoryRequestSequence = useRef(0);
+  const researchHistoryStartedKeyRef = useRef(null);
+  const researchHistoryLoadedKeyRef = useRef(null);
+  const researchLoadedKeyRef = useRef(null);
+  const researchRefreshCompletedAtRef = useRef(0);
+  const researchManualRefreshKeyRef = useRef(manualResearchRefreshKey);
   const marketContextRequestSequence = useRef(0);
+  const marketContextLoadedKeyRef = useRef(null);
+  const marketContextRefreshCompletedAtRef = useRef(0);
+  const marketContextManualRefreshKeyRef = useRef(manualResearchRefreshKey);
+  const priorityRiskRequestsRef = useRef(new Map());
+  const riskMetricsInFlightSymbolsRef = useRef(new Set());
   const researchProductRowsCacheRef = useRef(new WeakMap());
   const researchFallbackPayloadRef = useRef({});
   const lastVerifiedRiskMetricsRef = useRef(null);
@@ -1528,6 +1889,45 @@ const PortfolioBreakdown = ({
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [active, metricVerification]);
+
+  useEffect(() => {
+    if (!active || !leveragedProductModal) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setLeveragedProductModal(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [active, leveragedProductModal]);
+
+  useEffect(() => {
+    const baseSymbol = leveragedProductModal?.baseSymbol;
+    const referenceSymbol = leveragedProductModal?.product?.overlapReferenceSymbol;
+    if (!active || !baseSymbol || !referenceSymbol) {
+      setLeveragedOverlapState({ status: 'idle', data: null });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setLeveragedOverlapState({ status: 'loading', data: null });
+    MarketDataService.getLeveragedProductOverlap({
+      baseSymbol,
+      referenceSymbol,
+      signal: controller.signal,
+    }).then((data) => {
+      if (controller.signal.aborted) return;
+      setLeveragedOverlapState(isVerifiedHoldingsOverlap(data)
+        ? { status: 'available', data }
+        : { status: 'unavailable', data: null });
+    }).catch((error) => {
+      if (controller.signal.aborted || error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') return;
+      setLeveragedOverlapState({ status: 'unavailable', data: null });
+    });
+    return () => controller.abort();
+  }, [
+    active,
+    leveragedProductModal?.baseSymbol,
+    leveragedProductModal?.product?.overlapReferenceSymbol,
+  ]);
 
   const researchSymbols = useMemo(() => [...new Set(
     holdings
@@ -1589,13 +1989,23 @@ const PortfolioBreakdown = ({
     const symbols = researchSymbolsKey ? researchSymbolsKey.split(',') : [];
     const requestSequence = researchRequestSequence.current + 1;
     researchRequestSequence.current = requestSequence;
+    const historyLoadedForSameKey = researchHistoryLoadedKeyRef.current === researchSymbolsKey;
+    if (!historyLoadedForSameKey) {
+      researchHistoryStartedKeyRef.current = null;
+      researchHistoryRequestSequence.current += 1;
+    }
 
     if (symbols.length === 0) {
+      researchHistoryLoadedKeyRef.current = null;
+      researchLoadedKeyRef.current = researchSymbolsKey;
+      researchRefreshCompletedAtRef.current = Date.now();
       setResearchState({
         status: 'empty',
         data: null,
         error: null,
         symbolsKey: researchSymbolsKey,
+        historyStatus: 'empty',
+        historyError: null,
       });
       return;
     }
@@ -1608,29 +2018,94 @@ const PortfolioBreakdown = ({
       data: current.symbolsKey === researchSymbolsKey ? current.data : null,
       error: null,
       symbolsKey: researchSymbolsKey,
+      historyStatus: historyLoadedForSameKey ? 'ready' : 'idle',
+      historyError: null,
     }));
     try {
-      const data = await MarketDataService.getSecurityIntelligence({
+      const data = await (SECURITY_INTELLIGENCE_V2_ENABLED
+        ? MarketDataService.getSecurityIntelligenceV2
+        : MarketDataService.getSecurityIntelligence)({
         symbols,
-        historyDays: RESEARCH_HISTORY_DAYS,
+        historyDays: RESEARCH_CURRENT_HISTORY_DAYS,
         signal,
       });
       if (signal?.aborted || researchRequestSequence.current !== requestSequence) return;
       const responseMarketDate = normalizeResearchDate(data?.marketDate);
+      researchLoadedKeyRef.current = researchSymbolsKey;
+      researchRefreshCompletedAtRef.current = Date.now();
       setResearchMarketDate(responseMarketDate);
-      setResearchState({
+      setResearchState((current) => ({
+        ...current,
         status: 'ready',
-        data,
+        data: mergeSecurityIntelligenceResponses(current.data, data),
         error: null,
         symbolsKey: researchSymbolsKey,
-      });
+        historyStatus: historyLoadedForSameKey ? 'ready' : 'idle',
+        historyError: null,
+      }));
     } catch (error) {
       if (signal?.aborted || researchRequestSequence.current !== requestSequence) return;
       setResearchState((current) => ({
+        ...current,
         status: 'error',
         data: current.symbolsKey === researchSymbolsKey ? current.data : null,
         error: error?.message || 'Verified research is unavailable.',
         symbolsKey: researchSymbolsKey,
+      }));
+    }
+  }, [researchSymbolsKey]);
+
+  const loadSecurityIntelligenceHistory = useCallback(async (signal) => {
+    const symbols = researchSymbolsKey ? researchSymbolsKey.split(',') : [];
+    if (symbols.length === 0) return;
+
+    const currentSequence = researchRequestSequence.current;
+    const requestSequence = researchHistoryRequestSequence.current + 1;
+    researchHistoryRequestSequence.current = requestSequence;
+    setResearchState((current) => ({
+      ...current,
+      historyStatus: 'loading',
+      historyError: null,
+    }));
+
+    try {
+      const data = await (SECURITY_INTELLIGENCE_V2_ENABLED
+        ? MarketDataService.getSecurityIntelligenceV2
+        : MarketDataService.getSecurityIntelligence)({
+        symbols,
+        historyDays: RESEARCH_HISTORY_DAYS,
+        signal,
+      });
+      if (
+        signal?.aborted
+        || researchRequestSequence.current !== currentSequence
+        || researchHistoryRequestSequence.current !== requestSequence
+      ) return;
+      const responseMarketDate = normalizeResearchDate(data?.marketDate);
+      setResearchMarketDate(responseMarketDate);
+      researchHistoryLoadedKeyRef.current = researchSymbolsKey;
+      setResearchState((current) => (
+        current.symbolsKey === researchSymbolsKey
+          ? {
+            ...current,
+            data: mergeSecurityIntelligenceResponses(current.data, data),
+            historyStatus: 'ready',
+            historyError: null,
+          }
+          : current
+      ));
+    } catch (error) {
+      if (
+        signal?.aborted
+        || researchRequestSequence.current !== currentSequence
+        || researchHistoryRequestSequence.current !== requestSequence
+      ) return;
+      researchHistoryLoadedKeyRef.current = null;
+      researchHistoryStartedKeyRef.current = null;
+      setResearchState((current) => ({
+        ...current,
+        historyStatus: 'error',
+        historyError: error?.message || 'Historical research is unavailable.',
       }));
     }
   }, [researchSymbolsKey]);
@@ -1641,12 +2116,19 @@ const PortfolioBreakdown = ({
     marketContextRequestSequence.current = requestSequence;
 
     if (symbols.length === 0) {
+      marketContextLoadedKeyRef.current = researchSymbolsKey;
+      marketContextRefreshCompletedAtRef.current = Date.now();
       setMarketContextState({
         status: 'empty',
         riskMetrics: null,
         volatility: null,
         usdCorrelations: null,
         errors: {},
+        sourceStatus: {
+          riskMetrics: 'empty',
+          volatility: 'empty',
+          usdCorrelations: 'empty',
+        },
       });
       return;
     }
@@ -1660,6 +2142,11 @@ const PortfolioBreakdown = ({
       volatility: current.volatility,
       usdCorrelations: current.usdCorrelations,
       errors: {},
+      sourceStatus: {
+        riskMetrics: 'loading',
+        volatility: 'loading',
+        usdCorrelations: 'loading',
+      },
     }));
 
     const symbolBatches = [];
@@ -1667,99 +2154,241 @@ const PortfolioBreakdown = ({
       symbolBatches.push(symbols.slice(index, index + RISK_METRICS_BATCH_SIZE));
     }
 
-    const [riskResult, volatilityResult, usdResult] = await Promise.allSettled([
-      Promise.all(symbolBatches.map((batch) => {
-        const batchAssetTypes = Object.fromEntries(
-          batch.map((symbol) => {
-            const match = researchAssetTypesKey
-              .split(',')
-              .find((pair) => pair.startsWith(`${symbol}:`));
-            const assetType = match ? match.slice(symbol.length + 1) : 'equity';
-            return [symbol, assetType || 'equity'];
-          }),
+    const sourceStatuses = ['loading', 'partial', 'ready', 'error', 'empty'];
+    const updateSource = (source, sourceStatus, patch = {}, sourceError = null) => {
+      if (marketContextRequestSequence.current !== requestSequence) return;
+      setMarketContextState((current) => {
+        const nextSourceStatus = {
+          ...(current.sourceStatus || {}),
+          [source]: sourceStatus,
+        };
+        const nextErrors = { ...(current.errors || {}) };
+        if (sourceError) nextErrors[source] = sourceError;
+        else delete nextErrors[source];
+        const statuses = Object.values(nextSourceStatus).filter((value) => sourceStatuses.includes(value));
+        const hasLoading = statuses.some((value) => value === 'loading' || value === 'idle');
+        const hasPartial = statuses.some((value) => value === 'partial');
+        const hasError = statuses.some((value) => value === 'error') || Object.keys(nextErrors).length > 0;
+        const allSettled = statuses.length === 3 && statuses.every((value) => (
+          ['ready', 'error', 'empty'].includes(value)
+        ));
+        return {
+          ...current,
+          ...patch,
+          sourceStatus: nextSourceStatus,
+          errors: nextErrors,
+          status: hasLoading
+            ? (hasPartial || hasError ? 'partial' : 'loading')
+            : allSettled && !hasError ? 'ready' : 'partial',
+        };
+      });
+    };
+
+    const loadVolatility = async () => {
+      try {
+        const value = await MarketDataService.getVolatilitySnapshot();
+        if (marketContextRequestSequence.current !== requestSequence) return;
+        const refreshDelayed = Object.values(value || {}).some((row) => (
+          isRefreshDelayedVolatilityRow(row)
+        ));
+        updateSource('volatility', refreshDelayed ? 'partial' : 'ready', { volatility: value });
+      } catch (error) {
+        if (marketContextRequestSequence.current !== requestSequence) return;
+        updateSource(
+          'volatility',
+          'error',
+          { volatility: null },
+          error?.message || 'Volatility indexes are unavailable.',
         );
-        return MarketDataService.getSecurityRiskMetrics(batch, {
+      }
+    };
+
+    const loadUsdCorrelations = async () => {
+      try {
+        const value = await MarketDataService.getUsdCorrelations();
+        if (marketContextRequestSequence.current !== requestSequence) return;
+        updateSource('usdCorrelations', 'ready', { usdCorrelations: value });
+      } catch (error) {
+        if (marketContextRequestSequence.current !== requestSequence) return;
+        updateSource(
+          'usdCorrelations',
+          'error',
+          { usdCorrelations: null },
+          error?.message || 'USD correlations are unavailable.',
+        );
+      }
+    };
+
+    // These sources are independent of the heavier per-symbol historical
+    // metrics, so let each one paint as soon as it is verified.
+    const volatilityPromise = loadVolatility();
+    const usdCorrelationsPromise = loadUsdCorrelations();
+
+    let mergedRiskRows = {
+      ...(lastVerifiedRiskMetricsRef.current?.rows || {}),
+    };
+    let riskMetadata = lastVerifiedRiskMetricsRef.current || null;
+    let successfulBatches = 0;
+    let lastRiskError = null;
+    const assetTypeBySymbol = Object.fromEntries(
+      researchAssetTypesKey.split(',')
+        .filter(Boolean)
+        .map((pair) => {
+          const separator = pair.indexOf(':');
+          return separator > 0
+            ? [pair.slice(0, separator), pair.slice(separator + 1) || 'equity']
+            : [pair, 'equity'];
+        }),
+    );
+    for (const batch of symbolBatches) {
+      if (marketContextRequestSequence.current !== requestSequence) return;
+      const batchAssetTypes = Object.fromEntries(
+        batch.map((symbol) => [symbol, assetTypeBySymbol[symbol] || 'equity']),
+      );
+      batch.forEach((symbol) => riskMetricsInFlightSymbolsRef.current.add(symbol));
+      try {
+        const payload = await MarketDataService.getSecurityRiskMetrics(batch, {
           assetTypes: batchAssetTypes,
         });
-      })),
-      MarketDataService.getVolatilitySnapshot(),
-      MarketDataService.getUsdCorrelations(),
-    ]);
-    if (marketContextRequestSequence.current !== requestSequence) return;
-
-    const riskPayloads = riskResult.status === 'fulfilled' ? riskResult.value : [];
-    const riskContractVerified = riskPayloads.length > 0 && riskPayloads.every((payload) => (
-      payload?.historicalOnly === true
-      && payload?.executable === false
-      && payload?._cache?.stale !== true
-    ));
-    const fetchedRiskMetrics = riskContractVerified
-      ? {
-        ...riskPayloads[0],
-        rows: Object.assign({}, ...riskPayloads.map((payload) => payload?.rows || {})),
-        historicalOnly: true,
-        executable: false,
+        batch.forEach((symbol) => riskMetricsInFlightSymbolsRef.current.delete(symbol));
+        if (marketContextRequestSequence.current !== requestSequence) return;
+        const contractVerified = payload?.historicalOnly === true
+          && payload?.executable === false
+          && payload?._cache?.stale !== true;
+        if (!contractVerified) {
+          throw new Error('Historical security metrics failed the non-executable source contract.');
+        }
+        mergedRiskRows = {
+          ...mergedRiskRows,
+          ...(payload?.rows || {}),
+        };
+        riskMetadata = {
+          ...(riskMetadata || {}),
+          ...payload,
+          rows: mergedRiskRows,
+          historicalOnly: true,
+          executable: false,
+        };
+        successfulBatches += 1;
+        lastVerifiedRiskMetricsRef.current = riskMetadata;
+        updateSource(
+          'riskMetrics',
+          successfulBatches === symbolBatches.length ? 'ready' : 'partial',
+          { riskMetrics: riskMetadata },
+        );
+      } catch (error) {
+        batch.forEach((symbol) => riskMetricsInFlightSymbolsRef.current.delete(symbol));
+        if (marketContextRequestSequence.current !== requestSequence) return;
+        lastRiskError = error?.message || 'Historical security metrics are unavailable.';
+        updateSource(
+          'riskMetrics',
+          successfulBatches > 0 ? 'partial' : 'error',
+          { riskMetrics: riskMetadata || lastVerifiedRiskMetricsRef.current },
+          lastRiskError,
+        );
       }
-      : null;
-    if (fetchedRiskMetrics) {
-      lastVerifiedRiskMetricsRef.current = fetchedRiskMetrics;
-    }
-    const riskMetrics = fetchedRiskMetrics || lastVerifiedRiskMetricsRef.current;
-    const errors = {};
-    if (riskResult.status === 'rejected') {
-      errors.riskMetrics = riskResult.reason?.message || 'Historical security metrics are unavailable.';
-    } else if (!riskContractVerified) {
-      errors.riskMetrics = 'Historical security metrics failed the non-executable source contract.';
-    }
-    if (!fetchedRiskMetrics && riskMetrics) {
-      errors.riskMetrics = `${errors.riskMetrics} Last verified completed-session metrics retained.`;
-    }
-    if (volatilityResult.status === 'rejected') {
-      errors.volatility = volatilityResult.reason?.message || 'Volatility indexes are unavailable.';
-    }
-    if (usdResult.status === 'rejected') {
-      errors.usdCorrelations = usdResult.reason?.message || 'USD correlations are unavailable.';
     }
 
-    setMarketContextState((current) => ({
-      status: Object.keys(errors).length > 0 ? 'partial' : 'ready',
-      riskMetrics,
-      volatility: volatilityResult.status === 'fulfilled'
-        ? volatilityResult.value
-        : retainHistoricalVolatilityRows(current.volatility),
-      usdCorrelations: usdResult.status === 'fulfilled'
-        ? usdResult.value
-        : current.usdCorrelations,
-      errors,
-    }));
-  }, [researchSymbolsKey, researchAssetTypesKey]);
+    if (marketContextRequestSequence.current !== requestSequence) return;
+    if (successfulBatches === 0) {
+      updateSource(
+        'riskMetrics',
+        'error',
+        { riskMetrics: lastVerifiedRiskMetricsRef.current },
+        lastRiskError || 'Historical security metrics are unavailable.',
+      );
+    } else if (successfulBatches < symbolBatches.length) {
+      updateSource(
+        'riskMetrics',
+        'partial',
+        { riskMetrics: riskMetadata },
+        lastRiskError || 'Some historical security metrics are unavailable.',
+      );
+    }
+
+    await Promise.allSettled([volatilityPromise, usdCorrelationsPromise]);
+    if (marketContextRequestSequence.current !== requestSequence) return;
+    marketContextLoadedKeyRef.current = researchSymbolsKey;
+    marketContextRefreshCompletedAtRef.current = Date.now();
+  }, [researchAssetTypesKey, researchSymbolsKey]);
 
   useEffect(() => {
     if (!active) return undefined;
     const controller = new AbortController();
-    loadSecurityIntelligence(controller.signal);
-
-    const intervalId = window.setInterval(() => {
-      loadSecurityIntelligence(controller.signal);
-    }, RESEARCH_REFRESH_INTERVAL_MS);
+    const manualRefreshRequested = researchManualRefreshKeyRef.current !== manualResearchRefreshKey;
+    researchManualRefreshKeyRef.current = manualResearchRefreshKey;
+    const retainedForScope = researchLoadedKeyRef.current === researchSymbolsKey;
+    const elapsedMs = Date.now() - researchRefreshCompletedAtRef.current;
+    const initialDelayMs = manualRefreshRequested || !retainedForScope
+      ? 0
+      : Math.max(0, RESEARCH_REFRESH_INTERVAL_MS - elapsedMs);
+    if (initialDelayMs <= 0) loadSecurityIntelligence(controller.signal);
+    const stopPolling = startVisibilityAwarePolling({
+      poll: () => loadSecurityIntelligence(controller.signal),
+      intervalMs: RESEARCH_REFRESH_INTERVAL_MS,
+      initialDelayMs: initialDelayMs <= 0 ? RESEARCH_REFRESH_INTERVAL_MS : initialDelayMs,
+    });
 
     return () => {
       controller.abort();
-      window.clearInterval(intervalId);
+      stopPolling();
     };
-  }, [active, loadSecurityIntelligence, manualResearchRefreshKey]);
+  }, [active, loadSecurityIntelligence, manualResearchRefreshKey, researchSymbolsKey]);
+
+  // Historical product references are useful once a card is open, but they
+  // are not needed to paint the first expanded frame. Fetch them lazily after
+  // the current-day envelope is verified so an empty/slow history response
+  // cannot make the card look broken.
+  useEffect(() => {
+    if (
+      !active
+      || expandedResearchRows.size === 0
+      || !researchSymbolsKey
+      || researchState.status !== 'ready'
+      || researchHistoryStartedKeyRef.current === researchSymbolsKey
+    ) return undefined;
+
+    researchHistoryStartedKeyRef.current = researchSymbolsKey;
+    const controller = new AbortController();
+    loadSecurityIntelligenceHistory(controller.signal);
+    return () => {
+      controller.abort();
+      researchHistoryRequestSequence.current += 1;
+    };
+  }, [
+    active,
+    expandedResearchRows.size,
+    loadSecurityIntelligenceHistory,
+    manualResearchRefreshKey,
+    researchState.status,
+    researchSymbolsKey,
+  ]);
 
   useEffect(() => {
     if (!active) return undefined;
-    loadMarketContext();
-    const intervalId = window.setInterval(loadMarketContext, RESEARCH_REFRESH_INTERVAL_MS);
+    const manualRefreshRequested = marketContextManualRefreshKeyRef.current !== manualResearchRefreshKey;
+    marketContextManualRefreshKeyRef.current = manualResearchRefreshKey;
+    const retainedForScope = marketContextLoadedKeyRef.current === researchSymbolsKey;
+    const elapsedMs = Date.now() - marketContextRefreshCompletedAtRef.current;
+    const initialDelayMs = manualRefreshRequested || !retainedForScope
+      ? 0
+      : Math.max(0, RESEARCH_REFRESH_INTERVAL_MS - elapsedMs);
+    if (initialDelayMs <= 0) loadMarketContext();
+    const stopPolling = startVisibilityAwarePolling({
+      poll: loadMarketContext,
+      intervalMs: RESEARCH_REFRESH_INTERVAL_MS,
+      initialDelayMs: initialDelayMs <= 0 ? RESEARCH_REFRESH_INTERVAL_MS : initialDelayMs,
+    });
     return () => {
       marketContextRequestSequence.current += 1;
-      window.clearInterval(intervalId);
+      stopPolling();
     };
-  }, [active, loadMarketContext, manualResearchRefreshKey]);
+  }, [active, loadMarketContext, manualResearchRefreshKey, researchSymbolsKey]);
 
   const handleManualRefresh = useCallback(() => {
+    researchHistoryStartedKeyRef.current = null;
+    researchHistoryLoadedKeyRef.current = null;
+    researchHistoryRequestSequence.current += 1;
     setManualResearchRefreshKey((current) => current + 1);
     if (typeof onRefresh === 'function') {
       Promise.resolve(onRefresh()).catch(() => {
@@ -2998,19 +3627,13 @@ const PortfolioBreakdown = ({
       || nonBenignWarning
       || (!historicalReference && !markLoading && unavailableMark)
     );
-    if (!historicalReference && !markLoading && !hasError) return null;
+    if (!markLoading && !hasError) return null;
 
-    const state = hasError ? 'error' : historicalReference ? 'reference' : markLoading ? 'loading' : 'error';
-    const title = state === 'reference'
-      ? `EOD close${holding.priceSessionDate ? ` from ${holding.priceSessionDate}` : ''}; reference only, not a live executable mark`
-      : state === 'loading'
-        ? 'Live IBKR market mark is still loading; no executable price is shown'
-        : holding.warning || 'Verified live market mark is unavailable';
-    const ariaLabel = state === 'reference'
-      ? 'EOD reference close'
-      : state === 'loading'
-        ? 'Market mark loading'
-        : 'Bad data warning';
+    const state = hasError ? 'error' : 'loading';
+    const title = state === 'loading'
+      ? 'Live IBKR market mark is still loading; no executable price is shown'
+      : holding.warning || 'Verified live market mark is unavailable';
+    const ariaLabel = state === 'loading' ? 'Market mark loading' : 'Bad data warning';
 
     return (
       <span
@@ -3018,12 +3641,7 @@ const PortfolioBreakdown = ({
         aria-label={ariaLabel}
         title={title}
       >
-        {state === 'reference' ? (
-          <>
-            <CalendarClock size={11} strokeWidth={2} aria-hidden="true" />
-            <span aria-hidden="true">EOD</span>
-          </>
-        ) : state === 'loading' ? (
+        {state === 'loading' ? (
           <RefreshCw size={10} strokeWidth={2} aria-hidden="true" />
         ) : (
           <span aria-hidden="true">⚠</span>
@@ -3035,6 +3653,12 @@ const PortfolioBreakdown = ({
   const researchPayload = researchState.data?.data && researchState.data?.data?.bySymbol
     ? researchState.data.data
     : researchState.data;
+  const canonicalResearchPayload = isCanonicalSecurityIntelligence(researchPayload)
+    ? researchPayload
+    : null;
+  const canonicalResearchRequestFailed = SECURITY_INTELLIGENCE_V2_ENABLED
+    && researchState.status === 'error'
+    && researchState.symbolsKey === researchSymbolsKey;
   const researchEnvelopeStatus = String(
     researchPayload?.coverage?.state || researchPayload?.status || ''
   ).toLowerCase();
@@ -3120,12 +3744,12 @@ const PortfolioBreakdown = ({
     if (!entry || !researchEnvelopeIsCurrent) return [];
     const references = [
       ...normalizeReferences(entry.directReferences, 'direct'),
-      ...normalizeReferences(entry.inferredReferences, 'inferred_exposure'),
       ...normalizeReferences(entry.todayReferences, 'direct'),
       ...normalizeReferences(entry.current?.references, 'direct'),
     ];
     return uniqueReferences(references).filter((reference) => (
       getResearchDatumDate(reference) === researchMarketDate
+      && DIRECT_RESEARCH_MATCH_TYPES.has(String(reference?.matchType || '').trim().toLowerCase())
       && isVerifiedResearchReference(reference)
     ));
   };
@@ -3141,6 +3765,7 @@ const PortfolioBreakdown = ({
         const date = getResearchDatumDate(reference);
         return date
           && date !== researchMarketDate
+          && DIRECT_RESEARCH_MATCH_TYPES.has(String(reference?.matchType || '').trim().toLowerCase())
           && isVerifiedResearchReference(reference, { historical: true });
       })
       .sort((a, b) => String(getResearchDatumDate(b)).localeCompare(String(getResearchDatumDate(a))));
@@ -3221,6 +3846,98 @@ const PortfolioBreakdown = ({
     };
   };
 
+  const loadPriorityRiskMetrics = useCallback((symbol) => {
+    const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+    if (!normalizedSymbol) return Promise.resolve(null);
+    if (riskMetricsInFlightSymbolsRef.current.has(normalizedSymbol)) return Promise.resolve(null);
+    const riskSourceStatus = marketContextState.sourceStatus?.riskMetrics;
+    if (riskSourceStatus === 'loading') return Promise.resolve(null);
+    const existingRow = marketContextState.riskMetrics?.rows?.[normalizedSymbol];
+    if (
+      existingRow?.historicalOnly === true
+      && existingRow?.executable === false
+    ) return Promise.resolve(existingRow);
+    if (priorityRiskRequestsRef.current.has(normalizedSymbol)) {
+      return priorityRiskRequestsRef.current.get(normalizedSymbol);
+    }
+
+    const requestSequence = marketContextRequestSequence.current;
+    setMarketContextState((current) => {
+      const nextErrors = { ...(current.errors || {}) };
+      delete nextErrors.riskMetrics;
+      return {
+        ...current,
+        sourceStatus: {
+          ...(current.sourceStatus || {}),
+          riskMetrics: 'partial',
+        },
+        errors: nextErrors,
+        status: current.status === 'ready' ? 'partial' : current.status,
+      };
+    });
+    const promise = MarketDataService.getSecurityRiskMetrics([normalizedSymbol], {
+      assetTypes: {
+        [normalizedSymbol]: researchAssetTypes[normalizedSymbol] || 'equity',
+      },
+    })
+      .then((payload) => {
+        if (marketContextRequestSequence.current !== requestSequence) return null;
+        const contractVerified = payload?.historicalOnly === true
+          && payload?.executable === false
+          && payload?._cache?.stale !== true;
+        const row = payload?.rows?.[normalizedSymbol];
+        if (!contractVerified || !row || row.historicalOnly !== true || row.executable !== false) {
+          throw new Error('Verified historical risk metrics are unavailable for this holding.');
+        }
+        const prior = lastVerifiedRiskMetricsRef.current || marketContextState.riskMetrics || {};
+        const merged = {
+          ...prior,
+          ...payload,
+          rows: {
+            ...(prior.rows || {}),
+            ...(payload.rows || {}),
+          },
+          historicalOnly: true,
+          executable: false,
+        };
+        lastVerifiedRiskMetricsRef.current = merged;
+        setMarketContextState((current) => {
+          const nextErrors = { ...(current.errors || {}) };
+          delete nextErrors.riskMetrics;
+          return {
+            ...current,
+            riskMetrics: merged,
+            sourceStatus: {
+              ...(current.sourceStatus || {}),
+              riskMetrics: current.sourceStatus?.riskMetrics === 'ready' ? 'ready' : 'partial',
+            },
+            errors: nextErrors,
+          };
+        });
+        return row;
+      })
+      .catch((error) => {
+        if (marketContextRequestSequence.current !== requestSequence) return null;
+        setMarketContextState((current) => ({
+          ...current,
+          errors: {
+            ...(current.errors || {}),
+            riskMetrics: error?.message || 'Verified historical risk metrics are unavailable.',
+          },
+        }));
+        return null;
+      })
+      .finally(() => {
+        priorityRiskRequestsRef.current.delete(normalizedSymbol);
+      });
+    priorityRiskRequestsRef.current.set(normalizedSymbol, promise);
+    return promise;
+  }, [
+    marketContextState.riskMetrics,
+    marketContextState.sourceStatus?.riskMetrics,
+    researchAssetTypes,
+  ]);
+
   const getControlledOtherExposures = (entry) => normalizeControlledExposureTags(entry?.exposures)
     .filter((exposure) => exposure.type && exposure.type !== 'factor');
 
@@ -3267,6 +3984,55 @@ const PortfolioBreakdown = ({
     );
   };
 
+  const renderLeveragedProductsCell = (symbol) => {
+    const products = getLeveragedProducts(symbol);
+    const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+
+    if (products.length === 0) {
+      return renderMetricCell({
+        value: '—',
+        meta: 'No current leveraged product mapping',
+        title: `No current daily leveraged product mapping is configured for ${normalizedSymbol}.`,
+        tone: 'is-muted',
+        className: 'pcv2-leveraged-products-cell',
+        spanClassName: 'pcv2-intel-span-4',
+      });
+    }
+
+    return renderMetricCell({
+      value: null,
+      meta: products.map((productItem) => `${productItem.ticker} ${productItem.leverage}`).join(' · '),
+      title: `Leveraged product options for ${normalizedSymbol}.`,
+      className: 'pcv2-leveraged-products-cell',
+      spanClassName: 'pcv2-intel-span-4',
+      children: (
+        <LeveragedProductsFitRow
+          symbol={normalizedSymbol}
+          signature={products.map((productItem) => `${productItem.ticker}:${productItem.leverage}`).join('|')}
+        >
+          {products.map((productItem) => (
+            <button
+              key={productItem.ticker}
+              type="button"
+              className={`pcv2-leveraged-product-link ${leveragedDirectionClass(productItem.leverage)}${productItem.matchType === 'proxy' ? ' is-proxy' : ''}`}
+              aria-label={`View ${productItem.ticker} ${productItem.leverage} details for ${normalizedSymbol}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setLeveragedProductModal({
+                  baseSymbol: normalizedSymbol,
+                  product: productItem,
+                });
+              }}
+            >
+              <span className="pcv2-leveraged-product-ticker">{productItem.ticker}</span>{' '}
+              <span>{productItem.leverage}</span>
+            </button>
+          ))}
+        </LeveragedProductsFitRow>
+      ),
+    });
+  };
+
   const renderCompactReferenceRow = ({
     reference = null,
     productLabel,
@@ -3274,13 +4040,13 @@ const PortfolioBreakdown = ({
     rowKey,
     historical = false,
   }) => {
-    const sourceUrl = safeResearchUrl(reference?.sourceUrl || reference?.url);
-    const direction = reference?.direction ? String(reference.direction).toUpperCase() : null;
-    const rawNote = reference ? researchReferenceText(reference) : emptyState?.note;
-    const note = direction ? `${direction} · ${rawNote}` : rawNote;
-    const sourceLabel = sourceUrl
-      ? 'SOURCE ›'
-      : emptyState?.sourceLabel || (reference ? 'INDEXED ✓' : 'UNAVAILABLE');
+    const direction = displayDirectionForReference(reference);
+    const rawNote = reference
+      ? (formatResearchReferenceDetail(reference) || researchReferenceText(reference))
+      : emptyState?.note;
+    const note = direction && !String(rawNote || '').startsWith(`${direction} ·`)
+      ? `${direction} · ${rawNote}`
+      : rawNote;
     return (
       <div
         className={`pcv2-intel-grid pcv2-intel-reference-row ${emptyState?.kind === 'indexed-empty' ? 'is-empty' : ''}`}
@@ -3295,17 +4061,10 @@ const PortfolioBreakdown = ({
           {productLabel}
         </div>
         <div
-          className={`pcv2-intel-cell pcv2-intel-span-14 pcv2-intel-reference-note ${emptyState ? 'is-empty' : ''}`}
+          className={`pcv2-intel-cell pcv2-intel-span-16 pcv2-intel-reference-note ${emptyState ? 'is-empty' : ''}`}
           title={note || undefined}
         >
           {note}
-        </div>
-        <div className="pcv2-intel-cell pcv2-intel-span-2 pcv2-intel-reference-source">
-          {sourceUrl ? (
-            <a href={sourceUrl} target="_blank" rel="noreferrer">
-              {sourceLabel}
-            </a>
-          ) : sourceLabel}
         </div>
       </div>
     );
@@ -3319,9 +4078,9 @@ const PortfolioBreakdown = ({
     trendValue,
   }) => {
     const normalizeDecisionBias = (value) => {
-      const normalized = String(value || '').trim().toUpperCase();
-      if (['BULLISH', 'BUY', 'LONG', 'POSITIVE'].includes(normalized)) return 'bullish';
-      if (['BEARISH', 'SELL', 'SHORT', 'NEGATIVE'].includes(normalized)) return 'bearish';
+      const normalized = normalizeResearchBias(value);
+      if (normalized === 'BULLISH') return 'bullish';
+      if (normalized === 'BEARISH') return 'bearish';
       return null;
     };
     const tradeBias = normalizeDecisionBias(tradeValue);
@@ -3423,7 +4182,21 @@ const PortfolioBreakdown = ({
 
   const renderSecurityResearch = (holding, rowId) => {
     const symbol = String(holding?.symbol || '').trim().toUpperCase();
+    const sourceStatus = marketContextState.sourceStatus || {};
+    const riskMetricsSourceStatus = sourceStatus.riskMetrics || marketContextState.status;
+    const volatilitySourceStatus = sourceStatus.volatility || marketContextState.status;
+    const usdCorrelationSourceStatus = sourceStatus.usdCorrelations || marketContextState.status;
+    const riskMetricsLoading = (
+      ['loading', 'partial'].includes(riskMetricsSourceStatus)
+      && !marketContextState.errors?.riskMetrics
+    );
+    const volatilityLoading = ['loading', 'idle'].includes(volatilitySourceStatus);
+    const usdCorrelationLoading = ['loading', 'idle'].includes(usdCorrelationSourceStatus);
     const entry = getSymbolResearch(symbol);
+    const canonicalSecurity = canonicalResearchPayload && entry?.products ? entry : null;
+    const canonicalHealth = canonicalSecurity?.health || null;
+    const canonicalHealthLabel = canonicalHealth?.status
+      || (canonicalResearchRequestFailed ? 'unavailable' : null);
     const decision = entry?.decision || entry?.signals || entry?.current?.decision || {};
     const lastVerifiedDecision = entry?.lastVerifiedDecision || {};
     const trade = decision.trade || entry?.trade;
@@ -3431,6 +4204,56 @@ const PortfolioBreakdown = ({
     const riskRange = decision.riskRange || entry?.riskRange;
     const signalStrength = decision.signalStrength || entry?.signalStrength;
     const supplementalRange = entry?.supplementalRange || entry?.earlyLookRange;
+    const currentReferences = getCurrentReferences(entry);
+    const historicalReferences = getHistoricalReferences(entry);
+
+    const canonicalPortfolioSolutionsProduct = canonicalSecurity?.products?.['portfolio-solutions'];
+    const canonicalPortfolioSolutionsField = canonicalPortfolioSolutionsProduct?.status === 'available'
+      ? canonicalPortfolioSolutionsProduct.fields?.trade || canonicalPortfolioSolutionsProduct.fields?.trend
+      : null;
+    const portfolioSolutionsProductIndexed = canonicalPortfolioSolutionsProduct
+      ? canonicalPortfolioSolutionsProduct.pipelineStatus === 'indexed'
+        && canonicalPortfolioSolutionsProduct.status === 'available'
+      : asArray(researchPayload?.products).some((product) => (
+        String(product?.id || '').trim().toLowerCase() === 'portfolio-solutions'
+        && String(product?.status || '').trim().toLowerCase() === 'indexed'
+      ));
+    const portfolioSolutionsReference = portfolioSolutionsProductIndexed
+      ? currentReferences.find((reference) => (
+        getResearchProductId(reference) === 'portfolio-solutions'
+        && String(reference?.kind || '').trim().toLowerCase() === 'portfolio_solutions_rank'
+        && finiteOptionalNumber(reference?.value) !== null
+      ))
+      : null;
+    const portfolioSolutionsDatum = canonicalPortfolioSolutionsField
+      && String(canonicalPortfolioSolutionsField.value || '').trim().toUpperCase() === 'BULLISH'
+      ? {
+        ...canonicalPortfolioSolutionsField,
+        status: 'available',
+        productId: 'portfolio-solutions',
+        productLabel: canonicalPortfolioSolutionsProduct.label || 'Portfolio Solutions',
+        sourceId: 'portfolio-solutions',
+        sourceLabel: canonicalPortfolioSolutionsProduct.label || 'Portfolio Solutions',
+        sourceDate: canonicalPortfolioSolutionsField.marketDate || canonicalPortfolioSolutionsProduct.marketDate,
+        marketDate: canonicalPortfolioSolutionsField.marketDate || canonicalPortfolioSolutionsProduct.marketDate,
+        value: canonicalPortfolioSolutionsField.value,
+        referenceOnly: true,
+        decisionEligible: false,
+      }
+      : portfolioSolutionsReference
+        ? {
+          ...portfolioSolutionsReference,
+          status: 'available',
+          productId: 'portfolio-solutions',
+          productLabel: portfolioSolutionsReference.productLabel || 'Portfolio Solutions',
+          sourceId: 'portfolio-solutions',
+          sourceLabel: portfolioSolutionsReference.productLabel || 'Portfolio Solutions',
+          sourceDate: portfolioSolutionsReference.marketDate,
+          value: 'BULLISH',
+          referenceOnly: true,
+          decisionEligible: false,
+        }
+        : null;
 
     const currentVerifiedTrade = researchEnvelopeIsCurrent
       && isVerifiedCurrentDecisionDatum(trade, researchMarketDate, 'trade') ? trade : null;
@@ -3456,14 +4279,19 @@ const PortfolioBreakdown = ({
       && isVerifiedHistoricalDecisionDatum(lastVerifiedDecision.signalStrength, 'signalStrength')
       ? lastVerifiedDecision.signalStrength
       : null;
-    const verifiedTrade = currentVerifiedTrade || historicalVerifiedTrade;
-    const verifiedTrend = currentVerifiedTrend || historicalVerifiedTrend;
+    const verifiedTrade = currentVerifiedTrade || portfolioSolutionsDatum || historicalVerifiedTrade;
+    const verifiedTrend = currentVerifiedTrend || portfolioSolutionsDatum || historicalVerifiedTrend;
     const verifiedRiskRange = currentVerifiedRiskRange || historicalVerifiedRiskRange;
     const verifiedSignalStrength = currentVerifiedSignalStrength || historicalVerifiedSignalStrength;
-    const tradeIsReference = Boolean(historicalVerifiedTrade || (currentVerifiedTrade && researchEnvelopeIsRetained));
-    const trendIsReference = Boolean(historicalVerifiedTrend || (currentVerifiedTrend && researchEnvelopeIsRetained));
-    const riskRangeIsReference = Boolean(
-      historicalVerifiedRiskRange || (currentVerifiedRiskRange && researchEnvelopeIsRetained)
+    const tradeIsReference = Boolean(
+      historicalVerifiedTrade
+      || (!currentVerifiedTrade && portfolioSolutionsDatum)
+      || (currentVerifiedTrade && researchEnvelopeIsRetained),
+    );
+    const trendIsReference = Boolean(
+      historicalVerifiedTrend
+      || (!currentVerifiedTrend && portfolioSolutionsDatum)
+      || (currentVerifiedTrend && researchEnvelopeIsRetained),
     );
     const signalIsReference = Boolean(
       historicalVerifiedSignalStrength || (currentVerifiedSignalStrength && researchEnvelopeIsRetained)
@@ -3478,8 +4306,6 @@ const PortfolioBreakdown = ({
       ? supplementalRange
       : null;
 
-    const currentReferences = getCurrentReferences(entry);
-    const historicalReferences = getHistoricalReferences(entry);
     const coverageState = String(
       entry?.coverage?.state || entry?.state || researchEnvelopeStatus || 'unavailable'
     ).toLowerCase();
@@ -3498,9 +4324,15 @@ const PortfolioBreakdown = ({
     const zScore20 = riskMetrics?.zScore20?.status === 'available'
       && finiteOptionalNumber(riskMetrics.zScore20.value) !== null ? riskMetrics.zScore20 : null;
     const factorContribution = getPortfolioWeight(holding, totalValue);
+    const researchInitialLoading = researchState.status === 'loading' && !researchPayload;
+    const historyLoading = researchState.historyStatus === 'loading';
 
-    const tradeValue = researchValue(verifiedTrade, ['value', 'signal', 'trade']);
-    const trendValue = researchValue(verifiedTrend, ['value', 'trend', 'signal']);
+    const tradeValue = normalizeResearchBias(
+      researchValue(verifiedTrade, ['value', 'signal', 'trade']),
+    );
+    const trendValue = normalizeResearchBias(
+      researchValue(verifiedTrend, ['value', 'trend', 'signal']),
+    );
     const signalValue = researchValue(verifiedSignalStrength, ['value', 'action', 'change', 'state']);
     const quadRanking = getQuadExpectedValueRanking(symbol);
     const riskRangeStructure = buildRiskRangeStructure({
@@ -3598,14 +4430,15 @@ const PortfolioBreakdown = ({
         && row?.freshness === 'historical'
         && row?.quoteMode === 'end-of-day'
       );
-      return value !== null && (current || historicalClose)
-        ? { definition, row, value, historicalClose }
+      const refreshDelayed = isRefreshDelayedVolatilityRow(row);
+      return value !== null && (current || historicalClose || refreshDelayed)
+        ? { definition, row, value, historicalClose, refreshDelayed }
         : null;
     }).filter(Boolean);
     const volatilityValue = volatilityIndexes.length === 0
       ? 'N/A'
       : validVolatilityRows.length === 0
-        ? marketContextState.status === 'loading' ? '…' : 'Unavailable'
+        ? volatilityLoading ? '…' : 'Unavailable'
         : validVolatilityRows
           .map(({ definition, value }) => `${definition.label} ${Number(value).toFixed(2)}`)
           .join(' · ');
@@ -3615,10 +4448,29 @@ const PortfolioBreakdown = ({
         ? 'Mapped source unavailable'
         : [
           validVolatilityRows.map(({ definition }) => definition.symbol).join(' / '),
-          validVolatilityRows.some(({ historicalClose }) => historicalClose)
+          validVolatilityRows.some(({ refreshDelayed }) => refreshDelayed)
+            ? `Refresh delayed · last verified ${formatContextTimestamp(validVolatilityRows[0].row?.lastVerifiedAt || validVolatilityRows[0].row?.asOf)}`
+            : validVolatilityRows.some(({ historicalClose }) => historicalClose)
             ? `Close · ${formatResearchDateLabel(validVolatilityRows[0].row?.asOf)}`
             : formatContextTimestamp(validVolatilityRows[0].row?.asOf || validVolatilityRows[0].row?.timestamp),
         ].join(' · ');
+    const volatilityValueContent = validVolatilityRows.length > 0 ? (
+      <>
+        {validVolatilityRows.map(({ definition, row, value, historicalClose, refreshDelayed }, index) => (
+          <React.Fragment key={definition.key}>
+            {index > 0 ? ' · ' : null}
+            {definition.label} {Number(value).toFixed(2)}
+            <DelayedDataMarker
+              status={refreshDelayed ? 'refresh-delayed' : historicalClose ? 'historical' : 'live'}
+              title={refreshDelayed
+                ? `Refresh delayed · last verified ${formatContextTimestamp(row?.lastVerifiedAt || row?.asOf)}`
+                : `Historical reference · as of ${formatContextTimestamp(row?.asOf)}`}
+              updatedAt={row?.lastVerifiedAt || row?.asOf || row?.timestamp}
+            />
+          </React.Fragment>
+        ))}
+      </>
+    ) : null;
 
     const usdProxy = USD_CORRELATION_PROXY_BY_SYMBOL[symbol] || null;
     const usdPayload = marketContextState.usdCorrelations;
@@ -3629,7 +4481,7 @@ const PortfolioBreakdown = ({
     const usdValue = !usdProxy
       ? 'N/A'
       : usdCorrelation === null
-        ? marketContextState.status === 'loading' ? '…' : 'Unavailable'
+        ? usdCorrelationLoading ? '…' : 'Unavailable'
         : `${usdCorrelation > 0 ? '+' : ''}${usdCorrelation.toFixed(2)}`;
     const usdMeta = !usdProxy
       ? 'No direct USD proxy'
@@ -3675,7 +4527,11 @@ const PortfolioBreakdown = ({
           ? hasLastVerifiedDecision ? 'Refresh failed · last verified retained' : 'Refresh failed'
           : 'Product coverage incomplete');
 
-    const apiResearchProducts = asArray(researchPayload?.products);
+    const apiResearchProducts = asArray(researchPayload?.products).filter((product) => (
+      !SECURITY_RESEARCH_EXCLUDED_PRODUCTS.has(
+        String(product?.id || '').trim().toLowerCase(),
+      )
+    ));
     const apiProductsById = new Map(
       apiResearchProducts
         .map((product) => [String(product?.id || '').trim().toLowerCase(), product])
@@ -3762,15 +4618,21 @@ const PortfolioBreakdown = ({
     let cachedProductRows = payloadCache.get(productCacheKey) || null;
     if (!cachedProductRows) {
       cachedProductRows = {
-        current: buildResearchProductRows({
-          references: displayCurrentReferences,
-          symbol,
-          productsById,
-          productOrder,
-          marketDate: expectedResearchMarketDate,
-          requireCurrentIndexed: true,
-          includeEmptyProducts: true,
-        }),
+        current: canonicalSecurity
+          ? buildCanonicalResearchProductRows({
+            security: canonicalSecurity,
+            productOrder,
+            marketDate: expectedResearchMarketDate,
+          })
+          : buildResearchProductRows({
+            references: displayCurrentReferences,
+            symbol,
+            productsById,
+            productOrder,
+            marketDate: expectedResearchMarketDate,
+            requireCurrentIndexed: true,
+            includeEmptyProducts: true,
+          }),
         historical: buildResearchProductRows({
           references: historicalReferences,
           symbol,
@@ -3787,6 +4649,9 @@ const PortfolioBreakdown = ({
     const renderResearchProductContext = (row) => {
       const sourceUrl = safeResearchUrl(row.reference?.sourceUrl || row.reference?.url);
       const sourceTime = formatResearchTime(row.publishedAt);
+      const contextFactLines = row.factLines.length > 1
+        ? row.factLines.slice(1)
+        : row.factLines;
       const sourceMeta = [
         row.productLabel,
         formatResearchSourceDate(row.marketDate),
@@ -3806,7 +4671,7 @@ const PortfolioBreakdown = ({
               role="list"
               aria-label={`${row.productLabel} fact list for ${symbol}`}
             >
-              {row.factLines.map((fact, index) => (
+              {contextFactLines.map((fact, index) => (
                 <p
                   className="pcv2-intel-reference-fact"
                   role="listitem"
@@ -3834,13 +4699,18 @@ const PortfolioBreakdown = ({
     const renderCurrentResearchProductRow = (row) => {
       const expansionKey = researchProductExpansionKey(row);
       const isExpanded = expandedResearchProducts.has(expansionKey);
+      const hasFacts = row.state === 'available' && row.factLines.length > 0;
       const detail = row.state === 'available'
-        ? `${row.factLines.length} ${row.factLines.length === 1 ? 'fact' : 'facts'} for ${symbol}`
-        : row.state === 'unavailable' ? 'UNAVAILABLE' : 'N/A';
+        ? row.factLines[0] || `Verified current structured row for ${symbol}`
+        : row.state === 'unavailable' ? 'UNAVAILABLE'
+          : row.state === 'conflict' ? 'CONFLICT'
+            : 'N/A';
       const statusLabel = row.state === 'available'
         ? `Verified ${row.productLabel} evidence for ${symbol}`
         : row.state === 'unavailable'
           ? `${row.productLabel} evidence is unavailable for ${symbol}`
+          : row.state === 'conflict'
+            ? `${row.productLabel} contains conflicting current rows for ${symbol}`
           : `${row.productLabel} has no verified mention for ${symbol}`;
       return (
         <React.Fragment key={`${rowId}-current-${row.key}`}>
@@ -3853,19 +4723,34 @@ const PortfolioBreakdown = ({
               {formatResearchTime(row.publishedAt)}
             </div>
             <div className="pcv2-intel-cell pcv2-intel-span-2 pcv2-intel-reference-product">
-              {row.productLabel}
-            </div>
-            <div
-              className={`pcv2-intel-cell pcv2-intel-span-14 pcv2-intel-reference-note ${row.state !== 'available' ? 'is-empty' : ''}`}
-              title={detail}
-            >
-              {detail}
-            </div>
-            <div className="pcv2-intel-cell pcv2-intel-span-2 pcv2-intel-reference-source">
-              {row.state === 'available' ? (
+              {hasFacts ? (
                 <button
                   type="button"
-                  className="pcv2-intel-reference-toggle"
+                  className="pcv2-intel-reference-product-button"
+                  aria-expanded={isExpanded}
+                  aria-controls={`research-product-context-${rowId}-${row.productId}`}
+                  aria-label={`${isExpanded ? 'Collapse' : 'View'} ${row.productLabel} facts for ${symbol}`}
+                  onClick={() => {
+                    setExpandedResearchProducts((current) => {
+                      const next = new Set(current);
+                      if (next.has(expansionKey)) next.delete(expansionKey);
+                      else next.add(expansionKey);
+                      return next;
+                    });
+                  }}
+                >
+                  <span>{row.productLabel}</span>
+                </button>
+              ) : row.productLabel}
+            </div>
+            <div
+              className={`pcv2-intel-cell pcv2-intel-span-16 pcv2-intel-reference-note ${row.state !== 'available' ? 'is-empty' : ''}`}
+              title={detail}
+            >
+              {hasFacts ? (
+                <button
+                  type="button"
+                  className="pcv2-intel-reference-summary"
                   aria-expanded={isExpanded}
                   aria-controls={`research-product-context-${rowId}-${row.productId}`}
                   aria-label={`${isExpanded ? 'Collapse' : 'View'} ${row.productLabel} context for ${symbol}`}
@@ -3878,15 +4763,14 @@ const PortfolioBreakdown = ({
                     });
                   }}
                 >
-                  {isExpanded ? 'HIDE ↑' : 'VIEW ›'}
+                  <span className="pcv2-intel-reference-summary__label">{detail}</span>
                 </button>
               ) : (
                 <span
-                  className="pcv2-intel-reference-source-disabled"
-                  aria-disabled="true"
+                  className={`pcv2-intel-reference-summary__label ${detail === 'N/A' ? 'is-na' : ''}`}
                   title={statusLabel}
                 >
-                  VIEW ›
+                  {detail}
                 </span>
               )}
             </div>
@@ -3901,6 +4785,8 @@ const PortfolioBreakdown = ({
         className="pcv2-intel-panel"
         id={`portfolio-research-${rowId}`}
         aria-label={`Research intelligence for ${symbol}`}
+        data-health-status={canonicalHealthLabel || undefined}
+        aria-busy={researchInitialLoading || riskMetricsLoading || volatilityLoading || usdCorrelationLoading}
       >
         <div className="pcv2-intel-grid pcv2-intel-header" aria-label="Decision intelligence headers">
           {[
@@ -3916,21 +4802,21 @@ const PortfolioBreakdown = ({
 
         <div className="pcv2-intel-grid pcv2-intel-values" aria-label={`${symbol} decision intelligence`}>
           {renderMetricCell({
-            value: tradeValue || '—',
+            value: tradeValue || (researchInitialLoading ? '…' : '—'),
             meta: decisionSourceMeta(verifiedTrade, tradeIsReference, unavailableDecisionMeta),
             tone: metricToneForValue(tradeValue),
             className: tradeIsReference ? 'is-reference' : '',
             spanClassName: 'pcv2-intel-span-4',
           })}
           {renderMetricCell({
-            value: trendValue || '—',
+            value: trendValue || (researchInitialLoading ? '…' : '—'),
             meta: decisionSourceMeta(verifiedTrend, trendIsReference, unavailableDecisionMeta),
             tone: metricToneForValue(trendValue),
             className: trendIsReference ? 'is-reference' : '',
             spanClassName: 'pcv2-intel-span-4',
           })}
           {renderMetricCell({
-            value: beta ? Number(beta.value).toFixed(2) : marketContextState.status === 'loading' ? '…' : '—',
+            value: beta ? Number(beta.value).toFixed(2) : riskMetricsLoading ? '…' : '—',
             meta: beta
               ? `${beta.windowSessions || 252}D vs ${beta.benchmark || 'SPY'} · ${formatResearchDateLabel(beta.asOf)}`
               : 'Historical beta unavailable',
@@ -3975,7 +4861,7 @@ const PortfolioBreakdown = ({
           aria-label="Decision intelligence secondary headers"
         >
           {[
-            'Primary range',
+            'Levered products',
             'Signal strength',
             'RR structure',
             'Other exposure',
@@ -3989,18 +4875,9 @@ const PortfolioBreakdown = ({
           className="pcv2-intel-grid pcv2-intel-values"
           aria-label={`${symbol} supplemental decision intelligence`}
         >
+          {renderLeveragedProductsCell(symbol)}
           {renderMetricCell({
-            value: verifiedRiskRange
-              ? `${formatResearchNumber(researchValue(verifiedRiskRange, ['lrr', 'low']))}–${formatResearchNumber(researchValue(verifiedRiskRange, ['hrr', 'high']))}`
-              : '—',
-            meta: verifiedRiskRange
-              ? decisionSourceMeta(verifiedRiskRange, riskRangeIsReference, unavailableDecisionMeta)
-              : unavailableDecisionMeta,
-            className: riskRangeIsReference ? 'is-reference' : '',
-            spanClassName: 'pcv2-intel-span-4',
-          })}
-          {renderMetricCell({
-            value: signalValue || '—',
+            value: signalValue || (researchInitialLoading ? '…' : '—'),
             meta: decisionSourceMeta(
               verifiedSignalStrength,
               signalIsReference,
@@ -4051,7 +4928,7 @@ const PortfolioBreakdown = ({
           {renderMetricCell({
             value: zScore20
               ? `${Number(zScore20.value) > 0 ? '+' : ''}${Number(zScore20.value).toFixed(2)}`
-              : marketContextState.status === 'loading' ? '…' : 'Unavailable',
+              : riskMetricsLoading ? '…' : 'Unavailable',
             meta: zScore20
               ? `Completed close · ${formatResearchDateLabel(zScore20.asOf)}`
               : 'Verified completed-close series unavailable',
@@ -4072,7 +4949,7 @@ const PortfolioBreakdown = ({
             return renderMetricCell({
               value: sizingVolPct != null
                 ? `${sizingVolPct.toFixed(1)}%`
-                : marketContextState.status === 'loading' ? '…' : 'Unavailable',
+                : riskMetricsLoading ? '…' : 'Unavailable',
               meta: sizingVolPct != null
                 ? `max(63d, 1Y) realized · ${formatResearchDateLabel(rv?.asOf)}${badgeText}`
                 : (rv?.warnings?.[0] || 'Insufficient adjusted history for sizing vol'),
@@ -4121,6 +4998,7 @@ const PortfolioBreakdown = ({
             meta: volatilityMeta,
             tone: volatilityValue === 'Unavailable' ? 'is-muted' : '',
             spanClassName: 'pcv2-intel-span-4',
+            children: volatilityValueContent,
           })}
           {renderMetricCell({
             value: usdValue,
@@ -4149,15 +5027,30 @@ const PortfolioBreakdown = ({
         <div className="pcv2-intel-grid pcv2-intel-header pcv2-intel-reference-header" aria-label={`${symbol} research product references`}>
           <div className="pcv2-intel-cell pcv2-intel-span-2">TIME</div>
           <div className="pcv2-intel-cell pcv2-intel-span-2">PRODUCT</div>
-          <div className="pcv2-intel-cell pcv2-intel-span-14">DETAIL</div>
-          <div className="pcv2-intel-cell pcv2-intel-span-2">SOURCE</div>
+          <div className="pcv2-intel-cell pcv2-intel-span-16">DETAIL</div>
         </div>
-        {currentProductRows.map((row) => renderCurrentResearchProductRow(row))}
+        {researchInitialLoading ? (
+          <div className="pcv2-intel-grid pcv2-intel-reference-row pcv2-intel-loading-row" role="status">
+            <div className="pcv2-intel-cell pcv2-intel-span-20">
+              <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
+              <span>Loading verified research…</span>
+            </div>
+          </div>
+        ) : currentProductRows.map((row) => renderCurrentResearchProductRow(row))}
 
         <details className="pcv2-intel-history">
-          <summary>Previous {RESEARCH_HISTORY_DAYS} market days ({historicalProductRows.length} product rows)</summary>
+          <summary>
+            Previous {RESEARCH_HISTORY_DAYS} market days ({historyLoading ? 'loading…' : `${historicalProductRows.length} product rows`})
+          </summary>
           <div className="pcv2-intel-history-body">
-            {historicalProductRows.length > 0
+            {historyLoading ? (
+              <div className="pcv2-intel-grid pcv2-intel-reference-row pcv2-intel-loading-row" role="status">
+                <div className="pcv2-intel-cell pcv2-intel-span-20">
+                  <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
+                  <span>Loading verified historical references…</span>
+                </div>
+              </div>
+            ) : historicalProductRows.length > 0
               ? historicalProductRows.map((row) => renderCompactReferenceRow({
                 reference: row.reference,
                 productLabel: row.productLabel,
@@ -4167,7 +5060,9 @@ const PortfolioBreakdown = ({
               : (
                 <div className="pcv2-intel-grid pcv2-intel-reference-row is-empty">
                   <div className="pcv2-intel-cell pcv2-intel-span-20 pcv2-intel-history-empty">
-                    No verified historical references returned.
+                    {researchState.historyStatus === 'error'
+                      ? 'Historical references unavailable.'
+                      : 'No verified historical references returned.'}
                   </div>
                 </div>
               )}
@@ -4220,6 +5115,101 @@ const PortfolioBreakdown = ({
         </section>
       </div>,
       document.body
+    );
+  };
+
+  const renderLeveragedProductModal = () => {
+    if (!active || !leveragedProductModal) return null;
+    const { baseSymbol, product } = leveragedProductModal;
+    const referenceLabel = String(product.reference || 'Reference exposure')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    const directionClass = leveragedDirectionClass(product.leverage);
+    const fitLabel = product.fitLabel || product.matchLabel;
+    const fitNote = product.fitNote
+      || (product.matchType === 'proxy' ? `Different or broader exposure than ${baseSymbol}.` : null);
+    const overlap = leveragedOverlapState.status === 'available'
+      && leveragedOverlapState.data?.baseSymbol === baseSymbol
+      && leveragedOverlapState.data?.referenceSymbol === product.overlapReferenceSymbol
+      ? leveragedOverlapState.data
+      : null;
+    const overlapPercent = overlap ? Math.round(Number(overlap.weightedOverlapPct)) : null;
+    const displayedFitLabel = overlapPercent == null
+      ? fitLabel
+      : `${fitLabel} · ${overlapPercent}% overlap`;
+    const displayedFitNote = overlap
+      ? `${overlap.sharedHoldings} shared holdings · ${formatResearchSourceDate(overlap.asOf)}. ${fitNote || ''}`.trim()
+      : fitNote;
+
+    return createPortal(
+      <div
+        className="pcv2-leveraged-product-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setLeveragedProductModal(null);
+        }}
+      >
+        <section
+          className="pcv2-leveraged-product-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pcv2-leveraged-product-title"
+          aria-describedby={displayedFitNote ? 'pcv2-leveraged-product-fit-note' : undefined}
+          data-testid="leveraged-product-modal"
+        >
+          <header className="pcv2-leveraged-product-header">
+            <div>
+              <h2 id="pcv2-leveraged-product-title">{product.ticker}</h2>
+              <p
+                className={directionClass}
+                data-testid="leveraged-product-direction"
+              >
+                {product.leverage} daily
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Close leveraged product details"
+              title="Close"
+              onClick={() => setLeveragedProductModal(null)}
+              autoFocus
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </header>
+          <dl className="pcv2-leveraged-product-details">
+            <div>
+              <dt>Tracks</dt>
+              <dd>{referenceLabel}</dd>
+            </div>
+            <div>
+              <dt>{baseSymbol} fit</dt>
+              <dd>
+                <strong title={overlap ? 'Weighted overlap: the smaller portfolio weight for each shared holding, summed.' : undefined}>
+                  {displayedFitLabel}
+                </strong>
+                {displayedFitNote ? (
+                  <span id="pcv2-leveraged-product-fit-note">{displayedFitNote}</span>
+                ) : null}
+              </dd>
+            </div>
+          </dl>
+          <footer className="pcv2-leveraged-product-footer">
+            <p>Daily reset · Multi-day returns may diverge.</p>
+            {product.issuerUrl ? (
+              <a
+                className="pcv2-leveraged-product-issuer-link"
+                href={product.issuerUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {product.issuer} ↗
+              </a>
+            ) : (
+              <span className="pcv2-leveraged-product-issuer-link is-disabled">Issuer page unavailable</span>
+            )}
+          </footer>
+        </section>
+      </div>,
+      document.body,
     );
   };
 
@@ -4351,10 +5341,26 @@ const PortfolioBreakdown = ({
       const rowId = holdingRowIds.get(holding)
         || `${isLongs ? 'long' : 'short'}-${holding.symbol || 'unknown'}-${index}`;
       const isExpanded = expandedResearchRows.has(rowId);
+      const symbolResearch = getSymbolResearch(holding.symbol);
+      const healthStatus = symbolResearch?.health?.status || null;
+      const researchNeedsAttention = SECURITY_INTELLIGENCE_V2_ENABLED
+        && ['ready', 'error'].includes(researchState.status)
+        && (
+          canonicalResearchRequestFailed
+          || !symbolResearch
+          || ['attention', 'unavailable'].includes(healthStatus)
+        );
 
       return (
         <React.Fragment key={rowId}>
-          <tr className={`pcv2-ledger-row ${isExpanded ? 'is-expanded' : ''}`} data-row-id={rowId}>
+          <tr
+            className={`pcv2-ledger-row ${isExpanded ? 'is-expanded' : ''} ${researchNeedsAttention ? 'is-research-attention' : ''}`}
+            data-row-id={rowId}
+            data-research-health={healthStatus || (researchNeedsAttention ? 'unavailable' : undefined)}
+            title={researchNeedsAttention
+              ? `${holding.symbol} current research is incomplete or unavailable; holding remains visible.`
+              : undefined}
+          >
             <td className="pcv2-ticker">
               <button
                 type="button"
@@ -4363,6 +5369,8 @@ const PortfolioBreakdown = ({
                 aria-controls={`portfolio-research-${rowId}`}
                 aria-label={`${isExpanded ? 'Hide' : 'Show'} research intelligence for ${holding.symbol}`}
                 onClick={() => {
+                  const willExpand = !expandedResearchRows.has(rowId);
+                  if (willExpand) void loadPriorityRiskMetrics(holding.symbol);
                   setExpandedResearchRows((current) => {
                     const next = new Set(current);
                     if (next.has(rowId)) next.delete(rowId);
@@ -4413,12 +5421,14 @@ const PortfolioBreakdown = ({
                 onClick={() => setMetricVerification(positionSizeReference.verification)}
               >
                 {positionSizeReference.value
-                  || (marketContextState.status === 'loading' ? '…' : '—')}
+                  || (['loading', 'partial'].includes(
+                    marketContextState.sourceStatus?.riskMetrics || marketContextState.status
+                  ) && !marketContextState.errors?.riskMetrics ? '…' : '—')}
               </button>
             </td>
             <td className="pcv2-num">{renderTargetControl(holding, isLongs, pctOfAccount)}</td>
             <td className="pcv2-factor-exposures" title={factorLabels.join(' · ') || 'Needs +EV classification review'}>
-              {factorExposureText}
+              <span>{factorExposureText}</span>
             </td>
             <td className="pcv2-num">
               {shares === null ? '—' : shares ? (shares > 0 ? `+${shares}` : shares) : '0'}
@@ -4428,7 +5438,16 @@ const PortfolioBreakdown = ({
               aria-label={mark?.ariaLabel || 'Price unavailable'}
               title={mark?.title || 'Verified live price or completed-session close unavailable'}
             >
-              {mark === null ? '—' : formatPrice(mark.value)}
+              {mark === null ? '—' : (
+                <>
+                  {formatPrice(mark.value)}
+                  <DelayedDataMarker
+                    status={mark.state === 'historical_close' ? 'historical' : 'live'}
+                    title={mark.title}
+                    updatedAt={mark.updatedAt}
+                  />
+                </>
+              )}
             </td>
             <td
               className={`pcv2-num ${dayGainLossPercent > 0 ? 'pcv2-positive' : dayGainLossPercent < 0 ? 'pcv2-negative' : ''}`}
@@ -4967,6 +5986,7 @@ const PortfolioBreakdown = ({
 
       </div>
       {renderMetricVerification()}
+      {renderLeveragedProductModal()}
     </div>
 
   );

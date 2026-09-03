@@ -1,0 +1,794 @@
+.pm-performance-shell {
+  --pm-market-all: #5b6b84;
+  --pm-market-wti: #bf750f;
+  --pm-market-gold: #c9a227;
+  --pm-market-sp500: #287ab8;
+  --pm-market-nasdaq100: #7655ad;
+  --pm-market-bitcoin: #df8b16;
+  --pm-market-ethereum: #6274c8;
+  --pm-market-cpi: #417d6e;
+  background: #fff;
+  color: #17233e;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pm-performance-scope-controls {
+  align-items: center;
+  border-bottom: 1px solid #edf2f7;
+  display: flex;
+  gap: 5px;
+  /* Keep interactive controls clear of the panel's 11px resize handles. */
+  padding: 4px 12px;
+}
+
+.pm-performance-scope-select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.pm-performance-scope-select--venue { width: 92px; }
+
+.pm-performance-scope-controls .pm-performance-scope-trigger {
+  align-items: center;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+  border: 1px solid #d6e0ec;
+  border-radius: 5px;
+  box-shadow: 0 1px 2px rgba(28, 45, 71, 0.05);
+  color: #42526b;
+  cursor: pointer;
+  display: flex;
+  font-family: inherit;
+  font-size: 8px;
+  font-weight: 500;
+  gap: 6px;
+  height: 22px;
+  justify-content: space-between;
+  line-height: 1;
+  min-width: 0;
+  padding: 0 6px;
+  text-align: left;
+  transition: border-color 100ms ease, box-shadow 100ms ease, background 100ms ease;
+}
+
+.pm-performance-scope-controls .pm-performance-scope-trigger:hover {
+  background: #fff;
+  border-color: #bccbdd;
+}
+
+.pm-performance-scope-controls .pm-performance-scope-trigger[aria-expanded="true"] {
+  background: #fff;
+  border-color: #6e99d5;
+  box-shadow: 0 0 0 2px rgba(43, 111, 202, 0.11);
+}
+
+.pm-performance-scope-controls .pm-performance-scope-trigger:focus-visible {
+  border-color: #2d6dc2;
+  box-shadow: 0 0 0 2px rgba(43, 111, 202, 0.16);
+  outline: 0;
+}
+
+.pm-performance-scope-trigger .popover-select__trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-performance-scope-trigger .popover-select__chevron {
+  color: #7788a1;
+  flex: 0 0 auto;
+  height: 5px;
+  stroke-width: 1.4;
+  transition: transform 100ms ease;
+  width: 8px;
+}
+
+.pm-performance-scope-trigger[aria-expanded="true"] .popover-select__chevron {
+  transform: rotate(180deg);
+}
+
+.pm-performance-scope-menu.pm-performance-scope-menu {
+  animation: pm-performance-popover-in 90ms ease-out;
+  background: #fff;
+  border: 1px solid #d5dfeb;
+  border-radius: 6px;
+  box-shadow: 0 10px 24px rgba(30, 48, 74, 0.16), 0 2px 6px rgba(30, 48, 74, 0.08);
+  color: #27364f;
+  overflow: hidden;
+  padding: 3px;
+  transform-origin: top center;
+}
+
+.pm-performance-scope-menu[data-placement="top"] {
+  transform-origin: bottom center;
+}
+
+.pm-performance-scope-menu > .py-1 {
+  padding-bottom: 0;
+  padding-top: 0;
+}
+
+.pm-performance-scope-option.pm-performance-scope-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: #35445d;
+  cursor: pointer;
+  display: flex;
+  font-family: inherit;
+  font-size: 8px;
+  font-weight: 500;
+  gap: 5px;
+  line-height: 1.15;
+  min-height: 22px;
+  padding: 4px 5px;
+}
+
+.pm-performance-scope-option.pm-performance-scope-option:hover,
+.pm-performance-scope-option.pm-performance-scope-option:focus-visible {
+  background: #f1f5fa;
+  outline: 0;
+}
+
+.pm-performance-scope-option.pm-performance-scope-option[aria-selected="true"] {
+  background: #edf4fd;
+  color: #165cae;
+  font-weight: 600;
+}
+
+.pm-performance-scope-option .popover-select__selection-mark {
+  flex: 0 0 9px;
+  font-size: 8px;
+  line-height: 1;
+  text-align: center;
+}
+
+.pm-performance-scope-option .popover-select__option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-performance-scope-note {
+  color: #a35c08;
+  font-size: 7px;
+  margin-left: auto;
+}
+
+@keyframes pm-performance-popover-in {
+  from { opacity: 0; transform: translateY(-2px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.pm-performance-tabs {
+  align-items: flex-end;
+  border-bottom: 1px solid #e6edf4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 1px 4px 0;
+}
+
+.pm-performance-tab-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.pm-performance-tab-group--views {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.pm-performance-tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  color: #71819b;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 400;
+  padding: 6px 7px 5px;
+}
+
+.pm-performance-tabs button:focus-visible { outline: 0; }
+.pm-performance-tabs button[data-market="wti"] { color: var(--pm-market-wti); }
+.pm-performance-tabs button[data-market="gold"] { color: var(--pm-market-gold); }
+.pm-performance-tabs button[data-market="sp500"] { color: var(--pm-market-sp500); }
+.pm-performance-tabs button[data-market="nasdaq100"] { color: var(--pm-market-nasdaq100); }
+.pm-performance-tabs button[data-market="bitcoin"] { color: var(--pm-market-bitcoin); }
+.pm-performance-tabs button[data-market="ethereum"] { color: var(--pm-market-ethereum); }
+.pm-performance-tabs button[data-market="cpi"] { color: var(--pm-market-cpi); }
+.pm-performance-tabs button.active[data-market="overview"],
+.pm-performance-tabs button.active[data-market="research"],
+.pm-performance-tabs button.active[data-market="open"] { border-bottom-color: #64748b; color: #334155; }
+.pm-performance-tabs button.active[data-market="all"] { border-bottom-color: #1d64d8; color: #1460d2; }
+.pm-performance-tabs button.active[data-market="wti"] { border-bottom-color: var(--pm-market-wti); color: var(--pm-market-wti); }
+.pm-performance-tabs button.active[data-market="gold"] { border-bottom-color: var(--pm-market-gold); color: var(--pm-market-gold); }
+.pm-performance-tabs button.active[data-market="sp500"] { border-bottom-color: var(--pm-market-sp500); color: var(--pm-market-sp500); }
+.pm-performance-tabs button.active[data-market="nasdaq100"] { border-bottom-color: var(--pm-market-nasdaq100); color: var(--pm-market-nasdaq100); }
+.pm-performance-tabs button.active[data-market="bitcoin"] { border-bottom-color: var(--pm-market-bitcoin); color: var(--pm-market-bitcoin); }
+.pm-performance-tabs button.active[data-market="ethereum"] { border-bottom-color: var(--pm-market-ethereum); color: var(--pm-market-ethereum); }
+.pm-performance-tabs button.active[data-market="cpi"] { border-bottom-color: var(--pm-market-cpi); color: var(--pm-market-cpi); }
+
+.pm-performance-summary {
+  align-items: center;
+  color: #708099;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 7px;
+  font-weight: 400;
+  gap: 5px;
+  letter-spacing: .035em;
+  padding: 7px 9px 6px;
+}
+
+.pm-performance-summary strong { font-size: 8px; font-weight: 400; }
+.pm-performance-summary i { color: #c5ced9; font-style: normal; }
+.pm-performance-summary .positive,
+.pm-performance-table .positive { color: #079653; }
+.pm-performance-summary .negative,
+.pm-performance-table .negative { color: #e33637; }
+.pm-performance-summary-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.pm-performance-summary-view > .pm-summary-shell { height: 100%; }
+.pm-performance-refreshing {
+  color: #8896aa;
+  font-size: 8px;
+  letter-spacing: .03em;
+  margin-left: auto;
+}
+
+.pm-performance-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 0 4px 4px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pm-performance-table-wrap:focus-visible {
+  outline: 2px solid #7ba8e6;
+  outline-offset: -2px;
+}
+
+.pm-performance-table-wrap::-webkit-scrollbar { width: 8px; }
+.pm-performance-table-wrap::-webkit-scrollbar-track { background: #f3f6fa; }
+.pm-performance-table-wrap::-webkit-scrollbar-thumb {
+  background: #aab8ca;
+  border: 2px solid #f3f6fa;
+  border-radius: 999px;
+}
+
+.pm-performance-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: clamp(5.5px, 1.9cqi, 8px);
+  max-width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.pm-performance-table .pm-performance-day-card-gap > td {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #d7e0ec;
+  height: 3px;
+  padding: 0;
+}
+
+.pm-performance-col--date { width: 6.5%; }
+.pm-performance-col--status { width: 10.5%; }
+.pm-performance-col--contract { width: 14%; }
+.pm-performance-col--quantity { width: 9%; }
+.pm-performance-col--settlementValue { width: 10%; }
+.pm-performance-col--resolutionAt { width: 12%; }
+.pm-performance-col--risked { width: 9.5%; }
+.pm-performance-col--value { width: 9.5%; }
+.pm-performance-col--pnl { width: 9.5%; }
+.pm-performance-col--roi { width: 9.5%; }
+
+.pm-performance-table thead th {
+  background: #fff;
+  border-bottom: 1px solid #dbe3ee;
+  color: #8491a5;
+  font-size: clamp(5.5px, 1.65cqi, 7px);
+  line-height: 1.05;
+  letter-spacing: .04em;
+  overflow: hidden;
+  padding: 4px clamp(1px, .45cqi, 2px);
+  position: sticky;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  top: 0;
+  white-space: nowrap;
+  z-index: 3;
+}
+
+.pm-performance-table th button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  letter-spacing: inherit;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  justify-content: flex-start;
+  text-align: left;
+  text-transform: inherit;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.pm-performance-header-cluster {
+  align-items: center;
+  display: inline-flex;
+  gap: 1px;
+  justify-content: flex-start;
+  max-width: 100%;
+}
+
+.pm-performance-header--quantity,
+.pm-performance-header--settlementValue,
+.pm-performance-header--resolutionAt,
+.pm-performance-header--risked,
+.pm-performance-header--value,
+.pm-performance-header--pnl,
+.pm-performance-header--roi { text-align: right; }
+
+.pm-performance-header--quantity .pm-performance-header-cluster,
+.pm-performance-header--settlementValue .pm-performance-header-cluster,
+.pm-performance-header--resolutionAt .pm-performance-header-cluster,
+.pm-performance-header--risked .pm-performance-header-cluster,
+.pm-performance-header--value .pm-performance-header-cluster,
+.pm-performance-header--pnl .pm-performance-header-cluster,
+.pm-performance-header--roi .pm-performance-header-cluster,
+.pm-performance-header--settlementValue button,
+.pm-performance-header--resolutionAt button,
+.pm-performance-header--risked button,
+.pm-performance-header--value button,
+.pm-performance-header--pnl button,
+.pm-performance-header--roi button {
+  justify-content: flex-end;
+}
+
+.pm-performance-sort-icon {
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.pm-performance-table th button:hover,
+.pm-performance-table th button:focus-visible {
+  color: #1d64d8;
+  outline: 0;
+}
+
+.pm-performance-table thead th:first-child,
+.pm-performance-table td:first-child { padding-left: 3px; }
+.pm-performance-table thead th:last-child,
+.pm-performance-table td:last-child { padding-right: 3px; }
+.pm-performance-table thead th:first-child { padding-left: 3px; }
+.pm-performance-table thead th:last-child { padding-right: 3px; }
+.pm-performance-table td.pm-performance-number { text-align: right; }
+.pm-performance-table td {
+  border-bottom: 1px solid #eef2f7;
+  color: #334155;
+  overflow: hidden;
+  padding: clamp(2px, 1cqi, 4px) clamp(1px, .45cqi, 2px);
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.pm-performance-table td.pm-performance-number {
+  font-size: clamp(5px, 1.8cqi, 7.5px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.015em;
+}
+.pm-performance-table td.pm-performance-money {
+  font-size: clamp(4.75px, 1.6cqi, 7.5px);
+  letter-spacing: -.03em;
+  text-overflow: clip;
+}
+
+.pm-performance-day-date {
+  background: #fff;
+  border-bottom: 1px solid #eef2f7;
+  border-right: 1px solid #287ab8;
+  color: #1d2b46;
+  font-size: clamp(7px, 2cqi, 9px);
+  font-weight: 600;
+  letter-spacing: .025em;
+  line-height: 1.15;
+  padding: 5px 3px 3px;
+  text-align: center;
+  text-transform: uppercase;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.pm-performance-day-date span {
+  display: block;
+  overflow-wrap: normal;
+}
+
+.pm-performance-day-date small {
+  color: #8a97ab;
+  display: block;
+  font-weight: 400;
+  letter-spacing: 0;
+  margin-top: 1px;
+  text-transform: none;
+}
+
+.pm-performance-day-summary th,
+.pm-performance-day-summary td {
+  background: #fff;
+  border-bottom: 0;
+  border-top: 1px solid #dbe3ee;
+  font-weight: 600;
+  padding-bottom: 3px;
+  padding-top: 3px;
+}
+
+.pm-performance-day-summary th {
+  color: #68778e;
+  font-size: clamp(5.5px, 1.8cqi, 7px);
+  letter-spacing: .06em;
+  padding-left: 5px;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.pm-performance-day-summary th small {
+  color: #9a6e2e;
+  display: inline;
+  font-size: clamp(5px, 1.65cqi, 6.5px);
+  font-weight: 600;
+  letter-spacing: .02em;
+  margin-left: 3px;
+  margin-top: 0;
+  text-transform: none;
+}
+
+.pm-performance-day-summary td.pm-performance-number {
+  font-size: clamp(4.35px, 1.55cqi, 7px);
+  font-weight: 600;
+}
+
+.pm-performance-evidence-gap {
+  color: #9a6e2e;
+  display: inline-block;
+  font-size: clamp(4.75px, 1.6cqi, 6.5px);
+  line-height: 1.05;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.pm-performance-final-pending {
+  color: #9a6e2e;
+  display: inline-block;
+  font-size: clamp(5.5px, 1.7cqi, 7px);
+  line-height: 1.15;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.pm-performance-table td.pm-performance-contract {
+  color: #1d2b46;
+  max-width: none;
+  overflow: hidden;
+}
+
+.pm-performance-contract-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 1px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.pm-performance-contract-toggle:focus-visible {
+  outline: 1px solid #7ba8e6;
+  outline-offset: 1px;
+}
+
+.pm-performance-expand-icon {
+  color: #8291a7;
+  flex: 0 0 auto;
+  font-size: 8px;
+  margin-left: auto;
+}
+
+.pm-performance-contract-detail {
+  align-items: baseline;
+  color: #1d2b46;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 1px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.pm-performance-contract-code {
+  flex: 0 0 auto;
+  font-size: clamp(5.5px, 1.75cqi, 7.5px);
+  font-weight: 600;
+  margin-right: 1px;
+}
+
+.pm-performance-strike,
+.pm-performance-side {
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-performance-direction {
+  flex: 0 0 auto;
+  font-size: clamp(6.5px, 2.15cqi, 10px);
+  font-weight: 600;
+  line-height: 1;
+  margin-right: 1px;
+  text-align: center;
+  width: 8px;
+}
+.pm-performance-direction--above { color: #079653; }
+.pm-performance-direction--below { color: #e33637; }
+.pm-performance-strike { color: #17233e; }
+.pm-performance-side[data-side="yes"] { color: #079653; }
+.pm-performance-side[data-side="no"] { color: #e33637; }
+
+.pm-performance-table tr[data-market] td.pm-performance-contract { padding-left: 4px; }
+.pm-performance-table tr[data-market="wti"] td.pm-performance-contract { box-shadow: inset 2px 0 var(--pm-market-wti); }
+.pm-performance-table tr[data-market="gold"] td.pm-performance-contract { box-shadow: inset 2px 0 var(--pm-market-gold); }
+.pm-performance-table tr[data-market="sp500"] td.pm-performance-contract { box-shadow: inset 2px 0 var(--pm-market-sp500); }
+.pm-performance-table tr[data-market="nasdaq100"] td.pm-performance-contract { box-shadow: inset 2px 0 var(--pm-market-nasdaq100); }
+.pm-performance-table tr[data-market="bitcoin"] td.pm-performance-contract { box-shadow: inset 2px 0 var(--pm-market-bitcoin); }
+.pm-performance-table tr[data-market="ethereum"] td.pm-performance-contract { box-shadow: inset 2px 0 var(--pm-market-ethereum); }
+.pm-performance-table tr[data-market="cpi"] td.pm-performance-contract { box-shadow: inset 2px 0 var(--pm-market-cpi); }
+.pm-performance-table tr[data-market="wti"] .pm-performance-contract-code { color: var(--pm-market-wti); }
+.pm-performance-table tr[data-market="gold"] .pm-performance-contract-code { color: var(--pm-market-gold); }
+.pm-performance-table tr[data-market="sp500"] .pm-performance-contract-code { color: var(--pm-market-sp500); }
+.pm-performance-table tr[data-market="nasdaq100"] .pm-performance-contract-code { color: var(--pm-market-nasdaq100); }
+.pm-performance-table tr[data-market="bitcoin"] .pm-performance-contract-code { color: var(--pm-market-bitcoin); }
+.pm-performance-table tr[data-market="ethereum"] .pm-performance-contract-code { color: var(--pm-market-ethereum); }
+.pm-performance-table tr[data-market="cpi"] .pm-performance-contract-code { color: var(--pm-market-cpi); }
+.pm-performance-table td.pm-performance-status { min-width: 0; white-space: normal; }
+.pm-performance-status strong {
+  color: #64748b;
+  display: block;
+  font-size: clamp(5.5px, 1.8cqi, 8px);
+  font-weight: 400;
+  letter-spacing: .045em;
+  line-height: 1.05;
+  white-space: normal;
+}
+.pm-performance-status strong[data-tone="open"] { color: #1460d2; }
+.pm-performance-status strong[data-tone="closed"],
+.pm-performance-status strong[data-tone="awaiting-result"] { color: #a05c00; }
+.pm-performance-status strong[data-tone="settled"] { color: #087f49; }
+.pm-performance-status strong[data-tone="check"] { color: #b45309; }
+.pm-performance-preliminary-label {
+  color: #9a6e2e;
+  display: block;
+  font-size: clamp(5px, 1.55cqi, 6.5px);
+  font-weight: 500;
+  letter-spacing: .015em;
+  line-height: 1.05;
+  margin-top: 1px;
+  white-space: normal;
+}
+.pm-performance-preliminary-metric {
+  background: #fffbeb;
+  text-decoration: underline dotted #d5a44e;
+  text-underline-offset: 2px;
+}
+.pm-performance-schedule span,
+.pm-performance-schedule small,
+.pm-performance-settle-price span,
+.pm-performance-settle-price small {
+  display: block;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-performance-schedule span,
+.pm-performance-schedule small {
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.pm-performance-schedule small,
+.pm-performance-settle-price small {
+  color: #94a3b8;
+  font-size: clamp(5px, 1.6cqi, 7px);
+  line-height: 1.05;
+  margin-top: 1px;
+}
+
+.pm-performance-settle-price > span:only-child {
+  color: #7f8da2;
+  font-size: clamp(5.5px, 1.7cqi, 7px);
+  line-height: 1.2;
+  white-space: normal;
+}
+
+.pm-performance-state {
+  color: #71819b;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.pm-performance-empty {
+  color: #71819b;
+  font-size: 11px;
+  padding: 18px 16px;
+}
+
+.pm-performance-state--paused {
+  align-items: center;
+  background: #fffbeb;
+  border: 1px solid #f8d89c;
+  border-radius: 6px;
+  color: #936111;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 10px 16px;
+  padding: 12px;
+  text-align: left;
+}
+
+.pm-performance-state--paused strong { font-size: 11px; font-weight: 400; }
+.pm-performance-cutoff-reference {
+  color: #8a5a17;
+  font-variant-numeric: tabular-nums;
+}
+
+.pm-performance-day-comparison {
+  color: #57677f !important;
+  display: block !important;
+  font-weight: 600 !important;
+  margin-left: 0 !important;
+  margin-top: 1px !important;
+}
+
+.pm-performance-detail-row > td {
+  background: #fbfdff;
+  overflow: visible;
+  padding: 0 !important;
+  white-space: normal;
+}
+
+.pm-performance-detail-panel {
+  border-bottom: 1px solid #dbe3ee;
+  color: #334155;
+  font-size: 8px;
+  padding: 8px 10px 10px;
+}
+
+.pm-performance-detail-state {
+  color: #71819b;
+  padding: 9px 10px;
+}
+
+.pm-performance-detail-state--error { color: #9a5f13; }
+
+.pm-performance-detail-summary {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 8px;
+}
+
+.pm-performance-detail-summary span {
+  color: #71819b;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pm-performance-detail-summary strong {
+  color: #263652;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-performance-transaction-groups {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pm-performance-transaction-groups h4 {
+  color: #60708a;
+  font-size: 8px;
+  letter-spacing: .05em;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.pm-performance-transaction-groups p { color: #8190a5; margin: 4px 0; }
+.pm-performance-transaction {
+  border-top: 1px solid #edf2f7;
+  padding: 5px 0;
+}
+.pm-performance-transaction > div:first-child {
+  align-items: baseline;
+  display: grid;
+  gap: 3px 7px;
+  grid-template-columns: 1fr auto;
+}
+.pm-performance-transaction > div:first-child strong,
+.pm-performance-transaction > div:first-child span { font-variant-numeric: tabular-nums; }
+.pm-performance-transaction > div:first-child small {
+  color: #8391a5;
+  grid-column: 1 / -1;
+}
+.pm-performance-raw-legs { margin-top: 4px; }
+.pm-performance-raw-legs summary { color: #58739b; cursor: pointer; }
+.pm-performance-raw-grid { display: grid; gap: 3px; margin-top: 4px; }
+.pm-performance-raw-grid > div {
+  background: #f3f7fb;
+  display: grid;
+  gap: 2px 5px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 4px 5px;
+}
+.pm-performance-raw-grid small {
+  color: #8290a4;
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
+@container balance-panel (min-width: 600px) {
+  .pm-performance-detail-panel { padding-left: 14px; padding-right: 14px; }
+}
+
+@container balance-panel (max-width: 360px) {
+  /* The edge resize handles sit above the panel content. A 12px inset keeps
+     the first and last tab hit targets clickable at the compact width. */
+  .pm-performance-tabs { padding: 1px 12px 0; }
+  .pm-performance-tabs button { padding-left: 3px; padding-right: 3px; }
+  .pm-performance-summary { padding-left: 8px; padding-right: 8px; }
+  .pm-performance-table thead th,
+  .pm-performance-table td { padding-left: 1px; padding-right: 1px; }
+  .pm-performance-table thead th:first-child,
+  .pm-performance-table td:first-child { padding-left: 3px; }
+  .pm-performance-table thead th:last-child,
+  .pm-performance-table td:last-child { padding-right: 3px; }
+  .pm-performance-table thead th:first-child { padding-left: 1px; }
+  .pm-performance-table thead th:last-child { padding-right: 1px; }
+  .pm-performance-status strong { letter-spacing: 0; }
+  .pm-performance-detail-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pm-performance-transaction-groups { grid-template-columns: 1fr; }
+}

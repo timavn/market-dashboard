@@ -83,21 +83,29 @@ function referenceEvidence({
   };
 }
 
-function fundingReferenceEvidence(overrides = {}) {
+function balanceSidecarEvidence(overrides = {}) {
   const observedAt = new Date().toISOString();
   return {
     ok: true,
     connected: true,
-    status: 'reference',
-    source: 'ibkr_completed_session_reference',
+    status: 'live',
+    source: 'ibkr_live_session',
+    from_cache: false,
     account: 'U1',
     observed_at: observedAt,
     socket_verified_at: observedAt,
+    snapshotId: 'balance-snapshot-1',
     summary: {
       account: 'U1',
       baseCurrency: 'USD',
       AccountReady: true,
       NetLiquidation: 195000,
+      EquityWithLoanValue: 190000,
+      InitMarginReq: 80000,
+      MaintMarginReq: 75000,
+      AvailableFunds: 110000,
+      ExcessLiquidity: 115000,
+      BuyingPower: 380000,
       TotalCashValue: 114000,
       'TotalCashValue-S': 114000,
       'TotalCashValue-C': 0,
@@ -105,54 +113,98 @@ function fundingReferenceEvidence(overrides = {}) {
       'GrossPositionValue-S': 295000,
       StockMarketValue: 95000,
       'AccruedCash-S': 0,
-      'SettledCashByDate-S': '20260725:115000;20260727:114000',
-      'SettledCashByDate-C': '20260725:0;20260727:0',
+      'SettledCashByDate-S': '20260805:115000;20260807:114000',
+      'SettledCashByDate-C': '20260805:0;20260807:0',
       CashBalance: { USD: 114000 },
     },
-    funding: null,
-    fundingReference: {
-      schemaVersion: 1,
-      referenceOnly: true,
-      actionable: false,
-      referenceKind:
-        'completed_market_session_with_current_settlement_ladder',
-      referenceSessionDate: '2026-07-24',
-      cashLedgerObservedDate: '2026-07-25',
-      settlementHorizonDate: '2026-07-27',
+    balanceEvidence: {
       accountValuesObservedAt: observedAt,
       openPositionCount: 2,
       shortPositionCount: 1,
       openOrderCount: 0,
-      executionCountObserved: 0,
-      cashBalances: { USD: 114000 },
-      shortStockReferenceCloseValue: 100000,
-      shortPositionReferenceEvidence: [{
+      sameDayExecutionCount: 1,
+      positionScope: { allStock: true, allBaseCurrency: true },
+      settlementLaddersVerified: true,
+      activitySnapshotVerified: true,
+      settlementState: 'pending',
+      settlementDate: '2026-08-05',
+      settlementHorizonDate: '2026-08-07',
+      settlementVerification: 'segment_ladders_double_snapshot',
+      shortPositionEvidence: [{
         conId: 756733,
         symbol: 'MACRO',
         currency: 'USD',
         quantity: -1000,
-        referenceClose: 100,
-        referenceCloseSource: 'ibkr_historical_daily_close',
-        referenceCloseSessionDate: '2026-07-24',
-        referenceCloseObservedAt: observedAt,
+        priorClose: 100,
+        priorCloseSource: 'ibkr_historical_daily_close',
+        priorCloseSessionDate: '2026-08-04',
+        priorCloseObservedAt: observedAt,
       }],
-      positionScope: {
-        allStock: true,
-        allBaseCurrency: true,
-      },
-      settlementVerification:
-        'reference_segment_ladders_double_snapshot',
     },
     ...overrides,
   };
 }
 
+function singleEventBalanceEvidence({
+  exchange = 'FORECASTX',
+  secType = 'FOP',
+} = {}) {
+  const response = balanceSidecarEvidence();
+  response.summary['TotalCashValue-C'] = 100;
+  response.summary['SettledCashByDate-C'] = '20260805:100;20260807:100';
+  response.summary['GrossPositionValue-C'] = 250;
+  response.summary['NetLiquidation-C'] = 350;
+  response.summary['InitMarginReq-C'] = 250;
+  response.summary['MaintMarginReq-C'] = 250;
+  response.summary['AvailableFunds-C'] = 100;
+  response.summary['EquityWithLoanValue-C'] = 100;
+  response.balanceEvidence.openPositionCount = 3;
+  response.balanceEvidence.positionScope = {
+    mode: 'stocks_and_event_contracts',
+    allSupportedForBalance: true,
+    allStock: false,
+    allBaseCurrency: true,
+    stockPositionCount: 2,
+    eventPositionCount: 1,
+    eventVenues: [exchange],
+  };
+  response.balanceEvidence.eventPositionEvidence = [{
+    conId: 910875954,
+    symbol: 'FFRATE',
+    localSymbol: 'FFRATE-YES',
+    tradingClass: 'FFRATE',
+    exchange,
+    secType,
+    currency: 'USD',
+    multiplier: 1,
+    quantity: 5500.35,
+  }];
+  response.balanceEvidence.eventAccounting = {
+    venues: [exchange],
+    positionCount: 1,
+    marketValue: 250,
+    initialMargin: 250,
+    maintenanceMargin: 250,
+    availableFunds: 100,
+    equityWithLoanValue: 100,
+    capacityContribution: 0,
+    verification: 'ibkr_event_contract_commodity_segment_reconciled',
+    accountValues: {
+      'NetLiquidation-C': 350,
+      'TotalCashValue-C': 100,
+      'GrossPositionValue-C': 250,
+      'InitMarginReq-C': 250,
+      'MaintMarginReq-C': 250,
+      'AvailableFunds-C': 100,
+      'EquityWithLoanValue-C': 100,
+    },
+  };
+  return response;
+}
+
 function installLiveMocks({
   positions = [],
   summary = { NetLiquidation: 190539.25 },
-  fundingOverrides = {},
-  fundingError = null,
-  fundingResponse = null,
   referenceResponse = null,
   accountSummaryAvailable = true,
 } = {}) {
@@ -174,60 +226,6 @@ function installLiveMocks({
     }
     if (requestPath.startsWith('/portfolio/reference-marks')) {
       return referenceResponse || referenceEvidence();
-    }
-    if (requestPath.startsWith('/portfolio/live-funding')) {
-      if (fundingError) throw fundingError;
-      if (fundingResponse) return fundingResponse;
-      const fundingObservedAt = new Date().toISOString();
-      const shortPositionEvidence = positions
-        .filter((position) => Number(position.position) < 0)
-        .map((position) => ({
-          conId: position.conId || 1,
-          symbol: position.symbol,
-          currency: position.currency || 'USD',
-          quantity: Number(position.position),
-          priorClose: 100,
-          priorCloseSource: 'ibkr_live_tick_close',
-          priorCloseSessionDate: '2026-07-22',
-          priorCloseObservedAt: fundingObservedAt,
-          currentPrice: 100.25,
-          currentPriceSource: 'ibkr_ticker_direct_max',
-          directAsk: 100.25,
-          directBid: 99.75,
-          directLast: 100,
-          snapshotTimestamp: fundingObservedAt,
-          marketDataType: 1,
-        }));
-      return liveEvidence({
-        account: 'U1',
-        summary: {
-          account: 'U1',
-          baseCurrency: 'USD',
-          AccountReady: true,
-          'TotalCashValue-S': 100000,
-          'TotalCashValue-C': 0,
-          'MaintMarginReq-C': 0,
-          'GrossPositionValue-S': Number(summary.GrossPositionValue || 0),
-          StockMarketValue: 0,
-          'AccruedCash-S': 0,
-          'SettledCashByDate-S': '20260723:100000',
-          'SettledCashByDate-C': '20260723:0',
-          ...summary,
-        },
-        funding: {
-          accountValuesObservedAt: fundingObservedAt,
-          shortPositionEvidence,
-          openPositionCount: positions.filter((position) => Number(position.position) !== 0).length,
-          shortPositionCount: shortPositionEvidence.length,
-          positionScope: { allStock: true, allBaseCurrency: true },
-          openOrderCount: 0,
-          settledShortPositionsVerified: true,
-          settlementStatus: 'settled',
-          noSameDayExecutionsVerified: true,
-          sameDayExecutionCount: 0,
-          ...fundingOverrides,
-        },
-      });
     }
     if (requestPath.startsWith('/portfolio/pnl')) return { ok: true, pnl: null };
     throw new Error(`Unexpected sidecar request: ${requestPath}`);
@@ -258,21 +256,78 @@ describe('ibkrPortfolioDataProvider live-session integrity', () => {
     });
     expect(snapshot.holdings.map((holding) => holding.symbol)).not.toContain('CLOSED');
     expect(snapshot.holdings.every((holding) => holding.positionSource === 'ibkr_live_session')).toBe(true);
-    expect(snapshot.funding.shortPositions[0]).toMatchObject({
-      symbol: 'SHORT_A',
-      quantity: -20,
-      priorClose: 100,
-      priorCloseSource: 'ibkr_live_tick_close',
-      priorCloseSessionDate: '2026-07-22',
-      priorCloseObservedAt: expect.any(String),
-      currentPrice: 100.25,
-      currentPriceSource: 'ibkr_ticker_direct_max',
-      directAsk: 100.25,
-      directBid: 99.75,
-      directLast: 100,
-      marketDataType: 1,
-    });
+    expect(snapshot).not.toHaveProperty('funding');
     expect(sidecarRequest.mock.calls.some(([requestPath]) => requestPath.startsWith('/cache/'))).toBe(false);
+  });
+
+  test('keeps ForecastEx contracts out of the securities portfolio while retaining EXPGY', async () => {
+    const eventPositions = [
+      { conId: 913869765, localSymbol: 'FES_082126_7700_YES', position: 2500 },
+      { conId: 913869775, localSymbol: 'FES_082126_7725_YES', position: 5000 },
+      { conId: 913869780, localSymbol: 'FES_082126_7750_YES', position: 4999 },
+    ].map((position) => ({
+      account: 'U1',
+      symbol: 'ES',
+      secType: 'FOP',
+      ...position,
+    }));
+    const failures = [
+      ...eventPositions.map((position) => ({
+        account: 'U1',
+        conId: position.conId,
+        symbol: position.localSymbol,
+        errorCode: 'REFERENCE_MARK_NO_TRADE_IN_LOOKBACK',
+        stage: 'historical_daily_close',
+      })),
+      {
+        account: 'U1',
+        conId: 41197624,
+        symbol: 'EXPGY',
+        errorCode: 'REFERENCE_MARK_NO_TRADE_IN_LOOKBACK',
+        stage: 'historical_daily_close',
+      },
+    ];
+    installLiveMocks({
+      positions: [
+        ...eventPositions,
+        {
+          account: 'U1',
+          conId: 41197624,
+          symbol: 'EXPGY',
+          localSymbol: 'EXPGY',
+          position: 112.5,
+          secType: 'STK',
+          exchange: 'PINK',
+        },
+      ],
+      referenceResponse: referenceEvidence({ failures }),
+    });
+
+    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
+
+    expect(snapshot.holdings).toEqual([
+      expect.objectContaining({
+        symbol: 'EXPGY',
+        secType: 'STK',
+        exchange: 'PINK',
+        isPredictionMarket: false,
+      }),
+    ]);
+    expect(snapshot.summary).toMatchObject({
+      positionCount: 1,
+      longCount: 1,
+      shortCount: 0,
+    });
+    expect(snapshot.dataQuality).toMatchObject({
+      predictionMarketContractCount: 3,
+      predictionMarketContractSymbols: ['ES', 'ES', 'ES'],
+      markFailureCount: 1,
+      missingMarketValueCount: 1,
+      missingMarketValueSymbols: ['EXPGY'],
+    });
+    expect(snapshot.referenceMarks.failures).toEqual([
+      expect.objectContaining({ conId: 41197624, symbol: 'EXPGY' }),
+    ]);
   });
 
   test('retries one transient live-position transport failure without using cached data', async () => {
@@ -636,7 +691,6 @@ describe('ibkrPortfolioDataProvider live-session integrity', () => {
         position: 2,
         secType: 'STK',
       }],
-      fundingError: new Error('funding unavailable'),
       accountSummaryAvailable: false,
       referenceResponse: referenceEvidence({
         marks: [{
@@ -752,7 +806,7 @@ describe('ibkrPortfolioDataProvider live-session integrity', () => {
     expect(JSON.stringify(snapshot)).not.toContain('12345');
   });
 
-  test('accepts a verified empty portfolio and uses only the live funding-summary NLV', async () => {
+  test('accepts a verified empty portfolio from the live account-summary path only', async () => {
     installLiveMocks();
 
     const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
@@ -767,247 +821,580 @@ describe('ibkrPortfolioDataProvider live-session integrity', () => {
       },
       summary: { totalValue: 190539.25, positionCount: 0 },
     });
-    expect(sidecarRequest).toHaveBeenCalledWith(
-      '/portfolio/live-funding?account=U1',
-      { timeoutMs: 25000 },
-    );
+    expect(sidecarRequest.mock.calls.some(([path]) => path.includes('live-balance')))
+      .toBe(false);
   });
 
-  test('passes through only a fresh same-account live funding snapshot', async () => {
-    installLiveMocks({
-      summary: {
-        NetLiquidation: 190539.25,
-        TotalCashValue: 90000,
-        GrossPositionValue: 250000,
-      },
-    });
+  test('calculates a live balance from pending settlement ladders', async () => {
+    sidecarRequest.mockResolvedValue(balanceSidecarEvidence());
 
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
 
-    expect(snapshot.accountSummary).toMatchObject({
-      netLiquidation: 190539.25,
-      totalCashValue: 90000,
-      grossPositionValue: 250000,
-    });
-    expect(snapshot.funding).toMatchObject({
-      accountId: 'U1',
+    expect(balance).toMatchObject({
+      available: true,
       status: 'live',
       source: 'ibkr_live_session',
+      accountId: 'U1',
       fromCache: false,
-      accountReady: true,
-      totalCashValueSecurities: 100000,
-      settledCashByDateSecurities: '20260723:100000',
-      settledCashByDateCommodities: '20260723:0',
-      openOrderCount: 0,
-      settledShortPositionsVerified: true,
-      settlementStatus: 'settled',
-      noSameDayExecutionsVerified: true,
-      sameDayExecutionCount: 0,
+      snapshotId: 'balance-snapshot-1',
+      settlement: { state: 'pending', horizonDate: '2026-08-07' },
+      activity: { sameDayExecutionCount: 1, previewAvailable: true },
+      freshness: { status: 'fresh', maxAgeMs: 45000 },
+      cash: {
+        netAccruedInterest: 0,
+        noBorrowBalance: 12000,
+        noBorrowLongLimit: 207000,
+      },
+      buffer: { balance: 4900 },
+      exposure: {
+        available: true,
+        longMarketValue: 195000,
+        shortMarketValue: 100000,
+      },
+      margin: {
+        available: true,
+        health: 'healthy',
+        availableFunds: 110000,
+        excessLiquidity: 115000,
+        buyingPower: 380000,
+        actionable: false,
+      },
+      interestExposure: {
+        available: true,
+        interpretation: 'debit_interest_exposure_only',
+        actionable: false,
+        projected: { estimatedDebitPrincipal: 0 },
+        policy: { estimatedDebitPrincipalAfterReserve: 0 },
+      },
+      capacity: { available: true, status: 'live' },
     });
     expect(sidecarRequest).toHaveBeenCalledWith(
-      '/portfolio/live-funding?account=U1',
-      { timeoutMs: 25000 },
+      '/portfolio/live-balance?account=U1',
+      { timeoutMs: 13000 },
     );
   });
 
-  test('passes through a broker-verified weekend reference without promoting it to live funding', async () => {
-    const fundingResponse = fundingReferenceEvidence();
-    installLiveMocks({ fundingResponse });
+  test('fails closed when broker-native margin evidence is incomplete', async () => {
+    const response = balanceSidecarEvidence();
+    delete response.summary.ExcessLiquidity;
+    sidecarRequest.mockResolvedValue(response);
 
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(snapshot.funding).toBeNull();
-    expect(snapshot.fundingUnavailableReason).toBe('non_settlement_day');
-    expect(snapshot.fundingReference).toMatchObject({
-      schemaVersion: 1,
-      referenceOnly: true,
-      actionable: false,
-      accountId: 'U1',
-      status: 'reference',
-      source: 'ibkr_completed_session_reference',
-      fromCache: false,
-      referenceSessionDate: '2026-07-24',
-      cashLedgerObservedDate: '2026-07-25',
-      settlementHorizonDate: '2026-07-27',
-      shortPositionCount: 1,
-      openOrderCount: 0,
-      shortPositionReferences: [{
-        conId: 756733,
-        quantity: -1000,
-        referenceClose: 100,
-        referenceCloseSource: 'ibkr_historical_daily_close',
-      }],
+    await expect(ibkrPortfolio.getPortfolioBalance('U1')).rejects.toMatchObject({
+      code: 'BALANCE_MARGIN_INVALID',
     });
-    expect(snapshot.fundingReference.shortPositionReferences[0])
-      .not.toHaveProperty('currentPrice');
   });
 
-  test('retries one transient funding timeout before dropping the weekend reference', async () => {
-    let fundingCalls = 0;
+  test('returns verified exposure-only evidence with explicit unavailable margin', async () => {
+    const response = balanceSidecarEvidence();
+    response.balanceEvidence.capacityAvailable = false;
+    response.balanceEvidence.capacityUnavailableCode = 'EVENT_CONTRACT_ACCOUNTING_UNRECONCILED';
+    response.balanceEvidence.capacityUnavailableMessage = 'Event accounting did not reconcile.';
+    response.balanceEvidence.positionScope = {
+      allStock: false,
+      allBaseCurrency: false,
+    };
+    response.balanceEvidence.openPositionCount = null;
+    response.balanceEvidence.shortPositionCount = null;
+    response.balanceEvidence.openOrderCount = null;
+    response.balanceEvidence.sameDayExecutionCount = null;
+    response.balanceEvidence.shortPositionEvidence = [];
+    response.balanceEvidence.positionEvidence = [];
+    [
+      'EquityWithLoanValue',
+      'InitMarginReq',
+      'MaintMarginReq',
+      'AvailableFunds',
+      'ExcessLiquidity',
+      'BuyingPower',
+      'TotalCashValue',
+      'TotalCashValue-S',
+      'TotalCashValue-C',
+      'MaintMarginReq-C',
+      'AccruedCash-S',
+      'SettledCashByDate-S',
+      'SettledCashByDate-C',
+      'CashBalance',
+    ].forEach((key) => delete response.summary[key]);
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance).toMatchObject({
+      available: true,
+      status: 'live',
+      source: 'ibkr_live_session',
+      exposure: {
+        available: true,
+        netLiquidation: 195000,
+        grossMarketValue: 295000,
+        netMarketValue: 95000,
+      },
+      margin: {
+        available: false,
+        status: 'unavailable',
+        errorCode: 'BALANCE_MARGIN_UNAVAILABLE',
+        reason: 'broker_native_margin_evidence_unavailable',
+      },
+      capacity: {
+        available: false,
+        errorCode: 'EVENT_CONTRACT_ACCOUNTING_UNRECONCILED',
+        reason: 'event_contract_accounting_unreconciled',
+      },
+      settlement: null,
+      activity: null,
+      cash: null,
+      buffer: null,
+    });
+  });
+
+  test('exposes signed net accrued interest only from exact securities-segment evidence', async () => {
+    const response = balanceSidecarEvidence();
+    response.summary['AccruedCash-S'] = -102.32;
+    response.summary.AccruedCash = 999;
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.cash.netAccruedInterest).toBe(-102.32);
+    expect(balance.cash.accruedDebitReserve).toBe(102.32);
+
+    const missingExact = balanceSidecarEvidence();
+    delete missingExact.summary['AccruedCash-S'];
+    missingExact.summary.AccruedCash = -102.32;
+    sidecarRequest.mockResolvedValue(missingExact);
+
+    const unavailable = await ibkrPortfolio.getPortfolioBalance('U1');
+    expect(unavailable.capacity).toMatchObject({
+      available: false,
+      reason: 'invalid_accruedCashSecurities',
+    });
+    expect(unavailable.cash).toBeNull();
+  });
+
+  test('does not amplify a transient busy balance read with a provider retry', async () => {
+    sidecarRequest
+      .mockRejectedValueOnce(Object.assign(new Error('busy'), {
+        sidecarCode: 'BALANCE_SNAPSHOT_BUSY',
+      }))
+      .mockResolvedValueOnce(balanceSidecarEvidence());
+
+    await expect(ibkrPortfolio.getPortfolioBalance('U1')).rejects.toMatchObject({
+      sidecarCode: 'BALANCE_SNAPSHOT_BUSY',
+    });
+
+    expect(sidecarRequest).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    ['cross-account', (response) => { response.account = 'U2'; }],
+    ['cached', (response) => { response.from_cache = true; }],
+    ['stale', (response) => {
+      const stale = new Date(Date.now() - 46_000).toISOString();
+      response.observed_at = stale;
+      response.socket_verified_at = stale;
+      response.balanceEvidence.accountValuesObservedAt = stale;
+    }],
+  ])('fails closed for %s portfolio-balance evidence', async (_label, mutate) => {
+    const response = balanceSidecarEvidence();
+    mutate(response);
+    sidecarRequest.mockResolvedValue(response);
+
+    await expect(ibkrPortfolio.getPortfolioBalance('U1')).rejects.toBeTruthy();
+  });
+
+  test('keeps current exposure live when short-position evidence is missing', async () => {
+    const response = balanceSidecarEvidence();
+    response.balanceEvidence.openPositionCount = 0;
+    response.balanceEvidence.shortPositionCount = 0;
+    response.balanceEvidence.shortPositionEvidence = [];
+    response.balanceEvidence.positionEvidence = [];
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance).toMatchObject({
+      available: true,
+      status: 'live',
+      exposure: {
+        available: true,
+        longMarketValue: 195000,
+        shortMarketValue: 100000,
+      },
+      capacity: {
+        available: false,
+        reason: 'short_position_evidence_missing',
+      },
+      cash: null,
+      buffer: null,
+    });
+  });
+
+  test('keeps current exposure live while unreconciled cash blocks capacity', async () => {
+    const response = balanceSidecarEvidence();
+    response.summary['TotalCashValue-S'] = 113000;
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.exposure).toMatchObject({
+      available: true,
+      grossMarketValue: 295000,
+      netMarketValue: 95000,
+    });
+    expect(balance.capacity).toMatchObject({
+      available: false,
+      reason: 'securities_cash_ladder_unreconciled',
+    });
+  });
+
+  test('honors a sidecar instrument-scope blocker without erasing exposure', async () => {
+    const response = balanceSidecarEvidence();
+    response.balanceEvidence.capacityAvailable = false;
+    response.balanceEvidence.capacityUnavailableCode = 'POSITION_SCOPE_UNSUPPORTED';
+    response.balanceEvidence.positionScope = {
+      allStock: false,
+      allBaseCurrency: true,
+    };
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.exposure.available).toBe(true);
+    expect(balance.margin).toMatchObject({
+      available: true,
+      status: 'live',
+      health: 'healthy',
+    });
+    expect(balance.capacity).toMatchObject({
+      available: false,
+      errorCode: 'POSITION_SCOPE_UNSUPPORTED',
+      reason: 'position_scope_unsupported',
+    });
+  });
+
+  test('accepts a reconciled Kalshi position scope and keeps event contracts out of stock exposure', async () => {
+    const response = balanceSidecarEvidence();
+    response.summary['TotalCashValue-C'] = 100;
+    response.summary['SettledCashByDate-C'] = '20260805:100;20260807:100';
+    response.summary['GrossPositionValue-C'] = 250;
+    response.summary['NetLiquidation-C'] = 350;
+    response.summary['InitMarginReq-C'] = 250;
+    response.summary['MaintMarginReq-C'] = 250;
+    response.summary['AvailableFunds-C'] = 100;
+    response.summary['EquityWithLoanValue-C'] = 100;
+    response.balanceEvidence.openPositionCount = 3;
+    response.balanceEvidence.positionScope = {
+      mode: 'stocks_and_kalshi',
+      allSupportedForBalance: true,
+      allStock: false,
+      allBaseCurrency: true,
+      stockPositionCount: 1,
+      eventPositionCount: 2,
+    };
+    response.balanceEvidence.positionEvidence = [{
+      conId: 756733,
+      symbol: 'MACRO',
+      quantity: -1000,
+      currency: 'USD',
+    }];
+    response.balanceEvidence.eventPositionEvidence = [
+      {
+        conId: 882701217,
+        symbol: 'KXCPIYOY',
+        localSymbol: 'KXCPIYOY-YES',
+        tradingClass: 'KXCPIYOY',
+        exchange: 'KALSHI',
+        secType: 'OPT',
+        currency: 'USD',
+        multiplier: 1,
+        quantity: 10,
+      },
+      {
+        conId: 882701270,
+        symbol: 'KXCPIYOY',
+        localSymbol: 'KXCPIYOY-NO',
+        tradingClass: 'KXCPIYOY',
+        exchange: 'KALSHI',
+        secType: 'OPT',
+        currency: 'USD',
+        multiplier: 1,
+        quantity: 15,
+      },
+    ];
+    response.balanceEvidence.eventAccounting = {
+      venue: 'KALSHI',
+      positionCount: 2,
+      marketValue: 250,
+      initialMargin: 250,
+      maintenanceMargin: 250,
+      availableFunds: 100,
+      equityWithLoanValue: 100,
+      capacityContribution: 0,
+      verification: 'ibkr_kalshi_commodity_segment_reconciled',
+      accountValues: {
+        'NetLiquidation-C': 350,
+        'TotalCashValue-C': 100,
+        'GrossPositionValue-C': 250,
+        'InitMarginReq-C': 250,
+        'MaintMarginReq-C': 250,
+        'AvailableFunds-C': 100,
+        'EquityWithLoanValue-C': 100,
+      },
+    };
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.capacity.available).toBe(true);
+    expect(balance.positions).toHaveLength(1);
+    expect(balance.eventPositions).toHaveLength(2);
+    expect(balance.eventContracts).toMatchObject({
+      venues: ['KALSHI'],
+      venue: 'KALSHI',
+      positionCount: 2,
+      contractQuantity: 25,
+      marketValue: 250,
+      capacityContribution: 0,
+    });
+    expect(balance.cash.commodityResidual).toBe(100);
+  });
+
+  test('accepts canonical ForecastX and mixed event venues with generic accounting', async () => {
+    const response = balanceSidecarEvidence();
+    response.summary['TotalCashValue-C'] = 100;
+    response.summary['SettledCashByDate-C'] = '20260805:100;20260807:100';
+    response.summary['GrossPositionValue-C'] = 250;
+    response.summary['NetLiquidation-C'] = 350;
+    response.summary['InitMarginReq-C'] = 250;
+    response.summary['MaintMarginReq-C'] = 250;
+    response.summary['AvailableFunds-C'] = 100;
+    response.summary['EquityWithLoanValue-C'] = 100;
+    response.balanceEvidence.openPositionCount = 3;
+    response.balanceEvidence.positionScope = {
+      mode: 'stocks_and_event_contracts',
+      allSupportedForBalance: true,
+      allStock: false,
+      allBaseCurrency: true,
+      stockPositionCount: 1,
+      eventPositionCount: 2,
+      eventVenues: ['FORECASTX', 'KALSHI'],
+    };
+    response.balanceEvidence.positionEvidence = [{
+      conId: 756733,
+      symbol: 'MACRO',
+      quantity: -1000,
+      currency: 'USD',
+    }];
+    response.balanceEvidence.eventPositionEvidence = [
+      {
+        conId: 882701217,
+        symbol: 'FFCPIYOY',
+        localSymbol: 'FF-CPI-YES',
+        tradingClass: 'FF-CPI',
+        exchange: 'FORECASTX',
+        secType: 'FOP',
+        currency: 'USD',
+        multiplier: 1,
+        quantity: 10,
+      },
+      {
+        conId: 882701270,
+        symbol: 'KXCPIYOY',
+        localSymbol: 'KXCPIYOY-NO',
+        tradingClass: 'KXCPIYOY',
+        exchange: 'KALSHI',
+        secType: 'OPT',
+        currency: 'USD',
+        multiplier: 1,
+        quantity: 15,
+      },
+    ];
+    response.balanceEvidence.eventAccounting = {
+      venues: ['FORECASTX', 'KALSHI'],
+      positionCount: 2,
+      marketValue: 250,
+      initialMargin: 250,
+      maintenanceMargin: 250,
+      availableFunds: 100,
+      equityWithLoanValue: 100,
+      capacityContribution: 0,
+      verification: 'ibkr_event_contract_commodity_segment_reconciled',
+      accountValues: {
+        'NetLiquidation-C': 350,
+      },
+    };
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.capacity.available).toBe(true);
+    expect(balance.positionScope).toBe('stocks_and_event_contracts');
+    expect(balance.eventPositions[0]).toMatchObject({
+      exchange: 'FORECASTX',
+      secType: 'FOP',
+    });
+    expect(balance.eventContracts).toMatchObject({
+      venues: ['FORECASTX', 'KALSHI'],
+      venue: null,
+      positionCount: 2,
+      contractQuantity: 25,
+      marketValue: 250,
+      verification: 'ibkr_event_contract_commodity_segment_reconciled',
+    });
+  });
+
+  test.each([
+    ['Kalshi FOP', { exchange: 'KALSHI', secType: 'FOP' }],
+    ['ForecastX unsupported security type', { exchange: 'FORECASTX', secType: 'FUT' }],
+  ])('keeps %s event evidence unavailable', async (_label, contract) => {
+    sidecarRequest.mockResolvedValue(singleEventBalanceEvidence(contract));
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.capacity.available).toBe(false);
+    expect(balance.capacity.reasons)
+      .toContain('event_contract_accounting_unverified');
+    expect(balance.eventContracts).toBeNull();
+  });
+
+  test('requires one unique canonical event row per conId', async () => {
+    const response = singleEventBalanceEvidence();
+    response.balanceEvidence.openPositionCount += 1;
+    response.balanceEvidence.positionScope.eventPositionCount = 2;
+    response.balanceEvidence.eventAccounting.positionCount = 2;
+    response.balanceEvidence.eventPositionEvidence.push({
+      ...response.balanceEvidence.eventPositionEvidence[0],
+      quantity: 10000.437,
+    });
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.capacity.available).toBe(false);
+    expect(balance.capacity.reasons)
+      .toContain('event_contract_accounting_unverified');
+    expect(balance.eventContracts).toBeNull();
+  });
+
+  test('keeps malformed canonical event evidence unavailable', async () => {
+    const response = balanceSidecarEvidence();
+    response.balanceEvidence.openPositionCount = 1;
+    response.balanceEvidence.positionScope = {
+      mode: 'stocks_and_event_contracts',
+      allSupportedForBalance: true,
+      allBaseCurrency: true,
+      eventPositionCount: 1,
+      eventVenues: ['FORECASTX'],
+    };
+    response.balanceEvidence.eventPositionEvidence = [{
+      conId: 1,
+      exchange: 'UNKNOWN',
+      secType: 'OPT',
+      currency: 'USD',
+      multiplier: 1,
+      quantity: 1,
+    }];
+    response.balanceEvidence.eventAccounting = {
+      venues: ['FORECASTX'],
+      positionCount: 1,
+      verification: 'ibkr_event_contract_commodity_segment_reconciled',
+    };
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.capacity.available).toBe(false);
+    expect(balance.capacity.reasons).toContain('event_contract_accounting_unverified');
+    expect(balance.eventContracts).toBeNull();
+  });
+
+  test('keeps the live balance available while open orders disable preview', async () => {
+    const response = balanceSidecarEvidence();
+    response.balanceEvidence.openOrderCount = 2;
+    sidecarRequest.mockResolvedValue(response);
+
+    const balance = await ibkrPortfolio.getPortfolioBalance('U1');
+
+    expect(balance.available).toBe(true);
+    expect(balance.activity).toMatchObject({
+      openOrderCount: 2,
+      previewAvailable: false,
+      previewUnavailableReason: 'open_orders_present',
+    });
+  });
+
+  test('re-reads the balance and returns a read-only long preview', async () => {
+    sidecarRequest.mockResolvedValue(balanceSidecarEvidence());
+
+    const preview = await ibkrPortfolio.getPortfolioBalancePreview({
+      accountId: 'U1',
+      action: 'add_long',
+      amount: 5000,
+    });
+
+    expect(preview).toMatchObject({
+      available: true,
+      status: 'preview',
+      accountId: 'U1',
+      orderSubmitted: false,
+      cash: { noBorrowBalance: 7000 },
+      exposure: { longMarketValue: 200000 },
+    });
+  });
+
+  test('requires verified live quote and shortability evidence for add-short preview', async () => {
     sidecarRequest.mockImplementation(async (requestPath) => {
-      if (requestPath === '/accounts') {
-        return { ok: true, accounts: ['U1'] };
+      if (requestPath.startsWith('/portfolio/live-balance?')) {
+        return balanceSidecarEvidence();
       }
-      if (requestPath === '/portfolio/live-positions') {
-        return liveEvidence({ positions: [] });
-      }
-      if (requestPath.startsWith('/portfolio/reference-marks')) {
-        return referenceEvidence();
-      }
-      if (requestPath.startsWith('/portfolio/live-funding')) {
-        fundingCalls += 1;
-        if (fundingCalls === 1) {
-          throw Object.assign(new Error('transient'), {
-            sidecarCode: 'FUNDING_SNAPSHOT_TIMEOUT',
-            status: 503,
-          });
-        }
-        return fundingReferenceEvidence();
-      }
-      if (requestPath.startsWith('/portfolio/pnl')) {
-        return { ok: true, pnl: null };
+      if (requestPath === '/portfolio/live-balance/preview-evidence') {
+        const observedAt = new Date().toISOString();
+        return {
+          ok: true,
+          available: true,
+          connected: true,
+          status: 'live',
+          source: 'ibkr_live_session',
+          from_cache: false,
+          account: 'U1',
+          conId: 756733,
+          action: 'add_short',
+          positionQuantity: -1000,
+          bid: 100,
+          ask: 100.1,
+          currentPrice: 101,
+          shortableShares: 1000,
+          marketDataType: 1,
+          quoteObservedAt: observedAt,
+          observed_at: observedAt,
+          socket_verified_at: observedAt,
+        };
       }
       throw new Error(`Unexpected sidecar request: ${requestPath}`);
     });
 
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(fundingCalls).toBe(2);
-    expect(snapshot.fundingReference).toMatchObject({
-      status: 'reference',
-      referenceSessionDate: '2026-07-24',
-    });
-    expect(snapshot.fundingUnavailableReason).toBe('non_settlement_day');
-  });
-
-  test.each([
-    ['wrong source', (response) => {
-      response.source = 'ibkr_live_session';
-    }],
-    ['actionable flag', (response) => {
-      response.fundingReference.actionable = true;
-    }],
-    ['live quote field', (response) => {
-      response.fundingReference.shortPositionReferenceEvidence[0]
-        .currentPrice = 100;
-    }],
-    ['cross-account response', (response) => {
-      response.account = 'U2';
-    }],
-  ])('rejects a weekend funding reference with %s', async (_label, mutate) => {
-    const fundingResponse = fundingReferenceEvidence();
-    mutate(fundingResponse);
-    sidecarRequest.mockResolvedValue(fundingResponse);
-
-    const snapshot = await ibkrPortfolio.getLiveFundingSnapshot('U1');
-
-    expect(snapshot).toBeNull();
-  });
-
-  test('does not convert missing or legacy short evidence into a verified empty array', async () => {
-    installLiveMocks({
-      fundingOverrides: {
-        shortPositionEvidence: undefined,
-        shortPositions: [],
-      },
+    const preview = await ibkrPortfolio.getPortfolioBalancePreview({
+      accountId: 'U1',
+      action: 'add_short',
+      conId: 756733,
+      quantity: 100,
+      limitPrice: 99,
     });
 
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(snapshot.funding.shortPositions).toBeNull();
-  });
-
-  test('does not substitute response observation time for missing account-value evidence', async () => {
-    installLiveMocks({
-      fundingOverrides: {
-        accountValuesObservedAt: undefined,
-      },
-    });
-
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(snapshot.funding.accountValuesObservedAt).toBeNull();
-    expect(snapshot.funding.observedAt).not.toBeNull();
-  });
-
-  test('preserves missing settlement attestation as unavailable evidence', async () => {
-    installLiveMocks({
-      fundingOverrides: {
-        settledShortPositionsVerified: undefined,
-        settlementStatus: undefined,
-        noSameDayExecutionsVerified: undefined,
-        sameDayExecutionCount: '0',
-      },
-    });
-
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(snapshot.funding.settledShortPositionsVerified).toBeNull();
-    expect(snapshot.funding.settlementStatus).toBeNull();
-    expect(snapshot.funding.noSameDayExecutionsVerified).toBeNull();
-    expect(snapshot.funding.sameDayExecutionCount).toBeNull();
-  });
-
-  test('preserves exact short currency and snapshot fields without legacy fallbacks', async () => {
-    installLiveMocks({
-      fundingOverrides: {
-        shortPositionEvidence: [{
-          conId: 1,
-          symbol: 'NO-FALLBACK',
-          quantity: -1,
-          priorClose: 100,
-          priorCloseSource: 'ibkr_live_tick_close',
-          currentPrice: 100,
-          currentPriceSource: 'ibkr_ticker_direct_max',
-          directBid: 100,
-          directAsk: 100,
-          timestamp: new Date().toISOString(),
-          marketDataType: 1,
-        }],
-        shortPositionCount: 1,
-      },
-    });
-
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(snapshot.funding.shortPositions[0].currency).toBeNull();
-    expect(snapshot.funding.shortPositions[0].snapshotTimestamp).toBeNull();
-  });
-
-  test('propagates only the sanitized unsettled funding reason', async () => {
-    const warningSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const fundingError = Object.assign(
-      new Error('contains sensitive broker details 12345'),
-      { sidecarCode: 'UNSETTLED_SECURITIES_ACTIVITY', status: 503 },
+    expect(preview.available).toBe(true);
+    expect(preview.orderSubmitted).toBe(false);
+    expect(sidecarRequest).toHaveBeenCalledWith(
+      '/portfolio/live-balance/preview-evidence',
+      expect.objectContaining({
+        method: 'POST',
+        body: {
+          account: 'U1',
+          conId: 756733,
+          action: 'add_short',
+          quantity: 100,
+        },
+      }),
     );
-    installLiveMocks({ fundingError });
-
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(snapshot.funding).toBeNull();
-    expect(snapshot.fundingUnavailableReason).toBe(
-      'unsettled_securities_activity',
-    );
-    expect(JSON.stringify(snapshot)).not.toContain('12345');
-    expect(JSON.stringify(warningSpy.mock.calls)).not.toContain('12345');
-    warningSpy.mockRestore();
-  });
-
-  test('propagates only the sanitized non-settlement-day funding reason', async () => {
-    const warningSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const fundingError = Object.assign(
-      new Error('contains sensitive broker details 67890'),
-      { sidecarCode: 'NON_SETTLEMENT_DAY', status: 503 },
-    );
-    installLiveMocks({ fundingError });
-
-    const snapshot = await ibkrPortfolio.getPortfolioSnapshot('U1');
-
-    expect(snapshot.funding).toBeNull();
-    expect(snapshot.fundingUnavailableReason).toBe('non_settlement_day');
-    expect(JSON.stringify(snapshot)).not.toContain('67890');
-    expect(JSON.stringify(warningSpy.mock.calls)).not.toContain('67890');
-    warningSpy.mockRestore();
   });
 
   test('fails closed on stale or unverified position evidence', async () => {

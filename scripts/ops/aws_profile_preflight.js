@@ -14,7 +14,11 @@ const { spawnSync } = require('node:child_process');
 
 const EXPECTED_ACCOUNT_ID = '915328198276';
 const DEFAULT_REGION = 'us-west-1';
-const DEFAULT_TIMEOUT_MS = 8_000;
+// launchd runs the dashboard supervisor as a background job, where a cold AWS
+// CLI process can be deprioritized well beyond the interactive-shell timing.
+// Keep the identity check bounded, but do not reject valid dedicated profiles
+// merely because an individual CLI probe needed more than eight seconds.
+const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MINIMUM_REMAINING_MS = 15 * 60_000;
 
 const PROFILE_TARGETS = Object.freeze({
@@ -107,13 +111,14 @@ function runAwsCli(args, {
   return sanitizeAwsProcessResult(result, { capture, sensitivePresenceOnly });
 }
 
-function resultError(errorCode, detail, target) {
+function resultError(errorCode, detail, target, { expiresAt = null } = {}) {
   return {
     ok: false,
     purpose: target?.purpose || null,
     profile: target?.profile || null,
     errorCode,
     detail,
+    ...(expiresAt ? { expiresAt } : {}),
   };
 }
 
@@ -150,6 +155,9 @@ function classifyStsFailure(result) {
   ) {
     return 'AWS_PROFILE_EXPIRED';
   }
+  if (/AccessDenied|UnauthorizedOperation|not authorized|unauthorized/i.test(diagnostic)) {
+    return 'AWS_AUTHORIZATION_DENIED';
+  }
   if (result?.errorCode === 'ENOENT') return 'AWS_CLI_UNAVAILABLE';
   return 'AWS_PROFILE_UNUSABLE';
 }
@@ -182,17 +190,20 @@ function validateRefreshableExpiration(result, {
     return {
       ok: false,
       errorCode: 'AWS_PROFILE_EXPIRED',
+      expiresAt: new Date(expiration).toISOString(),
     };
   }
   if (remainingMs < minimumRemainingMs) {
     return {
       ok: false,
       errorCode: 'AWS_PROFILE_EXPIRING_SOON',
+      expiresAt: new Date(expiration).toISOString(),
     };
   }
   return {
     ok: true,
     errorCode: null,
+    expiresAt: new Date(expiration).toISOString(),
   };
 }
 
@@ -231,10 +242,33 @@ function preflightAwsProfile({
     );
   }
 
+  const ambientProfile = String(env.AWS_PROFILE || '').trim();
+  const ambientDefaultProfile = String(env.AWS_DEFAULT_PROFILE || '').trim();
+  if (purpose === 'admin') {
+    const overriddenProfiles = [ambientProfile, ambientDefaultProfile].filter(Boolean);
+    if (overriddenProfiles.some((value) => value !== target.profile)) {
+      return resultError(
+        'AWS_PROFILE_ENVIRONMENT_OVERRIDE',
+        'The administrator preflight found an ambient AWS profile override; clear it and retry with the approved admin profile.',
+        target,
+      );
+    }
+    if (AWS_CREDENTIAL_ENVIRONMENT_KEYS
+      .filter((key) => !['AWS_PROFILE', 'AWS_DEFAULT_PROFILE'].includes(key))
+      .some((key) => String(env[key] || '').trim())) {
+      return resultError(
+        'AWS_PROFILE_STATIC_SESSION_REJECTED',
+        'The administrator preflight found ambient static or session credentials; clear them and use the approved SSO provider.',
+        target,
+      );
+    }
+  }
+
   const environment = isolatedAwsEnvironment(env, {
     profile: target.profile,
     region,
   });
+  let expiresAt = null;
   for (const fieldName of ['aws_session_token', 'aws_security_token']) {
     const sessionToken = staticProfileFieldIsSet(
       fieldName,
@@ -312,6 +346,7 @@ function preflightAwsProfile({
       now,
       minimumRemainingMs,
     });
+    expiresAt = expiration.expiresAt || null;
     if (!expiration.ok) {
       let detail = `${target.profile} has no usable refreshable credentials.`;
       if (expiration.errorCode === 'AWS_PROFILE_EXPIRED') {
@@ -323,7 +358,7 @@ function preflightAwsProfile({
       } else if (expiration.errorCode === 'AWS_PROFILE_EXPIRATION_UNVERIFIED') {
         detail = `${target.profile} credential expiration could not be verified.`;
       }
-      return resultError(expiration.errorCode, detail, target);
+      return resultError(expiration.errorCode, detail, target, { expiresAt });
     }
   }
 
@@ -376,6 +411,7 @@ function preflightAwsProfile({
     profile: target.profile,
     errorCode: null,
     detail: `${target.profile} resolved to its approved ${purpose} identity.`,
+    ...(expiresAt ? { expiresAt } : {}),
   };
 }
 
@@ -405,6 +441,7 @@ function publicResult(result) {
     profile: result.profile,
     errorCode: result.errorCode,
     detail: result.detail,
+    ...(result.expiresAt ? { expiresAt: result.expiresAt } : {}),
   };
 }
 

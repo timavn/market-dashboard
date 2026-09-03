@@ -1,5 +1,9 @@
 {
   "schemaVersion": 2,
+  "structuredOnlyTickers": [
+    "AM",
+    "PM"
+  ],
   "reservedTokens": [
     "ADD",
     "ADDED",

@@ -1894,17 +1894,20 @@
   border-color: rgba(255, 55, 55, 0.24);
 }
 
+/* Keep every long/short ledger row at 60% of its original vertical baseline. */
 .pcv2-ledger-pane-head {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 30px;
-  padding: 5px 7px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0 7px;
   color: #1b2747;
   font-size: 10px;
   font-weight: 400;
+  line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border-bottom: 1px solid var(--pcv2-border);
@@ -1961,7 +1964,7 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  height: 28px;
+  height: 19.32px;
   color: var(--dashboard-muted-text, #667085);
   overflow: hidden;
   font-size: var(--dashboard-label-size, clamp(7px, 0.42vw, 8px));
@@ -1982,7 +1985,7 @@
 }
 
 .pcv2-ledger-row td {
-  height: 36px;
+  height: 21.6px;
   overflow: hidden;
   color: #1f2a44;
   font-weight: 500;
@@ -2003,10 +2006,18 @@
   color: #465570 !important;
   font-size: 8px;
   font-weight: 650 !important;
-  line-height: 9px;
+  line-height: 8px;
   text-align: center !important;
   overflow-wrap: anywhere;
   white-space: normal !important;
+}
+
+.pcv2-factor-exposures > span {
+  display: -webkit-box;
+  max-height: 16px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .pcv2-ledger-size-reference button {
@@ -2035,8 +2046,8 @@
 }
 
 .pcv2-ledger-divider td {
-  height: 24px;
-  padding: 6px 12px 4px;
+  height: 14.4px;
+  padding: 3.6px 12px 2.4px;
   color: #5d6b86;
   font-size: 10px;
   font-weight: 700;
@@ -2134,6 +2145,17 @@
   border-right: 2px solid var(--pcv2-blue);
 }
 
+/* Canonical v2 health is a row-level attention state. It must never hide a
+   holding or imply an order; it only exposes missing/unavailable research. */
+.pcv2-ledger-row.is-research-attention td {
+  background: var(--pcv2-soft-red, #fef2f2) !important;
+  box-shadow: inset 0 -1px 0 rgba(220, 38, 38, 0.12);
+}
+
+.pcv2-ledger-row.is-research-attention.is-expanded td {
+  border-top-color: #fca5a5;
+}
+
 .pcv2-research-row > td {
   width: auto !important;
   height: auto !important;
@@ -2200,7 +2222,7 @@
 }
 
 .pcv2-intel-header .pcv2-intel-cell {
-  min-height: 28px;
+  min-height: 16.8px;
   height: auto;
   color: var(--dashboard-muted-text, #667085);
   font-size: var(--dashboard-label-size, clamp(7px, 0.42vw, 8px));
@@ -2209,15 +2231,15 @@
   letter-spacing: var(--dashboard-label-tracking, 0.04em);
   overflow: hidden;
   overflow-wrap: anywhere;
-  padding-top: 4px;
-  padding-bottom: 4px;
+  padding-top: 2.4px;
+  padding-bottom: 2.4px;
   text-transform: uppercase;
   white-space: normal;
   background: #ffffff;
 }
 
 .pcv2-intel-values .pcv2-intel-cell {
-  height: 36px;
+  height: 21.6px;
   align-items: center;
   justify-content: center;
   flex-direction: column;
@@ -2296,6 +2318,238 @@
 .pcv2-intel-metric-button:focus-visible {
   outline: 1px solid var(--pcv2-blue);
   outline-offset: -2px;
+}
+
+.pcv2-leveraged-products-cell {
+  padding-right: 5px;
+  padding-left: 5px;
+}
+
+.pcv2-leveraged-products {
+  height: 14px;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.pcv2-leveraged-products-content {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(var(--pcv2-leveraged-products-scale, 1));
+  transform-origin: center center;
+  width: max-content;
+  white-space: nowrap;
+}
+
+.pcv2-leveraged-product-link {
+  flex: 0 0 auto;
+  max-width: none;
+  overflow: visible;
+  padding: 0;
+  color: #2467d1;
+  font: inherit;
+  font-size: 9px;
+  line-height: 14px;
+  text-decoration: none;
+  text-overflow: clip;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pcv2-leveraged-product-link:hover,
+.pcv2-leveraged-product-link:focus-visible {
+  color: #12469d;
+}
+
+.pcv2-leveraged-product-link.is-positive,
+.pcv2-leveraged-product-link.is-positive:hover,
+.pcv2-leveraged-product-link.is-positive:focus-visible {
+  color: #087a55;
+}
+
+.pcv2-leveraged-product-link.is-negative,
+.pcv2-leveraged-product-link.is-negative:hover,
+.pcv2-leveraged-product-link.is-negative:focus-visible {
+  color: #c93636;
+}
+
+.pcv2-leveraged-product-link.is-proxy .pcv2-leveraged-product-ticker {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.pcv2-leveraged-product-link:focus-visible {
+  outline: 1px solid var(--pcv2-blue);
+  outline-offset: 2px;
+}
+
+.pcv2-leveraged-product-backdrop {
+  position: fixed;
+  z-index: 10010;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(18, 26, 61, 0.26);
+}
+
+.pcv2-leveraged-product-dialog {
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(280px, calc(100vh - 32px));
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 16px 18px;
+  color: #1d2b48;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid #cbd6e5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 38px rgba(18, 26, 61, 0.25);
+}
+
+.pcv2-leveraged-product-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pcv2-leveraged-product-header h2 {
+  margin: 0;
+  color: #17224a;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.pcv2-leveraged-product-header p {
+  margin: 3px 0 0;
+  color: #53627e;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 15px;
+}
+
+.pcv2-leveraged-product-header p.is-positive {
+  color: #087a55;
+}
+
+.pcv2-leveraged-product-header p.is-negative {
+  color: #c93636;
+}
+
+.pcv2-leveraged-product-header button {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 0;
+  color: #52617d;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pcv2-leveraged-product-header button:hover,
+.pcv2-leveraged-product-header button:focus-visible {
+  color: #173f91;
+  background: #f1f5fb;
+  outline: 1px solid #9bb7e8;
+  outline-offset: 1px;
+}
+
+.pcv2-leveraged-product-details {
+  margin: 14px 0 0;
+  padding: 12px 0;
+  border-top: 1px solid #e4e9f1;
+  border-bottom: 1px solid #e4e9f1;
+}
+
+.pcv2-leveraged-product-details > div {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.pcv2-leveraged-product-details > div + div {
+  margin-top: 10px;
+}
+
+.pcv2-leveraged-product-details dt {
+  color: #7a879e;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 15px;
+  text-transform: uppercase;
+}
+
+.pcv2-leveraged-product-details dd {
+  min-width: 0;
+  margin: 0;
+  color: #1d2b48;
+  font-size: 11.5px;
+  line-height: 15px;
+}
+
+.pcv2-leveraged-product-details dd strong {
+  display: block;
+  font-weight: 700;
+}
+
+.pcv2-leveraged-product-details dd span {
+  display: block;
+  margin-top: 3px;
+  color: #63718b;
+  font-size: 10.5px;
+  line-height: 14px;
+}
+
+.pcv2-leveraged-product-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 11px;
+}
+
+.pcv2-leveraged-product-footer p {
+  margin: 0;
+  color: #7a6330;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.pcv2-leveraged-product-issuer-link {
+  display: inline-block;
+  flex: 0 0 auto;
+  color: #2467d1;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.pcv2-leveraged-product-issuer-link:hover,
+.pcv2-leveraged-product-issuer-link:focus-visible {
+  text-decoration: none;
+  color: #12469d;
+}
+
+.pcv2-leveraged-product-issuer-link.is-disabled {
+  color: #8995a8;
 }
 
 .pcv2-verification-backdrop {
@@ -2469,7 +2723,7 @@
 }
 
 .pcv2-intel-reference-row .pcv2-intel-cell {
-  height: 40px;
+  height: 24px;
   color: #44536f;
   font-size: 10px;
   font-weight: 500;
@@ -2479,6 +2733,24 @@
 .pcv2-intel-reference-row.is-empty .pcv2-intel-cell {
   color: #77849a;
   background: #ffffff;
+}
+
+.pcv2-intel-loading-row .pcv2-intel-cell {
+  min-height: 24px;
+  height: 24px;
+  gap: 7px;
+  color: #536785;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+.pcv2-intel-loading-row svg {
+  flex: 0 0 auto;
+  animation: pcv2-intel-loading-spin 1s linear infinite;
+}
+
+@keyframes pcv2-intel-loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .pcv2-intel-reference-time {
@@ -2495,10 +2767,92 @@
   white-space: nowrap;
 }
 
+.pcv2-intel-reference-product-button {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  margin: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  color: #2b72de !important;
+  font: inherit;
+  font-weight: 650 !important;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pcv2-intel-reference-product-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pcv2-intel-reference-product-button:hover span,
+.pcv2-intel-reference-product-button:focus-visible span {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.pcv2-intel-reference-product-button:focus-visible {
+  outline: 1px solid var(--pcv2-blue);
+  outline-offset: -2px;
+}
+
 .pcv2-intel-reference-note {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pcv2-intel-reference-summary {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 4px;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pcv2-intel-reference-summary__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #2b72de;
+  white-space: nowrap;
+}
+
+.pcv2-intel-reference-summary__label.is-na {
+  color: #253757;
+}
+
+.pcv2-intel-reference-summary:hover .pcv2-intel-reference-summary__label,
+.pcv2-intel-reference-summary:focus-visible .pcv2-intel-reference-summary__label {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.pcv2-intel-reference-summary:focus-visible {
+  outline: 1px solid var(--pcv2-blue);
+  outline-offset: -2px;
 }
 
 .pcv2-intel-reference-note.is-empty {
@@ -2507,60 +2861,13 @@
   letter-spacing: 0.03em;
 }
 
-.pcv2-intel-reference-source {
-  justify-content: center;
-  color: #536785 !important;
-  font-size: 8px !important;
-  font-weight: 500 !important;
-  white-space: nowrap;
-}
-
-.pcv2-intel-reference-source a {
-  color: #315fa8;
-  text-decoration: none;
-}
-
-.pcv2-intel-reference-source a:hover {
-  text-decoration: underline;
-}
-
 .pcv2-intel-reference-header .pcv2-intel-cell {
-  min-height: 26px;
+  min-height: 15.6px;
   color: var(--dashboard-muted-text, #667085);
   font-size: var(--dashboard-label-size, clamp(7px, 0.42vw, 8px));
   font-weight: var(--dashboard-label-weight, 760);
   letter-spacing: var(--dashboard-label-tracking, 0.04em);
   text-transform: uppercase;
-}
-
-.pcv2-intel-reference-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 50px;
-  padding: 0;
-  color: #315fa8;
-  font: inherit;
-  font-size: 8px;
-  font-weight: 600;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
-.pcv2-intel-reference-toggle:hover,
-.pcv2-intel-reference-toggle:focus-visible {
-  color: #173f91;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  outline: 0;
-}
-
-.pcv2-intel-reference-source-disabled {
-  color: #101828;
-  font-size: 8px;
-  font-weight: 700;
-  opacity: 0.46;
 }
 
 .pcv2-intel-reference-row.is-unavailable .pcv2-intel-reference-note {
@@ -2574,7 +2881,7 @@
 
 .pcv2-intel-reference-context > .pcv2-intel-cell {
   display: block;
-  padding: 14px 18px 12px;
+  padding: 8.4px 18px 7.2px;
   text-align: left;
   border-right: 0;
   background: #fbfcfe;
@@ -2582,7 +2889,7 @@
 
 .pcv2-intel-reference-facts {
   display: grid;
-  gap: 6px;
+  gap: 3.6px;
 }
 
 .pcv2-intel-reference-fact {
@@ -2598,7 +2905,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 6px;
   color: #718096;
   font-size: 8px;
   font-weight: 500;
@@ -2628,12 +2935,12 @@
 .pcv2-intel-history summary {
   box-sizing: border-box;
   width: 50%;
-  height: 30px;
+  height: 18px;
   padding: 0 8px;
   color: #536785;
   font-size: 9px;
   font-weight: 500;
-  line-height: 30px;
+  line-height: 18px;
   text-align: left;
   border-bottom: 1px solid var(--pcv2-border);
   cursor: pointer;
@@ -2641,7 +2948,7 @@
 }
 
 .pcv2-intel-history-empty {
-  height: 40px;
+  height: 24px;
   color: #8995a8 !important;
   font-size: 9px !important;
   font-weight: 500 !important;
@@ -2727,14 +3034,14 @@
 }
 
 .pcv2-empty {
-  height: 36px !important;
+  height: 21.6px !important;
   color: #7b879e !important;
   text-align: center;
   font-weight: 750 !important;
 }
 
 .pcv2-ledger-table tfoot td {
-  height: 34px;
+  height: 20.4px;
   color: #17224a;
   font-size: 11px;
   font-weight: 700;
@@ -2745,14 +3052,14 @@
 
 @container portfolio-pane (max-width: 680px) {
   .pcv2-intel-header .pcv2-intel-cell {
-    min-height: 30px;
+    min-height: 18px;
     font-size: 7.5px;
     letter-spacing: 0.025em;
     line-height: 9px;
   }
 
   .pcv2-intel-values .pcv2-intel-cell {
-    height: 36px;
+    height: 21.6px;
   }
 
   .pcv2-intel-value {
@@ -2761,12 +3068,11 @@
   }
 
   .pcv2-intel-reference-row .pcv2-intel-cell {
-    height: 36px;
+    height: 21.6px;
     font-size: 8px;
   }
 
-  .pcv2-intel-reference-time,
-  .pcv2-intel-reference-source {
+  .pcv2-intel-reference-time {
     font-size: 7px !important;
   }
 
@@ -2779,11 +3085,7 @@
   }
 
   .pcv2-intel-reference-row > .pcv2-intel-cell:nth-child(3) {
-    grid-column: span 10;
-  }
-
-  .pcv2-intel-reference-row > .pcv2-intel-cell:nth-child(4) {
-    grid-column: span 4;
+    grid-column: span 14;
   }
 
   .pcv2-intel-reference-header > .pcv2-intel-cell:nth-child(1) {
@@ -2795,15 +3097,11 @@
   }
 
   .pcv2-intel-reference-header > .pcv2-intel-cell:nth-child(3) {
-    grid-column: span 10;
-  }
-
-  .pcv2-intel-reference-header > .pcv2-intel-cell:nth-child(4) {
-    grid-column: span 4;
+    grid-column: span 14;
   }
 
   .pcv2-intel-reference-context > .pcv2-intel-cell {
-    padding: 10px 12px;
+    padding: 6px 12px;
   }
 
   .pcv2-intel-reference-fact {

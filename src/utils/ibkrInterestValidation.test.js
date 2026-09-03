@@ -111,6 +111,37 @@ describe("IBKR interest segment and collateral model", () => {
     expect(result.eligibleCashBeforeCollateral).toBe(-10000);
   });
 
+  test("adds verified event-contract value before subtracting matching commodity margin", () => {
+    const result = calculateSegmentTransfer({
+      securitiesCash: -2000,
+      commoditiesCash: 1000,
+      eventMarketValue: 1490,
+      commodityMaintenanceMargin: 1490,
+    });
+
+    expect(result.available).toBe(true);
+    expect(result.commodityExcess).toBe(1000);
+    expect(result.commodityTransfer).toBe(1000);
+    expect(result.eligibleCashBeforeCollateral).toBe(-1000);
+  });
+
+  test("accepts the legacy Kalshi market-value alias", () => {
+    const result = calculateSegmentTransfer({
+      securitiesCash: -2000,
+      commoditiesCash: 1000,
+      kalshiMarketValue: 1490,
+      commodityMaintenanceMargin: 1490,
+      commodityAvailableFunds: 728,
+    });
+
+    expect(result.available).toBe(true);
+    expect(result.eventMarketValue).toBe(1490);
+    expect(result.commodityExcessBeforeBrokerHoldback).toBe(1000);
+    expect(result.commodityExcess).toBe(728);
+    expect(result.commodityTransfer).toBe(728);
+    expect(result.eligibleCashBeforeCollateral).toBe(-1272);
+  });
+
   test("fails closed when nonzero commodities cash lacks maintenance margin", () => {
     const result = calculateSegmentTransfer({
       securitiesCash: -10000,
@@ -487,6 +518,63 @@ describe("graduated cushion and validation status", () => {
 });
 
 describe("end-to-end interest forecast", () => {
+  test("keeps fully margined event-contract value at zero incremental capacity", () => {
+    const result = forecastIbkrDebitInterest(forecastInput({
+      positionScope: "stocks_and_event_contracts",
+      accrualPeriods: [{
+        id: "event-mixed",
+        accrualDays: 1,
+        securitiesCash: -15000,
+        commoditiesCash: 1000,
+        eventMarketValue: 1490,
+        commodityMaintenanceMargin: 1490,
+        eventAccountingVerified: true,
+        shortPositions: [],
+      }],
+    }));
+
+    expect(result.available).toBe(true);
+    expect(result.positionScope).toBe("stocks_and_event_contracts");
+    expect(result.principal).toBe(14000);
+    expect(result.segmentDetails[0]).toEqual(expect.objectContaining({
+      eventMarketValue: 1490,
+      commodityExcess: 1000,
+      commodityTransfer: 1000,
+    }));
+  });
+
+  test("fails mixed-scope forecasts without reconciled event accounting", () => {
+    const result = forecastIbkrDebitInterest(forecastInput({
+      positionScope: "stocks_and_event_contracts",
+    }));
+
+    expect(result.available).toBe(false);
+    expect(result.reasons).toContain("event_accounting_not_verified");
+  });
+
+  test("normalizes the legacy Kalshi scope and market-value input", () => {
+    const result = forecastIbkrDebitInterest(forecastInput({
+      positionScope: "stocks_and_kalshi",
+      accrualPeriods: [{
+        id: "legacy-kalshi",
+        accrualDays: 1,
+        securitiesCash: -15000,
+        commoditiesCash: 1000,
+        kalshiMarketValue: 1490,
+        commodityMaintenanceMargin: 1490,
+        eventAccountingVerified: true,
+        shortPositions: [],
+      }],
+    }));
+
+    expect(result.available).toBe(true);
+    expect(result.positionScope).toBe("stocks_and_event_contracts");
+    expect(result.segmentDetails[0]).toEqual(expect.objectContaining({
+      eventMarketValue: 1490,
+      kalshiMarketValue: 1490,
+    }));
+  });
+
   test("returns decision-complete raw, point, upper, principal, collateral, and segment details", () => {
     const result = forecastIbkrDebitInterest(forecastInput());
 

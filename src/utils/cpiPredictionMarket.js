@@ -487,7 +487,13 @@ function eventKey(event) {
   return event?.id || event?.api_raw_id || event?.conid || event?.conId || eventTitle(event);
 }
 
-export function buildCpiContractLadder(events = [], cpiModel = null, rawSettings = {}, activeCpiMonth = null) {
+export function buildCpiContractLadder(
+  events = [],
+  cpiModel = null,
+  rawSettings = {},
+  activeCpiMonth = null,
+  options = {},
+) {
   const settings = { ...DEFAULT_CPI_SETTINGS, ...(rawSettings || {}) };
   const scenarios = cpiModel?.scenarios || [];
   const totalCap = Math.max(0, Math.min(settings.maxRiskPerBet ?? 0, settings.maxOpenRisk ?? Infinity));
@@ -586,6 +592,7 @@ export function buildCpiContractLadder(events = [], cpiModel = null, rawSettings
         title: eventTitle(event),
         venue: event?.venue || 'IBKR',
         threshold,
+        volume: toNumber(event?.volume),
         modelYesProbability,
         modelNoProbability,
         yesPrice: yesQuote.price,
@@ -646,6 +653,12 @@ export function buildCpiContractLadder(events = [], cpiModel = null, rawSettings
       ],
     };
   });
+
+  // Display-only consumers can request the complete verified current-release
+  // provider ladder. The default remains the model-derived target band used by
+  // allocation and sizing, so broadening the Contracts card cannot broaden the
+  // actionable trade universe.
+  if (options?.scope === 'all-live') return allocatedCandidates;
 
   const targetStrikes = deriveCpiTargetStrikes(cpiModel);
   if (targetStrikes.length === 0) return allocatedCandidates;

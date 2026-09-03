@@ -1,0 +1,41 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListAnalystStagingObjects",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::market-dashboard-csv-data",
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": "analyst-staging/"
+        }
+      }
+    },
+    {
+      "Sid": "ManageAnalystStagingObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::market-dashboard-csv-data/analyst-staging/*"
+    },
+    {
+      "Sid": "ReadWriteAnalystManualImports",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::market-dashboard-csv-data/hedgeye-uploads/manual/*"
+    },
+    {
+      "Sid": "InvokeAnalystStructuredPdfParser",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:us-west-1:915328198276:function:market-dashboard-hedgeye-pdf-processor-v1"
+    }
+  ]
+}

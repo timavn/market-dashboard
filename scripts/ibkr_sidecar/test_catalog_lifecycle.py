@@ -32,7 +32,58 @@ def july_request(catalog_contracts=None):
     )
 
 
-def authoritative_seed(con_id, local_symbol, expiry="20260812"):
+def monitor_request(
+    catalog_contracts=None,
+    *,
+    market_id="nasdaq100",
+    product_code="FNQ",
+    generation_key="FNQ_123199",
+    event_prefix=None,
+    close_time="2099-12-31T20:00:00Z",
+    target_strikes=None,
+):
+    return app.DiscoveryRequest(
+        monitor=app.PredictionMonitorContext(
+            marketId=market_id,
+            productCode=product_code,
+            generationKey=generation_key,
+            eventPrefix=event_prefix or generation_key,
+            closeTime=close_time,
+            targetStrikes=target_strikes or [28000],
+        ),
+        catalogContracts=catalog_contracts or [],
+    )
+
+
+def monitor_seed(
+    con_id,
+    local_symbol="FNQ_123199_28000_YES",
+    *,
+    product_code="FNQ",
+    generation_key="FNQ_123199",
+    strike=28000,
+    expiry="20991231",
+):
+    quote_side = "NO" if local_symbol.upper().endswith("_NO") else "YES"
+    public_contract_id = local_symbol
+    if public_contract_id.upper().endswith(("_YES", "_NO")):
+        public_contract_id = public_contract_id.rsplit("_", 1)[0]
+    return {
+        **authoritative_seed(con_id, local_symbol, expiry),
+        "productCode": product_code,
+        "publicContractId": public_contract_id,
+        "contractId": public_contract_id,
+        "releaseKey": generation_key,
+        "underlying": product_code,
+        "symbol": product_code,
+        "tradingClass": product_code,
+        "strike": strike,
+        "right": "P" if quote_side == "NO" else "C",
+        "quote_side": quote_side,
+    }
+
+
+def authoritative_seed(con_id, local_symbol, expiry="20991231"):
     return {
         "conId": con_id,
         "localSymbol": local_symbol,
@@ -452,6 +503,270 @@ def invoke_live_funding(fake_ib, account="U1"):
 
 
 class CatalogLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        # The Gateway governor is intentionally process-wide in production.
+        # Unit cases must not inherit another case's circuit/backoff evidence.
+        app.gateway_governor.reset()
+
+    def test_prediction_monitor_context_requires_exact_current_market_product_and_close_date(self):
+        for market_id, product_code in app.PREDICTION_MONITOR_PRODUCTS.items():
+            with self.subTest(market_id=market_id):
+                request = monitor_request(
+                    market_id=market_id,
+                    product_code=product_code,
+                    generation_key=f"{product_code}_123199",
+                )
+                self.assertEqual(app.request_release_key(request), f"{product_code}_123199")
+
+        chicago_boundary = monitor_request(
+            generation_key="FNQ_123199",
+            close_time="2100-01-01T01:00:00Z",
+        )
+        self.assertEqual(app.request_release_key(chicago_boundary), "FNQ_123199")
+
+        invalid_requests = (
+            monitor_request(market_id="nasdaq100", product_code="FES", generation_key="FES_123199"),
+            monitor_request(generation_key="FNQ_123099", close_time="2099-12-31T20:00:00Z"),
+            monitor_request(generation_key="FNQ_123199", event_prefix="FNQ_123099"),
+            monitor_request(generation_key="FNQ_010120", close_time="2020-01-01T20:00:00Z"),
+        )
+        self.assertTrue(all(app.request_release_key(request) is None for request in invalid_requests))
+
+    def test_prediction_monitor_catalog_rejects_relabelled_generation_product_strike_and_expiry(self):
+        request = monitor_request()
+        current = monitor_seed(101)
+        wrong_generation = monitor_seed(102, "FNQ_123099_28000_YES")
+        wrong_product = monitor_seed(103, product_code="FES")
+        wrong_strike = monitor_seed(104, "FNQ_123199_28100_YES", strike=28100)
+        expired = monitor_seed(105, expiry="20200101")
+
+        active, retired = app.partition_catalog_for_release(
+            [current, wrong_generation, wrong_product, wrong_strike, expired],
+            request,
+        )
+
+        self.assertEqual([seed["conId"] for seed in active], [101])
+        self.assertEqual(
+            {seed["retired_reason"] for seed in retired},
+            {"wrong_generation", "wrong_product", "wrong_strike", "expired_contract"},
+        )
+
+    def test_prediction_monitor_discovery_returns_only_exact_native_product_generation_and_strike(self):
+        contracts = [
+            Contract(
+                conId=201,
+                symbol="FNQ",
+                secType="OPT",
+                exchange="FORECASTX",
+                currency="USD",
+                localSymbol="FNQ_123199_28000_YES",
+                tradingClass="FNQ",
+                lastTradeDateOrContractMonth="20991231",
+                strike=28000,
+                right="C",
+            ),
+            Contract(
+                conId=202,
+                symbol="FNQ",
+                secType="OPT",
+                exchange="FORECASTX",
+                currency="USD",
+                localSymbol="FNQ_123099_28000_YES",
+                tradingClass="FNQ",
+                lastTradeDateOrContractMonth="20991231",
+                strike=28000,
+                right="C",
+            ),
+            Contract(
+                conId=203,
+                symbol="FES",
+                secType="OPT",
+                exchange="FORECASTX",
+                currency="USD",
+                localSymbol="FNQ_123199_28000_YES",
+                tradingClass="FES",
+                lastTradeDateOrContractMonth="20991231",
+                strike=28000,
+                right="C",
+            ),
+            Contract(
+                conId=204,
+                symbol="FNQ",
+                secType="OPT",
+                exchange="FORECASTX",
+                currency="USD",
+                localSymbol="FNQ_123199_28100_YES",
+                tradingClass="FNQ",
+                lastTradeDateOrContractMonth="20991231",
+                strike=28100,
+                right="C",
+            ),
+        ]
+
+        class FakeIb:
+            async def reqContractDetailsAsync(self, query):
+                self.query = query
+                return [SimpleNamespace(contract=contract) for contract in contracts]
+
+        fake_ib = FakeIb()
+        original_ib = app.ib
+        try:
+            app.ib = fake_ib
+            discovered = asyncio.run(app.discover_event_contract_seeds(request=monitor_request()))
+        finally:
+            app.ib = original_ib
+
+        self.assertEqual(fake_ib.query.symbol, "FNQ")
+        self.assertEqual(fake_ib.query.exchange, "FORECASTX")
+        self.assertEqual([seed["conId"] for seed in discovered], [201])
+        self.assertTrue(all(seed["releaseKey"] == "FNQ_123199" for seed in discovered))
+
+    def test_prediction_monitor_qualifies_exact_public_yes_and_no_contracts_without_local_symbol_discovery(self):
+        public_contracts = []
+        for right, side in (("C", "YES"), ("P", "NO")):
+            public_contracts.append({
+                "publicContractId": f"FNQ_123199_28000_{side}",
+                "contractId": f"FNQ_123199_28000_{side}",
+                "releaseKey": "FNQ_123199",
+                "productCode": "FNQ",
+                "symbol": "FNQ",
+                "underlying": "FNQ",
+                "secType": "OPT",
+                "exchange": "FORECASTX",
+                "currency": "USD",
+                "tradingClass": "FNQ",
+                "lastTradeDateOrContractMonth": "20991231",
+                "strike": 28000,
+                "right": right,
+                "quote_side": side,
+            })
+
+        class FakeIb:
+            def __init__(self):
+                self.requests = []
+
+            async def qualifyContractsAsync(self, requested):
+                self.requests.append(requested)
+                con_id = 301 if requested.right == "C" else 302
+                return [Contract(
+                    conId=con_id,
+                    symbol=requested.symbol,
+                    secType=requested.secType,
+                    exchange=requested.exchange,
+                    currency=requested.currency,
+                    localSymbol=f"IBKR-CONID-{con_id}",
+                    tradingClass=requested.tradingClass,
+                    lastTradeDateOrContractMonth=requested.lastTradeDateOrContractMonth,
+                    strike=requested.strike,
+                    right=requested.right,
+                )]
+
+        fake_ib = FakeIb()
+        original_ib = app.ib
+        try:
+            app.ib = fake_ib
+            qualified = asyncio.run(app.qualify_forecastx_public_contracts(
+                monitor_request(catalog_contracts=public_contracts),
+            ))
+        finally:
+            app.ib = original_ib
+
+        self.assertEqual({seed["conId"] for seed in qualified}, {301, 302})
+        self.assertEqual({seed["quote_side"] for seed in qualified}, {"YES", "NO"})
+        self.assertEqual(
+            {seed["publicContractId"] for seed in qualified},
+            {"FNQ_123199_28000_YES", "FNQ_123199_28000_NO"},
+        )
+        self.assertTrue(all(request.secType == "OPT" for request in fake_ib.requests))
+        self.assertTrue(all(request.exchange == "FORECASTX" for request in fake_ib.requests))
+        self.assertTrue(all(not request.localSymbol for request in fake_ib.requests))
+
+    def test_fes_qualifies_distinct_yes_no_es_futures_options_and_rejects_legacy_opt_shape(self):
+        public_contracts = []
+        for right, side in (("C", "YES"), ("P", "NO")):
+            public_contracts.append({
+                "publicContractId": "FES_123199_7600",
+                "contractId": "FES_123199_7600",
+                "releaseKey": "FES_123199",
+                "productCode": "FES",
+                "symbol": "ES",
+                "underlying": "ES",
+                "secType": "FOP",
+                "exchange": "FORECASTX",
+                "currency": "USD",
+                "tradingClass": "FES",
+                "lastTradeDateOrContractMonth": "20991231",
+                "strike": 7600,
+                "right": right,
+                "quote_side": side,
+            })
+        public_contracts.append({
+            **public_contracts[0],
+            "publicContractId": "FES_123199_7625",
+            "contractId": "FES_123199_7625",
+            "symbol": "FES",
+            "underlying": "FES",
+            "secType": "OPT",
+            "strike": 7625,
+        })
+
+        class FakeIb:
+            def __init__(self):
+                self.requests = []
+
+            async def qualifyContractsAsync(self, requested):
+                self.requests.append(requested)
+                con_id = 401 if requested.right == "C" else 402
+                return [Contract(
+                    conId=con_id,
+                    symbol=requested.symbol,
+                    secType=requested.secType,
+                    exchange=requested.exchange,
+                    currency=requested.currency,
+                    localSymbol=f"FES_123199_7600_{'YES' if requested.right == 'C' else 'NO'}",
+                    tradingClass=requested.tradingClass,
+                    lastTradeDateOrContractMonth=requested.lastTradeDateOrContractMonth,
+                    strike=requested.strike,
+                    right=requested.right,
+                )]
+
+        request = monitor_request(
+            catalog_contracts=public_contracts,
+            market_id="sp500",
+            product_code="FES",
+            generation_key="FES_123199",
+            target_strikes=[7600, 7625],
+        )
+        fake_ib = FakeIb()
+        original_ib = app.ib
+        try:
+            app.ib = fake_ib
+            qualified = asyncio.run(app.qualify_forecastx_public_contracts(request))
+        finally:
+            app.ib = original_ib
+
+        self.assertEqual(app.monitor_broker_identity("FES"), {
+            "productCode": "FES",
+            "symbol": "ES",
+            "secType": "FOP",
+            "exchange": "FORECASTX",
+            "currency": "USD",
+            "tradingClass": "FES",
+        })
+        self.assertEqual({seed["conId"] for seed in qualified}, {401, 402})
+        self.assertEqual({seed["quote_side"] for seed in qualified}, {"YES", "NO"})
+        self.assertTrue(all(
+            seed["quote_wait_sec"] == app.PREDICTION_REFRESH_QUOTE_WAIT_SEC
+            for seed in qualified
+        ))
+        self.assertTrue(all(seed["productCode"] == "FES" for seed in qualified))
+        self.assertTrue(all(seed["symbol"] == "ES" for seed in qualified))
+        self.assertTrue(all(seed["secType"] == "FOP" for seed in qualified))
+        self.assertEqual(len(fake_ib.requests), 2)
+        self.assertTrue(all(contract.symbol == "ES" for contract in fake_ib.requests))
+        self.assertTrue(all(contract.secType == "FOP" for contract in fake_ib.requests))
+        self.assertTrue(all(contract.tradingClass == "FES" for contract in fake_ib.requests))
+
     def test_request_catalog_is_explicit_and_never_loaded_from_local_json(self):
         original_seed_path = app.SEED_PATH
         try:
@@ -549,8 +864,12 @@ class CatalogLifecycleTests(unittest.TestCase):
                     contract=contract,
                     bid=0.41,
                     ask=0.43,
+                    bidSize=10,
+                    askSize=12,
                     last=0.42,
                     volume=12,
+                    marketDataType=1,
+                    time=datetime.now(timezone.utc),
                 )
 
             def cancelMktData(self, _contract):
@@ -576,6 +895,152 @@ class CatalogLifecycleTests(unittest.TestCase):
         self.assertEqual(payload["contracts_total"], 1)
         self.assertEqual([event["conId"] for event in payload["events"]], [61])
         self.assertEqual(payload["events"][0]["yes_bid"], 0.41)
+        self.assertEqual(payload["events"][0]["native_bid_size"], 10)
+        self.assertEqual(payload["events"][0]["dataType"], 1)
+        self.assertTrue(payload["events"][0]["exchange_timestamp"].endswith("Z"))
+
+    def test_forced_refresh_retries_only_an_unverified_prediction_book(self):
+        async def connected():
+            return {"ok": True, "status": "connected"}
+
+        class RetryIb:
+            def __init__(self):
+                self.snapshot_flags = []
+
+            async def qualifyContractsAsync(self, contract):
+                return [contract]
+
+            def reqMktData(self, contract, _fields, snapshot, _regulatory_snapshot):
+                self.snapshot_flags.append(snapshot)
+                valid = len(self.snapshot_flags) == 2
+                return SimpleNamespace(
+                    contract=contract,
+                    bid=0.41 if valid else -1,
+                    ask=0.43 if valid else -1,
+                    bidSize=10 if valid else 0,
+                    askSize=12 if valid else 0,
+                    last=0.42 if valid else -1,
+                    volume=12,
+                    marketDataType=1,
+                    time=datetime.now(timezone.utc),
+                )
+
+            def cancelMktData(self, _contract):
+                return None
+
+        seed = authoritative_seed(63, "IB-CPI-26JUL-T3.3-YES")
+        seed["quote_wait_sec"] = 0
+        request = july_request([seed])
+        request.forceRefresh = True
+        request.retryMissing = True
+        fake_ib = RetryIb()
+        original_ensure_connected = app.ensure_connected
+        original_ib = app.ib
+        try:
+            app.ensure_connected = connected
+            app.ib = fake_ib
+            response = asyncio.run(app.refresh(request))
+        finally:
+            app.ensure_connected = original_ensure_connected
+            app.ib = original_ib
+
+        payload = json.loads(response.body)
+        evidence = payload["refreshEvidence"]
+        self.assertTrue(payload["ok"])
+        self.assertEqual(fake_ib.snapshot_flags, [True, True])
+        self.assertEqual(evidence["requestedContractCount"], 1)
+        self.assertEqual(evidence["initialVerifiedContractCount"], 0)
+        self.assertEqual(evidence["brokerSnapshotRequestedCount"], 1)
+        self.assertEqual(evidence["brokerSnapshotRetryCount"], 1)
+        self.assertEqual(evidence["brokerSnapshotRecoveredCount"], 1)
+        self.assertEqual(evidence["verifiedContractCount"], 1)
+        self.assertEqual(evidence["missingContractCount"], 0)
+        self.assertTrue(evidence["coverageComplete"])
+        self.assertFalse(payload["events"][0]["from_cache"])
+        self.assertEqual(payload["events"][0]["observation_mode"], "broker_snapshot")
+        self.assertEqual(payload["events"][0]["snapshot_attempt"], 2)
+
+    def test_refresh_keeps_a_fresh_one_sided_native_book_and_does_not_retry_it(self):
+        async def connected():
+            return {"ok": True, "status": "connected"}
+
+        class OneSidedIb:
+            def __init__(self):
+                self.requests = 0
+
+            async def qualifyContractsAsync(self, contract):
+                return [contract]
+
+            def reqMktData(self, contract, *_args):
+                self.requests += 1
+                return SimpleNamespace(
+                    contract=contract,
+                    bid=-1,
+                    ask=0.97,
+                    bidSize=0,
+                    askSize=40,
+                    last=-1,
+                    volume=12,
+                    marketDataType=1,
+                    time=datetime.now(timezone.utc),
+                )
+
+            def cancelMktData(self, _contract):
+                return None
+
+        seed = authoritative_seed(64, "IB-CPI-26JUL-T3.3-YES")
+        seed["quote_wait_sec"] = 0
+        request = july_request([seed])
+        request.retryMissing = True
+        fake_ib = OneSidedIb()
+        original_ensure_connected = app.ensure_connected
+        original_ib = app.ib
+        try:
+            app.ensure_connected = connected
+            app.ib = fake_ib
+            response = asyncio.run(app.refresh(request))
+        finally:
+            app.ensure_connected = original_ensure_connected
+            app.ib = original_ib
+
+        payload = json.loads(response.body)
+        evidence = payload["refreshEvidence"]
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["providers"]["ibkr"]["status"], "connected")
+        self.assertEqual(fake_ib.requests, 1)
+        self.assertEqual(payload["events"][0]["yes_ask"], 0.97)
+        self.assertIsNone(payload["events"][0]["yes_bid"])
+        self.assertEqual(evidence["initialVerifiedContractCount"], 1)
+        self.assertEqual(evidence["brokerSnapshotRetryCount"], 0)
+        self.assertEqual(evidence["verifiedContractCount"], 1)
+        self.assertEqual(evidence["missingContractCount"], 0)
+        self.assertTrue(evidence["coverageComplete"])
+
+    def test_refresh_reports_exact_qualification_failure_when_catalog_contracts_do_not_qualify(self):
+        async def connected():
+            return {"ok": True, "status": "connected"}
+
+        class UnsupportedIb:
+            async def qualifyContractsAsync(self, _contract):
+                return []
+
+        seed = authoritative_seed(62, "IB-CPI-26JUL-T3.4-NO")
+        seed["quote_wait_sec"] = 0
+        original_ensure_connected = app.ensure_connected
+        original_ib = app.ib
+        try:
+            app.ensure_connected = connected
+            app.ib = UnsupportedIb()
+            response = asyncio.run(app.refresh(july_request([seed])))
+        finally:
+            app.ensure_connected = original_ensure_connected
+            app.ib = original_ib
+
+        payload = json.loads(response.body)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errorCode"], "FORECASTEX_QUALIFICATION_FAILED")
+        self.assertEqual(payload["providers"]["ibkr"]["status"], "qualification_failed")
+        self.assertEqual(payload["providers"]["ibkr"]["errorCode"], "FORECASTEX_QUALIFICATION_FAILED")
 
     def test_runtime_provenance_reports_workspace_managed_dependencies(self):
         runtime = app.runtime_provenance()
@@ -625,9 +1090,13 @@ class CatalogLifecycleTests(unittest.TestCase):
                 raise AssertionError("live PnL must not read the account-summary cache")
 
         class FakeIb:
+            def isConnected(self):
+                return True
+
             def __init__(self):
                 self.subscription = None
                 self.cancel_count = 0
+                self.request_count = 0
 
             async def reqCurrentTimeAsync(self):
                 return datetime.now(timezone.utc)
@@ -640,6 +1109,7 @@ class CatalogLifecycleTests(unittest.TestCase):
                 self.subscription = None
 
             def reqPnL(self, _account, _model_code):
+                self.request_count += 1
                 self.subscription = SimpleNamespace(
                     dailyPnL=125.5,
                     unrealizedPnL=80.25,
@@ -673,7 +1143,76 @@ class CatalogLifecycleTests(unittest.TestCase):
         self.assertEqual(payload["pnl"]["dailyPnL"], 125.5)
         self.assertIsNone(payload["pnl"]["dailyPnLPercent"])
         self.assertIsNone(payload["pnl"]["dailyPnLPercentSource"])
-        self.assertGreaterEqual(fake_ib.cancel_count, 2)
+        self.assertEqual(fake_ib.request_count, 1)
+        self.assertEqual(fake_ib.cancel_count, 1)
+
+    def test_concurrent_portfolio_pnl_callers_share_one_subscription_without_cross_cancellation(self):
+        async def connected():
+            return {"ok": True, "status": "connected"}
+
+        async def verified_socket():
+            return {"gatewayTime": datetime.now(timezone.utc)}
+
+        class FakeIb:
+            def __init__(self):
+                self.subscription = None
+                self.request_count = 0
+                self.cancel_count = 0
+
+            def managedAccounts(self):
+                return ["U1"]
+
+            def reqPnL(self, _account, _model_code):
+                self.request_count += 1
+                self.subscription = SimpleNamespace(
+                    dailyPnL=None,
+                    unrealizedPnL=None,
+                    realizedPnL=None,
+                )
+                asyncio.get_running_loop().call_later(
+                    0.05,
+                    setattr,
+                    self.subscription,
+                    "dailyPnL",
+                    42.0,
+                )
+                return self.subscription
+
+            def pnl(self, _account, _model_code):
+                return [self.subscription] if self.subscription else []
+
+            def cancelPnL(self, _account, _model_code):
+                self.cancel_count += 1
+                self.subscription = None
+
+        async def run_concurrently():
+            app._pnl_inflight.clear()
+            responses = await asyncio.gather(
+                app.portfolio_pnl("U1"),
+                app.portfolio_pnl("U1"),
+                app.portfolio_pnl("U1"),
+            )
+            return [json.loads(response.body) for response in responses]
+
+        fake_ib = FakeIb()
+        original_ensure_connected = app.ensure_connected
+        original_verify_primary_socket = app.verify_primary_socket
+        original_ib = app.ib
+        try:
+            app.ensure_connected = connected
+            app.verify_primary_socket = verified_socket
+            app.ib = fake_ib
+            payloads = asyncio.run(run_concurrently())
+        finally:
+            app.ensure_connected = original_ensure_connected
+            app.verify_primary_socket = original_verify_primary_socket
+            app.ib = original_ib
+            app._pnl_inflight.clear()
+
+        self.assertEqual(fake_ib.request_count, 1)
+        self.assertEqual(fake_ib.cancel_count, 1)
+        self.assertEqual([payload["pnl"]["dailyPnL"] for payload in payloads], [42.0, 42.0, 42.0])
+        self.assertTrue(all(payload["source"] == "ibkr_live_session" for payload in payloads))
 
     def test_only_authoritative_current_unexpired_seeds_are_quote_eligible(self):
         current = authoritative_seed(1, "IB-CPI-26JUL-T3.3-YES")
@@ -833,14 +1372,19 @@ class CatalogLifecycleTests(unittest.TestCase):
                     SimpleNamespace(
                         account="U1",
                         position=2,
-                        avgCost=491.25,
+                        avgCost=0.25,
                         contract=Contract(
                             conId=101,
-                            symbol="SPY",
-                            localSymbol="SPY",
-                            secType="STK",
-                            exchange="SMART",
+                            symbol="ES",
+                            localSymbol="FES_082426_7700_YES",
+                            secType="FOP",
+                            exchange="FORECASTX",
                             currency="USD",
+                            lastTradeDateOrContractMonth="20260824",
+                            strike=7700,
+                            right="C",
+                            multiplier="1",
+                            tradingClass="FES",
                         ),
                     ),
                     SimpleNamespace(
@@ -854,6 +1398,24 @@ class CatalogLifecycleTests(unittest.TestCase):
                             secType="STK",
                             exchange="SMART",
                             currency="USD",
+                        ),
+                    ),
+                    SimpleNamespace(
+                        account="U1",
+                        position=0,
+                        avgCost=0.03,
+                        contract=Contract(
+                            conId=303,
+                            symbol="ES",
+                            localSymbol="FES_082126_7750_YES",
+                            secType="FOP",
+                            exchange="FORECASTX",
+                            currency="USD",
+                            lastTradeDateOrContractMonth="20260821",
+                            strike=7750,
+                            right="C",
+                            multiplier="1",
+                            tradingClass="FES",
                         ),
                     ),
                 ]
@@ -894,12 +1456,22 @@ class CatalogLifecycleTests(unittest.TestCase):
         self.assertEqual({row["account"] for row in payload["positions"]}, {"U1", "U2"})
         self.assertEqual(
             {row["account"]: row["avgCost"] for row in payload["positions"]},
-            {"U1": 491.25, "U2": 88.75},
+            {"U1": 0.25, "U2": 88.75},
         )
+        event_row = next(row for row in payload["positions"] if row["conId"] == 101)
+        self.assertEqual(event_row["lastTradeDateOrContractMonth"], "20260824")
+        self.assertEqual(event_row["strike"], 7700)
+        self.assertEqual(event_row["right"], "C")
+        self.assertEqual(event_row["multiplier"], "1")
+        self.assertEqual(event_row["tradingClass"], "FES")
+        self.assertNotIn(303, {row["conId"] for row in payload["positions"]})
         self.assertTrue(all("marketValue" not in row for row in payload["positions"]))
 
     def test_live_account_summary_requires_socket_round_trip_and_native_nlv(self):
         class FakeIb:
+            def isConnected(self):
+                return True
+
             async def reqCurrentTimeAsync(self):
                 return datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc)
 

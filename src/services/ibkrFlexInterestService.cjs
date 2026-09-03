@@ -484,6 +484,18 @@ function latestStoredSnapshot(config) {
 
 function publicSnapshotSummary(snapshot) {
   if (!snapshot) return null;
+  const sectionPresence = {
+    tierInterestDetails: snapshot.tierDetailSectionPresent === true
+      || (snapshot.tierDetails?.length || 0) > 0,
+    interestAccruals: snapshot.accrualSectionPresent === true
+      || (snapshot.accruals?.length || 0) > 0,
+    cashTransactions: snapshot.cashTransactionSectionPresent === true
+      || (snapshot.cashTransactions?.length || 0) > 0,
+    cashReport: snapshot.cashReportSectionPresent === true
+      || (snapshot.cashReports?.length || 0) > 0,
+    stockBorrowFeeDetails: snapshot.borrowFeeDetailsSectionPresent === true
+      || (snapshot.borrowFeeDetails?.length || 0) > 0,
+  };
   return {
     fromDate: snapshot.fromDate,
     toDate: snapshot.toDate,
@@ -497,7 +509,9 @@ function publicSnapshotSummary(snapshot) {
       accruals: snapshot.accruals?.length || 0,
       cashTransactions: snapshot.cashTransactions?.length || 0,
       cashReports: snapshot.cashReports?.length || 0,
+      borrowFeeDetails: snapshot.borrowFeeDetails?.length || 0,
     },
+    sectionPresence,
   };
 }
 
@@ -686,9 +700,15 @@ function createIbkrFlexInterestService({
           expectedAccountMasked: maskAccountId(config.expectedAccountId),
           expectedAccountFingerprint: config.expectedAccountFingerprint,
           tierDetails: parsed.tierDetails,
+          tierDetailSectionPresent: parsed.tierDetailSectionPresent,
           accruals: parsed.accruals,
+          accrualSectionPresent: parsed.accrualSectionPresent,
           cashTransactions: parsed.cashTransactions,
+          cashTransactionSectionPresent: parsed.cashTransactionSectionPresent,
           cashReports: parsed.cashReports,
+          cashReportSectionPresent: parsed.cashReportSectionPresent,
+          borrowFeeDetails: parsed.borrowFeeDetails,
+          borrowFeeDetailsSectionPresent: parsed.borrowFeeDetailsSectionPresent,
           derived: parsed.derived,
         };
         const snapshot = {

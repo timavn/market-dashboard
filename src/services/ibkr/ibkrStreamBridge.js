@@ -56,6 +56,22 @@ function markAllStale() {
   });
 }
 
+function recordQuoteHeartbeat(canonical) {
+  if (!canonical?.valid) return;
+  const dataType = String(canonical.dataType || '').trim().toLowerCase();
+  const availability = dataType === 'live'
+    ? 'current'
+    : dataType === 'delayed'
+      ? 'delayed'
+      : null;
+  if (availability) {
+    // This heartbeat records receipt of a verified provider observation. The
+    // quote's own timestamp is retained on the quote and may legitimately lag
+    // for delayed data.
+    setIbkrLastQuoteAt(new Date().toISOString(), availability);
+  }
+}
+
 function upsertQuote(raw) {
   const canonical = normalizeIbkrRaw(raw);
   if (!canonical.symbol) return null;
@@ -66,9 +82,7 @@ function upsertQuote(raw) {
     legacy,
     updatedAt: Date.now(),
   });
-  if (canonical.valid) {
-    setIbkrLastQuoteAt(canonical.timestamp || new Date().toISOString());
-  }
+  recordQuoteHeartbeat(canonical);
   return { canonical, legacy };
 }
 

@@ -2,6 +2,7 @@ const {
   computeFlexExposure,
   parseFlexResponse,
   parseFlexStatement,
+  normalizeFlexTrade,
 } = require('./ibkrFlexExposure.cjs');
 
 const sampleStatementXml = `
@@ -78,5 +79,76 @@ describe('IBKR Flex exposure parser', () => {
     expect(exposure.nlv).toBeNull();
     expect(exposure.longPct).toBeNull();
     expect(exposure.longFundingGap).toBeNull();
+  });
+
+  test('normalizes prediction-market trades with broker IDs, fees, cash, and timestamps', () => {
+    const trade = normalizeFlexTrade({
+      accountId: 'U25779973', assetCategory: 'FOP', symbol: 'ES', localSymbol: 'FES_082126_7700_YES',
+      conid: '913869765', putCall: 'C', buySell: 'BUY', quantity: '500', tradePrice: '0.28',
+      ibCommission: '-5.00', netCash: '-145.00', proceeds: '-140.00', tradeDate: '20260821',
+      dateTime: '20260821;143000', execID: 'FLEX-EXEC-1', transactionID: 'TX-1', orderID: '42',
+    });
+    expect(trade).toMatchObject({
+      accountId: 'U25779973', execId: 'FLEX-EXEC-1', transactionId: 'TX-1', orderId: 42,
+      conId: 913869765, contractSide: 'YES', direction: 'BUY', shares: 500, price: 0.28,
+      commission: 5, netCash: -145, proceeds: -140, executionTime: '2026-08-21T18:30:00.000Z',
+      source: 'ibkr_flex_import', brokerIdentifierStatus: 'reported',
+    });
+  });
+
+  test('normalizes ISO-date Flex timestamps emitted by yyyy-MM-dd activity queries', () => {
+    const trade = normalizeFlexTrade({
+      accountId: 'U25779973', assetCategory: 'FOP', symbol: 'CPIY', localSymbol: 'CPIY_0626_3.6_NO',
+      conid: '999000001', putCall: 'P', buySell: 'BUY', quantity: '16000', tradePrice: '0.061607',
+      ibCommission: '0', ibCommissionCurrency: 'USD', netCash: '-985.71', proceeds: '-985.71', cost: '985.71',
+      tradeDate: '2026-06-03', dateTime: '2026-06-03;163805', ibExecID: 'FLEX-ISO-1',
+    });
+
+    expect(trade).toMatchObject({
+      execId: 'FLEX-ISO-1',
+      contractSide: 'NO',
+      brokerExecutionId: 'FLEX-ISO-1',
+      costBasis: 985.71,
+      commissionCurrency: 'USD',
+      executionTime: '2026-06-03T20:38:05.000Z',
+      tradeDate: '2026-06-03',
+    });
+  });
+
+  test('parses separate execution/control sections for every account in a bundle', () => {
+    const parsed = parseFlexStatement(`
+      <FlexQueryResponse><FlexStatements>
+        ${['U111', 'U222'].map((accountId) => `
+          <FlexStatement accountId="${accountId}" fromDate="2026-01-01" toDate="2026-01-31" currency="USD">
+            <Trades levelOfDetail="EXECUTION"><Trade accountId="${accountId}" conid="913869765" symbol="FES" localSymbol="FES_082126_7700_YES" exchange="FORECASTX" putCall="C" buySell="BUY" quantity="10" tradePrice="0.25" proceeds="-2.50" netCash="-2.60" costBasis="2.50" fifoPnlRealized="0" ibCommission="-0.10" tradeDate="20260115" dateTime="20260115;100000" execID="${accountId}-E1" tradeID="${accountId}-T1" openCloseIndicator="O" /></Trades>
+            <Trades levelOfDetail="CLOSED_LOT"><Trade accountId="${accountId}" conid="913869765" symbol="FES" localSymbol="FES_082126_7700_YES" exchange="FORECASTX" quantity="10" proceeds="10" costBasis="2.60" fifoPnlRealized="7.40" tradeID="${accountId}-L1" /></Trades>
+            <OptionExercisesAssignmentsExpirations><OptionEAE accountId="${accountId}" conid="913869765" symbol="FES" localSymbol="FES_082126_7700_YES" transactionType="Expiration" quantity="10" proceeds="10" costBasis="2.60" fifoPnlRealized="7.40" tradeID="${accountId}-O1" tradeDate="20260131" /></OptionExercisesAssignmentsExpirations>
+            <CashTransactions><CashTransaction accountId="${accountId}" conid="913869765" symbol="FES" amount="10" transactionID="${accountId}-C1" date="20260131" /></CashTransactions>
+            <StatementOfFunds><StatementOfFundsLine accountId="${accountId}" conid="913869765" symbol="FES" amount="10" transactionID="${accountId}-F1" date="20260131" /></StatementOfFunds>
+            <OpenPositions><OpenPosition accountId="${accountId}" conid="913869765" symbol="FES" quantity="0" marketValue="0" /></OpenPositions>
+          </FlexStatement>`).join('')}
+      </FlexStatements></FlexQueryResponse>
+    `);
+    expect(parsed).toMatchObject({
+      accountId: null,
+      accountIds: ['U111', 'U222'],
+      accountCount: 2,
+      complete: true,
+      sections: {
+        executions: true, closedLots: true, optionEvents: true,
+        cashTransactions: true, statementOfFunds: true, openPositions: true,
+      },
+      tradeCount: 2,
+      closedLotCount: 2,
+      optionEventCount: 2,
+      cashTransactionCount: 2,
+      statementOfFundsCount: 2,
+    });
+    expect(parsed.trades[0]).toMatchObject({
+      costBasisMicros: 2500000,
+      netCashMicros: -2600000,
+      realizedPnlMicros: 0,
+      openCloseIndicator: 'O',
+    });
   });
 });

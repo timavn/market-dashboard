@@ -25,11 +25,38 @@ describe('USD correlation provider service', () => {
     const [first, second] = await Promise.all([service.getSnapshot(), service.getSnapshot()]);
     const third = await service.getSnapshot();
 
-    expect(fetchHistory).toHaveBeenCalledTimes(6);
+    expect(fetchHistory).toHaveBeenCalledTimes(9);
     expect(second).toBe(first);
     expect(third).toBe(first);
     expect(first.sourceStatus).toBe('current');
     expect(first.fxvlSnapshot).toBeNull();
+    expect(first.correlations.SILVER).toEqual(expect.objectContaining({ '30D': 1 }));
+    expect(first.assetContext.silverRealizedVolatility).toMatchObject({
+      status: 'historical', window: 21, annualized: true, decisionEligible: false,
+    });
+    expect(first.assetContext.brentWtiSpread).toMatchObject({
+      status: 'historical', value: 0, decisionEligible: false,
+    });
+  });
+
+  test('keeps required correlations current but leaves Silver context blank when optional history fails', async () => {
+    const logger = { warn: jest.fn() };
+    const service = createUsdCorrelationService({
+      fetchHistory: async (symbol) => {
+        if (symbol === 'SILVER') throw new Error('Silver history timeout');
+        return makeHistory();
+      },
+      now: () => new Date('2026-05-15T22:00:00Z'),
+      logger,
+    });
+
+    const snapshot = await service.getSnapshot();
+
+    expect(snapshot.sourceStatus).toBe('current');
+    expect(snapshot.correlations.SILVER).toBeUndefined();
+    expect(snapshot.assetContext.silverRealizedVolatility).toBeUndefined();
+    expect(snapshot.assetContext.brentWtiSpread).toBeDefined();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('optional SILVER history unavailable'));
   });
 
   test('attaches a verified FXVL snapshot when the CME producer succeeds', async () => {

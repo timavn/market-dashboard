@@ -30,7 +30,7 @@ describe('risk range publication envelope', () => {
   test('keeps Early Look-only tickers out of decision ranges', () => {
     const rows = [
       supplement('SPX', '2026-07-21', { lrr: 1, hrr: 2 }),
-      primary('SPX', '2026-07-21', { lrr: 6000, hrr: 6100 }),
+      primary('SPX', '2026-07-21', { lrr: 6000, hrr: 6100, prevClose: 6042 }),
       supplement('UST10Y', '2026-07-21', { lrr: 4.1, hrr: 4.3 }),
     ];
     const envelope = buildRiskRangeEnvelope(rows, {
@@ -40,7 +40,9 @@ describe('risk range publication envelope', () => {
 
     expect(envelope.status).toBe('current');
     expect(envelope.available).toBe(true);
-    expect(envelope.ranges.SPX).toMatchObject({ lrr: 6000, hrr: 6100, provenance: 'primary' });
+    expect(envelope.ranges.SPX).toMatchObject({
+      lrr: 6000, hrr: 6100, previousClose: 6042, provenance: 'primary',
+    });
     expect(envelope.ranges.UST10Y).toBeUndefined();
     expect(envelope.supplementalRanges.UST10Y).toMatchObject({
       lrr: 4.1,

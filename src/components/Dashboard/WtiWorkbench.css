@@ -43,6 +43,35 @@
   gap: 8px;
 }
 
+.wti-back-button {
+  min-height: 28px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 5px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.wti-back-button:hover {
+  border-color: #93c5fd;
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+.wti-back-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
 .wti-title-accent {
   width: 3px;
   height: 32px;
@@ -580,6 +609,10 @@
 
 .wti-section-heading strong.available {
   color: #047857;
+}
+
+.wti-section-heading strong.delayed {
+  color: #a16207;
 }
 
 .wti-section-heading strong.unavailable {

@@ -21,24 +21,37 @@ async function trySpecialQuote(symbol) {
 
 async function getCanonicalQuote(symbolOrInstrument) {
   const instrument = resolveInstrument(symbolOrInstrument);
+  const observedAt = () => new Date().toISOString();
   if (!['auto', 'ibkr', 'yahoo'].includes(instrument.provider)) {
     setMarketMeta(instrument.provider, `${instrument.provider}_quote_unavailable`);
     return null;
   }
-  const shouldUseYahooDirectly = instrument.provider === 'yahoo' || !instrument.supported;
+  const ibkrOnly = instrument.provider === 'ibkr';
+  if (ibkrOnly && !instrument.supported) {
+    setMarketMeta(null, instrument.reason || 'ibkr_quote_unavailable');
+    return null;
+  }
+  const shouldUseYahooDirectly = instrument.provider === 'yahoo'
+    || (!instrument.supported && !ibkrOnly);
   if (shouldUseYahooDirectly && instrument.reason !== 'forecast_event_todo') {
     const yahooResult = await yahoo.getQuote(symbolOrInstrument);
     if (yahooResult.canonical?.valid) {
-      setMarketMeta('yahoo', yahooResult.canonical.warning);
+      setMarketMeta('yahoo', yahooResult.canonical.warning, observedAt());
       return yahooResult.canonical;
     }
+    setMarketMeta(null, 'no_quote_available');
     return null;
   }
 
   const ibkrResult = await ibkr.getQuote(symbolOrInstrument);
   if (ibkrResult.canonical?.valid) {
-    setMarketMeta('ibkr', ibkrResult.canonical.warning);
+    setMarketMeta('ibkr', ibkrResult.canonical.warning, observedAt());
     return ibkrResult.canonical;
+  }
+
+  if (ibkrOnly) {
+    setMarketMeta(null, ibkrResult.error || 'ibkr_quote_unavailable');
+    return null;
   }
 
   const yahooResult = await yahoo.getQuote(symbolOrInstrument);
@@ -51,8 +64,12 @@ async function getCanonicalQuote(symbolOrInstrument) {
       .filter(Boolean)
       .join('; ');
     yahooResult.canonical.valid = yahooResult.canonical.valid && Boolean(yahooResult.canonical.mark);
-    setMarketMeta('yahoo', yahooResult.canonical.warning);
-    return yahooResult.canonical.valid ? yahooResult.canonical : null;
+    if (yahooResult.canonical.valid) {
+      setMarketMeta('yahoo', yahooResult.canonical.warning, observedAt());
+      return yahooResult.canonical;
+    }
+    setMarketMeta(null, 'no_quote_available');
+    return null;
   }
 
   setMarketMeta(null, 'no_quote_available');
@@ -67,7 +84,9 @@ async function getQuote(symbolOrInstrument) {
 
   const special = await trySpecialQuote(symbol);
   if (special?.legacy) {
-    setMarketMeta(special.legacy.source || 'fred', null);
+    // FRED/Stooq observations are historical reference data, not current
+    // market-provider evidence. Keep them out of the SYS market-data health
+    // state so a rates lookup cannot overwrite the last IBKR/Yahoo quote.
     return special.legacy;
   }
 
@@ -86,10 +105,11 @@ async function getQuotes(symbols) {
   return out;
 }
 
-async function getHistoricalBars(symbol, range, interval) {
-  const ibkrBars = await ibkr.getHistoricalBars(symbol, range, interval);
-  if (ibkrBars.bars?.length) return ibkrBars;
-  return yahoo.getHistoricalBars(symbol, range, interval);
+async function getHistoricalBars(symbolOrInstrument, range, interval) {
+  const instrument = resolveInstrument(symbolOrInstrument);
+  const ibkrBars = await ibkr.getHistoricalBars(symbolOrInstrument, range, interval);
+  if (ibkrBars.bars?.length || instrument.provider === 'ibkr') return ibkrBars;
+  return yahoo.getHistoricalBars(symbolOrInstrument, range, interval);
 }
 
 async function getProviderStatus() {

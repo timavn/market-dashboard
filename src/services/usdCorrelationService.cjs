@@ -1,4 +1,5 @@
 const {
+  OPTIONAL_SYMBOLS,
   REQUIRED_SYMBOLS,
   UsdCorrelationDataError,
   buildUsdCorrelationSnapshot,
@@ -34,7 +35,7 @@ function createUsdCorrelationService({
 
   async function fetchSnapshot() {
     const requestTime = now();
-    const [historyEntries, fxvlSnapshot] = await Promise.all([
+    const [requiredHistoryEntries, optionalHistoryEntries, fxvlSnapshot] = await Promise.all([
       Promise.all(REQUIRED_SYMBOLS.map(async (symbol) => {
         try {
           return [symbol, await fetchHistory(symbol)];
@@ -45,9 +46,20 @@ function createUsdCorrelationService({
           );
         }
       })),
+      Promise.all(OPTIONAL_SYMBOLS.map(async (symbol) => {
+        try {
+          return [symbol, await fetchHistory(symbol)];
+        } catch (error) {
+          logger.warn?.(`[usd-correlations] optional ${symbol} history unavailable: ${error.message}`);
+          return [symbol, null];
+        }
+      })),
       loadFxvlSnapshot(),
     ]);
-    const snapshot = buildUsdCorrelationSnapshot(Object.fromEntries(historyEntries), {
+    const snapshot = buildUsdCorrelationSnapshot(Object.fromEntries([
+      ...requiredHistoryEntries,
+      ...optionalHistoryEntries,
+    ]), {
       now: requestTime,
       maxStaleDays,
     });

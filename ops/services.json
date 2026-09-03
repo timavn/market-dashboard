@@ -1,5 +1,13 @@
 {
   "version": 1,
+  "legacyHermesCapabilityIds": [
+    "automation.hermes",
+    "dashboard.core",
+    "portfolio.live",
+    "prediction.display",
+    "prediction.ibkrExecution",
+    "research.current"
+  ],
   "owners": [
     {
       "id": "local-operations",
@@ -24,6 +32,7 @@
       "serviceHeartbeatTable": "MarketDashboardServiceHeartbeats",
       "hermesInputSnapshotTable": "HermesInputSnapshots",
       "predictionCatalogTable": "PredictionMarketCatalogV2",
+      "predictionPerformanceTable": "PredictionMarketPerformanceLedger",
       "researchEventLedgerTable": "ResearchEventLedgerV2",
       "researchEntityEventsTable": "ResearchEntityEventsV1",
       "researchProductManifestTable": "ResearchProductManifestsV1",
@@ -35,8 +44,10 @@
       "rawArtifactBucket": "market-dashboard-csv-data",
       "gmailOAuthSecret": "hermes/gmail/oauth",
       "gmailFunction": "market-dashboard-gmail-ingestor-v2",
+      "cftcFunction": "market-dashboard-cftc-ingestor-v1",
       "hermesFunction": "market-dashboard-hermes-worker-v2",
       "gmailSchedule": "market-dashboard-gmail-v2-every-15m",
+      "cftcSchedule": "market-dashboard-cftc-weekday-v1",
       "quantAnalystSchedule": "market-dashboard-hermes-quant-analyst-v2",
       "quantDeveloperSchedule": "market-dashboard-hermes-quant-developer-v2",
       "securitySchedule": "market-dashboard-hermes-security-v2"
@@ -89,8 +100,14 @@
     },
     {
       "id": "automation.hermes",
-      "label": "Hermes and Gmail automation",
-      "description": "Scheduled agents and email ingestion are completing on cadence.",
+      "label": "Legacy Hermes and Gmail automation",
+      "description": "Rollback-retained scheduled workers and email ingestion are completing on cadence.",
+      "blocking": false
+    },
+    {
+      "id": "automation.readiness",
+      "label": "Readiness automation",
+      "description": "Gmail ingestion and deterministic readiness automation are completing on cadence.",
       "blocking": false
     },
     {
@@ -148,13 +165,37 @@
     },
     {
       "id": "hermes.controller",
-      "label": "Hermes reliability controller",
+      "label": "Legacy Hermes reliability controller",
       "owner": "automation-operations",
       "runbookId": "local-stack",
       "cadenceMinutes": 1,
       "readinessMaxAgeMinutes": 3,
       "capabilityIds": [],
       "dependsOn": ["dashboard.supervisor", "dashboard.api"],
+      "blocking": false,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "readiness.controller",
+      "label": "Dashboard readiness controller",
+      "owner": "automation-operations",
+      "runbookId": "local-stack",
+      "cadenceMinutes": 1,
+      "readinessMaxAgeMinutes": 3,
+      "capabilityIds": [],
+      "dependsOn": ["dashboard.supervisor", "dashboard.api"],
+      "blocking": false,
+      "automatic": true,
+      "recoveryActionId": "start-local-stack"
+    },
+    {
+      "id": "analyst.runtime",
+      "label": "The Analyst runtime",
+      "owner": "research-operations",
+      "runbookId": "local-stack",
+      "capabilityIds": [],
+      "dependsOn": ["dashboard.supervisor"],
       "blocking": false,
       "automatic": true,
       "recoveryActionId": "start-local-stack"
@@ -210,7 +251,7 @@
       "dependsOn": [],
       "blocking": true,
       "automatic": true,
-      "recoveryActionId": "start-local-stack"
+      "recoveryActionId": "restart-ibkr-sidecar"
     },
     {
       "id": "local-bridge",
@@ -238,7 +279,7 @@
       "dependsOn": ["local-sidecar"],
       "blocking": true,
       "automatic": true,
-      "recoveryActionId": "restart-local-stack"
+      "recoveryActionId": "restart-ibkr-sidecar"
     },
     {
       "id": "ibkr.runtime",
@@ -259,7 +300,8 @@
       "capabilityIds": ["portfolio.live"],
       "dependsOn": ["ibkr.sidecar", "ibkr.runtime"],
       "blocking": true,
-      "automatic": false
+      "automatic": true,
+      "recoveryActionId": "restart-ibkr-sidecar"
     },
     {
       "id": "ibkr.accounts",
@@ -280,7 +322,7 @@
       "dependsOn": ["ibkr.sidecar", "ibkr.gateway", "ibkr.accounts"],
       "blocking": true,
       "automatic": true,
-      "recoveryActionId": "restart-local-stack"
+      "recoveryActionId": "restart-ibkr-sidecar"
     },
     {
       "id": "hermes.quant-analyst",
@@ -384,6 +426,26 @@
       "recoveryActionId": "retry-gmail-poll"
     },
     {
+      "id": "cftc.official-ingestion",
+      "label": "Official CFTC positioning ingestion",
+      "owner": "research-operations",
+      "runbookId": "research-projections",
+      "cadenceMinutes": 1440,
+      "readinessMaxAgeMinutes": 4320,
+      "scheduleWindow": { "timeZone": "America/New_York", "weekdays": true, "startHour": 16, "endHour": 17 },
+      "aws": {
+        "functionName": "market-dashboard-cftc-ingestor-v1",
+        "scheduleId": "market-dashboard-cftc-weekday-v1",
+        "scheduleExpression": "cron(15 16 ? * MON-FRI *)",
+        "scheduleTimeZone": "America/New_York",
+        "heartbeatServiceId": "cftc:official-positioning"
+      },
+      "capabilityIds": ["research.current"],
+      "dependsOn": [],
+      "blocking": false,
+      "automatic": true
+    },
+    {
       "id": "prediction.display",
       "label": "Prediction-market live display",
       "owner": "research-operations",
@@ -410,6 +472,19 @@
         "catalogTable": "PredictionMarketCatalogV2"
       },
       "recoveryActionId": "reconcile-prediction-catalog"
+    },
+    {
+      "id": "prediction.performanceLedger",
+      "label": "Prediction-market performance ledger",
+      "owner": "brokerage-operations",
+      "runbookId": "prediction-catalog",
+      "capabilityIds": ["prediction.ibkrExecution"],
+      "dependsOn": ["dashboard.api", "ibkr.sidecar"],
+      "blocking": false,
+      "automatic": true,
+      "aws": {
+        "ledgerTable": "PredictionMarketPerformanceLedger"
+      }
     },
     {
       "id": "research.rta",
@@ -518,20 +593,18 @@
       "authority": "automatic",
       "triggeringErrorCodes": [
         "DASHBOARD_CODE_VERSION_DRIFT",
+        "DASHBOARD_SUPERVISOR_CODE_DRIFT",
         "DASHBOARD_RUNTIME_MISMATCH",
         "HERMES_BRIDGE_DISABLED_PROCESS_PRESENT",
-        "HERMES_BRIDGE_DISABLED_STATE_UNVERIFIED",
-        "IBKR_LIVE_SESSION_STALE",
-        "IBKR_LIVE_SESSION_UNAVAILABLE",
-        "IBKR_LIVE_SESSION_UNVERIFIED",
-        "IBKR_SIDECAR_UNREACHABLE"
+        "HERMES_BRIDGE_DISABLED_STATE_UNVERIFIED"
       ],
       "scope": "repo-processes",
       "riskClass": "low",
       "prerequisites": [
         {
           "checkId": "dashboard.supervisor",
-          "statuses": ["pass"],
+          "statuses": ["pass", "warn"],
+          "allowedErrorCodes": [null, "DASHBOARD_SUPERVISOR_CODE_DRIFT"],
           "maxAgeMs": 180000
         }
       ],
@@ -542,6 +615,52 @@
       "maxAttempts": 2,
       "circuitDurationMs": 3600000,
       "escalationOwner": "local-operations"
+    },
+    {
+      "id": "restart-ibkr-sidecar",
+      "label": "Restart the repo-owned IBKR sidecar",
+      "description": "Signals only the exact repo-owned port-8765 sidecar and leaves the dashboard, controller, bridge, API, UI, and Java IB Gateway untouched.",
+      "executor": "dev-stack-sidecar-restart",
+      "command": "npm run dev:sidecar:restart",
+      "automatic": true,
+      "loopbackOnly": true,
+      "controllerExecutor": "loopback-readiness-api",
+      "authority": "automatic",
+      "triggeringErrorCodes": [
+        "IBKR_GATEWAY_API_UNRESPONSIVE",
+        "IBKR_POSITIONS_CLIENT_UNAVAILABLE",
+        "IBKR_POSITIONS_REQUEST_TIMEOUT",
+        "IBKR_SOCKET_VERIFICATION_TIMEOUT",
+        "IBKR_BALANCE_REQUEST_TIMEOUT",
+        "IBKR_LIVE_SESSION_STALE",
+        "IBKR_LIVE_SESSION_UNAVAILABLE",
+        "IBKR_LIVE_SESSION_UNVERIFIED",
+        "IBKR_SIDECAR_UNREACHABLE",
+        "IBKR_SIDECAR_DUPLICATES",
+        "IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED"
+      ],
+      "triggeringCheckIds": ["local-sidecar", "ibkr.sidecar", "ibkr.gateway", "ibkr.portfolio"],
+      "scope": "repo-processes",
+      "riskClass": "low",
+      "prerequisites": [
+        {
+          "checkId": "dashboard.supervisor",
+          "statuses": ["pass", "warn"],
+          "maxAgeMs": 180000
+        }
+      ],
+      "verificationChecks": [
+        "ibkr.sidecar",
+        "ibkr.gateway",
+        "ibkr.accounts",
+        "ibkr.portfolio"
+      ],
+      "settleTimeoutMs": 60000,
+      "cooldownMs": 120000,
+      "attemptWindowMs": 3600000,
+      "maxAttempts": 2,
+      "circuitDurationMs": 3600000,
+      "escalationOwner": "brokerage-operations"
     },
     {
       "id": "rebuild-sidecar-runtime",

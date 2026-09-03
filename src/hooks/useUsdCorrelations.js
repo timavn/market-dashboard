@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { USDMarketService } from '../services/api/usdMarketService';
 import { REFRESH_INTERVALS } from '../constants/usdMarket';
+import { useDashboardResource } from './useDashboardResource';
 
 export const CORRELATION_RETRY_DELAYS_MS = [2000, 5000, 15000, 60000];
 export const CORRELATION_FAILURE_POLL_MS = 5 * 60 * 1000;
+export const CORRELATION_REFERENCE_STORAGE_KEY = 'market-dashboard.reference.usd-correlations.v1';
 
 export const EMPTY_CORRELATION_DATA = Object.freeze({
   correlations: null,
@@ -12,12 +14,6 @@ export const EMPTY_CORRELATION_DATA = Object.freeze({
   calculationDate: null,
   fxvlSnapshot: null,
 });
-
-function unavailableMessage(error) {
-  return error?.response?.data?.error
-    || error?.message
-    || 'Current USD correlation data is unavailable';
-}
 
 function validateCorrelationResponse(data) {
   if (
@@ -44,57 +40,62 @@ export function useUsdCorrelations({
   failurePollMs = CORRELATION_FAILURE_POLL_MS,
   successPollMs = REFRESH_INTERVALS.CORRELATIONS,
 } = {}) {
-  const [data, setData] = useState(EMPTY_CORRELATION_DATA);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [retryGeneration, setRetryGeneration] = useState(0);
+  const timerRef = useRef(null);
+  const failureCountRef = useRef(0);
+  const mountedRef = useRef(false);
 
-  const retry = useCallback(() => {
-    setRetryGeneration((value) => value + 1);
-  }, []);
+  const resource = useDashboardResource('usd-correlations', {}, {
+    fetcher: () => service.getCorrelations(),
+    validate: validateCorrelationResponse,
+    getObservedAt: (data) => data.correlationsTimestamp || data.calculationDate,
+    enabled: false,
+    core: true,
+  });
+
+  const { refresh } = resource;
+
+  const runAndSchedule = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const committed = await refresh();
+    if (!mountedRef.current) return;
+    const succeeded = Boolean(committed);
+    const delay = succeeded
+      ? successPollMs
+      : retryDelaysMs[failureCountRef.current] ?? failurePollMs;
+    failureCountRef.current = succeeded ? 0 : failureCountRef.current + 1;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(runAndSchedule, delay);
+  }, [failurePollMs, refresh, retryDelaysMs, successPollMs]);
 
   useEffect(() => {
-    let cancelled = false;
-    let timer = null;
-    let failureCount = 0;
-
-    const schedule = (callback, delay) => {
-      timer = setTimeout(callback, delay);
-    };
-
-    const fetchCorrelations = async () => {
-      if (cancelled) return;
-      setLoading(true);
-      setError(null);
-      setData(EMPTY_CORRELATION_DATA);
-
-      try {
-        const response = await service.getCorrelations();
-        const nextData = validateCorrelationResponse(response);
-        if (cancelled) return;
-        failureCount = 0;
-        setData(nextData);
-        setLoading(false);
-        schedule(fetchCorrelations, successPollMs);
-      } catch (requestError) {
-        if (cancelled) return;
-        setData(EMPTY_CORRELATION_DATA);
-        setError(unavailableMessage(requestError));
-        setLoading(false);
-        const delay = retryDelaysMs[failureCount] ?? failurePollMs;
-        failureCount += 1;
-        schedule(fetchCorrelations, delay);
-      }
-    };
-
-    fetchCorrelations();
+    mountedRef.current = true;
+    runAndSchedule();
     return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
     };
-  }, [failurePollMs, retryDelaysMs, retryGeneration, service, successPollMs]);
+  }, [runAndSchedule]);
 
-  return { ...data, loading, error, retry };
+  const retry = useCallback(() => {
+    failureCountRef.current = 0;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    refresh();
+  }, [refresh]);
+
+  const data = resource.data || EMPTY_CORRELATION_DATA;
+  return {
+    ...data,
+    loading: resource.initialLoading && !resource.data,
+    refreshing: resource.refreshing,
+    availability: resource.availability,
+    observedAt: resource.observedAt,
+    hydratedFromStorage: resource.hydratedFromStorage,
+    persistedAt: resource.persistedAt,
+    error: resource.error?.message || null,
+    retry,
+  };
 }
 
 export default useUsdCorrelations;

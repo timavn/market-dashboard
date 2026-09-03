@@ -14,11 +14,22 @@ restarts the owned stack once and validates it again. It will not sign in to IB
 Gateway, alter AWS/Gmail configuration, kill an unknown process, or claim
 stale/cache-only trading data is live.
 
+Refresh behavior is governed by [`DASHBOARD_DATA_RETENTION.md`](./DASHBOARD_DATA_RETENTION.md):
+the front dashboard keeps last-verified, still-fresh numbers visible while a
+poll is in flight or delayed, hydrates valid reference snapshots across a hard
+reload, and only executable live surfaces fail closed.
+
 For a strictly read-only check:
 
 ```bash
 npm run morning:check
 ```
+
+During The Analyst shadow period, also confirm `Analyst research sidecar` and
+`The Analyst Hermes gateway` in the local-stack group. The Hermes entry is not
+ready unless the deep JSON-RPC/MCP contract passed. Run the focused regression
+suite with `npm run test:analyst`; rollout evidence belongs in
+[`THE_ANALYST_SHADOW_ACCEPTANCE.md`](./THE_ANALYST_SHADOW_ACCEPTANCE.md).
 
 For automation or troubleshooting output:
 

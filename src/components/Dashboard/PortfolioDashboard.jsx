@@ -1,64 +1,169 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Text, Grid, Title, Button, Badge } from '@tremor/react';
+import { Text, Grid, Title, Button } from '@tremor/react';
+import {
+  FileText,
+  Monitor,
+  MessageSquare,
+  PieChart,
+  Scale,
+  Share2,
+  Table2,
+  Target,
+} from 'lucide-react';
 import { MarketDataService } from '../../services/api/marketDataService';
-import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
+import predictionMarketTestService from '../../services/api/predictionMarketTestService';
 import { useTheme } from '../../context/ThemeContext';
 import USDMacroDashboard from './USDMacroDashboard';
-import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
-import './PredictionMarkets.css';
 import RefreshButton from '../common/RefreshButton';
 import LoadingIndicator from '../common/LoadingIndicator';
-import PortfolioSidebarSnapshot from './portfolio/PortfolioSidebarSnapshot';
+import PersistentSurface, { useSurfaceActivity } from '../common/PersistentSurface';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
+import DashboardNavigationRail from './DashboardNavigationRail';
+import PortfolioBalanceScenarioPlanner from './portfolio/PortfolioBalanceScenarioPlanner';
+import PredictionMarketPerformanceCard from './PredictionMarketPerformanceCard';
 import { loadSelectedAccount, saveSelectedAccount, saveIbkrAccounts } from '../../constants/ibkrAccountStorage';
 import { getIbkrConnectionDisplay, getPreferredIbkrAccount } from '../../utils/ibkrConnectionStatus';
 import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 import { isExplicitlySafeResearchComparison } from '../../utils/researchComparisonContract';
+import {
+  activePredictionMarketNavIndicators,
+  normalizePredictionMarketNavIndicators,
+  PREDICTION_MARKET_INDICATOR_MAX_AGE_MS,
+  PREDICTION_MARKET_INDICATOR_POLL_MS,
+} from '../../utils/predictionMarketNavIndicators';
+import {
+  markMarketQuotePayloadRefreshDelayed,
+  MARKET_QUOTE_FUTURE_TOLERANCE_MS,
+  marketPayloadObservedAt,
+  reconcileMarketQuotePayload,
+  validateMarketQuotePayload,
+  validatePeriodReturnPayload,
+} from '../../utils/marketQuoteFreshness';
+import {
+  createUnknownDashboardCardStatuses,
+  mergeDashboardCardStatuses,
+} from './dashboardStatus';
+import { getProcessDocument } from '../../constants/processDocuments';
+import { isDashboardSessionRetentionEnabled } from '../../config/dashboardSessionRetention';
+import { createDashboardWarmupQueue } from '../../utils/dashboardWarmupQueue';
+import { warmDashboardResource } from '../../utils/dashboardResourceWarmup';
+import { canonicalPredictionMonitorContext } from '../../utils/predictionMonitorIdentity';
+import AnalystSurfaceBoundary from './AnalystSurfaceBoundary';
 
-const ReactMarkdown = lazy(() => import('react-markdown'));
-const SystemReadinessPanel = lazy(() => import('./SystemReadinessPanel'));
-const WorkflowStatus = lazy(() => import('./WorkflowStatus'));
-const SecuritiesUniverse = lazy(() => import('./SecuritiesUniverse'));
-const PerformanceTracking = lazy(() => import('./PerformanceTracking'));
-const PortfolioBreakdown = lazy(() => import('./PortfolioBreakdown'));
-const ExpectedValuesWindow = lazy(() => import('./ExpectedValuesWindow'));
-const PredictionMarketsHubPanel = lazy(() => import('./PredictionMarketsHub'));
-const SignalStrengthPanel = lazy(() => import('./SignalStrengthPanel'));
-const EtfProPanel = lazy(() => import('./EtfProPanel'));
-const HedgeyeShowPanel = lazy(() => import('./HedgeyeShowPanel'));
-const ProcessOverlay = lazy(() => import('../Process/ProcessOverlay'));
+const loadReactMarkdownModule = () => import('react-markdown');
+const loadSystemReadinessModule = () => import('./SystemReadinessPanel');
+const loadWorkflowStatusModule = () => import('./WorkflowStatus');
+const loadPerformanceTrackingModule = () => import('./PerformanceTracking');
+const loadPortfolioBreakdownModule = () => import('./PortfolioBreakdown');
+const loadExposureLabModule = () => import('./ExposureLab');
+const loadPredictionMonitorModule = () => import('./PredictionMarketResolverTest');
+const loadSignalStrengthModule = () => import('./SignalStrengthPanel');
+const loadEtfProModule = () => import('./EtfProPanel');
+const loadHedgeyeShowModule = () => import('./HedgeyeShowPanel');
+const loadMorningTldrModule = () => import('./MorningTldrOverlay');
+const loadAnalystModule = () => import('./AnalystPanel');
+const loadProcessModule = () => import('../Process/ProcessOverlay');
+
+const ReactMarkdown = lazy(loadReactMarkdownModule);
+const SystemReadinessPanel = lazy(loadSystemReadinessModule);
+const WorkflowStatus = lazy(loadWorkflowStatusModule);
+const PerformanceTracking = lazy(loadPerformanceTrackingModule);
+const PortfolioBreakdown = lazy(loadPortfolioBreakdownModule);
+const ExposureLab = lazy(loadExposureLabModule);
+const PredictionMarketResolverTestPanel = lazy(loadPredictionMonitorModule);
+const SignalStrengthPanel = lazy(loadSignalStrengthModule);
+const EtfProPanel = lazy(loadEtfProModule);
+const HedgeyeShowPanel = lazy(loadHedgeyeShowModule);
+const MorningTldrOverlay = lazy(loadMorningTldrModule);
+const AnalystPanel = lazy(loadAnalystModule);
+const ProcessOverlay = lazy(loadProcessModule);
+
+const DASHBOARD_LAZY_WARMUPS = Object.freeze([
+  Object.freeze({ key: 'chunk:system-readiness', run: loadSystemReadinessModule }),
+  Object.freeze({ key: 'chunk:workflow', run: loadWorkflowStatusModule }),
+  Object.freeze({ key: 'chunk:performance', run: loadPerformanceTrackingModule }),
+  Object.freeze({ key: 'chunk:portfolio', run: loadPortfolioBreakdownModule }),
+  Object.freeze({ key: 'chunk:exposure-lab', run: loadExposureLabModule }),
+  Object.freeze({ key: 'chunk:prediction-monitor', run: loadPredictionMonitorModule }),
+  Object.freeze({ key: 'chunk:signal-strength', run: loadSignalStrengthModule }),
+  Object.freeze({ key: 'chunk:etf-pro', run: loadEtfProModule }),
+  Object.freeze({ key: 'chunk:hedgeye-show', run: loadHedgeyeShowModule }),
+  Object.freeze({ key: 'chunk:morning-tldr', run: loadMorningTldrModule }),
+  Object.freeze({ key: 'chunk:analyst', run: loadAnalystModule }),
+  Object.freeze({ key: 'chunk:process', run: loadProcessModule }),
+]);
+
+const PANEL_WARMUP_TASK_KEYS = Object.freeze({
+  system: Object.freeze(['chunk:system-readiness']),
+  analytics: Object.freeze(['chunk:workflow']),
+  performance: Object.freeze(['chunk:performance']),
+  portfolio: Object.freeze(['chunk:portfolio']),
+  exposureLab: Object.freeze(['chunk:exposure-lab', 'resource:exposure-lab-universe']),
+  predictionMonitor: Object.freeze(['chunk:prediction-monitor']),
+  ss: Object.freeze(['chunk:signal-strength']),
+  etfPro: Object.freeze(['chunk:etf-pro', 'resource:etf-pro']),
+  macroShow: Object.freeze(['chunk:hedgeye-show']),
+  call: Object.freeze(['chunk:hedgeye-show']),
+  tldr: Object.freeze(['chunk:morning-tldr']),
+  analyst: Object.freeze(['chunk:analyst']),
+});
 
 // The funding guard may need fresh IBKR daily bars for symbols whose live
 // stream omits the prior-close tick. Keep the full portfolio/funding refresh
 // below IBKR historical-data pacing while remaining inside the guard's
 // freshness window.
 const PORTFOLIO_POLL_MS = 50000;
-const PORTFOLIO_ACCOUNTS_POLL_MS = 60000;
 const REFERENCE_DATA_POLL_MS = 5 * 60 * 1000;
-const PREDICTION_PROVIDER_STATUS_POLL_MS = 30000;
 const PROVIDER_STATUS_POLL_MS = 5000;
 const PROVIDER_STATUS_POLL_OFFLINE_MS = 15000;
 const PROVIDER_STATUS_TIMEOUT_MS = 3500;
 const PORTFOLIO_REQUEST_TIMEOUT_MS = 60 * 1000;
+const PORTFOLIO_LIVE_MAX_AGE_MS = 5 * 60 * 1000;
+const MARKET_QUOTES_MAX_AGE_MS = 4 * 24 * 60 * 60 * 1000;
+const MARKET_PERIOD_RETURNS_POLL_MS = 15 * 60 * 1000;
 const SIDEBAR_PANEL_Z_INDEX_BASE = 1300;
 const DASHBOARD_PANEL_STATE_KEY = 'marketDashboard.panelState.v1';
-const DASHBOARD_RAIL_COLLAPSED_WIDTH = '76px';
-const DASHBOARD_RAIL_EXPANDED_WIDTH = 'calc((100vw - 16px) * (2/12) + 16px + 128px)';
-const RTA_STALE_WARNING = 'The API is serving a last-good cached RTA response.';
-const RTA_REFRESH_WARNING = 'The latest RTA refresh failed; retained positions are a prior dated reference.';
+const DASHBOARD_RAIL_COLLAPSED_WIDTH = 'min(88px, calc(100vw - 32px))';
+const CONTRACT_PNL_PANEL_DEFAULT_WIDTH = 295;
+const CONTRACT_PNL_PANEL_MIN_WIDTH = 295;
+const CONTRACT_PNL_PANEL_MAX_WIDTH = 1400;
+const CONTRACT_PNL_PANEL_EDGE_INSET = 8;
+const CONTRACT_PNL_PANEL_RESIZE_STEP = 24;
+const ANALYST_PANEL_DEFAULT_WIDTH = 440;
+const ANALYST_PANEL_MIN_WIDTH = 280;
+const ANALYST_PANEL_MAX_WIDTH = 1400;
+const ANALYST_PANEL_EDGE_INSET = 8;
+const ANALYST_PANEL_RESIZE_STEP = 24;
+const ANALYST_PANEL_POSITIONS = new Set(['left', 'center', 'right']);
+const ANALYST_PANEL_DEFAULT_POSITION = 'auto';
 const ETF_PRO_STALE_WARNING = 'The API is serving a last-good cached ETF Pro response.';
+const ANALYST_SHADOW_MODE = process.env.REACT_APP_ANALYST_SHADOW_MODE !== 'false';
+export function analystNavigationState(shadowMode = ANALYST_SHADOW_MODE) {
+  return {
+    systemsEntry: shadowMode ? 'tldr' : 'analyst',
+    showLegacyTldr: shadowMode,
+    showResearchAnalyst: shadowMode,
+  };
+}
+const ANALYST_NAVIGATION = analystNavigationState();
+const PROCESS_ROUTE = getProcessDocument('the-process').route;
+const EXPOSURE_GUIDE_DOCUMENT_ID = 'exposure-lab-guide';
+const EXPOSURE_GUIDE_ROUTE = getProcessDocument(EXPOSURE_GUIDE_DOCUMENT_ID).route;
 const PERSISTED_SIDEBAR_PANELS = new Set([
   'system',
   'analytics',
-  'securities',
   'performance',
   'portfolio',
-  'predictionMarkets',
+  'exposureLab',
+  'predictionMonitor',
+  // Accepted only so persisted legacy state can migrate to predictionMonitor.
+  'resolverTest',
+  'tldr',
+  'analyst',
   'ss',
   'etfPro',
   'macroShow',
   'call',
-  'pods',
-  'ev',
 ]);
 
 const scheduleBackgroundTask = (callback, timeout = 1) => {
@@ -170,9 +275,39 @@ const isRejectedPortfolioResponse = (snapshot) => (
     snapshot?.dataSource === 'ibkr_api'
     && snapshot?.liveSessionVerified !== true
   )
-  || snapshot?.fromCache === true
+  || snapshot?.dataSource !== 'ibkr_api'
+  || snapshot?.fromCache !== false
   || snapshot?._cache?.stale === true
 );
+
+const validateLivePortfolioSnapshot = (snapshot, expectedAccount) => {
+  const reportedAccount = String(snapshot?.accountId || '').trim();
+  if (
+    !snapshot
+    || typeof snapshot !== 'object'
+    || isRejectedPortfolioResponse(snapshot)
+    || (expectedAccount && reportedAccount !== expectedAccount)
+    || !snapshot.fetchedAt
+    || !snapshot.socketVerifiedAt
+  ) {
+    throw Object.assign(
+      new Error(
+        snapshot?.dataSource === 'ibkr_offline'
+          ? 'IBKR is disconnected; the live portfolio is unavailable.'
+          : 'The portfolio response was not verified live account data.',
+      ),
+      {
+        code: snapshot?.dataSource === 'ibkr_offline'
+          ? 'PORTFOLIO_GATEWAY_OFFLINE'
+          : expectedAccount && reportedAccount && reportedAccount !== expectedAccount
+            ? 'PORTFOLIO_ACCOUNT_MISMATCH'
+            : 'PORTFOLIO_RESPONSE_UNVERIFIED',
+        liveInvalidation: true,
+      },
+    );
+  }
+  return snapshot;
+};
 
 const LazyPanelFallback = ({ label = 'Loading...' }) => (
   <div
@@ -207,17 +342,53 @@ const writeDashboardPanelState = (state) => {
 
 const readPersistedBoolean = (state, key) => state?.[key] === true;
 
-const PREDICTION_MARKET_VIEWS = new Set(['overview', 'wti', 'spx', 'cpi']);
-const WTI_CADENCES = new Set(['daily', 'weekly']);
+const clampAnalystPanelWidth = (
+  value,
+  minWidth = ANALYST_PANEL_MIN_WIDTH,
+  maxWidth = ANALYST_PANEL_MAX_WIDTH,
+) => {
+  const minimum = Math.min(minWidth, maxWidth);
+  const maximum = Math.max(minWidth, maxWidth);
+  const parsed = Number(value);
+  const width = Number.isFinite(parsed) ? parsed : ANALYST_PANEL_DEFAULT_WIDTH;
+  return Math.round(Math.min(maximum, Math.max(minimum, width)));
+};
+
+const clampContractPnlPanelWidth = (
+  value,
+  minWidth = CONTRACT_PNL_PANEL_MIN_WIDTH,
+  maxWidth = CONTRACT_PNL_PANEL_MAX_WIDTH,
+) => {
+  const minimum = Math.min(minWidth, maxWidth);
+  const maximum = Math.max(minWidth, maxWidth);
+  const parsed = Number(value);
+  const width = Number.isFinite(parsed) ? parsed : CONTRACT_PNL_PANEL_DEFAULT_WIDTH;
+  return Math.round(Math.min(maximum, Math.max(minimum, width)));
+};
+
+const normalizeAnalystPanelPosition = (value) => (
+  ANALYST_PANEL_POSITIONS.has(value) ? value : ANALYST_PANEL_DEFAULT_POSITION
+);
+
+const PREDICTION_MONITOR_MARKETS = new Set(['silver', 'gold', 'wti', 'brent', 'bitcoin', 'sp500', 'cpi']);
+// IBKR catalog review 2026-08-20: each button has at least one listed contract
+// family above 10,000 aggregate open interest; repeated cadences share one card.
+const PREDICTION_MONITOR_NAV_ITEMS = Object.freeze([
+  Object.freeze({ marketId: 'silver', label: 'Silver', tier: 'T1', description: 'IBKR Silver futures and weekly threshold contracts' }),
+  Object.freeze({ marketId: 'gold', label: 'Gold', tier: 'T1', indicatorMarketId: 'gold', description: 'IBKR Gold daily, weekly, and futures threshold contracts' }),
+  Object.freeze({ marketId: 'wti', label: 'WTI', tier: 'T1', indicatorMarketId: 'wti', description: 'Kalshi/IBKR WTI daily, weekly, and futures threshold contracts' }),
+  Object.freeze({ marketId: 'brent', label: 'Brent', tier: 'T1', description: 'Kalshi/IBKR Brent daily and weekly threshold contracts' }),
+  Object.freeze({ marketId: 'bitcoin', label: 'Bitcoin', tier: 'T1', description: 'IBKR Bitcoin range contracts' }),
+  Object.freeze({ marketId: 'sp500', label: 'SP500', tier: 'T2', indicatorMarketId: 'sp500', description: 'IBKR S&P 500 futures threshold contracts' }),
+  Object.freeze({ marketId: 'cpi', label: 'CPI', tier: 'T2', description: 'Kalshi headline CPI YoY contracts with Hedgeye, Cleveland Fed, and BLS context' }),
+]);
 
 export const migratePredictionMarketsPanelState = (state = {}) => {
   const stack = Array.isArray(state?.sidebarPanelStack) ? state.sidebarPanelStack : [];
-  const legacyCpiVisible = state?.showCpiModel === true || state?.showPredictionMarkets === true;
-  const legacySpxVisible = state?.showPredictionMarketsSandbox === true;
-  const currentVisible = state?.showPredictionMarketsHub === true;
-  const visible = currentVisible || legacyCpiVisible || legacySpxVisible;
+  const legacyMonitorVisible = state?.showResolverTest === true;
+  const currentMonitorVisible = state?.showPredictionMonitor === true;
+  const monitorVisible = currentMonitorVisible || legacyMonitorVisible;
 
-  let lastLegacyView = null;
   const migratedStack = [];
   const pushLast = (key) => {
     const withoutKey = migratedStack.filter((entry) => entry !== key);
@@ -225,47 +396,27 @@ export const migratePredictionMarketsPanelState = (state = {}) => {
   };
 
   stack.forEach((key) => {
-    let applicablePredictionAlias = false;
-    if (key === 'cpi' && legacyCpiVisible) {
-      applicablePredictionAlias = true;
-      lastLegacyView = 'cpi';
-    } else if (key === 'predMkts' && legacySpxVisible) {
-      applicablePredictionAlias = true;
-      lastLegacyView = 'spx';
-    } else if (key === 'predictionMarkets' && (currentVisible || state?.showPredictionMarkets === true)) {
-      applicablePredictionAlias = true;
-      if (!currentVisible && state?.showPredictionMarkets === true) lastLegacyView = 'cpi';
+    if (key === 'resolverTest') {
+      if (legacyMonitorVisible) pushLast('predictionMonitor');
+      return;
     }
-
-    if (applicablePredictionAlias) {
-      pushLast('predictionMarkets');
+    if (key === 'predictionMonitor') {
+      if (monitorVisible) pushLast('predictionMonitor');
       return;
     }
     if (key === 'cpi' || key === 'predMkts' || key === 'predictionMarkets') return;
     if (PERSISTED_SIDEBAR_PANELS.has(key) && !migratedStack.includes(key)) migratedStack.push(key);
   });
 
-  if (visible && !migratedStack.includes('predictionMarkets')) migratedStack.push('predictionMarkets');
-
-  let activePredictionMarket = 'overview';
-  if (visible) {
-    if (currentVisible && PREDICTION_MARKET_VIEWS.has(state?.activePredictionMarket)) {
-      activePredictionMarket = state.activePredictionMarket;
-    } else if (lastLegacyView) {
-      activePredictionMarket = lastLegacyView;
-    } else if (legacySpxVisible) {
-      // SPX was the later overlay in the legacy render order.
-      activePredictionMarket = 'spx';
-    } else if (legacyCpiVisible) {
-      activePredictionMarket = 'cpi';
-    }
-  }
+  if (monitorVisible && !migratedStack.includes('predictionMonitor')) migratedStack.push('predictionMonitor');
 
   return {
     ...state,
-    showPredictionMarketsHub: visible,
-    activePredictionMarket,
-    activeWtiCadence: WTI_CADENCES.has(state?.activeWtiCadence) ? state.activeWtiCadence : 'daily',
+    showPredictionMonitor: monitorVisible,
+    activePredictionMonitorMarket: currentMonitorVisible
+      && PREDICTION_MONITOR_MARKETS.has(state?.activePredictionMonitorMarket)
+      ? state.activePredictionMonitorMarket
+      : 'sp500',
     sidebarPanelStack: migratedStack,
   };
 };
@@ -287,6 +438,7 @@ const PERIOD_RETURN_FIELDS = [
   'mtdChangePct',
   'qtdChangePct',
   'ytdChangePct',
+  'oneYearChangePct',
 ];
 
 const PERIOD_RETURN_METADATA_FIELDS = [
@@ -346,47 +498,6 @@ const mergeMarketDataPreservingPeriods = (previous = {}, next = {}, options = {}
   return merged;
 };
 
-const sidebarTabCenteredLabelStyle = {
-  position: 'absolute',
-  left: 0,
-  right: 0,
-  color: 'inherit',
-  textAlign: 'center',
-  pointerEvents: 'none',
-  fontSize: '15px',
-  fontWeight: 400,
-  lineHeight: 1,
-  letterSpacing: 0,
-};
-
-const sidebarRailControlStyle = {
-  minWidth: '56px',
-  height: 'var(--dashboard-rail-control-height)',
-  flexShrink: 0,
-  color: 'var(--dashboard-rail-blue)',
-};
-
-const sidebarRailIconStyle = {
-  width: '26px',
-  height: '26px',
-  flexShrink: 0,
-};
-
-const sidebarRailTextStyle = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: '100%',
-  height: '100%',
-  color: 'inherit',
-  fontSize: '9px',
-  fontWeight: 400,
-  lineHeight: 1,
-  letterSpacing: 0,
-  textTransform: 'uppercase',
-  whiteSpace: 'nowrap',
-};
-
 const PortfolioDashboard = ({
   processDocumentId = null,
   onOpenProcess,
@@ -394,48 +505,116 @@ const PortfolioDashboard = ({
   onCloseProcess,
   onOpenWhitePaper,
 }) => {
-  const openProcess = onOpenProcess || onOpenWhitePaper || (() => {
+  const surfaceActive = useSurfaceActivity();
+  const dashboardWarmupQueueRef = useRef(null);
+  const warmupsEnqueuedQueueRef = useRef(null);
+  useEffect(() => {
+    if (!isDashboardSessionRetentionEnabled()) return undefined;
+    const queue = createDashboardWarmupQueue({ concurrency: 2 });
+    dashboardWarmupQueueRef.current = queue;
+    return () => {
+      if (dashboardWarmupQueueRef.current === queue) dashboardWarmupQueueRef.current = null;
+      queue.dispose();
+    };
+  }, []);
+  const promoteDashboardWarmups = useCallback((keys = []) => {
+    const queue = dashboardWarmupQueueRef.current;
+    if (!queue) return;
+    keys.forEach((key) => {
+      const promoted = queue.promote(key);
+      if (promoted) promoted.catch(() => {});
+    });
+  }, []);
+  const openProcess = useCallback(() => {
+    if (onOpenProcess) return onOpenProcess();
+    if (onOpenWhitePaper) return onOpenWhitePaper();
     window.location.hash = '/process';
-  });
+    return undefined;
+  }, [onOpenProcess, onOpenWhitePaper]);
   const isProcessOpen = Boolean(processDocumentId);
+  const isExposureGuideOpen = processDocumentId === EXPOSURE_GUIDE_DOCUMENT_ID;
   const { theme } = useTheme();
-  const [portfolioData, setPortfolioData] = useState(null);
-  const [portfolioAccountsData, setPortfolioAccountsData] = useState([]);
-  const [portfolioLoading, setPortfolioLoading] = useState(true);
-  const [portfolioRefreshing, setPortfolioRefreshing] = useState(false);
-  const [portfolioError, setPortfolioError] = useState(null);
-  const [portfolioExposureReconciliation, setPortfolioExposureReconciliation] = useState(null);
-  const [portfolioExposureReconciliationLoading, setPortfolioExposureReconciliationLoading] = useState(false);
-  const [portfolioInterestValidation, setPortfolioInterestValidation] = useState(null);
-  const [portfolioInterestValidationLoading, setPortfolioInterestValidationLoading] = useState(false);
-  const [rtaPositions, setRtaPositions] = useState(null);
-  const [etfProSnapshot, setEtfProSnapshot] = useState(null);
-  const [etfProLoading, setEtfProLoading] = useState(true);
-  const [etfProRefreshing, setEtfProRefreshing] = useState(false);
-  const [etfProError, setEtfProError] = useState(null);
-  const [predictionMarketProviderStatus, setPredictionMarketProviderStatus] = useState(null);
   const [hedgeyeChangelog, setHedgeyeChangelog] = useState(null);
   const [hedgeyeChangelogLoading, setHedgeyeChangelogLoading] = useState(true);
   const [hedgeyeChangelogError, setHedgeyeChangelogError] = useState(null);
-  const [hedgeyeChangelogLastSuccessAt, setHedgeyeChangelogLastSuccessAt] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(() => loadSelectedAccount());
-  const [ibkrAccounts, setIbkrAccounts] = useState([]);
+  const loadPortfolio = useCallback(() => withTimeout(
+    MarketDataService.getPortfolio({ account: selectedAccount || undefined }),
+    PORTFOLIO_REQUEST_TIMEOUT_MS,
+    'Portfolio refresh',
+  ), [selectedAccount]);
+  const validatePortfolio = useCallback(
+    (snapshot) => validateLivePortfolioSnapshot(snapshot, selectedAccount),
+    [selectedAccount],
+  );
+  const portfolioResource = useDashboardResource('portfolio', {
+    accountId: selectedAccount,
+  }, {
+    fetcher: loadPortfolio,
+    validate: validatePortfolio,
+    getObservedAt: (snapshot) => snapshot.fetchedAt,
+    maxAgeMs: PORTFOLIO_LIVE_MAX_AGE_MS,
+    pollIntervalMs: PORTFOLIO_POLL_MS,
+    enabled: Boolean(selectedAccount),
+    active: true,
+    pollWhenHidden: true,
+    pollWhenDocumentHidden: true,
+    invalidateOnScopeChange: true,
+    core: true,
+    expectedScope: selectedAccount,
+    getScope: (snapshot) => snapshot.accountId,
+    expiredCode: 'PORTFOLIO_SNAPSHOT_EXPIRED',
+    expiredMessage: 'The last verified live portfolio snapshot expired.',
+  });
+  const portfolioData = selectedAccount ? portfolioResource.data : null;
+  const portfolioLoading = Boolean(
+    selectedAccount && portfolioResource.initialLoading && !portfolioData
+  );
+  const portfolioRefreshing = Boolean(selectedAccount && portfolioResource.refreshing);
+  const refreshPortfolioResource = portfolioResource.refresh;
   const ibkrAccountsRef = useRef([]);
   const selectedAccountRef = useRef(loadSelectedAccount());
   const [ibkrConnection, setIbkrConnection] = useState(null);
   const [providerStatus, setProviderStatus] = useState(null);
   const ibkrConnectionRef = useRef(null);
   const lastGoodProviderStatusRef = useRef(null);
-  const portfolioDataRef = useRef(null);
-  const portfolioRequestSequenceRef = useRef(0);
-  const interestValidationRequestSequenceRef = useRef(0);
+  const providerStatusInFlightRef = useRef(null);
+  const changelogInFlightRef = useRef(null);
+  const changelogRefreshCompletedAtRef = useRef(0);
   const persistedPanelState = useMemo(
     () => migratePredictionMarketsPanelState(readDashboardPanelState()),
     [],
   );
-  const [showPortfolioMetrics, setShowPortfolioMetrics] = useState(() => readPersistedBoolean(persistedPanelState, 'showPortfolioMetrics'));
-  const [showPeaPodWindow, setShowPeaPodWindow] = useState(() => readPersistedBoolean(persistedPanelState, 'showPeaPodWindow'));
-  const [showEVWindow, setShowEVWindow] = useState(() => readPersistedBoolean(persistedPanelState, 'showEVWindow'));
+  const [analystPanelWidth, setAnalystPanelWidth] = useState(() => (
+    clampAnalystPanelWidth(persistedPanelState.analystPanelWidth)
+  ));
+  const [analystPanelPosition, setAnalystPanelPosition] = useState(() => (
+    normalizeAnalystPanelPosition(persistedPanelState.analystPanelPosition)
+  ));
+  const selectedAnalystPanelPosition = ANALYST_PANEL_POSITIONS.has(analystPanelPosition)
+    ? analystPanelPosition
+    : null;
+  const analystPanelResizeEdge = ['left', 'center'].includes(analystPanelPosition)
+    ? 'right'
+    : 'left';
+  const [analystPanelResizing, setAnalystPanelResizing] = useState(false);
+  const analystPanelSurfaceRef = useRef(null);
+  const analystPanelResizeCleanupRef = useRef(null);
+  const [contractPnlPanelWidth, setContractPnlPanelWidth] = useState(() => (
+    clampContractPnlPanelWidth(persistedPanelState.contractPnlPanelWidth)
+  ));
+  const [contractPnlPanelRightExtension, setContractPnlPanelRightExtension] = useState(0);
+  const contractPnlPanelDisplayedWidth = Math.min(
+    CONTRACT_PNL_PANEL_MAX_WIDTH,
+    contractPnlPanelWidth + contractPnlPanelRightExtension,
+  );
+  const [contractPnlPanelResizing, setContractPnlPanelResizing] = useState(false);
+  const contractPnlPanelSurfaceRef = useRef(null);
+  const contractPnlPanelResizeCleanupRef = useRef(null);
+  const [showPortfolioBalance, setShowPortfolioBalance] = useState(false);
+  const [showContractPnl, setShowContractPnl] = useState(false);
+  const [showMorningTldr, setShowMorningTldr] = useState(() => readPersistedBoolean(persistedPanelState, 'showMorningTldr'));
+  const [showAnalyst, setShowAnalyst] = useState(() => readPersistedBoolean(persistedPanelState, 'showAnalyst'));
   const [showBookMenu, setShowBookMenu] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
   const [selectedBookContent, setSelectedBookContent] = useState(null);
@@ -444,40 +623,230 @@ const PortfolioDashboard = ({
   const bookMenuRef = useRef(null);
   const bookPopoverRef = useRef(null);
   const processButtonRef = useRef(null);
+  const exposureGuideButtonRef = useRef(null);
+  const processReturnFocusTargetRef = useRef(null);
+  const lastProcessDocumentIdRef = useRef(processDocumentId);
   const dashboardCanvasRef = useRef(null);
-  const processRailExpandedRef = useRef(false);
   const restoreProcessFocusRef = useRef(true);
   const [showWorkflowStatus, setShowWorkflowStatus] = useState(() => readPersistedBoolean(persistedPanelState, 'showWorkflowStatus'));
   const [showSystemReadiness, setShowSystemReadiness] = useState(() => readPersistedBoolean(persistedPanelState, 'showSystemReadiness'));
   const [systemReadinessStatus, setSystemReadinessStatus] = useState('unknown');
+  const [dashboardCardStatuses, setDashboardCardStatuses] = useState(
+    createUnknownDashboardCardStatuses,
+  );
   const [analyticsRefreshKey, setAnalyticsRefreshKey] = useState(0);
-  const [showSecuritiesUniverse, setShowSecuritiesUniverse] = useState(() => readPersistedBoolean(persistedPanelState, 'showSecuritiesUniverse'));
   const [showPerformanceTracking, setShowPerformanceTracking] = useState(() => readPersistedBoolean(persistedPanelState, 'showPerformanceTracking'));
-  const [showPredictionMarketsHub, setShowPredictionMarketsHub] = useState(() => (
-    readPersistedBoolean(persistedPanelState, 'showPredictionMarketsHub')
+  const [showPredictionMonitor, setShowPredictionMonitor] = useState(() => (
+    readPersistedBoolean(persistedPanelState, 'showPredictionMonitor')
   ));
-  const [activePredictionMarket, setActivePredictionMarket] = useState(() => (
-    PREDICTION_MARKET_VIEWS.has(persistedPanelState.activePredictionMarket)
-      ? persistedPanelState.activePredictionMarket
-      : 'overview'
-  ));
-  const [activeWtiCadence, setActiveWtiCadence] = useState(() => (
-    WTI_CADENCES.has(persistedPanelState.activeWtiCadence)
-      ? persistedPanelState.activeWtiCadence
-      : 'daily'
+  const [activePredictionMonitorMarket, setActivePredictionMonitorMarket] = useState(() => (
+    PREDICTION_MONITOR_MARKETS.has(persistedPanelState.activePredictionMonitorMarket)
+      ? persistedPanelState.activePredictionMonitorMarket
+      : 'sp500'
   ));
   const [showSignalStrength, setShowSignalStrength] = useState(() => readPersistedBoolean(persistedPanelState, 'showSignalStrength'));
   const [showEtfPro, setShowEtfPro] = useState(() => readPersistedBoolean(persistedPanelState, 'showEtfPro'));
   const [showMacroShow, setShowMacroShow] = useState(() => readPersistedBoolean(persistedPanelState, 'showMacroShow'));
   const [showCall, setShowCall] = useState(() => readPersistedBoolean(persistedPanelState, 'showCall'));
   const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(() => readPersistedBoolean(persistedPanelState, 'showPortfolioBreakdown'));
+  const [showExposureLab, setShowExposureLab] = useState(() => readPersistedBoolean(persistedPanelState, 'showExposureLab'));
   const [sidebarPanelStack, setSidebarPanelStack] = useState(() => readPersistedSidebarStack(persistedPanelState));
-  const [portfolioExpandedUp, setPortfolioExpandedUp] = useState(() => readPersistedBoolean(persistedPanelState, 'portfolioExpandedUp'));
-  const [multiRegionMarketData, setMultiRegionMarketData] = useState({});
-  const [multiRegionLoading, setMultiRegionLoading] = useState(true);
-  const [multiRegionError, setMultiRegionError] = useState(null);
+  const [periodHydrationEnabled, setPeriodHydrationEnabled] = useState(false);
+  const loadEtfProSnapshot = useCallback(
+    () => MarketDataService.getHedgeyeEtfPro(),
+    [],
+  );
+  const etfProResource = useDashboardResource('etf-pro', {}, {
+    fetcher: loadEtfProSnapshot,
+    validate: (value) => (
+      value
+      && typeof value === 'object'
+      && Array.isArray(value.rows)
+      && value.mock !== true
+      && value.seeded !== true
+        ? value
+        : null
+    ),
+    getObservedAt: (value) => value?.meta?.snapshotDate || value?.generatedAt,
+    pollIntervalMs: REFERENCE_DATA_POLL_MS,
+    active: surfaceActive && showEtfPro,
+    refreshOnActivate: false,
+  });
+  const etfProSnapshot = useMemo(() => {
+    if (!etfProResource.data) return null;
+    const prepared = prepareReferenceComparisonSnapshot(etfProResource.data, {
+      staleWarning: ETF_PRO_STALE_WARNING,
+    });
+    if (!etfProResource.error) return prepared;
+    return markReferenceRefreshFailed(prepared, {
+      warning: 'The latest ETF Pro refresh failed; retained rows are a prior dated reference.',
+      error: etfProResource.error.message,
+      emptyState: { rows: [], longCount: null, shortCount: null },
+    });
+  }, [etfProResource.data, etfProResource.error]);
+  const etfProLoading = etfProResource.initialLoading && !etfProResource.data;
+  const etfProRefreshing = etfProResource.refreshing;
+  const etfProError = etfProResource.error?.message || null;
+  const refreshEtfProResource = etfProResource.refresh;
+  const fetchEtfProSnapshot = useCallback(
+    () => refreshEtfProResource(),
+    [refreshEtfProResource],
+  );
+  const [predictionIndicatorNow, setPredictionIndicatorNow] = useState(() => Date.now());
+  const loadPredictionMarketIndicators = useCallback(async () => {
+    const report = await predictionMarketTestService.getMorningReport();
+    return normalizePredictionMarketNavIndicators(report);
+  }, []);
+  const predictionIndicatorResource = useDashboardResource('prediction-nav', {}, {
+    fetcher: loadPredictionMarketIndicators,
+    getObservedAt: (snapshot) => snapshot.generatedAt,
+    maxAgeMs: PREDICTION_MARKET_INDICATOR_MAX_AGE_MS,
+    pollIntervalMs: PREDICTION_MARKET_INDICATOR_POLL_MS,
+    active: true,
+    pollWhenHidden: true,
+    pollWhenDocumentHidden: true,
+    isExplicitInvalidation: () => true,
+    expiredCode: 'PREDICTION_MARKET_INDICATORS_EXPIRED',
+    expiredMessage: 'Prediction-market alignment indicators expired.',
+  });
+  const predictionMarketIndicators = useMemo(() => (
+    activePredictionMarketNavIndicators(predictionIndicatorResource.data, {
+      now: Math.max(predictionIndicatorNow, Date.now()),
+    })
+  ), [predictionIndicatorNow, predictionIndicatorResource.data]);
+  useEffect(() => {
+    const futureExpiries = Object.values(predictionIndicatorResource.data?.indicators || {})
+      .map((indicator) => Date.parse(String(indicator?.expiresAt || '')))
+      .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > Date.now());
+    if (!futureExpiries.length) return undefined;
+    const timer = setTimeout(() => {
+      setPredictionIndicatorNow(Date.now());
+    }, Math.max(0, Math.min(...futureExpiries) - Date.now() + 1));
+    return () => clearTimeout(timer);
+  }, [predictionIndicatorNow, predictionIndicatorResource.data]);
+  const loadCurrentMarketQuotes = useCallback(
+    () => MarketDataService.getMultiRegionQuotes(null, true, false),
+    [],
+  );
+  const loadMarketPeriodReturns = useCallback(
+    () => MarketDataService.getMultiRegionQuotes(null, false, true),
+    [],
+  );
+  const currentMarketResource = useDashboardResource('market-quotes', {}, {
+    fetcher: loadCurrentMarketQuotes,
+    validate: validateMarketQuotePayload,
+    getObservedAt: marketPayloadObservedAt,
+    maxAgeMs: MARKET_QUOTES_MAX_AGE_MS,
+    futureToleranceMs: MARKET_QUOTE_FUTURE_TOLERANCE_MS,
+    pollIntervalMs: 30_000,
+    active: true,
+    pollWhenHidden: true,
+    pollWhenDocumentHidden: true,
+    // This resource is visual market context only. Retained values are
+    // explicitly demoted to a dated reference and never feed order controls.
+    isExplicitInvalidation: () => true,
+    reconcileIncoming: reconcileMarketQuotePayload,
+    core: true,
+    expiredCode: 'MARKET_QUOTES_EXPIRED',
+    expiredMessage: 'The last verified market quote observations expired.',
+  });
+  const periodReturnsResource = useDashboardResource('market-period-returns', {}, {
+    fetcher: loadMarketPeriodReturns,
+    validate: validatePeriodReturnPayload,
+    getObservedAt: (payload) => marketPayloadObservedAt(payload, { periodOnly: true }),
+    pollIntervalMs: MARKET_PERIOD_RETURNS_POLL_MS,
+    enabled: periodHydrationEnabled,
+    active: surfaceActive,
+    refreshOnActivate: false,
+    pollWhenHidden: false,
+    core: true,
+  });
+  const currentMarketDataForDisplay = useMemo(() => {
+    if (!currentMarketResource.data) return null;
+    if (['refresh-delayed', 'delayed-reference'].includes(currentMarketResource.availability)) {
+      return markMarketQuotePayloadRefreshDelayed(
+        currentMarketResource.data,
+        currentMarketResource.error?.code || 'market_quote_refresh_delayed',
+      );
+    }
+    return currentMarketResource.data;
+  }, [
+    currentMarketResource.availability,
+    currentMarketResource.data,
+    currentMarketResource.error?.code,
+  ]);
+  const multiRegionMarketData = useMemo(() => (
+    currentMarketDataForDisplay
+      ? mergeMarketDataPreservingPeriods(
+        periodReturnsResource.data || {},
+        currentMarketDataForDisplay,
+        { preservePeriods: true },
+      )
+      : {}
+  ), [currentMarketDataForDisplay, periodReturnsResource.data]);
+  const multiRegionLoading = Boolean(
+    currentMarketResource.initialLoading && !currentMarketResource.data
+  );
+  const multiRegionError = currentMarketResource.error?.message
+    || (periodReturnsResource.error && currentMarketResource.data
+      ? `Period-return refresh delayed: ${periodReturnsResource.error.message}`
+      : null);
+  const dashboardInitialSettled = !multiRegionLoading
+    && (!selectedAccount || !portfolioLoading);
+
+  useEffect(() => {
+    const queue = dashboardWarmupQueueRef.current;
+    if (
+      !isDashboardSessionRetentionEnabled()
+      || !surfaceActive
+      || !dashboardInitialSettled
+      || !queue
+      || warmupsEnqueuedQueueRef.current === queue
+    ) return;
+    warmupsEnqueuedQueueRef.current = queue;
+
+    const resourceWarmups = [
+      {
+        key: 'resource:etf-pro',
+        run: () => warmDashboardResource('etf-pro', {}, {
+          fetcher: () => MarketDataService.getHedgeyeEtfPro(),
+        }),
+      },
+      {
+        key: 'resource:exposure-lab-universe',
+        run: ({ signal }) => warmDashboardResource('exposure-lab-universe', {}, {
+          fetcher: () => MarketDataService.getExposureLabUniverse({ forceRefresh: false, signal }),
+        }),
+      },
+      ...PREDICTION_MONITOR_NAV_ITEMS.map(({ marketId }) => {
+        const monitorContext = canonicalPredictionMonitorContext({
+          marketId,
+          venue: 'auto',
+          generationId: null,
+        });
+        return {
+          key: `resource:prediction-monitor:${marketId}`,
+          run: ({ signal }) => warmDashboardResource('prediction-monitor', monitorContext, {
+            fetcher: () => predictionMarketTestService.getMonitor(marketId, {
+              signal,
+              venue: monitorContext.venue,
+              generationId: monitorContext.generationId,
+            }),
+          }),
+        };
+      }),
+    ];
+
+    [...DASHBOARD_LAZY_WARMUPS, ...resourceWarmups].forEach((task, index) => {
+      queue.enqueue({ ...task, priority: -index }).catch(() => {
+        // Warmup is opportunistic. The mounted panel owns user-visible errors
+        // and will retry through the same keyed resource if it is opened.
+      });
+    });
+  }, [dashboardInitialSettled, surfaceActive]);
   const [bookContentMap, setBookContentMap] = useState(null);
   const [bookContentLoading, setBookContentLoading] = useState(false);
+  if (processDocumentId) lastProcessDocumentIdRef.current = processDocumentId;
 
   useEffect(() => {
     if (dashboardCanvasRef.current) {
@@ -488,36 +857,42 @@ const PortfolioDashboard = ({
   useEffect(() => {
     if (!isProcessOpen) return undefined;
 
-    const processButton = processButtonRef.current;
     restoreProcessFocusRef.current = true;
-    processRailExpandedRef.current = showPortfolioMetrics;
-    setShowPortfolioMetrics(false);
-    setShowPeaPodWindow(false);
-    setShowEVWindow(false);
+    setShowPortfolioBalance(false);
+    setShowContractPnl(false);
     setShowBookMenu(false);
     setShowBookModal(false);
     setShowWorkflowStatus(false);
     setShowSystemReadiness(false);
-    setShowSecuritiesUniverse(false);
     setShowPerformanceTracking(false);
-    setShowPredictionMarketsHub(false);
-    setActivePredictionMarket('overview');
+    setShowPredictionMonitor(false);
+    setShowMorningTldr(false);
+    setShowAnalyst(false);
     setShowSignalStrength(false);
     setShowEtfPro(false);
     setShowMacroShow(false);
     setShowCall(false);
     setShowPortfolioBreakdown(false);
-    setPortfolioExpandedUp(false);
+    setShowExposureLab(false);
     setSidebarPanelStack([]);
 
-    return () => {
-      setShowPortfolioMetrics(processRailExpandedRef.current);
-      if (restoreProcessFocusRef.current) processButton?.focus();
-    };
-    // This runs only when the overlay crosses its open/closed boundary. The
-    // document id may change inside the open workspace without resetting the rail.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return undefined;
   }, [isProcessOpen]);
+
+  useEffect(() => {
+    if (isProcessOpen || !restoreProcessFocusRef.current) return;
+
+    (processReturnFocusTargetRef.current || processButtonRef.current)?.focus();
+    processReturnFocusTargetRef.current = null;
+    restoreProcessFocusRef.current = false;
+  }, [isProcessOpen]);
+
+  // Reading popups should never be hidden behind the compact utility panels.
+  useEffect(() => {
+    if (isProcessOpen || (!showAnalyst && !showMorningTldr)) return;
+    setShowPortfolioBalance(false);
+    setShowContractPnl(false);
+  }, [isProcessOpen, showAnalyst, showMorningTldr]);
 
   const bringSidebarPanelToFront = useCallback((panelKey) => {
     setSidebarPanelStack((current) => [
@@ -531,10 +906,13 @@ const PortfolioDashboard = ({
   }, []);
 
   const toggleSidebarPanel = useCallback((panelKey, setPanelVisible) => {
+    promoteDashboardWarmups(PANEL_WARMUP_TASK_KEYS[panelKey] || []);
     setPanelVisible((isVisible) => {
       const nextVisible = !isVisible;
 
       if (nextVisible) {
+        setShowPortfolioBalance(false);
+        setShowContractPnl(false);
         bringSidebarPanelToFront(panelKey);
       } else {
         removeSidebarPanelFromStack(panelKey);
@@ -542,31 +920,51 @@ const PortfolioDashboard = ({
 
       return nextVisible;
     });
-  }, [bringSidebarPanelToFront, removeSidebarPanelFromStack]);
+  }, [bringSidebarPanelToFront, promoteDashboardWarmups, removeSidebarPanelFromStack]);
+
+  const setAnalystPanelDock = useCallback((position) => {
+    const nextPosition = normalizeAnalystPanelPosition(position);
+    if (nextPosition === ANALYST_PANEL_DEFAULT_POSITION) return;
+    setAnalystPanelPosition(nextPosition);
+    if (showAnalyst) bringSidebarPanelToFront('analyst');
+  }, [bringSidebarPanelToFront, showAnalyst]);
 
   const closeSidebarPanel = useCallback((panelKey, setPanelVisible) => {
     setPanelVisible(false);
     removeSidebarPanelFromStack(panelKey);
   }, [removeSidebarPanelFromStack]);
 
-  const togglePredictionMarketsHub = useCallback(() => {
-    if (showPredictionMarketsHub) {
-      setShowPredictionMarketsHub(false);
-      setActivePredictionMarket('overview');
-      removeSidebarPanelFromStack('predictionMarkets');
+  const closeExposureLab = useCallback(() => {
+    closeSidebarPanel('exposureLab', setShowExposureLab);
+  }, [closeSidebarPanel]);
+
+  const closePredictionMonitor = useCallback(() => {
+    setShowPredictionMonitor(false);
+    removeSidebarPanelFromStack('predictionMonitor');
+  }, [removeSidebarPanelFromStack]);
+
+  const togglePredictionMonitor = useCallback((marketId) => {
+    if (!PREDICTION_MONITOR_MARKETS.has(marketId)) return;
+    promoteDashboardWarmups([
+      'chunk:prediction-monitor',
+      `resource:prediction-monitor:${marketId}`,
+    ]);
+    if (showPredictionMonitor && activePredictionMonitorMarket === marketId) {
+      closePredictionMonitor();
       return;
     }
-    // An explicit reopen always returns to the cross-market overview.
-    setActivePredictionMarket('overview');
-    setShowPredictionMarketsHub(true);
-    bringSidebarPanelToFront('predictionMarkets');
-  }, [bringSidebarPanelToFront, removeSidebarPanelFromStack, showPredictionMarketsHub]);
-
-  const closePredictionMarketsHub = useCallback(() => {
-    setShowPredictionMarketsHub(false);
-    setActivePredictionMarket('overview');
-    removeSidebarPanelFromStack('predictionMarkets');
-  }, [removeSidebarPanelFromStack]);
+    setShowPortfolioBalance(false);
+    setShowContractPnl(false);
+    setActivePredictionMonitorMarket(marketId);
+    setShowPredictionMonitor(true);
+    bringSidebarPanelToFront('predictionMonitor');
+  }, [
+    activePredictionMonitorMarket,
+    bringSidebarPanelToFront,
+    closePredictionMonitor,
+    promoteDashboardWarmups,
+    showPredictionMonitor,
+  ]);
 
   const getSidebarPanelZIndex = useCallback((panelKey, isVisible) => {
     if (!isVisible) return -1;
@@ -575,47 +973,535 @@ const PortfolioDashboard = ({
     return SIDEBAR_PANEL_Z_INDEX_BASE + Math.max(stackIndex, 0);
   }, [sidebarPanelStack]);
 
+  const togglePortfolioBalance = useCallback(() => {
+    if (isProcessOpen) return;
+    setShowContractPnl(false);
+    setShowPortfolioBalance((isVisible) => !isVisible);
+  }, [isProcessOpen]);
+
+  const toggleContractPnl = useCallback(() => {
+    if (isProcessOpen) return;
+    setShowPortfolioBalance(false);
+    setShowContractPnl((isVisible) => !isVisible);
+  }, [isProcessOpen]);
+
+  const getAnalystPanelResizeLimits = useCallback(() => {
+    const bounds = analystPanelSurfaceRef.current?.getBoundingClientRect();
+    if (!bounds || !Number.isFinite(bounds.width) || bounds.width <= 0) {
+      return {
+        currentWidth: analystPanelWidth,
+        minWidth: ANALYST_PANEL_MIN_WIDTH,
+        maxWidth: ANALYST_PANEL_MAX_WIDTH,
+      };
+    }
+
+    const viewportWidth = typeof window === 'undefined'
+      ? bounds.right + ANALYST_PANEL_EDGE_INSET
+      : window.innerWidth;
+    const availableWidth = analystPanelPosition === 'left'
+      ? bounds.width + Math.max(0, viewportWidth - bounds.right - ANALYST_PANEL_EDGE_INSET)
+      : analystPanelPosition === 'center'
+        ? bounds.width + (2 * Math.max(0, Math.min(
+          bounds.left - ANALYST_PANEL_EDGE_INSET,
+          viewportWidth - bounds.right - ANALYST_PANEL_EDGE_INSET,
+        )))
+        : bounds.width + Math.max(0, bounds.left - ANALYST_PANEL_EDGE_INSET);
+    const maxWidth = Math.max(
+      Math.min(ANALYST_PANEL_MIN_WIDTH, bounds.width),
+      Math.min(ANALYST_PANEL_MAX_WIDTH, availableWidth),
+    );
+    return {
+      currentWidth: bounds.width,
+      minWidth: Math.min(ANALYST_PANEL_MIN_WIDTH, maxWidth),
+      maxWidth,
+    };
+  }, [analystPanelPosition, analystPanelWidth]);
+
+  const beginAnalystPanelResize = useCallback((event) => {
+    if (event.button != null && event.button !== 0) return;
+    const startX = Number(event.clientX);
+    if (!Number.isFinite(startX)) return;
+
+    event.preventDefault();
+    analystPanelResizeCleanupRef.current?.();
+
+    const { currentWidth, minWidth, maxWidth } = getAnalystPanelResizeLimits();
+    const move = (moveEvent) => {
+      const clientX = Number(moveEvent.clientX);
+      if (!Number.isFinite(clientX)) return;
+      const widthDelta = analystPanelResizeEdge === 'right'
+        ? clientX - startX
+        : startX - clientX;
+      setAnalystPanelWidth(clampAnalystPanelWidth(
+        currentWidth + widthDelta,
+        minWidth,
+        maxWidth,
+      ));
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      document.body.classList.remove('dashboard-is-resizing-analyst');
+    };
+    const finish = () => {
+      cleanup();
+      analystPanelResizeCleanupRef.current = null;
+      setAnalystPanelResizing(false);
+    };
+
+    analystPanelResizeCleanupRef.current = cleanup;
+    setAnalystPanelResizing(true);
+    document.body.classList.add('dashboard-is-resizing-analyst');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  }, [analystPanelResizeEdge, getAnalystPanelResizeLimits]);
+
+  const handleAnalystPanelResizeKeyDown = useCallback((event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const { currentWidth, minWidth, maxWidth } = getAnalystPanelResizeLimits();
+    const step = event.shiftKey ? ANALYST_PANEL_RESIZE_STEP * 4 : ANALYST_PANEL_RESIZE_STEP;
+    const resizeFromRightEdge = analystPanelResizeEdge === 'right';
+    const requestedWidth = event.key === 'Home'
+      ? minWidth
+      : event.key === 'End'
+        ? maxWidth
+        : currentWidth + (event.key === 'ArrowLeft'
+          ? (resizeFromRightEdge ? -step : step)
+          : (resizeFromRightEdge ? step : -step));
+    setAnalystPanelWidth(clampAnalystPanelWidth(requestedWidth, minWidth, maxWidth));
+  }, [analystPanelResizeEdge, getAnalystPanelResizeLimits]);
+
+  const getContractPnlPanelResizeLimits = useCallback((resizeEdge = 'left') => {
+    const bounds = contractPnlPanelSurfaceRef.current?.getBoundingClientRect();
+    const resizeFromRightEdge = resizeEdge === 'right';
+    if (!bounds || !Number.isFinite(bounds.width) || bounds.width <= 0) {
+      return {
+        currentWidth: contractPnlPanelDisplayedWidth,
+        minWidth: resizeFromRightEdge
+          ? Math.max(
+            CONTRACT_PNL_PANEL_MIN_WIDTH,
+            contractPnlPanelDisplayedWidth - contractPnlPanelRightExtension,
+          )
+          : Math.min(
+            CONTRACT_PNL_PANEL_MAX_WIDTH,
+            CONTRACT_PNL_PANEL_MIN_WIDTH + contractPnlPanelRightExtension,
+          ),
+        maxWidth: CONTRACT_PNL_PANEL_MAX_WIDTH,
+      };
+    }
+
+    const viewportWidth = typeof window === 'undefined' ? bounds.right : window.innerWidth;
+    const availableWidth = bounds.width + Math.max(0, resizeFromRightEdge
+      ? viewportWidth - CONTRACT_PNL_PANEL_EDGE_INSET - bounds.right
+      : bounds.left - CONTRACT_PNL_PANEL_EDGE_INSET);
+    const requestedMinWidth = resizeFromRightEdge
+      ? Math.max(
+        Math.min(CONTRACT_PNL_PANEL_MIN_WIDTH, bounds.width),
+        bounds.width - contractPnlPanelRightExtension,
+      )
+      : Math.min(
+        CONTRACT_PNL_PANEL_MAX_WIDTH,
+        CONTRACT_PNL_PANEL_MIN_WIDTH + contractPnlPanelRightExtension,
+      );
+    const maxWidth = Math.max(
+      Math.min(requestedMinWidth, bounds.width),
+      Math.min(CONTRACT_PNL_PANEL_MAX_WIDTH, availableWidth),
+    );
+    return {
+      currentWidth: bounds.width,
+      minWidth: Math.min(requestedMinWidth, maxWidth),
+      maxWidth,
+    };
+  }, [contractPnlPanelDisplayedWidth, contractPnlPanelRightExtension]);
+
+  const beginContractPnlPanelResize = useCallback((event, resizeEdge = 'left') => {
+    if (event.button != null && event.button !== 0) return;
+    const startX = Number(event.clientX);
+    if (!Number.isFinite(startX)) return;
+
+    event.preventDefault();
+    contractPnlPanelResizeCleanupRef.current?.();
+
+    const resizeFromRightEdge = resizeEdge === 'right';
+    const startingPanelWidth = contractPnlPanelWidth;
+    const startingRightExtension = contractPnlPanelRightExtension;
+    const { currentWidth, minWidth, maxWidth } = getContractPnlPanelResizeLimits(resizeEdge);
+    const move = (moveEvent) => {
+      const clientX = Number(moveEvent.clientX);
+      if (!Number.isFinite(clientX)) return;
+      const requestedWidth = currentWidth + (resizeFromRightEdge
+        ? clientX - startX
+        : startX - clientX);
+      const nextWidth = clampContractPnlPanelWidth(
+        requestedWidth,
+        minWidth,
+        maxWidth,
+      );
+      const widthDelta = nextWidth - currentWidth;
+      if (resizeFromRightEdge) {
+        setContractPnlPanelRightExtension(Math.max(
+          0,
+          Math.min(
+            CONTRACT_PNL_PANEL_MAX_WIDTH - startingPanelWidth,
+            startingRightExtension + widthDelta,
+          ),
+        ));
+      } else {
+        setContractPnlPanelWidth(clampContractPnlPanelWidth(
+          startingPanelWidth + widthDelta,
+          CONTRACT_PNL_PANEL_MIN_WIDTH,
+          CONTRACT_PNL_PANEL_MAX_WIDTH - startingRightExtension,
+        ));
+      }
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      document.body.classList.remove('dashboard-is-resizing-contract-pnl');
+    };
+    const finish = () => {
+      cleanup();
+      contractPnlPanelResizeCleanupRef.current = null;
+      setContractPnlPanelResizing(false);
+    };
+
+    contractPnlPanelResizeCleanupRef.current = cleanup;
+    setContractPnlPanelResizing(true);
+    document.body.classList.add('dashboard-is-resizing-contract-pnl');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  }, [
+    contractPnlPanelRightExtension,
+    contractPnlPanelWidth,
+    getContractPnlPanelResizeLimits,
+  ]);
+
+  const handleContractPnlPanelResizeKeyDown = useCallback((event, resizeEdge = 'left') => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const resizeFromRightEdge = resizeEdge === 'right';
+    const { currentWidth, minWidth, maxWidth } = getContractPnlPanelResizeLimits(resizeEdge);
+    const step = event.shiftKey
+      ? CONTRACT_PNL_PANEL_RESIZE_STEP * 4
+      : CONTRACT_PNL_PANEL_RESIZE_STEP;
+    const requestedWidth = event.key === 'Home'
+      ? minWidth
+      : event.key === 'End'
+        ? maxWidth
+        : currentWidth + (event.key === 'ArrowLeft'
+          ? (resizeFromRightEdge ? -step : step)
+          : (resizeFromRightEdge ? step : -step));
+    const nextWidth = clampContractPnlPanelWidth(
+      requestedWidth,
+      minWidth,
+      maxWidth,
+    );
+    const widthDelta = nextWidth - currentWidth;
+    if (resizeFromRightEdge) {
+      setContractPnlPanelRightExtension((current) => Math.max(
+        0,
+        Math.min(CONTRACT_PNL_PANEL_MAX_WIDTH - contractPnlPanelWidth, current + widthDelta),
+      ));
+    } else {
+      setContractPnlPanelWidth((current) => clampContractPnlPanelWidth(
+        current + widthDelta,
+        CONTRACT_PNL_PANEL_MIN_WIDTH,
+        CONTRACT_PNL_PANEL_MAX_WIDTH - contractPnlPanelRightExtension,
+      ));
+    }
+  }, [
+    contractPnlPanelRightExtension,
+    contractPnlPanelWidth,
+    getContractPnlPanelResizeLimits,
+  ]);
+
+  const resetContractPnlPanelSize = useCallback(() => {
+    setContractPnlPanelWidth(CONTRACT_PNL_PANEL_DEFAULT_WIDTH);
+    setContractPnlPanelRightExtension(0);
+  }, []);
+
+  useEffect(() => () => {
+    analystPanelResizeCleanupRef.current?.();
+    document.body.classList.remove('dashboard-is-resizing-analyst');
+    contractPnlPanelResizeCleanupRef.current?.();
+    document.body.classList.remove('dashboard-is-resizing-contract-pnl');
+  }, []);
+
   useEffect(() => {
-    writeDashboardPanelState({
-      showPortfolioMetrics: isProcessOpen
-        ? processRailExpandedRef.current
-        : showPortfolioMetrics,
-      showPeaPodWindow,
-      showEVWindow,
+    if (showContractPnl) return;
+    contractPnlPanelResizeCleanupRef.current?.();
+    contractPnlPanelResizeCleanupRef.current = null;
+    document.body.classList.remove('dashboard-is-resizing-contract-pnl');
+    setContractPnlPanelResizing(false);
+  }, [showContractPnl]);
+
+  const activeNavigationItemIds = useMemo(() => {
+    if (isProcessOpen) return [isExposureGuideOpen ? 'exposureGuide' : 'process'];
+
+    return [
+      showSystemReadiness && 'system',
+      showMorningTldr && 'tldr',
+      showAnalyst && 'analyst',
+      showPortfolioBreakdown && 'portfolio',
+      showExposureLab && 'exposureLab',
+      showPortfolioBalance && 'balance',
+      showContractPnl && 'contractPnl',
+      showPredictionMonitor && `predictionMonitor-${activePredictionMonitorMarket}`,
+    ].filter(Boolean);
+  }, [
+    isProcessOpen,
+    isExposureGuideOpen,
+    showAnalyst,
+    showMorningTldr,
+    showContractPnl,
+    showPortfolioBalance,
+    showPortfolioBreakdown,
+    showExposureLab,
+    showPredictionMonitor,
+    activePredictionMonitorMarket,
+    showSystemReadiness,
+  ]);
+
+  const activeNavigationItemId = useMemo(() => {
+    if (isProcessOpen) return isExposureGuideOpen ? 'exposureGuide' : 'process';
+    if (showContractPnl) return 'contractPnl';
+    if (showPortfolioBalance) return 'balance';
+
+    return [...sidebarPanelStack]
+      .reverse()
+      .map((panelKey) => panelKey === 'predictionMonitor'
+        ? `predictionMonitor-${activePredictionMonitorMarket}`
+        : panelKey)
+      .find((panelKey) => activeNavigationItemIds.includes(panelKey))
+      || activeNavigationItemIds[activeNavigationItemIds.length - 1]
+      || null;
+  }, [
+    activeNavigationItemIds,
+    activePredictionMonitorMarket,
+    isProcessOpen,
+    isExposureGuideOpen,
+    showContractPnl,
+    showPortfolioBalance,
+    sidebarPanelStack,
+  ]);
+
+  const navigationItems = useMemo(() => [
+    {
+      id: 'system',
+      group: 'utility',
+      icon: Monitor,
+      label: 'Systems',
+      description: 'Core system status and health',
+      title: 'Systems',
+      onSelect: () => toggleSidebarPanel('system', setShowSystemReadiness),
+    },
+    {
+      id: 'x',
+      group: 'primary',
+      icon: 'x',
+      label: 'X.com',
+      description: 'Monitor X.com activity',
+      title: 'Open X (Twitter) List',
+      external: true,
+      onSelect: () => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer'),
+    },
+    ANALYST_NAVIGATION.showLegacyTldr
+      ? {
+          id: 'tldr',
+          group: 'primary',
+          icon: FileText,
+          label: 'TL;DR',
+          description: 'Morning research summary and changes',
+          title: 'Open TL;DR',
+          onSelect: () => toggleSidebarPanel('tldr', setShowMorningTldr),
+        }
+      : {
+          id: 'analyst',
+          group: 'utility',
+          icon: MessageSquare,
+          label: 'The Analyst',
+          description: 'Cited research and live portfolio context',
+          title: 'Open The Analyst',
+          onSelect: () => toggleSidebarPanel('analyst', setShowAnalyst),
+          analystPanelPosition: selectedAnalystPanelPosition,
+          onAnalystPanelPositionChange: setAnalystPanelDock,
+        },
+    {
+      id: 'process',
+      group: 'primary',
+      icon: Share2,
+      label: 'Process',
+      description: 'Workflows and automation',
+      title: 'Process',
+      buttonRef: processButtonRef,
+      isProcessToggle: true,
+      onSelect: () => {
+        setShowPortfolioBalance(false);
+        setShowContractPnl(false);
+        setShowBookMenu(false);
+        processReturnFocusTargetRef.current = processButtonRef.current;
+        if (isExposureGuideOpen) {
+          restoreProcessFocusRef.current = true;
+          if (onNavigateProcess) onNavigateProcess(PROCESS_ROUTE);
+          else window.location.hash = PROCESS_ROUTE.slice(1);
+          return;
+        }
+        if (isProcessOpen) {
+          restoreProcessFocusRef.current = true;
+          onCloseProcess?.();
+          return;
+        }
+        openProcess();
+      },
+    },
+    {
+      id: 'exposureGuide',
+      group: 'primary',
+      icon: FileText,
+      label: 'Exposure Guide',
+      description: 'How to operate Exposure Lab and interpret its risk model',
+      title: 'Exposure Lab Guide',
+      buttonRef: exposureGuideButtonRef,
+      isProcessToggle: true,
+      onSelect: () => {
+        setShowPortfolioBalance(false);
+        setShowContractPnl(false);
+        setShowBookMenu(false);
+        processReturnFocusTargetRef.current = exposureGuideButtonRef.current;
+        if (isExposureGuideOpen) {
+          restoreProcessFocusRef.current = true;
+          onCloseProcess?.();
+          return;
+        }
+        restoreProcessFocusRef.current = true;
+        if (onNavigateProcess) onNavigateProcess(EXPOSURE_GUIDE_ROUTE);
+        else window.location.hash = EXPOSURE_GUIDE_ROUTE.slice(1);
+      },
+    },
+    ANALYST_NAVIGATION.showResearchAnalyst && {
+      id: 'analyst',
+      group: 'utility',
+      icon: MessageSquare,
+      label: 'The Analyst',
+      description: 'Cited research and live portfolio context',
+      title: 'Open The Analyst',
+      onSelect: () => toggleSidebarPanel('analyst', setShowAnalyst),
+      analystPanelPosition: selectedAnalystPanelPosition,
+      onAnalystPanelPositionChange: setAnalystPanelDock,
+    },
+    {
+      id: 'portfolio',
+      group: 'primary',
+      icon: PieChart,
+      label: 'Portfolio',
+      description: 'Track performance and exposure',
+      title: 'Portfolio Breakdown',
+      onSelect: () => toggleSidebarPanel('portfolio', setShowPortfolioBreakdown),
+    },
+    {
+      id: 'exposureLab',
+      group: 'primary',
+      icon: Table2,
+      label: 'Exposure Lab',
+      description: 'Factor exposures, correlations, and universe QA',
+      title: 'Exposure Lab',
+      onSelect: () => toggleSidebarPanel('exposureLab', setShowExposureLab),
+    },
+    {
+      id: 'balance',
+      group: 'primary',
+      icon: Scale,
+      label: 'Balance',
+      description: 'Live cash and capacity',
+      title: 'Portfolio balance',
+      onSelect: togglePortfolioBalance,
+    },
+    {
+      id: 'contractPnl',
+      group: 'primary',
+      icon: FileText,
+      label: 'Contract P&L',
+      description: 'Prediction-market contract profit and loss',
+      title: 'Contract P&L',
+      onSelect: toggleContractPnl,
+    },
+    ...PREDICTION_MONITOR_NAV_ITEMS.map(({ marketId, label, tier, indicatorMarketId, description }) => {
+      const indicator = indicatorMarketId ? predictionMarketIndicators[indicatorMarketId] : null;
+      return {
+        id: `predictionMonitor-${marketId}`,
+        group: 'primary',
+        sectionLabel: tier,
+        icon: Target,
+        label,
+        description,
+        title: `${label} Prediction Monitor`,
+        indicatorTone: indicator?.tone,
+        indicatorDescription: indicator?.description,
+        onSelect: () => togglePredictionMonitor(marketId),
+      };
+    }),
+  ].filter(Boolean), [
+    isProcessOpen,
+    isExposureGuideOpen,
+    onCloseProcess,
+    onNavigateProcess,
+    openProcess,
+    predictionMarketIndicators,
+    togglePredictionMonitor,
+    toggleContractPnl,
+    togglePortfolioBalance,
+    toggleSidebarPanel,
+    selectedAnalystPanelPosition,
+    setAnalystPanelDock,
+  ]);
+
+  useEffect(() => {
+    const nextPanelState = {
+      showMorningTldr,
+      showAnalyst,
+      analystPanelWidth,
+      contractPnlPanelWidth,
       showSystemReadiness,
       showWorkflowStatus,
-      showSecuritiesUniverse,
       showPerformanceTracking,
-      showPredictionMarketsHub,
-      activePredictionMarket,
-      activeWtiCadence,
+      showPredictionMonitor,
+      activePredictionMonitorMarket,
       showSignalStrength,
       showEtfPro,
       showMacroShow,
       showCall,
       showPortfolioBreakdown,
+      showExposureLab,
       sidebarPanelStack,
-      portfolioExpandedUp,
-    });
+    };
+    if (analystPanelPosition !== ANALYST_PANEL_DEFAULT_POSITION) {
+      nextPanelState.analystPanelPosition = analystPanelPosition;
+    }
+    writeDashboardPanelState(nextPanelState);
   }, [
-    showPortfolioMetrics,
     isProcessOpen,
-    showPeaPodWindow,
-    showEVWindow,
+    showAnalyst,
+    analystPanelWidth,
+    analystPanelPosition,
+    contractPnlPanelWidth,
+    showMorningTldr,
     showSystemReadiness,
     showWorkflowStatus,
-    showSecuritiesUniverse,
     showPerformanceTracking,
-    showPredictionMarketsHub,
-    activePredictionMarket,
-    activeWtiCadence,
+    showPredictionMonitor,
+    activePredictionMonitorMarket,
     showSignalStrength,
     showEtfPro,
     showMacroShow,
     showCall,
     showPortfolioBreakdown,
+    showExposureLab,
     sidebarPanelStack,
-    portfolioExpandedUp,
   ]);
 
   const handleSystemReadinessStatus = useCallback((status) => {
@@ -626,443 +1512,150 @@ const PortfolioDashboard = ({
     setSystemReadinessStatus(nextStatus);
   }, []);
 
-  const fetchMultiRegionQuotes = useCallback(async ({ includePeriodReturns = false } = {}) => {
-    try {
-      const data = await MarketDataService.getMultiRegionQuotes(
-        null,
-        !includePeriodReturns,
-        includePeriodReturns,
-      );
-      setMultiRegionMarketData((current) => mergeMarketDataPreservingPeriods(current, data, {
-        // Fast quote-only refreshes intentionally omit the slower historical
-        // series. Keep the last dated period snapshot only on that path; a
-        // requested period refresh remains authoritative and can clear it.
-        preservePeriods: !includePeriodReturns,
-      }));
-      setMultiRegionLoading(false);
-      setMultiRegionError(null);
-
-      if (
-        process.env.NODE_ENV === 'development' &&
-        Array.isArray(data?.currencies) &&
-        data.currencies.length > 0
-      ) {
-        const row = data.currencies[0];
-        const hasPeriodRolling =
-          Object.prototype.hasOwnProperty.call(row, 'thirtyDayChangePct') &&
-          Object.prototype.hasOwnProperty.call(row, 'ninetyDayChangePct');
-        const hasSomePeriodTail =
-          row?.ytdChangePct != null || row?.weekChangePct != null || row?.monthChangePct != null;
-        if (!hasPeriodRolling && hasSomePeriodTail) {
-          console.warn(
-            '[market-dashboard] Currencies API is missing thirtyDayChangePct/ninetyDayChangePct — the Node server is probably an old build. Restart from this repo (`npm run server` or `node server.js`). API base:',
-            process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001'
-          );
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch multi-region quotes:', err);
-      // Quote rows influence interpretation and must not survive a failed
-      // refresh as if they were still current. Historical return metadata is
-      // rehydrated on the next successful response.
-      setMultiRegionMarketData({});
-      setMultiRegionError(err.message);
-      setMultiRegionLoading(false);
-    }
+  const handleDashboardStatusChange = useCallback((updates) => {
+    setDashboardCardStatuses((current) => mergeDashboardCardStatuses(current, updates));
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchMultiRegionQuotes({ includePeriodReturns: false });
-    const cancelBackgroundHydration = scheduleBackgroundTask(() => {
-      if (!cancelled) {
-        fetchMultiRegionQuotes({ includePeriodReturns: true });
-      }
-    }, 1500);
-    const currentQuotesInterval = setInterval(() => {
-      fetchMultiRegionQuotes({ includePeriodReturns: false });
-    }, 30000);
-    const periodReturnsInterval = setInterval(() => {
-      fetchMultiRegionQuotes({ includePeriodReturns: true });
-    }, 15 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      cancelBackgroundHydration?.();
-      clearInterval(currentQuotesInterval);
-      clearInterval(periodReturnsInterval);
-    };
-  }, [fetchMultiRegionQuotes]);
+    const cancelBackgroundHydration = scheduleBackgroundTask(
+      () => setPeriodHydrationEnabled(true),
+      1500,
+    );
+    return () => cancelBackgroundHydration?.();
+  }, []);
+
+  useEffect(() => {
+    if (
+      process.env.NODE_ENV !== 'development'
+      || !Array.isArray(multiRegionMarketData?.currencies)
+      || multiRegionMarketData.currencies.length === 0
+    ) return;
+    const row = multiRegionMarketData.currencies[0];
+    const hasPeriodRolling =
+      Object.prototype.hasOwnProperty.call(row, 'thirtyDayChangePct')
+      && Object.prototype.hasOwnProperty.call(row, 'ninetyDayChangePct');
+    const hasSomePeriodTail =
+      row?.ytdChangePct != null || row?.weekChangePct != null || row?.monthChangePct != null;
+    if (!hasPeriodRolling && hasSomePeriodTail) {
+      console.warn(
+        '[market-dashboard] Currencies API is missing thirtyDayChangePct/ninetyDayChangePct — the Node server is probably an old build. Restart from this repo (`npm run server` or `node server.js`). API base:',
+        process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001'
+      );
+    }
+  }, [multiRegionMarketData]);
 
   // Tag navigation state
   const [selectedTag, setSelectedTag] = useState(null);
   const bookContentRef = useRef(null);
 
-  // The Pods search state
-  const [podsSearchQuery, setPodsSearchQuery] = useState('');
-  const [podsShowSearchResults, setPodsShowSearchResults] = useState(false);
-  const [podsHighlightedIndex, setPodsHighlightedIndex] = useState(-1);
-  const [podsSelectedSecurity, setPodsSelectedSecurity] = useState(null);
-  const podsSearchInputRef = useRef(null);
-
-  // Filter securities based on search query - searches entire universe
-  const podsFilteredSecurities = useMemo(() => {
-    if (!podsSearchQuery.trim()) {
-      return [];
-    }
-    const query = podsSearchQuery.toLowerCase().trim();
-    // Search across ALL securities in the universe
-    return SECURITIES_LIST.filter(security =>
-      security.ticker.toLowerCase().includes(query) ||
-      security.name.toLowerCase().includes(query)
-    ).slice(0, 15); // Limit to 15 results
-  }, [podsSearchQuery]);
-
-  // Handle security selection from search
-  const handlePodsSecuritySelect = (security) => {
-    setPodsSelectedSecurity(security);
-    setPodsSearchQuery(`${security.ticker} - ${security.name}`);
-    setPodsShowSearchResults(false);
-    setPodsHighlightedIndex(-1);
-    podsSearchInputRef.current?.blur();
-  };
-
-  const fetchPortfolio = useCallback(async (accountId, silent = false) => {
-    const requestSequence = ++portfolioRequestSequenceRef.current;
+  const fetchPortfolio = useCallback((accountId) => {
     const requestedAccount = String(accountId || '').trim();
-    const hasExistingPortfolio = Boolean(portfolioDataRef.current);
-    const shouldShowInitialLoading = !silent && !hasExistingPortfolio;
-    try {
-      if (shouldShowInitialLoading) {
-        setPortfolioLoading(true);
-      } else {
-        setPortfolioRefreshing(true);
-      }
-      setPortfolioError(null);
-      const data = await withTimeout(
-        MarketDataService.getPortfolio({ account: accountId || undefined }),
-        PORTFOLIO_REQUEST_TIMEOUT_MS,
-        'Portfolio refresh',
-      );
-      if (
-        requestSequence !== portfolioRequestSequenceRef.current
-        || (
-          requestedAccount
-          && selectedAccountRef.current
-          && requestedAccount !== selectedAccountRef.current
-        )
-      ) {
-        return null;
-      }
-      if (isRejectedPortfolioResponse(data)) {
-        // The previous verified snapshot may remain visible only while the
-        // replacement request is genuinely pending. An explicit offline,
-        // cache-only, or otherwise unverified response ends that window.
-        setPortfolioData(
-          data?.dataSource === 'ibkr_offline'
-            ? data
-            : null,
-        );
-        portfolioDataRef.current =
-          data?.dataSource === 'ibkr_offline'
-            ? data
-            : null;
-        return data;
-      }
-      setPortfolioData(data);
-      portfolioDataRef.current = data;
-      return data;
-    } catch (e) {
-      if (requestSequence !== portfolioRequestSequenceRef.current) {
-        return null;
-      }
-      // Never keep a previously live portfolio mounted after its refresh
-      // fails. Active sizing and position surfaces must fail closed rather
-      // than silently aging the last successful response.
-      setPortfolioData(null);
-      portfolioDataRef.current = null;
-      if (!silent || !hasExistingPortfolio) {
-        setPortfolioError(e.message || 'Failed to load portfolio');
-      }
-      throw e;
-    } finally {
-      if (requestSequence === portfolioRequestSequenceRef.current) {
-        // A silent/background request can supersede the initial request while
-        // the first live snapshot is still in flight. The latest request owns
-        // the loading state, so always release the initial-loading gate when
-        // that latest request settles.
-        setPortfolioLoading(false);
-        setPortfolioRefreshing(false);
-      }
+    if (
+      requestedAccount
+      && selectedAccountRef.current
+      && requestedAccount !== selectedAccountRef.current
+    ) {
+      return Promise.resolve(null);
     }
-  }, []);
-
-  const fetchPortfolioAccounts = useCallback(async () => {
-    try {
-      const data = await MarketDataService.getPortfolioAccounts();
-      setPortfolioAccountsData(Array.isArray(data) ? data : []);
-      return data;
-    } catch (e) {
-      console.error('Failed to load portfolio account snapshots:', e);
-      setPortfolioAccountsData((current) => current || []);
-      return null;
-    }
-  }, []);
-
-  const fetchPortfolioExposureReconciliation = useCallback(async () => {
-    try {
-      setPortfolioExposureReconciliationLoading(true);
-      const data = await MarketDataService.getPortfolioExposureReconciliation();
-      setPortfolioExposureReconciliation(data);
-      return data;
-    } catch (e) {
-      console.error('Failed to load portfolio exposure reconciliation:', e);
-      const unavailable = {
-        status: 'error',
-        source: 'ibkr_flex_web_service',
-        error: e.message || 'Failed to load IBKR Flex reconciliation',
-      };
-      setPortfolioExposureReconciliation(unavailable);
-      return unavailable;
-    } finally {
-      setPortfolioExposureReconciliationLoading(false);
-    }
-  }, []);
-
-  const fetchPortfolioInterestValidation = useCallback(async (accountId = null) => {
-    const requestSequence = ++interestValidationRequestSequenceRef.current;
-    const requestedAccount = String(
-      accountId || selectedAccountRef.current || '',
-    ).trim();
-    try {
-      setPortfolioInterestValidationLoading(true);
-      const data = await MarketDataService.getIbkrInterestValidationStatus({
-        account: requestedAccount || null,
-      });
-      if (
-        requestSequence !== interestValidationRequestSequenceRef.current
-        || (
-          requestedAccount
-          && selectedAccountRef.current
-          && requestedAccount !== selectedAccountRef.current
-        )
-      ) {
-        return null;
-      }
-      const accountBoundData = {
-        ...data,
-        requestedAccount,
-      };
-      setPortfolioInterestValidation(accountBoundData);
-      return accountBoundData;
-    } catch (e) {
-      if (requestSequence !== interestValidationRequestSequenceRef.current) {
-        return null;
-      }
-      console.error('Failed to load IBKR interest validation:', e);
-      const unavailable = {
-        status: 'unavailable',
-        source: 'ibkr_interest_validation',
-        requestedAccount,
-        error: e.message || 'Failed to load IBKR interest validation',
-        guard: {
-          available: false,
-          appliedReserve: null,
-        },
-      };
-      setPortfolioInterestValidation(unavailable);
-      return unavailable;
-    } finally {
-      if (requestSequence === interestValidationRequestSequenceRef.current) {
-        setPortfolioInterestValidationLoading(false);
-      }
-    }
-  }, []);
-
-  const fetchRtaPositions = useCallback(async () => {
-    try {
-      const data = await MarketDataService.getRealTimeAlertPositions();
-      const prepared = prepareReferenceComparisonSnapshot(data, {
-        requireAvailable: true,
-        staleWarning: RTA_STALE_WARNING,
-      });
-      if (data?._cache?.stale) {
-        prepared.reconstructionWarnings = appendUniqueWarning(
-          data.reconstructionWarnings,
-          RTA_STALE_WARNING,
-        );
-      }
-      setRtaPositions(prepared);
-      return prepared;
-    } catch (e) {
-      console.error('Failed to load real-time alert positions:', e);
-      setRtaPositions((current) => ({
-        ...markReferenceRefreshFailed(current, {
-          warning: RTA_REFRESH_WARNING,
-          error: e.message || 'Failed to load real-time alert positions',
-          emptyState: { longCount: null, shortCount: null },
-        }),
-        reconstructionWarnings: appendUniqueWarning(
-          current?.reconstructionWarnings,
-          RTA_REFRESH_WARNING,
-        ),
-      }));
-      return null;
-    }
-  }, []);
-
-  const fetchEtfProSnapshot = useCallback(async (silent = false) => {
-    if (silent) setEtfProRefreshing(true);
-    else setEtfProLoading(true);
-    setEtfProError(null);
-    try {
-      const data = await MarketDataService.getHedgeyeEtfPro();
-      const prepared = prepareReferenceComparisonSnapshot(data, {
-        staleWarning: ETF_PRO_STALE_WARNING,
-      });
-      setEtfProSnapshot(prepared);
-      return prepared;
-    } catch (e) {
-      console.error('Failed to load ETF Pro snapshot:', e);
-      const error = e.message || 'Failed to load ETF Pro snapshot';
-      setEtfProError(error);
-      setEtfProSnapshot((current) => markReferenceRefreshFailed(current, {
-        warning: 'The latest ETF Pro refresh failed; retained rows are a prior dated reference.',
-        error,
-        emptyState: { rows: [], longCount: null, shortCount: null },
-      }));
-      return null;
-    } finally {
-      setEtfProLoading(false);
-      setEtfProRefreshing(false);
-    }
-  }, []);
-
-  const fetchPredictionMarketProviderStatus = useCallback(async () => {
-    try {
-      const data = await predictionMarketsIngestService.getProviderStatus();
-      setPredictionMarketProviderStatus(data);
-      return data;
-    } catch (e) {
-      console.error('Failed to load prediction market provider status:', e);
-      const errorStatus = { error: e.message || 'Failed to load prediction market provider status' };
-      setPredictionMarketProviderStatus(errorStatus);
-      return errorStatus;
-    }
-  }, []);
+    return refreshPortfolioResource();
+  }, [refreshPortfolioResource]);
 
   const fetchHedgeyeChangelog = useCallback(async (silent = false) => {
-    try {
-      if (!silent) {
-        setHedgeyeChangelogLoading(true);
-      }
-      setHedgeyeChangelogError(null);
-      const data = await MarketDataService.getHedgeyeChangelog();
-      setHedgeyeChangelog(data);
-      const cacheAgeSeconds = Number(data?._cache?.ageSeconds);
-      const responseTimestamp = Number.isFinite(cacheAgeSeconds)
-        ? Date.now() - (cacheAgeSeconds * 1000)
-        : Date.now();
-      setHedgeyeChangelogLastSuccessAt(new Date(responseTimestamp).toISOString());
-      if (data?._cache?.stale) {
-        const ageLabel = Number.isFinite(cacheAgeSeconds)
-          ? ` (${Math.max(1, Math.round(cacheAgeSeconds / 60))} minutes old)`
-          : '';
-        setHedgeyeChangelogError(`Showing a stale cached changelog response${ageLabel}.`);
-      }
-      return data;
-    } catch (e) {
-      console.error('Failed to load Hedgeye changelog:', e);
-      setHedgeyeChangelogError(e.message || 'Failed to load latest updates');
-      setHedgeyeChangelog((current) => current || {});
-      return null;
-    } finally {
-      if (!silent) {
+    if (changelogInFlightRef.current) return changelogInFlightRef.current;
+    const request = (async () => {
+      try {
+        if (!silent) {
+          setHedgeyeChangelogLoading(true);
+        }
+        setHedgeyeChangelogError(null);
+        const data = await MarketDataService.getHedgeyeChangelog();
+        setHedgeyeChangelog(data);
+        changelogRefreshCompletedAtRef.current = Date.now();
+        const cacheAgeSeconds = Number(data?._cache?.ageSeconds);
+        if (data?._cache?.stale) {
+          const ageLabel = Number.isFinite(cacheAgeSeconds)
+            ? ` (${Math.max(1, Math.round(cacheAgeSeconds / 60))} minutes old)`
+            : '';
+          setHedgeyeChangelogError(`Showing a stale cached changelog response${ageLabel}.`);
+        }
+        return data;
+      } catch (e) {
+        console.error('Failed to load Hedgeye changelog:', e);
+        setHedgeyeChangelogError(e.message || 'Failed to load latest updates');
+        setHedgeyeChangelog((current) => current || {});
+        return null;
+      } finally {
         setHedgeyeChangelogLoading(false);
       }
-    }
+    })().finally(() => {
+      if (changelogInFlightRef.current === request) changelogInFlightRef.current = null;
+    });
+    changelogInFlightRef.current = request;
+    return request;
   }, []);
 
   const handleAccountChange = useCallback((accountId) => {
-    // Invalidate a request for the prior account before clearing its data.
-    portfolioRequestSequenceRef.current += 1;
-    interestValidationRequestSequenceRef.current += 1;
     saveSelectedAccount(accountId);
     selectedAccountRef.current = accountId || '';
     setSelectedAccount(accountId);
-    // Never leave the prior account's executable risk numbers mounted during
-    // an account switch. Clear immediately, then request a same-account live
-    // snapshot instead of waiting for the next polling interval.
-    setPortfolioData(null);
-    portfolioDataRef.current = null;
-    setPortfolioInterestValidation(null);
-    if (accountId) {
-      return Promise.allSettled([
-        fetchPortfolio(accountId),
-        fetchPortfolioInterestValidation(accountId),
-      ]);
-    }
+    // The account-scoped resource key changes on the next render, so the old
+    // account snapshot can never be exposed while the new read is in flight.
     return Promise.resolve(null);
-  }, [fetchPortfolio, fetchPortfolioInterestValidation]);
+  }, []);
 
   const refreshProviderStatus = useCallback(async () => {
-    try {
-      const status = await withTimeout(
-        MarketDataService.getProviderStatus(),
-        PROVIDER_STATUS_TIMEOUT_MS,
-        'Provider status',
-      );
-      if (isConnectedProviderStatus(status)) {
-        lastGoodProviderStatusRef.current = status;
-      }
-      setProviderStatus(status);
-      const list = status?.ibkr?.accounts || status?.portfolio?.ibkr?.accounts || [];
-      if (Array.isArray(list) && list.length > 0) {
-        ibkrAccountsRef.current = list;
-        setIbkrAccounts(list);
-        saveIbkrAccounts(list);
-      } else if (portfolioDataRef.current?.dataSource === 'ibkr_offline') {
-        ibkrAccountsRef.current = [];
-        setIbkrAccounts([]);
-      } else {
-        setIbkrAccounts(ibkrAccountsRef.current);
-      }
-      setIbkrConnection(getIbkrConnectionDisplay({ status, error: null }));
-      return status;
-    } catch (err) {
-      const lastGoodStatus = lastGoodProviderStatusRef.current;
-      if (lastGoodStatus && (err?.code === 'ETIMEDOUT' || /timed out/i.test(err?.message || ''))) {
-        const delayedStatus = {
-          ...lastGoodStatus,
-          statusRefreshDelayed: true,
-          statusRefreshError: err.message,
-          statusRefreshDelayedAt: new Date().toISOString(),
-        };
-        setProviderStatus(delayedStatus);
-        const delayedConnection = getIbkrConnectionDisplay({ status: delayedStatus, error: null });
-        setIbkrConnection({
-          ...delayedConnection,
-          statusRefreshDelayed: true,
-          statusRefreshError: err.message,
-          statusRefreshDelayedAt: delayedStatus.statusRefreshDelayedAt,
+    if (providerStatusInFlightRef.current) return providerStatusInFlightRef.current;
+    const request = (async () => {
+      try {
+        const status = await withTimeout(
+          MarketDataService.getProviderStatus(),
+          PROVIDER_STATUS_TIMEOUT_MS,
+          'Provider status',
+        );
+        if (isConnectedProviderStatus(status)) {
+          lastGoodProviderStatusRef.current = status;
+        }
+        setProviderStatus(status);
+        const list = status?.ibkr?.accounts || status?.portfolio?.ibkr?.accounts || [];
+        if (Array.isArray(list) && list.length > 0) {
+          ibkrAccountsRef.current = list;
+          saveIbkrAccounts(list);
+        }
+        setIbkrConnection(getIbkrConnectionDisplay({ status, error: null }));
+        return status;
+      } catch (err) {
+        const lastGoodStatus = lastGoodProviderStatusRef.current;
+        if (lastGoodStatus && (err?.code === 'ETIMEDOUT' || /timed out/i.test(err?.message || ''))) {
+          const delayedStatus = {
+            ...lastGoodStatus,
+            statusRefreshDelayed: true,
+            statusRefreshError: err.message,
+            statusRefreshDelayedAt: new Date().toISOString(),
+          };
+          setProviderStatus(delayedStatus);
+          const delayedConnection = getIbkrConnectionDisplay({ status: delayedStatus, error: null });
+          setIbkrConnection({
+            ...delayedConnection,
+            statusRefreshDelayed: true,
+            statusRefreshError: err.message,
+            statusRefreshDelayedAt: delayedStatus.statusRefreshDelayedAt,
+          });
+          return delayedStatus;
+        }
+        setProviderStatus({
+          unavailable: true,
+          error: err.message || 'Provider status unavailable',
+          responseTimestamp: new Date().toISOString(),
+          ibkr: { connected: false, status: 'offline' },
         });
-        setIbkrAccounts(ibkrAccountsRef.current);
-        return delayedStatus;
+        setIbkrConnection(getIbkrConnectionDisplay({ status: null, error: err.message }));
+        throw err;
       }
-      setProviderStatus({
-        unavailable: true,
-        error: err.message || 'Provider status unavailable',
-        responseTimestamp: new Date().toISOString(),
-        ibkr: { connected: false, status: 'offline' },
-      });
-      setIbkrConnection(getIbkrConnectionDisplay({ status: null, error: err.message }));
-      if (portfolioDataRef.current?.dataSource === 'ibkr_offline') {
-        ibkrAccountsRef.current = [];
-        setIbkrAccounts([]);
-      } else {
-        setIbkrAccounts(ibkrAccountsRef.current);
-      }
-      throw err;
-    }
+    })().finally(() => {
+      if (providerStatusInFlightRef.current === request) providerStatusInFlightRef.current = null;
+    });
+    providerStatusInFlightRef.current = request;
+    return request;
   }, []);
 
   const resolvePortfolioAccount = useCallback((status = null) => {
@@ -1086,14 +1679,6 @@ const PortfolioDashboard = ({
 
   const pollingFnsRef = useRef({});
   pollingFnsRef.current = {
-    fetchPortfolio,
-    fetchPortfolioAccounts,
-    fetchPortfolioExposureReconciliation,
-    fetchPortfolioInterestValidation,
-    fetchRtaPositions,
-    fetchEtfProSnapshot,
-    fetchPredictionMarketProviderStatus,
-    fetchHedgeyeChangelog,
     handleAccountChange,
     refreshProviderStatus,
     resolvePortfolioAccount,
@@ -1101,102 +1686,22 @@ const PortfolioDashboard = ({
 
   useEffect(() => {
     let cancelled = false;
-    let cancelDeferredSecondary = null;
 
     const load = async () => {
-      const initialAccount = pollingFnsRef.current.resolvePortfolioAccount();
-      const initialPortfolioRequest = initialAccount
-        ? pollingFnsRef.current
-          .fetchPortfolio(initialAccount)
-          .catch((err) => {
-            if (!cancelled) {
-              setPortfolioError(err.message || 'Failed to load portfolio');
-            }
-            return null;
-          })
-        : null;
-      const providerStatusRequest = pollingFnsRef.current.refreshProviderStatus();
-
-      // These endpoints do not depend on IBKR provider discovery. Starting
-      // them now avoids serially adding provider-status and portfolio latency
-      // before RTA / ETF Pro can populate the comparison bar.
-      if (typeof document === 'undefined' || !document.hidden) {
-        Promise.allSettled([
-          pollingFnsRef.current.fetchRtaPositions(),
-          pollingFnsRef.current.fetchEtfProSnapshot(),
-          pollingFnsRef.current.fetchHedgeyeChangelog(),
-        ]).catch(() => {});
-      }
-
-      cancelDeferredSecondary = scheduleBackgroundTask(() => {
-        if (cancelled) return;
-        Promise.allSettled([
-          pollingFnsRef.current.fetchPortfolioAccounts(),
-          pollingFnsRef.current.fetchPortfolioExposureReconciliation(),
-          pollingFnsRef.current.fetchPortfolioInterestValidation(initialAccount),
-          pollingFnsRef.current.fetchPredictionMarketProviderStatus(),
-        ]).catch(() => {});
-      }, 1);
-
       try {
-        const status = await providerStatusRequest;
+        const status = await pollingFnsRef.current.refreshProviderStatus();
         if (cancelled) return;
         const acct = pollingFnsRef.current.resolvePortfolioAccount(status);
         if (acct && acct !== selectedAccountRef.current) {
           await pollingFnsRef.current.handleAccountChange(acct);
-        } else if (initialPortfolioRequest) {
-          await initialPortfolioRequest;
-        } else {
-          try {
-            await pollingFnsRef.current.fetchPortfolio(acct);
-          } catch (err) {
-            if (!cancelled) {
-              setPortfolioError(err.message || 'Failed to load portfolio');
-            }
-          }
         }
-      } catch (err) {
-        if (!cancelled) {
-          if (initialPortfolioRequest) {
-            await initialPortfolioRequest;
-          }
-          setPortfolioError(err.message || 'Failed to load portfolio');
-          if (!initialPortfolioRequest) {
-            setPortfolioLoading(false);
-          }
-        }
+      } catch {
+        // Provider health decorates connection state. The independently keyed
+        // portfolio resource owns its own availability and refresh lifecycle.
       }
     };
 
     load();
-
-    const portfolioInterval = setInterval(() => {
-      pollingFnsRef.current
-        .fetchPortfolio(pollingFnsRef.current.resolvePortfolioAccount(), true)
-        .catch(() => {});
-    }, PORTFOLIO_POLL_MS);
-
-    const portfolioAccountsInterval = setInterval(() => {
-      pollingFnsRef.current.fetchPortfolioAccounts().catch(() => {});
-      pollingFnsRef.current
-        .fetchPortfolioInterestValidation(
-          pollingFnsRef.current.resolvePortfolioAccount(),
-        )
-        .catch(() => {});
-    }, PORTFOLIO_ACCOUNTS_POLL_MS);
-
-    const predictionProviderStatusInterval = setInterval(() => {
-      pollingFnsRef.current.fetchPredictionMarketProviderStatus().catch(() => {});
-    }, PREDICTION_PROVIDER_STATUS_POLL_MS);
-
-    const stopReferencePolling = startVisibilityAwarePolling({
-      intervalMs: REFERENCE_DATA_POLL_MS,
-      poll: () => Promise.allSettled([
-        pollingFnsRef.current.fetchRtaPositions(),
-        pollingFnsRef.current.fetchEtfProSnapshot(true),
-        pollingFnsRef.current.fetchHedgeyeChangelog(true),
-      ]),
-    });
 
     let statusTimeout;
     const scheduleStatusPoll = () => {
@@ -1212,11 +1717,6 @@ const PortfolioDashboard = ({
 
     return () => {
       cancelled = true;
-      cancelDeferredSecondary?.();
-      clearInterval(portfolioInterval);
-      clearInterval(portfolioAccountsInterval);
-      clearInterval(predictionProviderStatusInterval);
-      stopReferencePolling();
       clearTimeout(statusTimeout);
     };
     // Polling callbacks are read from pollingFnsRef so UI state changes do not
@@ -1225,60 +1725,62 @@ const PortfolioDashboard = ({
   }, []);
 
   useEffect(() => {
+    if (!surfaceActive || (!showMorningTldr && !showSignalStrength)) return undefined;
+    const poll = () => fetchHedgeyeChangelog(true);
+    const elapsedMs = Date.now() - changelogRefreshCompletedAtRef.current;
+    const initialDelayMs = changelogRefreshCompletedAtRef.current > 0
+      ? Math.max(0, REFERENCE_DATA_POLL_MS - elapsedMs)
+      : 0;
+    if (initialDelayMs <= 0 && (typeof document === 'undefined' || !document.hidden)) poll();
+    return startVisibilityAwarePolling({
+      intervalMs: REFERENCE_DATA_POLL_MS,
+      poll,
+      initialDelayMs: initialDelayMs <= 0 ? REFERENCE_DATA_POLL_MS : initialDelayMs,
+    });
+  }, [fetchHedgeyeChangelog, showMorningTldr, showSignalStrength, surfaceActive]);
+
+  useEffect(() => {
     const handler = () => {
       fetchPortfolio(resolvePortfolioAccount(), true).catch(() => {});
-      fetchPortfolioAccounts().catch(() => {});
-      fetchPortfolioExposureReconciliation().catch(() => {});
-      fetchPortfolioInterestValidation(resolvePortfolioAccount()).catch(() => {});
-      fetchRtaPositions().catch(() => {});
-      fetchEtfProSnapshot(true).catch(() => {});
-      fetchPredictionMarketProviderStatus().catch(() => {});
-      fetchHedgeyeChangelog(true).catch(() => {});
+      if (showEtfPro) fetchEtfProSnapshot(true).catch(() => {});
+      if (showMorningTldr || showSignalStrength) fetchHedgeyeChangelog(true).catch(() => {});
     };
     window.addEventListener('portfolioRefresh', handler);
     return () => window.removeEventListener('portfolioRefresh', handler);
-  }, [fetchPortfolio, fetchPortfolioAccounts, fetchPortfolioExposureReconciliation, fetchPortfolioInterestValidation, fetchRtaPositions, fetchEtfProSnapshot, fetchPredictionMarketProviderStatus, fetchHedgeyeChangelog, resolvePortfolioAccount]);
+  }, [
+    fetchPortfolio,
+    fetchEtfProSnapshot,
+    fetchHedgeyeChangelog,
+    resolvePortfolioAccount,
+    showEtfPro,
+    showMorningTldr,
+    showSignalStrength,
+  ]);
 
   const handlePortfolioRefresh = useCallback(async () => {
     const account = resolvePortfolioAccount();
-    const results = await Promise.allSettled([
+    await Promise.allSettled([
       fetchPortfolio(account || undefined, true),
-      fetchPortfolioAccounts(),
-      fetchPortfolioExposureReconciliation(),
-      fetchPortfolioInterestValidation(account),
-      fetchRtaPositions(),
-      fetchEtfProSnapshot(true),
-      fetchPredictionMarketProviderStatus(),
-      fetchHedgeyeChangelog(),
+      showEtfPro ? fetchEtfProSnapshot(true) : Promise.resolve(null),
+      showMorningTldr || showSignalStrength
+        ? fetchHedgeyeChangelog(true)
+        : Promise.resolve(null),
     ]);
-    const portfolioResult = results[0];
-    if (portfolioResult.status === 'rejected') {
-      setPortfolioError(portfolioResult.reason?.message || 'Failed to load portfolio');
-    }
     try {
       await refreshProviderStatus();
     } catch {
       // Provider status has its own display state; keep manual refresh from surfacing
       // as an unhandled promise in the React development overlay.
     }
-  }, [fetchPortfolio, fetchPortfolioAccounts, fetchPortfolioExposureReconciliation, fetchPortfolioInterestValidation, fetchRtaPositions, fetchEtfProSnapshot, fetchPredictionMarketProviderStatus, fetchHedgeyeChangelog, refreshProviderStatus, resolvePortfolioAccount]);
-
-  useEffect(() => {
-    if (
-      ibkrConnection?.connected &&
-      portfolioData?.dataSource === 'ibkr_offline' &&
-      !portfolioLoading
-    ) {
-      fetchPortfolio(resolvePortfolioAccount(), true).catch(
-        () => {},
-      );
-    }
   }, [
-    ibkrConnection?.connected,
-    portfolioData?.dataSource,
-    portfolioLoading,
     fetchPortfolio,
+    fetchEtfProSnapshot,
+    fetchHedgeyeChangelog,
+    refreshProviderStatus,
     resolvePortfolioAccount,
+    showEtfPro,
+    showMorningTldr,
+    showSignalStrength,
   ]);
 
   // Handle clicks outside book menu
@@ -1310,11 +1812,6 @@ const PortfolioDashboard = ({
   // Book/Notes file configuration
   const bookFiles = [
     { name: 'The Coach — Source Notes', contentKey: 'The Coach', path: 'main/The Coach.md' },
-    {
-      name: 'Process Source Notes — Legacy',
-      contentKey: 'The Process',
-      path: 'main/The Process.md',
-    },
     { name: 'The Playbook — Legacy', contentKey: 'The Playbook', path: 'main/The Playbook.md' },
     { name: 'Stop Losses — Legacy', contentKey: 'Stop Losses', path: 'main/Stop Losses.md' }
   ];
@@ -1475,22 +1972,23 @@ const PortfolioDashboard = ({
     }
   };
 
+  const isRightWorkspaceOpen = showPortfolioBreakdown || showExposureLab || showPredictionMonitor;
+  const isDashboardBackdropVisible = isRightWorkspaceOpen;
+
   return (
     <div
       data-testid="dashboard-shell"
       className="dashboard-shell min-h-screen p-2 bg-[#eef6fb] dark:bg-gray-900"
       style={{
         '--dashboard-rail-collapsed-width': DASHBOARD_RAIL_COLLAPSED_WIDTH,
-        '--dashboard-rail-expanded-width': DASHBOARD_RAIL_EXPANDED_WIDTH,
-        '--dashboard-rail-control-width': '56px',
-        '--dashboard-rail-control-height': showPortfolioMetrics ? '30px' : '44px',
-        '--dashboard-rail-icon-size': '26px',
-        '--dashboard-rail-blue': theme === 'dark' ? '#78b7ff' : '#4682b4',
-        '--dashboard-active-rail-width': showPortfolioMetrics
-          ? DASHBOARD_RAIL_EXPANDED_WIDTH
-          : DASHBOARD_RAIL_COLLAPSED_WIDTH,
+        '--dashboard-rail-visible-width': DASHBOARD_RAIL_COLLAPSED_WIDTH,
+        '--dashboard-active-rail-width': 'var(--dashboard-rail-visible-width)',
+        '--dashboard-rail-panel-offset': 'var(--dashboard-rail-visible-width)',
+        '--dashboard-content-inset': 'var(--dashboard-rail-visible-width)',
+        '--dashboard-standard-panel-width': 'calc((100vw - 16px) * (9/12) - var(--dashboard-rail-visible-width))',
+        '--dashboard-workflow-panel-width': 'calc((100vw - 16px) * (5/12))',
         paddingBottom: '8px',
-        paddingRight: showPortfolioMetrics ? '0px' : 'var(--dashboard-rail-collapsed-width)',
+        paddingRight: 'var(--dashboard-content-inset)',
         transition: 'padding-right 0.3s ease-in-out',
       }}
     >
@@ -1503,8 +2001,7 @@ const PortfolioDashboard = ({
           <div
             className="col-span-12"
             style={{
-              marginRight: showPortfolioMetrics ? '0px' : '8px',
-              transition: 'all 0.3s ease-in-out',
+              marginRight: '8px',
               minWidth: 0,
             }}
           >
@@ -1514,6 +2011,7 @@ const PortfolioDashboard = ({
               multiRegionError={multiRegionError}
               providerStatus={providerStatus}
               ibkrConnection={ibkrConnection}
+              onDashboardStatusChange={handleDashboardStatusChange}
             />
           </div>
 
@@ -1521,7 +2019,123 @@ const PortfolioDashboard = ({
         </Grid>
       </div>
 
-      {/* Vertical Portfolio Bar - Always Visible */}
+      <div
+        data-testid="dashboard-panel-backdrop"
+        className="dashboard-panel-backdrop"
+        aria-hidden={!isDashboardBackdropVisible}
+        hidden={!isDashboardBackdropVisible}
+      />
+
+      <PersistentSurface
+        as="section"
+        active={showPortfolioBalance}
+        className={[
+          'dashboard-navigation-rail__balance-panel',
+          isRightWorkspaceOpen && 'dashboard-navigation-rail__balance-panel--workspace-left',
+          showPortfolioBreakdown && 'dashboard-navigation-rail__balance-panel--portfolio-left',
+        ].filter(Boolean).join(' ')}
+        style={{
+          zIndex: SIDEBAR_PANEL_Z_INDEX_BASE + sidebarPanelStack.length + 1,
+          '--dashboard-balance-panel-width': `${CONTRACT_PNL_PANEL_DEFAULT_WIDTH}px`,
+          '--dashboard-contract-pnl-right-extension': '0px',
+        }}
+        data-testid="portfolio-balance-planner-slot"
+        aria-label="Balance"
+      >
+        <header className="dashboard-navigation-rail__balance-header">
+          <h2 className="dashboard-navigation-rail__panel-title">Balance</h2>
+          <button
+            type="button"
+            className="dashboard-navigation-rail__balance-close"
+            aria-label="Close Balance"
+            title="Close Balance"
+            onClick={() => setShowPortfolioBalance(false)}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div className="dashboard-navigation-rail__balance-body">
+          <div className="dashboard-navigation-rail__balance-surface">
+            <PortfolioBalanceScenarioPlanner accountId={selectedAccount} />
+          </div>
+        </div>
+      </PersistentSurface>
+
+      <PersistentSurface
+        as="section"
+        active={showContractPnl}
+        ref={contractPnlPanelSurfaceRef}
+        className={[
+          'dashboard-navigation-rail__balance-panel',
+          'dashboard-navigation-rail__balance-panel--contract-pnl',
+          contractPnlPanelResizing
+            && 'dashboard-navigation-rail__balance-panel--contract-pnl-resizing',
+          isRightWorkspaceOpen && 'dashboard-navigation-rail__balance-panel--workspace-left',
+          showPortfolioBreakdown && 'dashboard-navigation-rail__balance-panel--portfolio-left',
+        ].filter(Boolean).join(' ')}
+        style={{
+          zIndex: SIDEBAR_PANEL_Z_INDEX_BASE + sidebarPanelStack.length + 1,
+          '--dashboard-balance-panel-width': `${contractPnlPanelDisplayedWidth}px`,
+          '--dashboard-contract-pnl-right-extension': `${contractPnlPanelRightExtension}px`,
+        }}
+        data-testid="contract-pnl-panel-slot"
+        aria-label="Contract P&L"
+      >
+        <div
+          className="dashboard-navigation-rail__contract-pnl-resize-handle dashboard-navigation-rail__contract-pnl-resize-handle--left"
+          data-testid="contract-pnl-panel-resize-handle"
+          role="separator"
+          aria-label="Resize Contract P&L from the left edge"
+          aria-orientation="vertical"
+          aria-valuemin={CONTRACT_PNL_PANEL_MIN_WIDTH}
+          aria-valuemax={CONTRACT_PNL_PANEL_MAX_WIDTH}
+          aria-valuenow={contractPnlPanelDisplayedWidth}
+          aria-valuetext={`${contractPnlPanelDisplayedWidth} pixels wide`}
+          tabIndex={0}
+          title="Drag the left edge to resize · double-click to reset"
+          onPointerDown={(event) => beginContractPnlPanelResize(event, 'left')}
+          onKeyDown={(event) => handleContractPnlPanelResizeKeyDown(event, 'left')}
+          onDoubleClick={resetContractPnlPanelSize}
+        />
+        <div
+          className="dashboard-navigation-rail__contract-pnl-resize-handle dashboard-navigation-rail__contract-pnl-resize-handle--right"
+          data-testid="contract-pnl-panel-resize-handle-right"
+          role="separator"
+          aria-label="Resize Contract P&L from the right edge"
+          aria-orientation="vertical"
+          aria-valuemin={CONTRACT_PNL_PANEL_MIN_WIDTH}
+          aria-valuemax={CONTRACT_PNL_PANEL_MAX_WIDTH}
+          aria-valuenow={contractPnlPanelDisplayedWidth}
+          aria-valuetext={`${contractPnlPanelDisplayedWidth} pixels wide`}
+          tabIndex={0}
+          title="Drag the right edge to resize · double-click to reset"
+          onPointerDown={(event) => beginContractPnlPanelResize(event, 'right')}
+          onKeyDown={(event) => handleContractPnlPanelResizeKeyDown(event, 'right')}
+          onDoubleClick={resetContractPnlPanelSize}
+        />
+        <header className="dashboard-navigation-rail__balance-header">
+          <h2 className="dashboard-navigation-rail__panel-title">Contract P&amp;L</h2>
+          <button
+            type="button"
+            className="dashboard-navigation-rail__balance-close"
+            aria-label="Close Contract P&L"
+            title="Close Contract P&L"
+            onClick={() => setShowContractPnl(false)}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div className="dashboard-navigation-rail__balance-body">
+          <div
+            className="dashboard-navigation-rail__balance-surface"
+            data-testid="contract-pnl-surface"
+          >
+            <PredictionMarketPerformanceCard accountId={selectedAccount} />
+          </div>
+        </div>
+      </PersistentSurface>
+
+      {/* Compact navigation rail */}
       <div
         data-testid="dashboard-right-rail"
         onClickCapture={(event) => {
@@ -1533,924 +2147,82 @@ const PortfolioDashboard = ({
         }}
         style={{
           position: 'fixed',
-          top: 0,
-          right: 0,
-          width: 'var(--dashboard-active-rail-width)',
-          height: '100vh',
-          zIndex: isProcessOpen ? 1250 : (showPortfolioMetrics ? 1100 : 1000),
-          backgroundColor: theme === 'dark' ? '#111827' : '#ffffff',
-          color: theme === 'dark' ? '#e5e7eb' : '#333333',
-          borderLeft: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
-          borderRight: 'none',
-          borderTop: 'none',
-          borderBottom: 'none',
-          borderRadius: '1rem 0 0 1rem',
-          boxShadow: showPortfolioMetrics
-            ? `-2px 0 10px ${theme === 'dark' ? 'rgba(0, 0, 0, 0.28)' : 'rgba(0, 0, 0, 0.08)'}`
-            : `-2px 0 10px ${theme === 'dark' ? 'rgba(0, 0, 0, 0.28)' : 'rgba(0, 0, 0, 0.08)'}`,
-          transition: 'width 0.3s ease-in-out, border-radius 0.3s ease-in-out',
+          top: '8px',
+          right: '8px',
+          bottom: '8px',
+          width: 'var(--dashboard-rail-visible-width)',
+          height: 'auto',
+          zIndex: isProcessOpen || showAnalyst || showMorningTldr ? 1250 : 1000,
+          backgroundColor: '#ffffff',
+          color: '#12203a',
+          border: '1px solid #d8e2ea',
+          borderRadius: '8px',
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.055)',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+          fontFamily: 'var(--font-ui)',
         }}
-        className="dark:bg-gray-900 dark:border-gray-700"
+        className="dashboard-navigation-rail"
       >
-        {/* Top Section - Dashboard Navigation */}
-        <div
-          data-testid="dashboard-rail-navigation"
-          style={{
-            padding: showPortfolioMetrics ? '6px 10px' : '12px 10px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            borderBottom: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
-            minHeight: showPortfolioMetrics ? 0 : '120px',
-            flex: showPortfolioMetrics ? '0 0 auto' : '1 1 auto',
-            maxHeight: 'none',
-            overflowY: showPortfolioMetrics ? 'hidden' : 'auto',
-            overflowX: 'hidden',
-            scrollbarWidth: 'thin',
-          }}
-          className="dark:border-gray-700"
-        >
-          {/* Lightweight current-service monitor. */}
-          <button
-            type="button"
-            onClick={() => toggleSidebarPanel('system', setShowSystemReadiness)}
-            className={`rounded-lg border transition-colors w-full ${showSystemReadiness
-              ? 'bg-blue-50 dark:bg-[#1d354b]'
-              : 'bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b]'
-            }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: 'relative',
-              overflow: 'hidden',
-              marginBottom: showPortfolioMetrics ? '4px' : '8px',
-              borderColor: systemReadinessStatus === 'online'
-                ? '#059669'
-                : systemReadinessStatus === 'attention'
-                  ? '#d97706'
-                  : systemReadinessStatus === 'offline'
-                    ? '#dc2626'
-                    : '#94a3b8',
-            }}
-            title="Systems"
-            aria-label={`Systems: ${systemReadinessStatus}`}
-            aria-pressed={showSystemReadiness}
-            data-readiness-status={systemReadinessStatus}
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column', gap: '4px' }} aria-hidden="true">
-                <span>SYS</span>
-                <span
-                  style={{
-                    width: '7px',
-                    height: '7px',
-                    borderRadius: '999px',
-                    backgroundColor: systemReadinessStatus === 'online'
-                      ? '#059669'
-                      : systemReadinessStatus === 'attention'
-                        ? '#d97706'
-                        : systemReadinessStatus === 'offline'
-                          ? '#dc2626'
-                          : '#94a3b8',
-                  }}
-                />
-              </span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className="text-[15px] text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                Systems
-              </span>
-            )}
-          </button>
+        <DashboardNavigationRail
+          items={navigationItems}
+          activeItemId={activeNavigationItemId}
+          activeItemIds={activeNavigationItemIds}
+          systemReadinessStatus={systemReadinessStatus}
+        />
 
-          {/* X/Twitter Logo Button */}
-          <button
-            onClick={() => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer')}
-            className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] transition-colors w-full"
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-            }}
-            title="Open X (Twitter) List"
-          >
-            <div style={{ ...sidebarRailIconStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-              </svg>
-            </div>
-            {showPortfolioMetrics && (
-              <span className="text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                X.com
-              </span>
-            )}
-          </button>
-
-          {/* The Pods Button */}
-          <button
-            onClick={() => toggleSidebarPanel('pods', setShowPeaPodWindow)}
-            className={`rounded-lg border transition-colors w-full mt-2 ${showPeaPodWindow
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '4px' : undefined,
-            }}
-            title="The Pods"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle}>PODS</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showPeaPodWindow ? 'text-[#111]' : 'text-gray-700 dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                PODS
-              </span>
-            )}
-          </button>
-
-          {/* +EV Button */}
-          <button
-            onClick={() => toggleSidebarPanel('ev', setShowEVWindow)}
-            className={`rounded-lg border transition-colors w-full mt-2 ${showEVWindow
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '4px' : undefined,
-            }}
-            title="Expected Values"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span className={showEVWindow ? 'text-[#111]' : 'text-black dark:text-white'} style={sidebarRailTextStyle}>+EV</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showEVWindow ? 'text-[#111]' : 'text-gray-700 dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                +EV Data
-              </span>
-            )}
-          </button>
-
-          {/* Book/Notes Button */}
-          <button
-            ref={bookMenuRef}
-            onClick={() => setShowBookMenu(!showBookMenu)}
-            className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] transition-colors w-full mt-2"
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '4px' : undefined,
-            }}
-            title="Open Notes"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle}>NOTES</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className="text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                NOTES
-              </span>
-            )}
-          </button>
-
-          {/* Process Button */}
-          <button
-            ref={processButtonRef}
-            type="button"
-            data-process-toggle="true"
-            onClick={() => {
-              setShowBookMenu(false);
-              if (isProcessOpen) {
-                restoreProcessFocusRef.current = true;
-                onCloseProcess?.();
-              }
-              else openProcess();
-            }}
-            className={`rounded-lg border transition-colors w-full mt-2 ${
-              isProcessOpen
-                ? 'bg-blue-50 border-blue-300 dark:bg-[#1d354b] dark:border-[#31516d]'
-                : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b]'
-            }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '4px' : undefined,
-            }}
-            title="Process"
-            aria-label="Process"
-            aria-pressed={isProcessOpen}
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span
-                aria-hidden="true"
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: showPortfolioMetrics ? '9px' : '8px',
-                  fontWeight: 400,
-                  lineHeight: 1.02,
-                  letterSpacing: showPortfolioMetrics ? '0.04em' : '-0.01em',
-                }}
-              >
-                {showPortfolioMetrics ? (
-                  <span>TP</span>
-                ) : (
-                  <span>PROCESS</span>
-                )}
-              </span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className="text-[15px] text-gray-700 dark:text-gray-200 whitespace-nowrap" style={sidebarTabCenteredLabelStyle}>
-                PROCESS
-              </span>
-            )}
-          </button>
-
-          {/* Popover Menu */}
-          {showBookMenu && (
-            <div
-              ref={bookPopoverRef}
-              style={{
-                position: 'fixed',
-                top: `${bookMenuPosition.top}px`,
-                right: `${bookMenuPosition.right}px`,
-                minWidth: '180px',
-                backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                border: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
-                borderRadius: '0.375rem',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04)',
-                zIndex: 1000,
-                padding: '4px 0',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-              }}
-            >
-              {bookFiles.map((file, index) => (
-                <button
-                  key={index}
-                  onClick={() => openBookFile(file)}
-                  disabled={bookContentLoading}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '8px 12px',
-                    fontSize: '14px',
-                    color: theme === 'dark' ? '#f3f4f6' : '#111',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: bookContentLoading ? 'wait' : 'pointer',
-                    opacity: bookContentLoading ? 0.7 : 1,
-                  }}
-                  className="hover:bg-gray-100 dark:hover:bg-gray-700"
-                  onMouseEnter={(e) => {
-                    e.target.style.backgroundColor = theme === 'dark' ? '#374151' : '#f3f4f6';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.target.style.backgroundColor = 'transparent';
-                  }}
-                >
-                  {bookContentLoading ? 'Loading...' : file.name}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Separator for Main Navigation Buttons */}
-          <div style={{
-            width: '100%',
-            height: '1px',
-            backgroundColor: theme === 'dark' ? '#374151' : '#e5e7eb',
-            margin: showPortfolioMetrics ? '8px 0 4px' : '12px 0 8px'
-          }} />
-
-          {/* Portfolio Breakdown Button */}
-          <button
-            onClick={() => toggleSidebarPanel('portfolio', setShowPortfolioBreakdown)}
-            className={`rounded-lg border transition-colors w-full ${showPortfolioBreakdown
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '2px' : '4px',
-            }}
-            title="Portfolio Breakdown"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle}>PORTFOLIO</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showPortfolioBreakdown ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                Portfolio
-              </span>
-            )}
-          </button>
-
-          {/* Securities Universe Button */}
-          <button
-            onClick={() => toggleSidebarPanel('securities', setShowSecuritiesUniverse)}
-            className={`rounded-lg border transition-colors w-full ${showSecuritiesUniverse
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '2px' : '4px',
-            }}
-            title="Securities Universe"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle}>SECURITIES</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showSecuritiesUniverse ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                Securities Universe
-              </span>
-            )}
-          </button>
-
-          {/* Prediction Markets Hub Button */}
-          <button
-            onClick={togglePredictionMarketsHub}
-            className={`rounded-lg border transition-colors w-full ${showPredictionMarketsHub
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '2px' : '4px',
-            }}
-            title="Prediction Markets"
-            aria-label="Prediction Markets"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column' }} aria-hidden="true">
-                <span>PRED</span>
-                <span>MKTS</span>
-              </span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showPredictionMarketsHub ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                Prediction Markets
-              </span>
-            )}
-          </button>
-
-          {/* Signal Strength Button */}
-          <button
-            onClick={() => toggleSidebarPanel('ss', setShowSignalStrength)}
-            className={`rounded-lg border transition-colors w-full ${showSignalStrength
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '2px' : '4px',
-            }}
-            title="Signal Strength"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column' }} aria-hidden="true">
-                <span>Signal</span>
-                <span>Strength</span>
-              </span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showSignalStrength ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>Signal Strength</span>
-            )}
-          </button>
-
-          {/* ETF Pro Button */}
-          <button
-            onClick={() => toggleSidebarPanel('etfPro', setShowEtfPro)}
-            className={`rounded-lg border transition-colors w-full ${showEtfPro
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '2px' : '4px',
-            }}
-            title="ETF Pro"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle} aria-hidden="true">ETF Pro</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showEtfPro ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>ETF Pro</span>
-            )}
-          </button>
-
-          {/* Macro Show Button */}
-          <button
-            onClick={() => toggleSidebarPanel('macroShow', setShowMacroShow)}
-            className={`rounded-lg border transition-colors w-full ${showMacroShow
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '2px' : '4px',
-            }}
-            title="Macro Show"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle} aria-hidden="true">
-              <span style={{ ...sidebarRailTextStyle, flexDirection: 'column' }}>
-                <span>Macro</span>
-                <span>Show</span>
-              </span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showMacroShow ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>Macro Show</span>
-            )}
-          </button>
-
-          {/* Call Button */}
-          <button
-            onClick={() => toggleSidebarPanel('call', setShowCall)}
-            className={`rounded-lg border transition-colors w-full ${showCall
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
-            style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
-              marginTop: showPortfolioMetrics ? '2px' : '4px',
-            }}
-            title="Call"
-          >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle} aria-hidden="true">Call</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showCall ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>Call</span>
-            )}
-          </button>
-
-          {/* Expand/Collapse Portfolio Bar Button */}
-          <button
-            onClick={() => {
-              if (isProcessOpen) processRailExpandedRef.current = true;
-              setShowPortfolioMetrics(isProcessOpen ? true : !showPortfolioMetrics);
-            }}
-            className="rounded-lg border border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors mt-2"
-            title={showPortfolioMetrics ? "Collapse Portfolio" : "Expand Portfolio"}
-            style={{
-              width: '48px',
-              height: showPortfolioMetrics ? '32px' : '40px',
-              padding: '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginTop: showPortfolioMetrics ? '4px' : '8px',
-              alignSelf: 'center',
-              flexShrink: 0,
-              color: 'var(--dashboard-rail-blue)',
-            }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 16 16"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              className="shrink-0"
-            >
-              <path
-                d={showPortfolioMetrics ? "M6 12L10 8L6 4" : "M10 12L6 8L10 4"}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
-
-        {/* Expanded Content Area */}
-        {showPortfolioMetrics && (
+        {showBookMenu && (
           <div
-            className={`portfolio-sidebar-panel dashboard-stable-panel${portfolioExpandedUp ? ' bg-white dark:bg-gray-900' : ''}`}
-            style={portfolioExpandedUp ? {
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: '58px',
-              zIndex: 10,
-              overflowY: 'hidden',
-            } : { flex: 1, minHeight: 0 }}
-          >
-            <div className="portfolio-metrics-panel">
-              {portfolioError && (
-                <Text className="text-xs text-blue-600 dark:text-blue-400 mb-2">{portfolioError}</Text>
-              )}
-              <PortfolioSidebarSnapshot
-                portfolioData={portfolioData}
-                portfolioAccountsData={portfolioAccountsData}
-                loading={portfolioLoading}
-                refreshing={portfolioRefreshing}
-                rtaPositions={rtaPositions}
-                etfProSnapshot={etfProSnapshot}
-                exposureReconciliation={portfolioExposureReconciliation}
-                exposureReconciliationLoading={portfolioExposureReconciliationLoading}
-                interestValidation={portfolioInterestValidation}
-                interestValidationLoading={portfolioInterestValidationLoading}
-                predictionMarketProviderStatus={predictionMarketProviderStatus}
-                hedgeyeChangelog={hedgeyeChangelog}
-                hedgeyeChangelogLoading={hedgeyeChangelogLoading}
-                hedgeyeChangelogError={hedgeyeChangelogError}
-                hedgeyeChangelogLastSuccessAt={hedgeyeChangelogLastSuccessAt}
-                accounts={ibkrAccounts}
-                connection={ibkrConnection}
-                selectedAccount={selectedAccount}
-                onAccountChange={handleAccountChange}
-                onRefresh={handlePortfolioRefresh}
-                expandedUp={portfolioExpandedUp}
-                onToggleExpandUp={() => setPortfolioExpandedUp(v => !v)}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Analytics stays on the collapsed utility rail, not the expanded portfolio bar. */}
-        {!showPortfolioMetrics && <div
-          style={{
-            marginTop: 'auto',
-            padding: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderTop: `1px solid ${theme === 'dark' ? '#374151' : '#e5e7eb'}`,
-          }}
-          className="dark:border-gray-700"
-        >
-          <button
-            onClick={() => toggleSidebarPanel('analytics', setShowWorkflowStatus)}
-            className={`rounded-lg border transition-colors w-full ${showWorkflowStatus
-              ? 'bg-blue-50 border-blue-300 hover:bg-blue-100 dark:bg-[#1d354b] dark:border-[#31516d] dark:hover:bg-[#26435e]'
-              : 'bg-white border-gray-200 dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-[#1d354b] dark:border-gray-600'
-              }`}
+            ref={bookPopoverRef}
             style={{
-              ...sidebarRailControlStyle,
-              padding: showPortfolioMetrics ? '0 14px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: showPortfolioMetrics ? 'flex-start' : 'center',
-              position: showPortfolioMetrics ? 'relative' : undefined,
-              overflow: 'hidden',
+              position: 'fixed',
+              top: bookMenuPosition.top,
+              right: bookMenuPosition.right,
+              minWidth: '220px',
+              backgroundColor: '#ffffff',
+              border: '1px solid #dbe3ee',
+              borderRadius: '12px',
+              boxShadow: '0 14px 30px rgba(15, 23, 42, 0.14)',
+              zIndex: 1400,
+              padding: '5px 0',
+              fontFamily: 'var(--font-ui)',
             }}
-            title="Analytics"
           >
-            <div className="shrink-0 flex items-center justify-center" style={sidebarRailIconStyle}>
-              <span style={sidebarRailTextStyle}>ANALYTICS</span>
-            </div>
-            {showPortfolioMetrics && (
-              <span className={`whitespace-nowrap ${showWorkflowStatus ? 'text-[#111]' : 'text-[#333] dark:text-gray-200'}`} style={sidebarTabCenteredLabelStyle}>
-                Analytics
-              </span>
-            )}
-          </button>
-        </div>}
-      </div>
-
-      {/* Expected Values Window */}
-      {showEVWindow && (
-        <Suspense fallback={<LazyPanelFallback label="Loading +EV..." />}>
-          <ExpectedValuesWindow
-            show={showEVWindow}
-            onClose={() => closeSidebarPanel('ev', setShowEVWindow)}
-            top={0}
-            right="var(--dashboard-active-rail-width)"
-            width="calc(100vw - var(--dashboard-active-rail-width))"
-            theme={theme}
-            zIndex={getSidebarPanelZIndex('ev', showEVWindow)}
-            showPortfolioMetrics={showPortfolioMetrics}
-            portfolioData={portfolioData}
-            portfolioLoading={portfolioLoading}
-            portfolioRefreshing={portfolioRefreshing}
-            portfolioError={portfolioError}
-            selectedAccount={selectedAccount}
-          />
-        </Suspense>
-      )}
-
-      {/* The Pods Window - Separate Pop-out Panel */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 'var(--dashboard-active-rail-width)',
-          width: showPeaPodWindow
-            ? 'var(--dashboard-rail-expanded-width)'
-            : '0px',
-          height: '100vh',
-          zIndex: getSidebarPanelZIndex('pods', showPeaPodWindow),
-          backgroundColor: '#ffffff',
-          borderLeft: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
-          borderRight: showPeaPodWindow ? '1px solid #e5e7eb' : 'none',
-          borderRadius: showPeaPodWindow ? '0.75rem 0 0 0' : '0',
-          boxShadow: showPeaPodWindow
-            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
-            : 'none',
-          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
-          display: showPeaPodWindow ? 'flex' : 'none',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-        className="dark:bg-gray-900 dark:border-gray-700"
-      >
-        {showPeaPodWindow && (
-          <>
-            {/* Header with Centered Title (Clickable to Close) */}
-            <div
-              style={{
-                padding: '12px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                backgroundColor: '#f9fafb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
-              onClick={() => closeSidebarPanel('pods', setShowPeaPodWindow)}
-            >
-              <Title
-                className="dark:text-white"
+            {bookFiles.map((file) => (
+              <button
+                key={file.path}
+                type="button"
+                onClick={() => openBookFile(file)}
+                disabled={bookContentLoading}
                 style={{
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  color: '#000',
-                  margin: 0,
-                  userSelect: 'none',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '10px 14px',
+                  fontSize: '14px',
+                  color: '#17233a',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  cursor: bookContentLoading ? 'wait' : 'pointer',
+                  opacity: bookContentLoading ? 0.7 : 1,
+                }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.backgroundColor = '#f3f7fc';
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                The Pods
-              </Title>
-            </div>
-
-            {/* Scrollable Content */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '16px',
-              }}
-            >
-              {/* Securities Search Box */}
-              <div className="relative mb-4" style={{ width: '100%', maxWidth: '400px' }}>
-                <input
-                  ref={podsSearchInputRef}
-                  type="text"
-                  value={podsSearchQuery}
-                  placeholder="Search securities..."
-                  onChange={(e) => {
-                    setPodsSearchQuery(e.target.value);
-                    setPodsShowSearchResults(true);
-                    setPodsHighlightedIndex(-1);
-                  }}
-                  onFocus={() => {
-                    if (podsSearchQuery.trim()) {
-                      setPodsShowSearchResults(true);
-                    }
-                  }}
-                  onBlur={() => {
-                    // Delay hiding to allow click on results
-                    setTimeout(() => {
-                      setPodsShowSearchResults(false);
-                      setPodsHighlightedIndex(-1);
-                    }, 200);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      setPodsHighlightedIndex(prev =>
-                        prev < podsFilteredSecurities.length - 1 ? prev + 1 : prev
-                      );
-                      setPodsShowSearchResults(true);
-                    } else if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      setPodsHighlightedIndex(prev => prev > 0 ? prev - 1 : -1);
-                    } else if (e.key === 'Enter' && podsHighlightedIndex >= 0) {
-                      e.preventDefault();
-                      const selected = podsFilteredSecurities[podsHighlightedIndex];
-                      if (selected) {
-                        handlePodsSecuritySelect(selected);
-                      }
-                    } else if (e.key === 'Escape') {
-                      setPodsShowSearchResults(false);
-                      setPodsSearchQuery('');
-                      podsSearchInputRef.current?.blur();
-                    }
-                  }}
-                  className="px-3 py-2 text-sm border border-[#e5e7eb] rounded-md bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#d1d5db] min-w-0 w-full"
-                />
-                {podsShowSearchResults && podsFilteredSecurities.length > 0 && (
-                  <div
-                    className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-[#e5e7eb] dark:border-gray-600 shadow-lg max-h-60 overflow-y-auto"
-                    style={{ top: '100%' }}
-                  >
-                    {podsFilteredSecurities.map((security, index) => (
-                      <div
-                        key={security.ticker}
-                        onClick={() => handlePodsSecuritySelect(security)}
-                        className={`px-3 py-2 cursor-pointer text-sm ${index === podsHighlightedIndex
-                          ? 'bg-[#f3f4f6] dark:bg-blue-900/30'
-                          : 'hover:bg-[#f3f4f6] dark:hover:bg-gray-700'
-                          }`}
-                        onMouseEnter={() => setPodsHighlightedIndex(index)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold dark:text-white">{security.ticker}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-500 ml-2">
-                            {ASSET_CLASS_NAMES[security.assetClass] || security.assetClass}
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                          {security.name}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* POD Calculations */}
-              <div
-                className="mt-6 p-4 bg-[#f9fafb] dark:bg-gray-800 rounded-lg border border-[#e5e7eb] dark:border-gray-700"
-                style={{ width: '100%', maxWidth: '400px' }}
-              >
-                <Text className="text-sm font-semibold dark:text-white mb-4">
-                  POD Calculations
-                </Text>
-
-                <div className="space-y-4">
-                  {/* POD1 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-[#e5e7eb] dark:border-gray-600">
-                    <div className="flex items-center justify-between mb-2">
-                      <Text className="text-sm font-semibold dark:text-white">
-                        POD1
-                      </Text>
-                      <Badge color="blue" size="sm">
-                        Revenue
-                      </Badge>
-                    </div>
-                    <Text className="text-xs text-gray-600 dark:text-gray-400">
-                      #roc of REVENUE Growth
-                    </Text>
-                    <div className="mt-2">
-                      <Text className="text-lg font-bold dark:text-white">
-                        {podsSelectedSecurity ? '--' : '--'}
-                      </Text>
-                    </div>
-                  </div>
-
-                  {/* POD2 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-[#e5e7eb] dark:border-gray-600">
-                    <div className="flex items-center justify-between mb-2">
-                      <Text className="text-sm font-semibold dark:text-white">
-                        POD2
-                      </Text>
-                      <Badge color="emerald" size="sm">
-                        EBITDA/EPS
-                      </Badge>
-                    </div>
-                    <Text className="text-xs text-gray-600 dark:text-gray-400">
-                      #roc of EBITDA or EPS Growth
-                    </Text>
-                    <div className="mt-2">
-                      <Text className="text-lg font-bold dark:text-white">
-                        {podsSelectedSecurity ? '--' : '--'}
-                      </Text>
-                    </div>
-                  </div>
-
-                  {/* POD3 */}
-                  <div className="p-3 bg-white dark:bg-gray-700 rounded-md border border-[#e5e7eb] dark:border-gray-600">
-                    <div className="flex items-center justify-between mb-2">
-                      <Text className="text-sm font-semibold dark:text-white">
-                        POD3
-                      </Text>
-                      <Badge color="purple" size="sm">
-                        FCF
-                      </Badge>
-                    </div>
-                    <Text className="text-xs text-gray-600 dark:text-gray-400">
-                      #roc of FCF (Free Cash Flow) Growth
-                    </Text>
-                    <div className="mt-2">
-                      <Text className="text-lg font-bold dark:text-white">
-                        {podsSelectedSecurity ? '--' : '--'}
-                      </Text>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Selected Security Display (Placeholder for future calculation) */}
-              {podsSelectedSecurity && (
-                <div className="mt-4 p-4 bg-[#f9fafb] dark:bg-gray-800 rounded-lg border border-[#e5e7eb] dark:border-gray-700">
-                  <Text className="text-sm font-semibold dark:text-white mb-2">
-                    Selected Security
-                  </Text>
-                  <Text className="text-sm dark:text-gray-300">
-                    <strong>Ticker:</strong> {podsSelectedSecurity.ticker}
-                  </Text>
-                  <Text className="text-sm dark:text-gray-300">
-                    <strong>Name:</strong> {podsSelectedSecurity.name}
-                  </Text>
-                  <Text className="text-sm dark:text-gray-300">
-                    <strong>Asset Class:</strong> {ASSET_CLASS_NAMES[podsSelectedSecurity.assetClass] || podsSelectedSecurity.assetClass}
-                  </Text>
-                  <Text className="text-sm dark:text-gray-400 mt-2 italic">
-                    Calculation will appear here based on 3 factors
-                  </Text>
-                </div>
-              )}
-            </div>
-          </>
+                {bookContentLoading ? 'Loading...' : file.name}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
       {/* Book/Notes Modal */}
-      {showBookModal && selectedBookContent && (
-        <div
+      <PersistentSurface
+          active={showBookModal && Boolean(selectedBookContent)}
           style={{
             position: 'fixed',
             top: 0,
@@ -2466,7 +2238,6 @@ const PortfolioDashboard = ({
           }}
           onClick={() => {
             setShowBookModal(false);
-            setSelectedTag(null);
           }}
         >
           <div
@@ -2617,7 +2388,6 @@ const PortfolioDashboard = ({
                 <Button
                   onClick={() => {
                     setShowBookModal(false);
-                    setSelectedTag(null);
                   }}
                   variant="secondary"
                   size="sm"
@@ -2923,91 +2693,16 @@ const PortfolioDashboard = ({
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Securities Universe Panel */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 'var(--dashboard-active-rail-width)',
-          width: showSecuritiesUniverse
-            ? (showPortfolioMetrics
-              ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (10/12) - var(--dashboard-rail-collapsed-width))')
-            : '0px',
-          height: '100vh',
-          backgroundColor: '#ffffff',
-          zIndex: getSidebarPanelZIndex('securities', showSecuritiesUniverse),
-          borderLeft: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
-          borderRight: showSecuritiesUniverse ? '1px solid #e5e7eb' : 'none',
-          borderRadius: showSecuritiesUniverse ? '0.75rem 0 0 0' : '0',
-          boxShadow: showSecuritiesUniverse
-            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
-            : 'none',
-          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
-          display: showSecuritiesUniverse ? 'flex' : 'none',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-        className="dashboard-side-panel dashboard-side-panel--portfolio dark:bg-gray-900 dark:border-gray-700"
-      >
-        {showSecuritiesUniverse && (
-          <>
-            <div
-              style={{
-                padding: '12px 16px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderBottom: '1px solid #e5e7eb',
-                backgroundColor: '#f9fafb',
-                cursor: 'pointer',
-              }}
-              className="dark:border-gray-700"
-              onClick={() => closeSidebarPanel('securities', setShowSecuritiesUniverse)}
-            >
-              <Title
-                className="dark:text-white"
-                style={{
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  color: '#000',
-                  margin: 0,
-                  userSelect: 'none',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif',
-                }}
-              >
-                Securities Universe
-              </Title>
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: 0,
-              }}
-            >
-              <Suspense fallback={<LazyPanelFallback label="Loading securities universe..." />}>
-                <SecuritiesUniverse />
-              </Suspense>
-            </div>
-          </>
-        )}
-      </div>
+      </PersistentSurface>
 
       {/* Securities A–Z list panel */}
-      <div
+      <PersistentSurface
+        active={showPerformanceTracking}
         style={{
           position: 'fixed',
           top: 0,
-          right: 'var(--dashboard-active-rail-width)',
-          width: showPerformanceTracking
-            ? (showPortfolioMetrics
-              ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (9/12) - var(--dashboard-rail-collapsed-width))')
-            : '0px',
+          right: 'var(--dashboard-rail-panel-offset)',
+          width: showPerformanceTracking ? 'var(--dashboard-standard-panel-width)' : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: getSidebarPanelZIndex('performance', showPerformanceTracking),
@@ -3024,8 +2719,6 @@ const PortfolioDashboard = ({
         }}
         className="dashboard-side-panel dashboard-side-panel--cpi dark:bg-gray-900 dark:border-gray-700"
       >
-        {showPerformanceTracking && (
-          <>
             <div
               style={{
                 padding: '12px 16px',
@@ -3064,21 +2757,18 @@ const PortfolioDashboard = ({
                 <PerformanceTracking />
               </Suspense>
             </div>
-          </>
-        )}
-      </div>
+      </PersistentSurface>
 
       {/* Portfolio Breakdown Panel */}
-      <div
+      <PersistentSurface
+        active={showPortfolioBreakdown}
+        data-testid="portfolio-breakdown-panel"
+        className="dashboard-side-panel dashboard-side-panel--portfolio-card dark:bg-gray-900 dark:border-gray-700"
         style={{
           position: 'fixed',
           top: 0,
-          right: 'var(--dashboard-active-rail-width)',
-          width: showPortfolioBreakdown
-            ? (showPortfolioMetrics
-              ? 'calc((100vw - 16px) * (10/12) - 128px)'
-              : 'calc((100vw - 16px) * (9/12) - var(--dashboard-rail-collapsed-width))')
-            : '0px',
+          right: 'var(--dashboard-rail-panel-offset)',
+          width: showPortfolioBreakdown ? 'var(--dashboard-standard-panel-width)' : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: getSidebarPanelZIndex('portfolio', showPortfolioBreakdown),
@@ -3093,15 +2783,13 @@ const PortfolioDashboard = ({
           flexDirection: 'column',
           overflow: 'hidden',
         }}
-        className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showPortfolioBreakdown && (
-          <>
             <div
+              className="dashboard-portfolio-panel__content"
               style={{
                 flex: 1,
                 overflowY: 'auto',
-                padding: '4px 16px 16px 16px',
+                padding: '8px',
               }}
             >
               <Suspense fallback={<LazyPanelFallback label="Loading portfolio breakdown..." />}>
@@ -3114,60 +2802,171 @@ const PortfolioDashboard = ({
                 />
               </Suspense>
             </div>
-          </>
-        )}
-      </div>
+      </PersistentSurface>
 
-      {/* Unified Prediction Markets Hub */}
-      <div
+      {/* Dense factor-risk and archive-universe workspace. */}
+      <PersistentSurface
+        active={showExposureLab}
+        data-testid="exposure-lab-panel"
+        data-layout="left-workspace-card"
+        className="dashboard-side-panel dashboard-side-panel--exposure-card dark:bg-gray-900 dark:border-gray-700"
         style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 'var(--dashboard-active-rail-width)',
-          width: showPredictionMarketsHub ? undefined : '0px',
-          boxSizing: 'border-box',
-          height: '100vh',
+          top: '8px',
+          right: 'calc(var(--dashboard-rail-panel-offset) + 16px)',
+          bottom: '8px',
+          left: showExposureLab ? '8px' : 'auto',
+          width: showExposureLab ? 'auto' : '0px',
+          height: 'calc(100vh - 16px)',
           backgroundColor: '#ffffff',
-          zIndex: getSidebarPanelZIndex('predictionMarkets', showPredictionMarketsHub),
-          borderLeft: showPredictionMarketsHub ? '1px solid #e5e7eb' : 'none',
-          borderRight: showPredictionMarketsHub ? '1px solid #e5e7eb' : 'none',
-          borderRadius: '0',
-          boxShadow: showPredictionMarketsHub
-            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
-            : 'none',
-          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
-          display: showPredictionMarketsHub ? 'flex' : 'none',
+          zIndex: getSidebarPanelZIndex('exposureLab', showExposureLab),
+          border: showExposureLab ? '1px solid #d8e2ea' : 'none',
+          borderRadius: showExposureLab ? '10px' : '0',
+          boxShadow: showExposureLab ? '0 10px 26px rgba(15, 23, 42, 0.12)' : 'none',
+          transition: 'width 0.2s ease-in-out, right 0.2s ease-in-out',
+          display: showExposureLab ? 'flex' : 'none',
           flexDirection: 'column',
           overflow: 'hidden',
         }}
-        className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showPredictionMarketsHub && (
-          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <Suspense fallback={<LazyPanelFallback label="Loading prediction markets..." />}>
-              <PredictionMarketsHubPanel
-                onClose={closePredictionMarketsHub}
-                portfolioData={portfolioData}
-                selectedAccount={selectedAccount}
-                activeMarket={activePredictionMarket}
-                onActiveMarketChange={setActivePredictionMarket}
-                activeWtiCadence={activeWtiCadence}
-                onWtiCadenceChange={setActiveWtiCadence}
-                ibkrConnection={ibkrConnection}
-              />
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <Suspense fallback={<LazyPanelFallback label="Loading Exposure Lab..." />}>
+            <ExposureLab
+              portfolioData={portfolioData}
+              isLoading={portfolioLoading}
+              isRefreshing={portfolioRefreshing}
+              connection={ibkrConnection}
+              onRefresh={handlePortfolioRefresh}
+              onClose={closeExposureLab}
+            />
+          </Suspense>
+        </div>
+      </PersistentSurface>
+
+      {/* Each market owns a persistent instance so switching markets never
+          mutates and clears a shared monitor component. */}
+      <PersistentSurface
+        active={showPredictionMonitor}
+        preserveLayoutWhenInactive
+        data-testid="prediction-market-resolver-test-panel"
+        className="dashboard-side-panel dashboard-side-panel--resolver-test dark:bg-gray-900 dark:border-gray-700"
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: 'var(--dashboard-rail-panel-offset)',
+          width: undefined,
+          height: '100vh',
+          backgroundColor: '#ffffff',
+          zIndex: getSidebarPanelZIndex('predictionMonitor', showPredictionMonitor),
+          borderLeft: showPredictionMonitor ? '1px solid #e5e7eb' : 'none',
+          borderRight: showPredictionMonitor ? '1px solid #e5e7eb' : 'none',
+          borderRadius: '0',
+          boxShadow: showPredictionMonitor
+            ? '-2px 0 8px rgba(0, 0, 0, 0.08), 2px 0 8px rgba(0, 0, 0, 0.08)'
+            : 'none',
+          transition: 'width 0.3s ease-in-out, right 0.3s ease-in-out, border-radius 0.3s ease-in-out',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
+          <Suspense fallback={<LazyPanelFallback label="Loading prediction monitor..." />}>
+            {PREDICTION_MONITOR_NAV_ITEMS.map(({ marketId }) => (
+              <PersistentSurface
+                key={marketId}
+                active={showPredictionMonitor && activePredictionMonitorMarket === marketId}
+                preserveLayoutWhenInactive
+                data-testid={`prediction-market-surface-${marketId}`}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                <PredictionMarketResolverTestPanel
+                  marketId={marketId}
+                  onClose={closePredictionMonitor}
+                  portfolioData={portfolioData}
+                  selectedAccount={selectedAccount}
+                />
+              </PersistentSurface>
+            ))}
+          </Suspense>
+        </div>
+      </PersistentSurface>
+
+      {/* Morning TL;DR - indexed dated research brief */}
+      <PersistentSurface active={showMorningTldr}>
+        <Suspense fallback={<LazyPanelFallback label="Loading morning TL;DR..." />}>
+          <MorningTldrOverlay
+            onClose={() => closeSidebarPanel('tldr', setShowMorningTldr)}
+          />
+        </Suspense>
+      </PersistentSurface>
+
+      {/* The Analyst remains mounted after its first open so chats and streams survive closing the panel. */}
+      <PersistentSurface
+        as="section"
+        active={showAnalyst}
+        ref={analystPanelSurfaceRef}
+        data-testid="analyst-panel-surface"
+        className={[
+          'dashboard-navigation-rail__balance-panel',
+          'dashboard-navigation-rail__analyst-panel',
+          analystPanelResizing && 'dashboard-navigation-rail__analyst-panel--resizing',
+          analystPanelPosition !== ANALYST_PANEL_DEFAULT_POSITION
+            && `dashboard-navigation-rail__analyst-panel--${analystPanelPosition}`,
+          analystPanelPosition === ANALYST_PANEL_DEFAULT_POSITION
+            && isRightWorkspaceOpen
+            && 'dashboard-navigation-rail__balance-panel--workspace-left',
+          analystPanelPosition === ANALYST_PANEL_DEFAULT_POSITION
+            && showPortfolioBreakdown
+            && 'dashboard-navigation-rail__balance-panel--portfolio-left',
+          'dark:bg-gray-900 dark:border-gray-700',
+        ].filter(Boolean).join(' ')}
+        style={{
+          zIndex: getSidebarPanelZIndex('analyst', showAnalyst),
+          '--analyst-panel-width': `${analystPanelWidth}px`,
+        }}
+        aria-label="The Analyst"
+      >
+        <div
+          className="dashboard-navigation-rail__analyst-resize-handle"
+          data-testid="analyst-panel-resize-handle"
+          role="separator"
+          aria-label={`Resize The Analyst from the ${analystPanelResizeEdge} edge`}
+          aria-orientation="vertical"
+          aria-valuemin={ANALYST_PANEL_MIN_WIDTH}
+          aria-valuemax={ANALYST_PANEL_MAX_WIDTH}
+          aria-valuenow={analystPanelWidth}
+          aria-valuetext={`${analystPanelWidth} pixels wide`}
+          tabIndex={0}
+          title={`Drag the ${analystPanelResizeEdge} edge to resize · double-click to reset`}
+          onPointerDown={beginAnalystPanelResize}
+          onKeyDown={handleAnalystPanelResizeKeyDown}
+          onDoubleClick={() => setAnalystPanelWidth(ANALYST_PANEL_DEFAULT_WIDTH)}
+        />
+        <div className="dashboard-navigation-rail__balance-body dashboard-navigation-rail__analyst-body">
+          <AnalystSurfaceBoundary onClose={() => closeSidebarPanel('analyst', setShowAnalyst)}>
+            <Suspense fallback={<LazyPanelFallback label="Loading The Analyst..." />}>
+              <AnalystPanel onClose={() => closeSidebarPanel('analyst', setShowAnalyst)} />
             </Suspense>
-          </div>
-        )}
-      </div>
+          </AnalystSurfaceBoundary>
+        </div>
+      </PersistentSurface>
 
       {/* Signal Strength Reference Panel */}
-      <div
+      <PersistentSurface
+        active={showSignalStrength}
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
-          right: 'var(--dashboard-active-rail-width)',
+          right: 'var(--dashboard-rail-panel-offset)',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: getSidebarPanelZIndex('ss', showSignalStrength),
@@ -3179,7 +2978,6 @@ const PortfolioDashboard = ({
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showSignalStrength && (
           <Suspense fallback={<LazyPanelFallback label="Loading SS..." />}>
             <SignalStrengthPanel
               onClose={() => closeSidebarPanel('ss', setShowSignalStrength)}
@@ -3189,16 +2987,16 @@ const PortfolioDashboard = ({
               onRefreshChangelog={fetchHedgeyeChangelog}
             />
           </Suspense>
-        )}
-      </div>
+      </PersistentSurface>
 
       {/* ETF Pro Reference Panel */}
-      <div
+      <PersistentSurface
+        active={showEtfPro}
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
-          right: 'var(--dashboard-active-rail-width)',
+          right: 'var(--dashboard-rail-panel-offset)',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: getSidebarPanelZIndex('etfPro', showEtfPro),
@@ -3210,7 +3008,6 @@ const PortfolioDashboard = ({
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showEtfPro && (
           <Suspense fallback={<LazyPanelFallback label="Loading ETF Pro..." />}>
             <EtfProPanel
               snapshot={etfProSnapshot}
@@ -3221,16 +3018,16 @@ const PortfolioDashboard = ({
               onClose={() => closeSidebarPanel('etfPro', setShowEtfPro)}
             />
           </Suspense>
-        )}
-      </div>
+      </PersistentSurface>
 
       {/* Macro Show Reference Panel */}
-      <div
+      <PersistentSurface
+        active={showMacroShow}
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
-          right: 'var(--dashboard-active-rail-width)',
+          right: 'var(--dashboard-rail-panel-offset)',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: getSidebarPanelZIndex('macroShow', showMacroShow),
@@ -3242,7 +3039,6 @@ const PortfolioDashboard = ({
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showMacroShow && (
           <Suspense fallback={<LazyPanelFallback label="Loading Macro Show..." />}>
             <HedgeyeShowPanel
               snapshotType="the-macro-show"
@@ -3250,16 +3046,16 @@ const PortfolioDashboard = ({
               onClose={() => closeSidebarPanel('macroShow', setShowMacroShow)}
             />
           </Suspense>
-        )}
-      </div>
+      </PersistentSurface>
 
       {/* Call Reference Panel */}
-      <div
+      <PersistentSurface
+        active={showCall}
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
-          right: 'var(--dashboard-active-rail-width)',
+          right: 'var(--dashboard-rail-panel-offset)',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: getSidebarPanelZIndex('call', showCall),
@@ -3271,7 +3067,6 @@ const PortfolioDashboard = ({
         }}
         className="dark:bg-gray-900 dark:border-gray-700"
       >
-        {showCall && (
           <Suspense fallback={<LazyPanelFallback label="Loading Call..." />}>
             <HedgeyeShowPanel
               snapshotType="the-call"
@@ -3279,11 +3074,11 @@ const PortfolioDashboard = ({
               onClose={() => closeSidebarPanel('call', setShowCall)}
             />
           </Suspense>
-        )}
-      </div>
+      </PersistentSurface>
 
       {/* Lightweight Systems flyout */}
-      <div
+      <PersistentSurface
+        active={showSystemReadiness}
         style={{
           position: 'fixed',
           top: '50%',
@@ -3310,26 +3105,25 @@ const PortfolioDashboard = ({
         className="system-status-flyout"
         data-testid="system-readiness-sheet"
       >
-        {showSystemReadiness ? (
           <Suspense fallback={<LazyPanelFallback label="Loading systems..." />}>
             <SystemReadinessPanel
-              open
+              open={showSystemReadiness}
               onClose={() => closeSidebarPanel('system', setShowSystemReadiness)}
               onStatusChange={handleSystemReadinessStatus}
+              dashboardCards={dashboardCardStatuses}
+              resolverMarketId={showPredictionMonitor ? activePredictionMonitorMarket : null}
             />
           </Suspense>
-        ) : null}
-      </div>
+      </PersistentSurface>
 
       {/* Workflow Status Panel */}
-      <div
+      <PersistentSurface
+        active={showWorkflowStatus}
         style={{
           position: 'fixed',
           top: 0,
-          right: 'var(--dashboard-active-rail-width)',
-          width: showWorkflowStatus
-            ? 'calc((100vw - 16px) * (5/12))'
-            : '0px',
+          right: 'var(--dashboard-rail-panel-offset)',
+          width: showWorkflowStatus ? 'var(--dashboard-workflow-panel-width)' : '0px',
           height: '100vh',
           backgroundColor: '#ffffff',
           zIndex: getSidebarPanelZIndex('analytics', showWorkflowStatus),
@@ -3348,8 +3142,6 @@ const PortfolioDashboard = ({
         }}
         className="dark:bg-gray-900/95 dark:border-gray-700 backdrop-blur-sm"
       >
-        {showWorkflowStatus && (
-          <>
             {/* Header with Centered Title (Clickable to Close) */}
             <div
               style={{
@@ -3402,21 +3194,18 @@ const PortfolioDashboard = ({
             >
               <Suspense fallback={<LazyPanelFallback label="Loading analytics..." />}>
                 <WorkflowStatus
-                  key={analyticsRefreshKey}
                   portfolioData={portfolioData}
                   connection={ibkrConnection}
-                  forceRefresh={analyticsRefreshKey > 0}
+                  refreshToken={analyticsRefreshKey}
                 />
               </Suspense>
             </div>
-          </>
-        )}
-      </div>
+      </PersistentSurface>
 
-      {isProcessOpen && (
+      <PersistentSurface active={isProcessOpen}>
         <Suspense fallback={<LazyPanelFallback label="Loading Process..." />}>
           <ProcessOverlay
-            documentId={processDocumentId}
+            documentId={processDocumentId || lastProcessDocumentIdRef.current}
             onClose={() => {
               restoreProcessFocusRef.current = true;
               onCloseProcess?.();
@@ -3424,7 +3213,7 @@ const PortfolioDashboard = ({
             onNavigate={onNavigateProcess}
           />
         </Suspense>
-      )}
+      </PersistentSurface>
 
     </div >
   );

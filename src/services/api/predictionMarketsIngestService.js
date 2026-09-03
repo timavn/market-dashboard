@@ -1,9 +1,13 @@
 import axios from 'axios';
 
-const API_BASE_URL =
-  process.env.REACT_APP_BACKEND_URL ||
-  process.env.REACT_APP_API_BASE_URL ||
-  'http://localhost:3001';
+// Use the CRA proxy while the dashboard is running locally so the browser and
+// API share one origin. This avoids localhost/127.0.0.1 transport differences
+// masking an otherwise available verified-live market payload.
+const API_BASE_URL = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1):3000$/.test(window.location.host)
+  ? ''
+  : process.env.REACT_APP_BACKEND_URL ||
+    process.env.REACT_APP_API_BASE_URL ||
+    'http://localhost:3001';
 
 const BASE = `${API_BASE_URL}/api/prediction-markets`;
 const IBKR_REFRESH_TIMEOUT_MS = Number(process.env.REACT_APP_IBKR_REFRESH_TIMEOUT_MS || 60000);
@@ -25,8 +29,16 @@ class PredictionMarketsIngestService {
     return response.data;
   }
 
-  async getPredictionMarketsOverview() {
+  async getPredictionMarketsOverview(params = {}) {
     const response = await axios.get(`${BASE}/overview`, {
+      params,
+      timeout: 30000,
+    });
+    return response.data;
+  }
+
+  async getSpxPredictionMarketsOverview() {
+    const response = await axios.get(`${BASE}/overview/spx`, {
       timeout: 30000,
     });
     return response.data;
@@ -58,6 +70,13 @@ class PredictionMarketsIngestService {
 
   async getSpxCloseWorkbench() {
     const response = await axios.get(`${BASE}/spx-close`, {
+      timeout: 30000,
+    });
+    return response.data;
+  }
+
+  async getSpxCoverSnapshot() {
+    const response = await axios.get(`${BASE}/spx-close/cover`, {
       timeout: 30000,
     });
     return response.data;
@@ -101,6 +120,21 @@ class PredictionMarketsIngestService {
     const response = await axios.get(`${BASE}/cpi/current`, { timeout: 30000 });
     return response.data;
   }
+
+  async getCpiOfficialFinals() {
+    const response = await axios.get(`${BASE}/cpi/finals`, { timeout: 15000 });
+    return response.data;
+  }
+
+  async getCpiBenchmarks(month) {
+    const response = await axios.get(`${BASE}/cpi/benchmarks`, {
+      params: { month },
+      timeout: 30000,
+    });
+    return response.data;
+  }
 }
 
-export default new PredictionMarketsIngestService();
+const predictionMarketsIngestService = new PredictionMarketsIngestService();
+
+export default predictionMarketsIngestService;

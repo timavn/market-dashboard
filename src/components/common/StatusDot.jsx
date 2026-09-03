@@ -5,6 +5,7 @@ import {
   formatLastUpdated,
   formatLastUpdatedForSources
 } from '../../utils/timeUtils';
+import { useSurfaceActivity } from './PersistentSurface';
 
 function sourceCardTestId(id) {
   return `status-source-card-${String(id || 'source').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
@@ -162,6 +163,7 @@ const StatusDot = ({
   overallLabel,
   showDateOnly = false,
 }) => {
+  const surfaceActive = useSurfaceActivity();
   const [open, setOpen] = useState(false);
   const [popupPos, setPopupPos] = useState({ top: 0, left: 0, right: 'auto' });
   const [acknowledgedWarnings, setAcknowledgedWarnings] = useState({});
@@ -318,7 +320,7 @@ const StatusDot = ({
 
   // Close on outside click / Escape
   useEffect(() => {
-    if (!open) return;
+    if (!open || !surfaceActive) return;
 
     const handleClickOutside = (event) => {
       const target = event.target;
@@ -342,7 +344,7 @@ const StatusDot = ({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open]);
+  }, [open, surfaceActive]);
 
   const calculatePosition = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -374,7 +376,7 @@ const StatusDot = ({
   }, []);
 
   useLayoutEffect(() => {
-    if (!open || positionedByDragRef.current || typeof window === 'undefined') return;
+    if (!open || !surfaceActive || positionedByDragRef.current || typeof window === 'undefined') return;
     const rect = popoverRef.current?.getBoundingClientRect();
     const margin = STATUS_DIALOG_MARGIN;
     const width = rect?.width || Math.min(STATUS_DIALOG_WIDTH, window.innerWidth - (margin * 2));
@@ -394,10 +396,10 @@ const StatusDot = ({
       }
       return next;
     });
-  }, [open]);
+  }, [open, surfaceActive]);
 
   useEffect(() => {
-    if (!dragging) return undefined;
+    if (!dragging || !surfaceActive) return undefined;
 
     const handleMouseMove = (event) => {
       if (!dragRef.current) return;
@@ -421,7 +423,7 @@ const StatusDot = ({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [clampPopoverPosition, dragging]);
+  }, [clampPopoverPosition, dragging, surfaceActive]);
 
   const startDrag = useCallback((event) => {
     if (!popoverRef.current) return;
@@ -682,7 +684,7 @@ const StatusDot = ({
         </span>
       </button>
 
-      {popover && createPortal(popover, document.body)}
+      {surfaceActive && popover && createPortal(popover, document.body)}
     </div>
   );
 };

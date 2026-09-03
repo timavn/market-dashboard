@@ -1,0 +1,27 @@
+{
+  "profile": "analyst",
+  "displayName": "The Analyst",
+  "model": "openai/gpt-5.6-luna",
+  "testedHermesVersion": "0.20.1 (2026.8.13)",
+  "testedHermesCommit": "165c889e5b4277b56dadd42949a4112c1e6175a6",
+  "testedAt": "2026-08-15",
+  "gatewayContract": 1,
+  "gatewayPort": 9121,
+  "sidecarPort": 6951,
+  "mcpServer": "market-dashboard-analyst",
+  "approvedTools": [
+    "get_research_coverage",
+    "get_briefing_packet",
+    "get_market_situation_context",
+    "search_research",
+    "get_research_source",
+    "get_research_page_image",
+    "get_portfolio_context",
+    "get_balance_context",
+    "get_live_market_snapshot",
+    "get_prediction_market_snapshot",
+    "get_market_history",
+    "get_company_fundamentals",
+    "get_macro_series"
+  ]
+}

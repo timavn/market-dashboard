@@ -29,6 +29,8 @@
     <string>__PATH_VALUE__</string>
     <key>MARKET_DASHBOARD_LAUNCHD_LABEL</key>
     <string>com.market-dashboard.stack</string>
+    <key>LEGACY_HERMES_MODE</key>
+    <string>__LEGACY_HERMES_MODE__</string>
     <key>HERMES_BRIDGE_AWS_PROFILE</key>
     <string>__HERMES_BRIDGE_AWS_PROFILE__</string>
     <key>HERMES_BRIDGE_ENABLED</key>
@@ -37,9 +39,9 @@
     <string>__HERMES_OPERATIONS_BRIDGE_ENABLED__</string>
     <key>HERMES_PORTFOLIO_BRIDGE_ENABLED</key>
     <string>__HERMES_PORTFOLIO_BRIDGE_ENABLED__</string>
-    <key>HERMES_RELIABILITY_CONTROLLER_MODE</key>
+    <key>READINESS_CONTROLLER_MODE</key>
     <string>__HERMES_CONTROLLER_MODE__</string>
-    <key>HERMES_RELIABILITY_ENABLED_ACTIONS</key>
+    <key>READINESS_CONTROLLER_ENABLED_ACTIONS</key>
     <string>__HERMES_CONTROLLER_ENABLED_ACTIONS__</string>
     <key>MARKET_DASHBOARD_LOCAL_NOTIFICATIONS</key>
     <string>__LOCAL_NOTIFICATIONS__</string>

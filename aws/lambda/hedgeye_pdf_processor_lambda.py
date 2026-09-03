@@ -28,7 +28,7 @@ from botocore.exceptions import ClientError
 
 import parse_bitcoin_tracker as bitcoin_tracker_parser
 from date_utils import extract_date_from_pdf
-from parse_cftc import extract_cftc_data, save_to_dynamodb as save_cftc
+from parse_cftc import extract_cftc_data, save_audit_to_dynamodb as save_cftc_audit
 from parse_early_look import extract_early_look
 from parse_hedgeye_pdf import extract_all_risk_range_data
 from parse_macro_show import extract_macro_show, save_to_dynamodb as save_macro_show
@@ -231,7 +231,7 @@ PARSERS: Dict[str, Tuple[Extractor, Saver]] = {
     "the-macro-show": (extract_macro_show, save_macro_show),
     "the-call": (extract_the_call, save_the_call),
     "volume": (extract_volume_snapshot, save_volume),
-    "cftc-positioning": (extract_cftc_data, save_cftc),
+    "cftc-positioning": (extract_cftc_data, save_cftc_audit),
 }
 
 REGISTERED_PDF_PRODUCTS = {
@@ -463,6 +463,11 @@ def _validate_product_data(product_id: str, data: Any) -> None:
             raise ValueError(
                 "signal-strength parser extracted no validated membership rows"
             )
+        reported_count = data.get("reportedStockCount") if isinstance(data, dict) else None
+        if reported_count is not None and len(stocks) != int(reported_count):
+            raise ValueError(
+                "signal-strength parser extracted a partial membership list"
+            )
     elif rule == "volume_metrics":
         metrics = data.get("metrics") if isinstance(data, dict) else None
         required_groups = ("totalMarket", "exchange")
@@ -690,11 +695,13 @@ def build_entity_events(
         }
         if signal_value:
             item["signalValue"] = signal_value
-        if product_id in {"risk-ranges", "early-look"}:
+        if product_id in {"risk-ranges", "early-look", "cftc-positioning"}:
             item["decisionEligible"] = False
             item["verificationStatus"] = (
                 "requires-primary-publication-manifest"
                 if product_id == "risk-ranges"
+                else "official-cftc-required"
+                if product_id == "cftc-positioning"
                 else "supplemental-only"
             )
         elif product_id in TRACKER_PRODUCTS:
@@ -772,11 +779,13 @@ def _manifest_snapshot(
             "eventCount": max(int(previous.get("eventCount", 0)), event_count),
             "updatedAt": now,
         }
-        if product_id in {"risk-ranges", "early-look"}:
+        if product_id in {"risk-ranges", "early-look", "cftc-positioning"}:
             artifact["decisionEligible"] = False
             artifact["verificationStatus"] = (
                 "requires-primary-publication-manifest"
                 if product_id == "risk-ranges"
+                else "official-cftc-required"
+                if product_id == "cftc-positioning"
                 else "supplemental-only"
             )
         if error and effective_stage != "indexed":

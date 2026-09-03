@@ -27,6 +27,7 @@ sys.path.insert(0, str(GMAIL_INGESTOR_DIR))
 
 from parse_hedgeye_email_html import parse_html_snapshot  # noqa: E402
 from research_intelligence import (  # noqa: E402
+    build_entity_events,
     persist_snapshot_failure,
     persist_snapshot_intelligence,
     product_ids,
@@ -38,7 +39,28 @@ DEFAULT_PDF_FUNCTION = os.environ.get(
     "PDF_PROCESSOR_FUNCTION_NAME",
     "market-dashboard-hedgeye-pdf-processor-v1",
 )
-AWS_REGION = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-west-1"))
+AWS_REGION = "us-west-1"
+EXPECTED_AWS_ACCOUNT_ID = "915328198276"
+DEFAULT_READ_PROFILE = "market-dashboard-local"
+REQUIRED_ADMIN_PROFILE = "market-dashboard-admin"
+PROFILE_ENVIRONMENT_KEYS = ("AWS_PROFILE", "AWS_DEFAULT_PROFILE")
+PROFILE_OVERRIDE_ENVIRONMENT_KEYS = (
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_CONFIG_FILE",
+)
+STATIC_CREDENTIAL_ENVIRONMENT_KEYS = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_SECURITY_TOKEN",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+)
 MARKET_TIME_ZONE = ZoneInfo("America/New_York")
 ONE_OFF_MARKET_CLOSURES = frozenset(
     {
@@ -71,9 +93,130 @@ def parse_args() -> argparse.Namespace:
         metavar="0..5",
         help="Number of prior U.S. market sessions to replay (default: 5).",
     )
+    parser.add_argument(
+        "--product",
+        action="append",
+        dest="products",
+        help="Replay only this registered product; repeat for multiple products.",
+    )
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--pdf-function", default=DEFAULT_PDF_FUNCTION)
+    parser.add_argument(
+        "--read-profile",
+        default=DEFAULT_READ_PROFILE,
+        help=f"Explicit read profile for dry-run inventory and artifacts (default: {DEFAULT_READ_PROFILE}).",
+    )
+    parser.add_argument(
+        "--admin-profile",
+        default=None,
+        help=f"Required explicit admin profile for --apply (must be {REQUIRED_ADMIN_PROFILE}).",
+    )
     return parser.parse_args()
+
+
+class ProfileValidationError(RuntimeError):
+    """Safe, typed failure raised before any replay write client is created."""
+
+    def __init__(self, error_code: str, detail: str):
+        super().__init__(detail)
+        self.error_code = error_code
+        self.detail = detail
+
+
+def validate_profile_environment(profile: str, *, apply: bool, environment: Dict[str, str] | None = None) -> None:
+    """Reject ambient credentials that could silently override the named profile."""
+    environment = os.environ if environment is None else environment
+    ambient_profiles = [
+        str(environment.get(key) or "").strip()
+        for key in PROFILE_ENVIRONMENT_KEYS
+        if str(environment.get(key) or "").strip()
+    ]
+    if any(value != profile for value in ambient_profiles):
+        raise ProfileValidationError(
+            "AWS_PROFILE_ENVIRONMENT_OVERRIDE",
+            "The replay found an ambient AWS profile override; clear it and retry with the explicit repository profile.",
+        )
+    if any(str(environment.get(key) or "").strip() for key in PROFILE_OVERRIDE_ENVIRONMENT_KEYS):
+        raise ProfileValidationError(
+            "AWS_PROFILE_ENVIRONMENT_OVERRIDE",
+            "The replay found an AWS config or credentials file override; clear it and retry with the explicit repository profile.",
+        )
+    if any(str(environment.get(key) or "").strip() for key in STATIC_CREDENTIAL_ENVIRONMENT_KEYS):
+        raise ProfileValidationError(
+            "AWS_PROFILE_STATIC_SESSION_REJECTED" if apply else "AWS_PROFILE_ENVIRONMENT_OVERRIDE",
+            "The replay found ambient AWS credentials; clear them and use the explicit repository profile provider.",
+        )
+
+
+def validate_profile_arguments(args: argparse.Namespace, *, environment: Dict[str, str] | None = None) -> str:
+    """Select the only permitted read or write profile before constructing AWS clients."""
+    read_profile = str(args.read_profile or "").strip()
+    if read_profile != DEFAULT_READ_PROFILE:
+        raise ProfileValidationError(
+            "AWS_PROFILE_NAME_INVALID",
+            f"Security Intelligence dry-run reads must use {DEFAULT_READ_PROFILE}.",
+        )
+    if args.apply:
+        admin_profile = str(args.admin_profile or "").strip()
+        if admin_profile != REQUIRED_ADMIN_PROFILE:
+            raise ProfileValidationError(
+                "AWS_ADMIN_PROFILE_REQUIRED",
+                f"--apply requires --admin-profile {REQUIRED_ADMIN_PROFILE}.",
+            )
+        validate_profile_environment(admin_profile, apply=True, environment=environment)
+        return admin_profile
+    if args.admin_profile not in (None, ""):
+        raise ProfileValidationError(
+            "AWS_ADMIN_PROFILE_APPLY_ONLY",
+            "--admin-profile is only valid with --apply; dry-run uses the explicit local read profile.",
+        )
+    validate_profile_environment(read_profile, apply=False, environment=environment)
+    return read_profile
+
+
+def approved_identity(identity: Dict[str, Any], profile: str, *, apply: bool) -> bool:
+    if not isinstance(identity, dict) or str(identity.get("Account") or "") != EXPECTED_AWS_ACCOUNT_ID:
+        return False
+    arn = str(identity.get("Arn") or "")
+    if apply:
+        return arn.startswith(f"arn:aws:sts::{EXPECTED_AWS_ACCOUNT_ID}:assumed-role/")
+    return arn == f"arn:aws:iam::{EXPECTED_AWS_ACCOUNT_ID}:user/{profile}"
+
+
+def create_verified_session(profile: str, *, apply: bool) -> Any:
+    """Create an explicit profile session and verify its principal before write clients."""
+    try:
+        session = boto3.session.Session(profile_name=profile, region_name=AWS_REGION)
+        identity = session.client("sts").get_caller_identity()
+    except Exception as error:  # boto3 exception types vary across CLI/SSO versions.
+        diagnostic = str(error)
+        lowered = diagnostic.lower()
+        if apply and any(token in lowered for token in (
+            "token has expired",
+            "expired",
+            "sso session",
+            "unauthorizedssotoken",
+            "tokenretrieval",
+        )):
+            raise ProfileValidationError(
+                "AWS_ADMIN_LOGIN_REQUIRED",
+                "The approved administrator SSO session is expired or unavailable; refresh it before applying the replay.",
+            ) from None
+        if "accessdenied" in lowered or "not authorized" in lowered or "unauthorizedoperation" in lowered:
+            raise ProfileValidationError(
+                "AWS_AUTHORIZATION_DENIED",
+                "The AWS principal is authenticated but is not authorized to verify or apply this operation.",
+            ) from None
+        raise ProfileValidationError(
+            "AWS_PROFILE_UNUSABLE",
+            "The explicit AWS profile could not be verified.",
+        ) from None
+    if not approved_identity(identity, profile, apply=apply):
+        raise ProfileValidationError(
+            "AWS_PROFILE_WRONG_PRINCIPAL",
+            "The explicit AWS profile resolved to an unapproved AWS principal.",
+        )
+    return session
 
 
 def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> date:
@@ -239,6 +382,41 @@ def object_metadata(s3: Any, bucket: str, key: str) -> Dict[str, str]:
     }
 
 
+def normalized_investing_ideas(snapshot: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Return compact, machine-readable evidence for replay verification."""
+    if str(snapshot.get("snapshotType") or "").lower() != "investing-ideas":
+        return None
+    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
+    positions = data.get("positions") if isinstance(data.get("positions"), list) else []
+    if not positions:
+        positions = [
+            {"ticker": ticker, "side": "Long"}
+            for ticker in data.get("longs") or []
+        ] + [
+            {"ticker": ticker, "side": "Short"}
+            for ticker in data.get("shorts") or []
+        ]
+    normalized = []
+    for position in positions:
+        if not isinstance(position, dict):
+            continue
+        side = str(position.get("side") or position.get("position") or "").strip().title()
+        normalized.append({
+            "ticker": str(position.get("ticker") or "").strip().upper(),
+            "side": side,
+            "bias": "BULLISH" if side == "Long" else "BEARISH" if side == "Short" else None,
+            "previousClose": position.get("prevClose"),
+            "lrr": position.get("lrr"),
+            "hrr": position.get("hrr"),
+        })
+    return {
+        "positionCount": len(normalized),
+        "longs": [item["ticker"] for item in normalized if item["side"] == "Long"],
+        "shorts": [item["ticker"] for item in normalized if item["side"] == "Short"],
+        "positions": normalized,
+    }
+
+
 def replay_html(
     *,
     artifact: Dict[str, Any],
@@ -289,6 +467,7 @@ def replay_html(
             )
         return {**artifact, "status": "failed", "error": error}
 
+    events = build_entity_events(snapshot, content_sha256=content_hash)
     event_count = (
         persist_snapshot_intelligence(
             snapshot,
@@ -296,14 +475,19 @@ def replay_html(
             content_sha256=content_hash,
         )
         if apply
-        else None
+        else len(events)
     )
-    return {
+    result = {
         **artifact,
         "status": "indexed" if apply else "would_index",
         "snapshotDate": snapshot["date"],
         "entityEventCount": event_count,
+        "contentSha256": content_hash,
     }
+    evidence = normalized_investing_ideas(snapshot)
+    if evidence is not None:
+        result["normalizedInvestingIdeas"] = evidence
+    return result
 
 
 def replay_pdf(
@@ -347,11 +531,43 @@ def main() -> int:
     final_date = args.date or current_market_date()
     date.fromisoformat(final_date)
     dates = market_dates(final_date, args.history_days)
-    session = boto3.session.Session(region_name=AWS_REGION)
+    try:
+        selected_profile = validate_profile_arguments(args)
+        session = create_verified_session(selected_profile, apply=args.apply)
+    except ProfileValidationError as error:
+        summary = {
+            "mode": "apply" if args.apply else "dry-run",
+            "dates": dates,
+            "products": sorted({
+                str(product).strip().lower()
+                for product in (args.products or [])
+                if str(product).strip()
+            }),
+            "status": "blocked",
+            "errorCode": error.error_code,
+            "error": error.detail,
+        }
+        if args.json:
+            print(json.dumps(summary, indent=2, sort_keys=True))
+        else:
+            print(f"{summary['mode']} blocked ({error.error_code}): {error.detail}")
+        return 2
+
     s3 = session.client("s3")
     lambda_client = session.client("lambda")
     dynamodb = session.resource("dynamodb")
     inventory = artifact_inventory(s3, args.bucket, dates)
+    selected_products = {
+        str(product).strip().lower()
+        for product in (args.products or [])
+        if str(product).strip()
+    }
+    if selected_products:
+        inventory = [
+            artifact
+            for artifact in inventory
+            if str(artifact.get("product") or "").strip().lower() in selected_products
+        ]
     results = []
     for artifact in inventory:
         try:
@@ -378,7 +594,9 @@ def main() -> int:
 
     summary = {
         "mode": "apply" if args.apply else "dry-run",
+        "awsProfile": selected_profile,
         "dates": dates,
+        "products": sorted(selected_products),
         "artifactCount": len(results),
         "statusCounts": {
             status: sum(item["status"] == status for item in results)

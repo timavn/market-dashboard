@@ -25,10 +25,15 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
 
   return (
     <tr
-      className="su-metrics-row"
+      className={`su-metrics-row ${security.researchHealth && security.researchHealth !== 'ready' ? 'su-research-attention' : ''}`}
+      title={security.researchHealth && security.researchHealth !== 'ready'
+        ? `${security.ticker} current research is incomplete or unavailable.`
+        : undefined}
       style={{
         borderBottom: '1px solid #e8e2d5',
-        backgroundColor: rowIndex % 2 === 0 ? 'transparent' : '#f9fafb',
+        backgroundColor: security.researchHealth && security.researchHealth !== 'ready'
+          ? '#fef2f2'
+          : rowIndex % 2 === 0 ? 'transparent' : '#f9fafb',
       }}
     >
       <td style={{ padding: '2px 3px', fontWeight: '600', borderRight: '1px solid #e5e7eb', textAlign: 'center' }} className="dark:text-white">

@@ -41,7 +41,15 @@ function RiskRangeCell({ riskRangeHistory, tradingDays: tradingDaysProp }) {
   });
 
   if (!hrr || !lrr) {
-    return <span className="su-metrics-muted">--</span>;
+    const status = String(riskRangeHistory?.status || '').toLowerCase();
+    const label = status === 'unavailable'
+      ? 'UNAVAILABLE'
+      : status === 'conflict'
+        ? 'CONFLICT'
+        : status === 'not_listed' || status === 'not_due'
+          ? 'N/A'
+          : '--';
+    return <span className="su-metrics-muted">{label}</span>;
   }
 
   return (

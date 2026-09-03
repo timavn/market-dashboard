@@ -23,6 +23,7 @@ const REASONS = Object.freeze({
 function unavailableRealizedVolatility(reason = REASONS.HISTORY_UNAVAILABLE) {
   return {
     status: 'unavailable',
+    rv21: null,
     rv63: null,
     rv252: null,
     rv3y: null,
@@ -43,6 +44,7 @@ function serializeRealizedVolatility(snapshot, { includeSeries = false } = {}) {
   if (!snapshot) return unavailableRealizedVolatility();
   const base = {
     status: snapshot.status,
+    rv21: snapshot.rv21,
     rv63: snapshot.rv63,
     rv252: snapshot.rv252,
     rv3y: snapshot.rv3y,
@@ -60,6 +62,7 @@ function serializeRealizedVolatility(snapshot, { includeSeries = false } = {}) {
   if (!includeSeries) return base;
   return {
     ...base,
+    rolling21: snapshot.rolling21 || [],
     rolling63: snapshot.rolling63 || [],
     rolling252: snapshot.rolling252 || [],
     priceSeries: snapshot.priceSeries || [],
@@ -217,6 +220,15 @@ function unavailableValueMetric({
   };
 }
 
+// The public calculation helpers still accept raw provider bars. The batch
+// portfolio path passes a normalized series so each maximum-history payload is
+// parsed and sorted only once.
+function normalizedBarsOrNormalize(bars, options = {}) {
+  return options.normalized === true
+    ? (Array.isArray(bars) ? bars : [])
+    : normalizeAdjustedPriceBars(bars);
+}
+
 function calculateAlignedBeta(securityBars, benchmarkBars, options = {}) {
   const source = options.source || DEFAULT_SOURCE;
   const benchmark = options.benchmark || 'SPY';
@@ -234,12 +246,12 @@ function calculateAlignedBeta(securityBars, benchmarkBars, options = {}) {
   };
 
   const securityByDate = new Map(
-    normalizeAdjustedPriceBars(securityBars)
+    normalizedBarsOrNormalize(securityBars, options)
       .filter((row) => row.adjustedClose != null)
       .map((row) => [row.date, row.adjustedClose]),
   );
   const benchmarkByDate = new Map(
-    normalizeAdjustedPriceBars(benchmarkBars)
+    normalizedBarsOrNormalize(benchmarkBars, options)
       .filter((row) => row.adjustedClose != null)
       .map((row) => [row.date, row.adjustedClose]),
   );
@@ -309,7 +321,7 @@ function calculateAtr14(bars, options = {}) {
   const periodSessions = Number.isInteger(options.periodSessions)
     ? options.periodSessions
     : ATR_PERIOD;
-  const normalized = normalizeAdjustedPriceBars(bars);
+  const normalized = normalizedBarsOrNormalize(bars, options);
   const trueRanges = [];
 
   for (let index = 1; index < normalized.length; index += 1) {
@@ -365,7 +377,7 @@ function calculatePriceZScore20(bars, options = {}) {
   const periodSessions = Number.isInteger(options.periodSessions)
     ? options.periodSessions
     : Z_SCORE_PERIOD;
-  const selected = normalizeAdjustedPriceBars(bars)
+  const selected = normalizedBarsOrNormalize(bars, options)
     .filter((row) => row.adjustedClose != null)
     .slice(-periodSessions);
   const asOf = selected.length > 0 ? selected[selected.length - 1].date : null;
@@ -414,7 +426,7 @@ function calculatePriceZScore20(bars, options = {}) {
 
 function calculatePriorAllTimePrices(bars, options = {}) {
   const source = options.source || DEFAULT_SOURCE;
-  const normalized = normalizeAdjustedPriceBars(bars);
+  const normalized = normalizedBarsOrNormalize(bars, options);
   const comparisonDate = options.beforeDate
     ? dateKeyFromRow({ date: options.beforeDate })
     : null;
@@ -506,7 +518,7 @@ function applyStructureLeg(previous, direction, eventCredit) {
  * one-point event bonus, except on a reversal/reset session.
  */
 function calculatePriceStructureRun(bars = [], options = {}) {
-  const normalized = normalizeAdjustedPriceBars(bars);
+  const normalized = normalizedBarsOrNormalize(bars, options);
   const complete = normalized.filter((bar) => bar.rawHigh != null && bar.rawLow != null);
   if (normalized.length < 2 || complete.length !== normalized.length) {
     return unavailablePriceStructure(REASONS.INSUFFICIENT_PRICE_HISTORY, {
@@ -521,6 +533,9 @@ function calculatePriceStructureRun(bars = [], options = {}) {
   let allTimeLowDate = complete[0].date;
   let highState = { score: 0, direction: null };
   let lowState = { score: 0, direction: null };
+  const timelineLimit = Number.isInteger(options.timelineLimit) && options.timelineLimit > 0
+    ? options.timelineLimit
+    : 8;
   const timeline = [];
 
   for (let index = 1; index < complete.length; index += 1) {
@@ -541,6 +556,7 @@ function calculatePriceStructureRun(bars = [], options = {}) {
 
     highState = { score: nextHighState.score, direction: nextHighState.direction };
     lowState = { score: nextLowState.score, direction: nextLowState.direction };
+    if (timeline.length >= timelineLimit) timeline.shift();
     timeline.push({
       date: current.date,
       high: current.rawHigh,
@@ -605,7 +621,7 @@ function calculatePriceStructureRun(bars = [], options = {}) {
       allTimeLow: priorAllTimeLow,
       allTimeLowDate,
     },
-    timeline: timeline.slice(-(options.timelineLimit || 8)),
+    timeline,
     priceBasis: 'completed SPX cash-index daily high and low',
     ruleVersion: 'spx-structure-run-v1',
   };
@@ -689,6 +705,7 @@ function buildSecurityRiskMetrics({
   recordsBeforeDate = null,
   assetType = 'equity',
   includeVolSeries = false,
+  normalizedBenchmarkBars = null,
 } = {}) {
   const normalizedSymbol = String(symbol || '').trim().toUpperCase();
   if (!normalizedSymbol) {
@@ -701,6 +718,9 @@ function buildSecurityRiskMetrics({
   }
 
   const normalized = normalizeAdjustedPriceBars(securityBars);
+  const benchmark = Array.isArray(normalizedBenchmarkBars)
+    ? normalizedBenchmarkBars
+    : normalizeAdjustedPriceBars(benchmarkBars);
   if (normalized.length === 0) {
     return createUnavailableSecurityRiskMetrics({
       symbol: normalizedSymbol,
@@ -710,12 +730,20 @@ function buildSecurityRiskMetrics({
     });
   }
 
-  const beta = calculateAlignedBeta(normalized, benchmarkBars, { source });
-  const atr14 = calculateAtr14(normalized, { source });
-  const zScore20 = calculatePriceZScore20(normalized, { source });
-  const records = calculatePriorAllTimePrices(normalized, { source, beforeDate: recordsBeforeDate });
-  const priceStructure = calculatePriceStructureRun(normalized);
-  const realizedSnapshot = buildRealizedVolatilitySnapshot(normalized, { assetType });
+  const normalizedOptions = { source, normalized: true };
+  const beta = calculateAlignedBeta(normalized, benchmark, normalizedOptions);
+  const atr14 = calculateAtr14(normalized, normalizedOptions);
+  const zScore20 = calculatePriceZScore20(normalized, normalizedOptions);
+  const records = calculatePriorAllTimePrices(normalized, {
+    ...normalizedOptions,
+    beforeDate: recordsBeforeDate,
+  });
+  const priceStructure = calculatePriceStructureRun(normalized, normalizedOptions);
+  const realizedSnapshot = buildRealizedVolatilitySnapshot(normalized, {
+    assetType,
+    includeSeries: includeVolSeries,
+    normalizedBars: normalized,
+  });
   const realizedVolatility = serializeRealizedVolatility(realizedSnapshot, {
     includeSeries: includeVolSeries,
   });

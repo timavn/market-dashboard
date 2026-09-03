@@ -1,7 +1,19 @@
-const { sidecarRequest, getSidecarProviderStatus } = require('../ibkrSidecarClient');
-const { normalizeIbkrPosition } = require('../normalize/normalizePosition');
+const {
+  sidecarRequest,
+  getSidecarProviderStatus,
+  getSidecarPortfolioStatus,
+} = require('../ibkrSidecarClient');
+const {
+  normalizeIbkrPosition,
+  isPredictionMarketContract,
+} = require('../normalize/normalizePosition');
 const { normalizeAccountSummary } = require('../normalize/normalizeAccountSummary');
 const { getLongShortPositionSnapshot } = require('../../../utils/portfolioPositionSides.cjs');
+const {
+  calculatePortfolioBalance,
+  calculatePortfolioExposure,
+  projectPortfolioBalance,
+} = require('../../../utils/ibkrPortfolioBalance.cjs');
 const {
   setIbkrConnected,
   setIbkrLastPortfolioAt,
@@ -11,6 +23,16 @@ const ENABLED = process.env.IBKR_PORTFOLIO_ENABLED !== 'false';
 const ACCOUNT_ID = process.env.IBKR_ACCOUNT_ID || '';
 const LIVE_EVIDENCE_MAX_AGE_MS = Number(process.env.IBKR_LIVE_EVIDENCE_MAX_AGE_MS || 5 * 60_000);
 const LIVE_LAST_MAX_AGE_MS = Number(process.env.IBKR_LIVE_LAST_MAX_AGE_MS || 60_000);
+const PORTFOLIO_BALANCE_MAX_AGE_MS = Number(
+  process.env.IBKR_PORTFOLIO_BALANCE_MAX_AGE_MS || 45_000,
+);
+const EVENT_CONTRACT_POSITION_SCOPE = 'stocks_and_event_contracts';
+const LEGACY_KALSHI_POSITION_SCOPE = 'stocks_and_kalshi';
+const EVENT_ACCOUNTING_VERIFICATION =
+  'ibkr_event_contract_commodity_segment_reconciled';
+const LEGACY_KALSHI_ACCOUNTING_VERIFICATION =
+  'ibkr_kalshi_commodity_segment_reconciled';
+const SUPPORTED_EVENT_VENUES = new Set(['FORECASTX', 'KALSHI']);
 
 function isOpenPosition(row) {
   return Number(row?.position || 0) !== 0 || Number(row?.marketValue || 0) !== 0;
@@ -48,15 +70,28 @@ function verifiedLiveResponse(response) {
   );
 }
 
-function verifiedFundingReferenceResponse(response) {
+function isFreshBalanceEvidence(value) {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const age = Date.now() - timestamp;
+  return age >= -5_000 && age <= PORTFOLIO_BALANCE_MAX_AGE_MS;
+}
+
+function verifiedLiveBalanceResponse(response, accountId) {
   return Boolean(
     response?.ok === true
     && response?.connected === true
-    && response?.status === 'reference'
-    && response?.source === 'ibkr_completed_session_reference'
-    && response?.funding == null
-    && isFreshEvidence(response?.observed_at)
-    && isFreshEvidence(response?.socket_verified_at)
+    && response?.status === 'live'
+    && response?.source === 'ibkr_live_session'
+    && response?.from_cache === false
+    && response?.account === accountId
+    && response?.summary?.account === accountId
+    && response?.balanceEvidence
+    && isFreshBalanceEvidence(response?.observed_at)
+    && isFreshBalanceEvidence(response?.socket_verified_at)
+    && isFreshBalanceEvidence(
+      response?.balanceEvidence?.accountValuesObservedAt,
+    )
   );
 }
 
@@ -64,6 +99,92 @@ function finiteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeLiveMarginHealth(rawSummary, accountId) {
+  const netLiquidation = finiteNumber(rawSummary?.NetLiquidation);
+  const equityWithLoanValue = finiteNumber(rawSummary?.EquityWithLoanValue);
+  const initialMarginRequirement = finiteNumber(rawSummary?.InitMarginReq);
+  const maintenanceMarginRequirement = finiteNumber(rawSummary?.MaintMarginReq);
+  const availableFunds = finiteNumber(rawSummary?.AvailableFunds);
+  const excessLiquidity = finiteNumber(rawSummary?.ExcessLiquidity);
+  const buyingPower = finiteNumber(rawSummary?.BuyingPower);
+  if (
+    netLiquidation === null
+    || netLiquidation <= 0
+    || equityWithLoanValue === null
+    || initialMarginRequirement === null
+    || initialMarginRequirement < 0
+    || maintenanceMarginRequirement === null
+    || maintenanceMarginRequirement < 0
+    || availableFunds === null
+    || excessLiquidity === null
+    || buyingPower === null
+  ) {
+    throw portfolioBalanceError(
+      'IBKR did not return complete broker-native margin health evidence.',
+      'BALANCE_MARGIN_INVALID',
+    );
+  }
+
+  const health = excessLiquidity < 0
+    ? 'maintenance_deficit'
+    : availableFunds < 0
+      ? 'initial_deficit'
+      : 'healthy';
+  return {
+    available: true,
+    status: 'live',
+    source: 'ibkr_live_session',
+    accountId,
+    currency: String(rawSummary?.baseCurrency || '').toUpperCase(),
+    health,
+    actionable: false,
+    netLiquidation,
+    equityWithLoanValue,
+    initialMarginRequirement,
+    maintenanceMarginRequirement,
+    availableFunds,
+    excessLiquidity,
+    buyingPower,
+    initialDeficit: Math.max(0, -availableFunds),
+    maintenanceDeficit: Math.max(0, -excessLiquidity),
+    excessLiquidityPercent: (excessLiquidity / netLiquidation) * 100,
+  };
+}
+
+function unavailableLiveMarginHealth(rawSummary, accountId) {
+  return {
+    available: false,
+    status: 'unavailable',
+    source: 'unavailable',
+    accountId,
+    currency: String(rawSummary?.baseCurrency || '').toUpperCase(),
+    health: 'unavailable',
+    actionable: false,
+    errorCode: 'BALANCE_MARGIN_UNAVAILABLE',
+    reason: 'broker_native_margin_evidence_unavailable',
+  };
+}
+
+function normalizeSortedEventVenues(value) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const venues = value.map((venue) => String(venue || '').trim());
+  if (
+    venues.some((venue) => !SUPPORTED_EVENT_VENUES.has(venue))
+    || new Set(venues).size !== venues.length
+  ) return null;
+  const sorted = [...venues].sort();
+  return venues.every((venue, index) => venue === sorted[index])
+    ? venues
+    : null;
+}
+
+function sameStringArray(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function validReferenceSessionDate(value) {
@@ -401,12 +522,23 @@ async function getReferenceMarks(accountId, positions) {
     ...identityFailures,
     ...response.failures
       .map((failure) => sanitizeMarkFailure(failure, acct))
-      .filter(Boolean),
+      .filter((failure) => (
+        failure
+        && (failure.conId == null || requestedConIds.has(failure.conId))
+      )),
   ];
   const pending = [];
   const pendingConIds = new Set();
   for (const row of response.pending) {
     const conid = finiteNumber(row?.conId ?? row?.conid);
+    if (
+      row?.account === acct
+      && conid != null
+      && conid > 0
+      && !requestedConIds.has(conid)
+    ) {
+      continue;
+    }
     if (
       row?.account !== acct
       || conid == null
@@ -455,8 +587,16 @@ async function getReferenceMarks(accountId, positions) {
   const marksByConId = new Map();
   const duplicateConIds = new Set();
   for (const row of response.marks) {
-    const normalized = normalizeBrokerMark(row, acct, requestedConIds);
     const conid = finiteNumber(row?.conId ?? row?.conid);
+    if (
+      row?.account === acct
+      && conid != null
+      && conid > 0
+      && !requestedConIds.has(conid)
+    ) {
+      continue;
+    }
+    const normalized = normalizeBrokerMark(row, acct, requestedConIds);
     if (!normalized || marksByConId.has(conid) || duplicateConIds.has(conid)) {
       const duplicate = marksByConId.has(conid) || duplicateConIds.has(conid);
       failures.push({
@@ -554,269 +694,343 @@ async function getReferenceMarks(accountId, positions) {
   };
 }
 
-function normalizeLiveFunding(response, accountId) {
-  const rawSummary = response?.summary || {};
-  const rawFunding = response?.funding || {};
-  const baseCurrency = String(
-    rawSummary.baseCurrency
-    || rawSummary.currency
-    || rawFunding.baseCurrency
-    || '',
-  ).toUpperCase();
-  const shortEvidence = Array.isArray(rawFunding.shortPositionEvidence)
-    ? rawFunding.shortPositionEvidence
-    : null;
-  const rawPositionScope = rawFunding.positionScope;
-  const positionScope = typeof rawPositionScope === 'string'
-    ? rawPositionScope
-    : rawPositionScope?.allStock === true
-      && rawPositionScope?.allBaseCurrency === true
-      ? 'stocks_only'
-      : null;
-
-  return {
-    accountId,
-    accountReady: (rawSummary.AccountReady ?? rawFunding.accountReady) === true
-      || String(rawSummary.AccountReady ?? rawFunding.accountReady ?? '').toLowerCase() === 'true',
-    baseCurrency,
-    currency: baseCurrency,
-    netLiquidation: finiteNumber(rawSummary.NetLiquidation),
-    totalCashValue: finiteNumber(rawSummary.TotalCashValue),
-    totalCashValueSecurities: finiteNumber(rawSummary['TotalCashValue-S']),
-    totalCashValueCommodities: finiteNumber(rawSummary['TotalCashValue-C']),
-    commodityMaintenanceMargin: finiteNumber(rawSummary['MaintMarginReq-C']),
-    grossPositionValue: finiteNumber(
-      rawSummary['GrossPositionValue-S'] ?? rawSummary.GrossPositionValue,
-    ),
-    stockMarketValue: finiteNumber(rawSummary.StockMarketValue),
-    accruedCashSecurities: finiteNumber(
-      rawSummary['AccruedCash-S'] ?? rawSummary.AccruedCash,
-    ),
-    settledCashByDateSecurities: rawSummary['SettledCashByDate-S'] || null,
-    settledCashByDateCommodities: rawSummary['SettledCashByDate-C'] || null,
-    cashBalances: rawFunding.cashBalances || rawSummary.CashBalance || {},
-    shortPositions: shortEvidence
-      ? shortEvidence.map((row) => ({
-        conId: row.conId ?? row.conid ?? null,
-        symbol: row.symbol || null,
-        quantity: finiteNumber(row.quantity),
-        priorClose: finiteNumber(row.priorClose),
-        priorCloseSource: row.priorCloseSource || null,
-        priorCloseSessionDate: row.priorCloseSessionDate || null,
-        priorCloseObservedAt: row.priorCloseObservedAt || null,
-        currentPrice: finiteNumber(row.currentPrice),
-        currentPriceSource: row.currentPriceSource || null,
-        directAsk: finiteNumber(row.directAsk),
-        directBid: finiteNumber(row.directBid),
-        directLast: finiteNumber(row.directLast),
-        currency: typeof row.currency === 'string' ? row.currency : null,
-        snapshotTimestamp: row.snapshotTimestamp || null,
-        marketDataType: row.marketDataType ?? null,
-      }))
-      : null,
-    shortStockPriorCloseValue: finiteNumber(rawFunding.shortStockPriorCloseValue),
-    openPositionCount: finiteNumber(rawFunding.openPositionCount),
-    shortPositionCount: finiteNumber(rawFunding.shortPositionCount),
-    openOrderCount: finiteNumber(rawFunding.openOrderCount),
-    settledShortPositionsVerified:
-      rawFunding.settledShortPositionsVerified === true
-        ? true
-        : rawFunding.settledShortPositionsVerified === false
-          ? false
-          : null,
-    settlementStatus:
-      typeof rawFunding.settlementStatus === 'string'
-        ? rawFunding.settlementStatus
-        : null,
-    settlementDate:
-      typeof rawFunding.settlementDate === 'string'
-        ? rawFunding.settlementDate
-        : null,
-    noSameDayExecutionsVerified:
-      rawFunding.noSameDayExecutionsVerified === true
-        ? true
-        : rawFunding.noSameDayExecutionsVerified === false
-          ? false
-          : null,
-    sameDayExecutionCount:
-      typeof rawFunding.sameDayExecutionCount === 'number' &&
-      Number.isFinite(rawFunding.sameDayExecutionCount)
-        ? rawFunding.sameDayExecutionCount
-        : null,
-    positionScope,
-    accountValuesObservedAt: rawFunding.accountValuesObservedAt || null,
-    status: 'live',
-    source: response.source,
-    observedAt: response.observed_at,
-    socketVerifiedAt: response.socket_verified_at,
-    fromCache: false,
-  };
+function portfolioBalanceError(message, code, status = 503) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  return error;
 }
 
-function normalizeFundingReference(response, accountId) {
-  const rawSummary = response?.summary;
-  const rawReference = response?.fundingReference;
-  const shortEvidence = rawReference?.shortPositionReferenceEvidence;
-  if (
-    !verifiedFundingReferenceResponse(response)
-    || response?.account !== accountId
-    || rawSummary?.account !== accountId
-    || !rawSummary
-    || !rawReference
-    || rawReference.schemaVersion !== 1
-    || rawReference.referenceOnly !== true
-    || rawReference.actionable !== false
-    || rawReference.referenceKind
-      !== 'completed_market_session_with_current_settlement_ladder'
-    || rawReference.settlementVerification
-      !== 'reference_segment_ladders_double_snapshot'
-    || !validReferenceSessionDate(rawReference.referenceSessionDate)
-    || !validReferenceSessionDate(rawReference.cashLedgerObservedDate)
-    || !validReferenceSessionDate(rawReference.settlementHorizonDate)
-    || !isFreshEvidence(rawReference.accountValuesObservedAt)
-    || !Array.isArray(shortEvidence)
-    || rawReference.positionScope?.allStock !== true
-    || rawReference.positionScope?.allBaseCurrency !== true
-  ) {
-    return null;
+function normalizeLivePortfolioBalance(response, accountId) {
+  if (!verifiedLiveBalanceResponse(response, accountId)) {
+    throw portfolioBalanceError(
+      'The sidecar response was not a fresh, account-matched live balance snapshot.',
+      'BALANCE_PROVENANCE_UNVERIFIED',
+    );
   }
 
-  const referenceSessionMs = Date.parse(
-    `${rawReference.referenceSessionDate}T00:00:00Z`,
+  const rawSummary = response.summary;
+  const rawEvidence = response.balanceEvidence;
+  const rawPositionScope = rawEvidence.positionScope || {};
+  const positionScope = rawPositionScope.mode === EVENT_CONTRACT_POSITION_SCOPE
+    && rawPositionScope.allSupportedForBalance === true
+    && rawPositionScope.allBaseCurrency === true
+    ? EVENT_CONTRACT_POSITION_SCOPE
+    : rawPositionScope.mode === LEGACY_KALSHI_POSITION_SCOPE
+      && rawPositionScope.allSupportedForBalance === true
+      && rawPositionScope.allBaseCurrency === true
+      ? LEGACY_KALSHI_POSITION_SCOPE
+      : rawPositionScope.mode === 'stocks_only'
+        && rawPositionScope.allSupportedForBalance === true
+        && rawPositionScope.allStock === true
+        && rawPositionScope.allBaseCurrency === true
+        ? 'stocks_only'
+        : rawPositionScope.mode === undefined
+          && rawPositionScope.allStock === true
+          && rawPositionScope.allBaseCurrency === true
+          ? 'stocks_only'
+          : null;
+  const shortPositions = Array.isArray(rawEvidence.shortPositionEvidence)
+    ? rawEvidence.shortPositionEvidence.map((row) => ({
+      conId: row?.conId ?? row?.conid ?? null,
+      symbol: typeof row?.symbol === 'string' ? row.symbol : null,
+      quantity: finiteNumber(row?.quantity),
+      currency: typeof row?.currency === 'string' ? row.currency : null,
+      priorClose: finiteNumber(row?.priorClose),
+      priorCloseSource: row?.priorCloseSource || null,
+      priorCloseSessionDate: row?.priorCloseSessionDate || null,
+      priorCloseObservedAt: row?.priorCloseObservedAt || null,
+    }))
+    : null;
+  const positions = Array.isArray(rawEvidence.positionEvidence)
+    ? rawEvidence.positionEvidence.map((row) => ({
+      conId: row?.conId ?? row?.conid ?? null,
+      symbol: typeof row?.symbol === 'string' ? row.symbol : null,
+      quantity: finiteNumber(row?.quantity),
+      currency: typeof row?.currency === 'string' ? row.currency : null,
+    }))
+    : null;
+  const eventPositions = Array.isArray(rawEvidence.eventPositionEvidence)
+    ? rawEvidence.eventPositionEvidence.map((row) => ({
+      conId: row?.conId ?? row?.conid ?? null,
+      symbol: typeof row?.symbol === 'string' ? row.symbol : null,
+      localSymbol: typeof row?.localSymbol === 'string' ? row.localSymbol : null,
+      tradingClass: typeof row?.tradingClass === 'string' ? row.tradingClass : null,
+      exchange: typeof row?.exchange === 'string' ? row.exchange : null,
+      secType: typeof row?.secType === 'string' ? row.secType : null,
+      currency: typeof row?.currency === 'string' ? row.currency : null,
+      multiplier: finiteNumber(row?.multiplier),
+      quantity: finiteNumber(row?.quantity),
+    }))
+    : null;
+  const rawEventAccounting = rawEvidence.eventAccounting || {};
+  const eventAccountValues = rawEventAccounting.accountValues || {};
+  const rawScopeEventPositionCount = finiteNumber(
+    rawPositionScope.eventPositionCount,
   );
-  const cashObservedMs = Date.parse(
-    `${rawReference.cashLedgerObservedDate}T00:00:00Z`,
+  const rawAccountingEventPositionCount = finiteNumber(
+    rawEventAccounting.positionCount,
   );
-  const settlementHorizonMs = Date.parse(
-    `${rawReference.settlementHorizonDate}T00:00:00Z`,
+  const eventPositionCount = rawScopeEventPositionCount
+    ?? rawAccountingEventPositionCount;
+  const eventContractQuantity = Array.isArray(eventPositions)
+    ? eventPositions.reduce((total, row) => total + (row.quantity || 0), 0)
+    : null;
+  const rawScopeEventVenues = normalizeSortedEventVenues(
+    rawPositionScope.eventVenues,
   );
-  if (
-    referenceSessionMs >= cashObservedMs
-    || settlementHorizonMs < referenceSessionMs
-  ) {
-    return null;
-  }
+  const legacyAccountingVenue = rawEventAccounting.venue === 'KALSHI'
+    ? ['KALSHI']
+    : null;
+  const rawAccountingEventVenues = normalizeSortedEventVenues(
+    rawEventAccounting.venues,
+  ) || (
+    positionScope === LEGACY_KALSHI_POSITION_SCOPE
+      ? legacyAccountingVenue
+      : null
+  );
+  const eventVenues = positionScope === EVENT_CONTRACT_POSITION_SCOPE
+    && sameStringArray(rawScopeEventVenues, rawAccountingEventVenues)
+    ? rawScopeEventVenues
+    : positionScope === LEGACY_KALSHI_POSITION_SCOPE
+      && sameStringArray(
+        rawScopeEventVenues || ['KALSHI'],
+        rawAccountingEventVenues,
+      )
+      ? rawAccountingEventVenues
+      : null;
+  const eventPositionVenues = Array.isArray(eventPositions)
+    ? [...new Set(eventPositions.map((row) => row.exchange))].sort()
+    : null;
+  const eventPositionConIds = Array.isArray(eventPositions)
+    ? eventPositions.map((row) => Number(row.conId))
+    : [];
+  const eventPositionRowsVerified = Array.isArray(eventPositions)
+    && new Set(eventPositionConIds).size === eventPositionConIds.length
+    && eventPositions.every((row) => (
+      Number.isSafeInteger(Number(row.conId))
+      && Number(row.conId) > 0
+      && SUPPORTED_EVENT_VENUES.has(row.exchange)
+      && (
+        row.secType === 'OPT'
+        || (row.exchange === 'FORECASTX' && row.secType === 'FOP')
+      )
+      && row.currency === 'USD'
+      && row.multiplier === 1
+      && Number.isFinite(row.quantity)
+      && row.quantity !== 0
+    ));
+  const eventPositionCountsReconciled = positionScope === EVENT_CONTRACT_POSITION_SCOPE
+    ? Number.isInteger(rawScopeEventPositionCount)
+      && Number.isInteger(rawAccountingEventPositionCount)
+      && rawScopeEventPositionCount === rawAccountingEventPositionCount
+    : (
+      rawScopeEventPositionCount === null
+      || rawAccountingEventPositionCount === null
+      || rawScopeEventPositionCount === rawAccountingEventPositionCount
+    );
+  const eventPositionEvidenceVerified = Boolean(
+    eventVenues
+    && eventPositionRowsVerified
+    && sameStringArray(eventPositionVenues, eventVenues)
+    && Number.isInteger(eventPositionCount)
+    && eventPositionCount > 0
+    && eventPositions.length === eventPositionCount
+    && eventPositionCountsReconciled
+  );
+  const accountingVerification = rawEventAccounting.verification || null;
+  const accountingVerificationAccepted =
+    accountingVerification === EVENT_ACCOUNTING_VERIFICATION
+    || (
+      positionScope === LEGACY_KALSHI_POSITION_SCOPE
+      && accountingVerification === LEGACY_KALSHI_ACCOUNTING_VERIFICATION
+    );
 
-  const openOrderCount = finiteNumber(rawReference.openOrderCount);
-  const openPositionCount = finiteNumber(rawReference.openPositionCount);
-  const shortPositionCount = finiteNumber(rawReference.shortPositionCount);
-  const executionCountObserved = finiteNumber(
-    rawReference.executionCountObserved,
-  );
-  const shortStockReferenceCloseValue = finiteNumber(
-    rawReference.shortStockReferenceCloseValue,
-  );
-  if (
-    !Number.isInteger(openOrderCount)
-    || openOrderCount !== 0
-    || !Number.isInteger(openPositionCount)
-    || openPositionCount < shortEvidence.length
-    || !Number.isInteger(shortPositionCount)
-    || shortPositionCount !== shortEvidence.length
-    || !Number.isInteger(executionCountObserved)
-    || executionCountObserved < 0
-    || shortStockReferenceCloseValue == null
-    || shortStockReferenceCloseValue < 0
-  ) {
-    return null;
-  }
-
-  const forbiddenLiveFields = [
-    'currentPrice',
-    'currentPriceSource',
-    'directAsk',
-    'directBid',
-    'directLast',
-    'marketDataType',
-    'snapshotTimestamp',
-    'priorClose',
-    'priorCloseSource',
-  ];
-  const seenConIds = new Set();
-  const normalizedShorts = [];
-  for (const row of shortEvidence) {
-    const conId = finiteNumber(row?.conId ?? row?.conid);
-    const quantity = finiteNumber(row?.quantity);
-    const referenceClose = finiteNumber(row?.referenceClose);
-    if (
-      !Number.isSafeInteger(conId)
-      || conId <= 0
-      || seenConIds.has(conId)
-      || quantity == null
-      || quantity >= 0
-      || referenceClose == null
-      || referenceClose <= 0
-      || String(row?.currency || '').toUpperCase() !== 'USD'
-      || row?.referenceCloseSource !== 'ibkr_historical_daily_close'
-      || row?.referenceCloseSessionDate
-        !== rawReference.referenceSessionDate
-      || !isFreshEvidence(row?.referenceCloseObservedAt)
-      || forbiddenLiveFields.some((field) => (
-        Object.prototype.hasOwnProperty.call(row, field)
-      ))
-    ) {
-      return null;
-    }
-    seenConIds.add(conId);
-    normalizedShorts.push({
-      conId,
-      symbol: typeof row.symbol === 'string' ? row.symbol : null,
-      currency: 'USD',
-      quantity,
-      referenceClose,
-      referenceCloseSource: row.referenceCloseSource,
-      referenceCloseSessionDate: row.referenceCloseSessionDate,
-      referenceCloseObservedAt: row.referenceCloseObservedAt,
-    });
-  }
-
-  const baseCurrency = String(
-    rawSummary.baseCurrency || rawSummary.currency || '',
-  ).toUpperCase();
-  return {
-    schemaVersion: 1,
-    referenceOnly: true,
-    actionable: false,
-    referenceKind: rawReference.referenceKind,
+  const exposure = calculatePortfolioExposure({
     accountId,
     accountReady: rawSummary.AccountReady === true
       || String(rawSummary.AccountReady || '').toLowerCase() === 'true',
-    baseCurrency,
-    currency: baseCurrency,
+    baseCurrency: String(rawSummary.baseCurrency || '').toUpperCase(),
     netLiquidation: finiteNumber(rawSummary.NetLiquidation),
-    totalCashValue: finiteNumber(rawSummary.TotalCashValue),
-    totalCashValueSecurities: finiteNumber(rawSummary['TotalCashValue-S']),
-    totalCashValueCommodities: finiteNumber(rawSummary['TotalCashValue-C']),
-    commodityMaintenanceMargin: finiteNumber(rawSummary['MaintMarginReq-C']),
     grossPositionValue: finiteNumber(
       rawSummary['GrossPositionValue-S'] ?? rawSummary.GrossPositionValue,
     ),
     stockMarketValue: finiteNumber(rawSummary.StockMarketValue),
-    accruedCashSecurities: finiteNumber(
-      rawSummary['AccruedCash-S'] ?? rawSummary.AccruedCash,
+  });
+  if (exposure.available !== true) {
+    throw portfolioBalanceError(
+      'IBKR did not return complete live aggregate exposure evidence.',
+      'BALANCE_EXPOSURE_INVALID',
+    );
+  }
+  const capacityExplicitlyUnavailable = rawEvidence.capacityAvailable === false;
+  let margin;
+  try {
+    margin = normalizeLiveMarginHealth(rawSummary, accountId);
+  } catch (error) {
+    if (
+      !capacityExplicitlyUnavailable
+      || error?.code !== 'BALANCE_MARGIN_INVALID'
+    ) {
+      throw error;
+    }
+    margin = unavailableLiveMarginHealth(rawSummary, accountId);
+  }
+
+  const calculation = calculatePortfolioBalance({
+    accountId,
+    accountReady: rawSummary.AccountReady === true
+      || String(rawSummary.AccountReady || '').toLowerCase() === 'true',
+    baseCurrency: String(rawSummary.baseCurrency || '').toUpperCase(),
+    currency: String(rawSummary.baseCurrency || '').toUpperCase(),
+    positionScope,
+    netLiquidation: finiteNumber(rawSummary.NetLiquidation),
+    totalCashValueSecurities: finiteNumber(rawSummary['TotalCashValue-S']),
+    totalCashValueCommodities: finiteNumber(rawSummary['TotalCashValue-C']),
+    commodityMaintenanceMargin: finiteNumber(rawSummary['MaintMarginReq-C']),
+    eventMarketValue: finiteNumber(
+      rawEventAccounting.marketValue ?? rawSummary['GrossPositionValue-C'],
     ),
-    settledCashByDateSecurities:
-      rawSummary['SettledCashByDate-S'] || null,
-    settledCashByDateCommodities:
-      rawSummary['SettledCashByDate-C'] || null,
-    cashBalances: rawReference.cashBalances || rawSummary.CashBalance || {},
-    shortPositionReferences: normalizedShorts,
-    shortStockReferenceCloseValue,
-    openPositionCount,
-    shortPositionCount,
-    openOrderCount,
-    executionCountObserved,
-    positionScope: 'stocks_only',
-    referenceSessionDate: rawReference.referenceSessionDate,
-    cashLedgerObservedDate: rawReference.cashLedgerObservedDate,
-    settlementHorizonDate: rawReference.settlementHorizonDate,
-    settlementVerification: rawReference.settlementVerification,
-    accountValuesObservedAt: rawReference.accountValuesObservedAt,
-    status: 'reference',
-    source: response.source,
+    eventNetLiquidation: finiteNumber(
+      eventAccountValues['NetLiquidation-C'] ?? rawSummary['NetLiquidation-C'],
+    ),
+    eventInitialMargin: finiteNumber(
+      rawEventAccounting.initialMargin ?? rawSummary['InitMarginReq-C'],
+    ),
+    eventMaintenanceMargin: finiteNumber(
+      rawEventAccounting.maintenanceMargin ?? rawSummary['MaintMarginReq-C'],
+    ),
+    eventAvailableFunds: finiteNumber(
+      rawEventAccounting.availableFunds ?? rawSummary['AvailableFunds-C'],
+    ),
+    eventEquityWithLoanValue: finiteNumber(
+      rawEventAccounting.equityWithLoanValue
+        ?? rawSummary['EquityWithLoanValue-C'],
+    ),
+    eventContractQuantity,
+    eventPositionCount,
+    eventVenues,
+    eventAccountingVerified:
+      eventPositionEvidenceVerified && accountingVerificationAccepted,
+    eventAccountingVerification: accountingVerification,
+    grossPositionValue: finiteNumber(
+      rawSummary['GrossPositionValue-S'] ?? rawSummary.GrossPositionValue,
+    ),
+    stockMarketValue: finiteNumber(rawSummary.StockMarketValue),
+    accruedCashSecurities: finiteNumber(rawSummary['AccruedCash-S']),
+    settledCashByDateSecurities: rawSummary['SettledCashByDate-S'] || null,
+    settledCashByDateCommodities: rawSummary['SettledCashByDate-C'] || null,
+    settlementLaddersVerified:
+      rawEvidence.settlementLaddersVerified === true
+      && rawEvidence.settlementVerification
+        === 'segment_ladders_double_snapshot',
+    activitySnapshotVerified: rawEvidence.activitySnapshotVerified === true,
+    settlementState: rawEvidence.settlementState,
+    settlementDate: rawEvidence.settlementDate,
+    settlementHorizonDate: rawEvidence.settlementHorizonDate,
+    openPositionCount: finiteNumber(rawEvidence.openPositionCount),
+    shortPositionCount: finiteNumber(rawEvidence.shortPositionCount),
+    openOrderCount: finiteNumber(rawEvidence.openOrderCount),
+    sameDayExecutionCount: finiteNumber(rawEvidence.sameDayExecutionCount),
+    shortPositions,
     observedAt: response.observed_at,
     socketVerifiedAt: response.socket_verified_at,
+    accountValuesObservedAt: rawEvidence.accountValuesObservedAt,
+  });
+  const freshnessTimestamps = [
+    response.observed_at,
+    response.socket_verified_at,
+    rawEvidence.accountValuesObservedAt,
+  ].map((value) => Date.parse(value));
+  const oldestEvidenceAt = Math.min(...freshnessTimestamps);
+  const common = {
+    available: true,
+    status: 'live',
+    source: 'ibkr_live_session',
+    accountId,
+    currency: exposure.currency,
+    observedAt: response.observed_at,
+    socketVerifiedAt: response.socket_verified_at,
+    accountValuesObservedAt: rawEvidence.accountValuesObservedAt,
     fromCache: false,
+    exposure,
+    margin,
+    positions: positions || [],
+    longPositions: (positions || []).filter((row) => Number(row.quantity) > 0),
+    eventPositions: eventPositions || [],
+    eventContracts: calculation.eventContracts || null,
+    snapshotId: String(response.snapshotId || '').trim() || null,
+    freshness: {
+      status: 'fresh',
+      maxAgeMs: PORTFOLIO_BALANCE_MAX_AGE_MS,
+      oldestEvidenceAgeMs: Math.max(0, Date.now() - oldestEvidenceAt),
+      accountReads: finiteNumber(response.freshness?.accountReads),
+      positionReads: finiteNumber(response.freshness?.positionReads),
+      activityReads: finiteNumber(response.freshness?.activityReads),
+    },
+    timing: response.timing || null,
+  };
+
+  if (calculation.available === true && rawEvidence.capacityAvailable !== false) {
+    return {
+      ...calculation,
+      ...common,
+      exposure: {
+        ...calculation.exposure,
+        available: true,
+        status: 'live',
+        source: 'ibkr_live_session',
+        currency: exposure.currency,
+      },
+      capacity: {
+        available: true,
+        status: 'live',
+        settlement: calculation.settlement,
+        activity: calculation.activity,
+        cash: calculation.cash,
+        buffer: calculation.buffer,
+      },
+    };
+  }
+
+  const sidecarCode = String(
+    rawEvidence.capacityUnavailableCode || '',
+  ).trim().toUpperCase();
+  const calculationReasons = Array.isArray(calculation.reasons)
+    ? calculation.reasons
+    : [calculation.reason].filter(Boolean);
+  const reason = sidecarCode
+    ? sidecarCode.toLowerCase()
+    : calculation.reason || 'balance_capacity_evidence_unavailable';
+  const openOrderCount = finiteNumber(rawEvidence.openOrderCount);
+  const sameDayExecutionCount = finiteNumber(rawEvidence.sameDayExecutionCount);
+  const activity = Number.isInteger(openOrderCount)
+    && openOrderCount >= 0
+    && Number.isInteger(sameDayExecutionCount)
+    && sameDayExecutionCount >= 0
+    ? {
+      openOrderCount,
+      sameDayExecutionCount,
+      previewAvailable: false,
+      previewUnavailableReason: 'capacity_unavailable',
+    }
+    : null;
+
+  return {
+    ...common,
+    positionScope: positionScope || 'unsupported_or_unverified',
+    settlement: null,
+    activity,
+    cash: null,
+    buffer: null,
+    shortPositions: [],
+    capacity: {
+      available: false,
+      status: 'unavailable',
+      errorCode: sidecarCode || 'BALANCE_EVIDENCE_INVALID',
+      reason,
+      reasons: sidecarCode ? [reason] : calculationReasons,
+    },
   };
 }
 
@@ -898,6 +1112,218 @@ async function resolveAccountId(accountId) {
   return accounts[0] || null;
 }
 
+async function requestLivePortfolioBalance(accountId) {
+  const response = await sidecarRequest(
+    `/portfolio/live-balance?account=${encodeURIComponent(accountId)}`,
+    { timeoutMs: 13_000 },
+  );
+  return normalizeLivePortfolioBalance(response, accountId);
+}
+
+async function getPortfolioBalance(accountId) {
+  const requestedAccount = String(accountId || '').trim();
+  const acct = requestedAccount || await resolveAccountId(null);
+  if (!acct) {
+    throw portfolioBalanceError(
+      'No exact live IBKR account is available for portfolio balance.',
+      'BALANCE_ACCOUNT_REQUIRED',
+      400,
+    );
+  }
+
+  return requestLivePortfolioBalance(acct);
+}
+
+function verifiedShortPreviewEvidence(response, accountId, conId, action) {
+  return Boolean(
+    response?.ok === true
+    && response?.available === true
+    && response?.connected === true
+    && response?.status === 'live'
+    && response?.source === 'ibkr_live_session'
+    && response?.account === accountId
+    && Number(response?.conId) === Number(conId)
+    && response?.action === action
+    && response?.from_cache === false
+    && Number(response?.marketDataType) === 1
+    && isFreshBalanceEvidence(response?.observed_at)
+    && isFreshBalanceEvidence(response?.socket_verified_at)
+    && isFreshLiveLast(response?.quoteObservedAt)
+  );
+}
+
+function verifiedBatchPreviewEvidence(response, accountId, legs = []) {
+  if (
+    response?.ok !== true
+    || response?.available !== true
+    || response?.connected !== true
+    || response?.status !== 'live'
+    || response?.source !== 'ibkr_live_session'
+    || response?.account !== accountId
+    || response?.from_cache !== false
+    || !isFreshBalanceEvidence(response?.observed_at)
+    || !isFreshBalanceEvidence(response?.socket_verified_at)
+    || !Array.isArray(response?.legs)
+  ) return false;
+  const requestedIds = new Set(legs.map((leg) => String(leg?.id || '').trim()));
+  if (requestedIds.size === 0 || response.legs.length !== requestedIds.size) return false;
+  return response.legs.every((row) => {
+    const id = String(row?.id || '').trim();
+    const action = String(row?.action || '').trim().toLowerCase();
+    return requestedIds.has(id)
+      && row?.available === true
+      && ['buy_long', 'sell_long', 'add_short', 'cover_short'].includes(action)
+      && Number(row?.conId) > 0
+      && Number(row?.marketDataType) === 1
+      && finiteNumber(row?.bid) > 0
+      && finiteNumber(row?.ask) > 0
+      && finiteNumber(row?.currentPrice) > 0
+      && isFreshLiveLast(row?.quoteObservedAt)
+      && (action !== 'add_short'
+        || (finiteNumber(row?.shortableShares) !== null
+          && finiteNumber(row?.shortableShares) >= 0))
+      && (action === 'buy_long' || action === 'sell_long'
+        || (finiteNumber(row?.priorClose) !== null
+          && finiteNumber(row?.priorClose) > 0
+          && row?.priorCloseSource === 'ibkr_historical_daily_close'
+          && isFreshBalanceEvidence(row?.priorCloseObservedAt)));
+  });
+}
+
+async function getPortfolioBalancePreview(request = {}) {
+  const accountId = String(request.accountId || request.account || '').trim();
+  if (!accountId) {
+    throw portfolioBalanceError(
+      'An account is required for a portfolio-balance preview.',
+      'BALANCE_ACCOUNT_REQUIRED',
+      400,
+    );
+  }
+  const baseline = await getPortfolioBalance(accountId);
+  if (baseline.capacity?.available !== true) {
+    throw portfolioBalanceError(
+      'Exact portfolio capacity requires complete live position and settlement evidence.',
+      'BALANCE_CAPACITY_UNAVAILABLE',
+      422,
+    );
+  }
+  if (baseline.activity?.openOrderCount > 0) {
+    throw portfolioBalanceError(
+      'Open orders must be resolved before previewing another trade.',
+      'OPEN_ORDERS_PRESENT',
+      409,
+    );
+  }
+
+  if (Array.isArray(request.legs)) {
+    const legs = request.legs.map((leg, index) => ({
+      ...leg,
+      id: String(leg?.id || `leg-${index + 1}`).trim(),
+      action: String(leg?.action || '').trim().toLowerCase(),
+    }));
+    if (!legs.length || legs.some((leg) => !leg.id || !leg.action)) {
+      throw portfolioBalanceError(
+        'At least one valid scenario leg is required.',
+        'BALANCE_PREVIEW_REQUEST_INVALID',
+        400,
+      );
+    }
+    const response = await sidecarRequest(
+      '/portfolio/live-balance/preview-evidence',
+      {
+        method: 'POST',
+        timeoutMs: 30_000,
+        body: { account: accountId, legs },
+      },
+    );
+    if (!verifiedBatchPreviewEvidence(response, accountId, legs)) {
+      throw portfolioBalanceError(
+        'The scenario planner did not return verified live quote evidence for every leg.',
+        'BALANCE_PREVIEW_EVIDENCE_UNVERIFIED',
+      );
+    }
+    const evidence = {
+      legs: Object.fromEntries(response.legs.map((row) => [row.id, {
+        ...row,
+        available: true,
+        marketDataType: Number(row.marketDataType),
+      }])),
+    };
+    const projection = projectPortfolioBalance(
+      baseline,
+      { ...request, accountId, legs },
+      evidence,
+    );
+    if (projection.available !== true) {
+      throw portfolioBalanceError(
+        `Portfolio-balance scenario is unavailable: ${projection.reason}`,
+        String(projection.reason || 'BALANCE_PREVIEW_INVALID').toUpperCase(),
+        422,
+      );
+    }
+    return projection;
+  }
+
+  const action = String(request.action || '').trim().toLowerCase();
+  let shortEvidence = null;
+  if (action === 'add_short' || action === 'cover_short') {
+    const conId = finiteNumber(request.conId);
+    const quantity = finiteNumber(request.quantity);
+    if (!Number.isSafeInteger(conId) || conId <= 0 || quantity == null || quantity <= 0) {
+      throw portfolioBalanceError(
+        'A verified existing short and positive share quantity are required.',
+        'BALANCE_PREVIEW_REQUEST_INVALID',
+        400,
+      );
+    }
+    const response = await sidecarRequest(
+      '/portfolio/live-balance/preview-evidence',
+      {
+        method: 'POST',
+        timeoutMs: 15_000,
+        body: {
+          account: accountId,
+          conId,
+          action,
+          quantity,
+        },
+      },
+    );
+    if (!verifiedShortPreviewEvidence(response, accountId, conId, action)) {
+      throw portfolioBalanceError(
+        'The short preview did not return verified live quote evidence.',
+        'BALANCE_PREVIEW_EVIDENCE_UNVERIFIED',
+      );
+    }
+    shortEvidence = {
+      available: true,
+      conId,
+      positionQuantity: finiteNumber(response.positionQuantity),
+      bid: finiteNumber(response.bid),
+      ask: finiteNumber(response.ask),
+      currentPrice: finiteNumber(response.currentPrice),
+      marketDataType: Number(response.marketDataType),
+      shortableShares: finiteNumber(response.shortableShares),
+      quoteObservedAt: response.quoteObservedAt,
+      source: response.source,
+    };
+  }
+
+  const projection = projectPortfolioBalance(
+    baseline,
+    { ...request, action },
+    shortEvidence,
+  );
+  if (projection.available !== true) {
+    throw portfolioBalanceError(
+      `Portfolio-balance preview is unavailable: ${projection.reason}`,
+      String(projection.reason || 'BALANCE_PREVIEW_INVALID').toUpperCase(),
+      422,
+    );
+  }
+  return projection;
+}
+
 async function getAccountSummary(accountId) {
   const acct = await resolveAccountId(accountId);
   if (!acct) return null;
@@ -911,46 +1337,6 @@ async function getAccountSummary(accountId) {
     source: res.source,
     socket_verified_at: res.socket_verified_at,
   });
-}
-
-async function getLiveFundingSnapshot(accountId) {
-  const acct = String(accountId || '').trim();
-  if (!acct) return null;
-
-  const res = await sidecarRequest(
-    `/portfolio/live-funding?account=${encodeURIComponent(acct)}`,
-    { timeoutMs: 25_000 },
-  );
-  const liveResponse = (
-    verifiedLiveResponse(res)
-    && res.account === acct
-    && res.summary
-    && res.funding
-  );
-  const fundingReference = liveResponse
-    ? null
-    : normalizeFundingReference(res, acct);
-  if (!liveResponse && !fundingReference) {
-    return null;
-  }
-
-  const accountSummary = normalizeAccountSummary({
-    ...res.summary,
-    currency: res.summary.baseCurrency || res.summary.currency,
-    GrossPositionValue:
-      res.summary.GrossPositionValue ?? res.summary['GrossPositionValue-S'],
-    fetched_at: res.observed_at,
-    source: res.source,
-    socket_verified_at: res.socket_verified_at,
-  });
-
-  return {
-    accountSummary,
-    funding: liveResponse ? normalizeLiveFunding(res, acct) : null,
-    fundingReference,
-    fundingUnavailableReason:
-      fundingReference ? 'non_settlement_day' : null,
-  };
 }
 
 async function getBalances(accountId) {
@@ -1016,47 +1402,6 @@ async function getPnLBestEffort(accountId) {
   }
 }
 
-async function getLiveFundingSnapshotBestEffort(accountId) {
-  try {
-    return await getLiveFundingSnapshot(accountId);
-  } catch (err) {
-    let finalError = err;
-    if (
-      ['FUNDING_SNAPSHOT_TIMEOUT', 'GATEWAY_UNAVAILABLE']
-        .includes(err?.sidecarCode)
-    ) {
-      try {
-        return await getLiveFundingSnapshot(accountId);
-      } catch (retryError) {
-        finalError = retryError;
-      }
-    }
-    const unavailableReasonByCode = {
-      NON_SETTLEMENT_DAY: 'non_settlement_day',
-      UNSETTLED_SECURITIES_ACTIVITY: 'unsettled_securities_activity',
-    };
-    const fundingUnavailableReason =
-      unavailableReasonByCode[finalError?.sidecarCode];
-    if (fundingUnavailableReason) {
-      console.warn(
-        '[Portfolio] IBKR live funding snapshot unavailable:',
-        fundingUnavailableReason,
-      );
-      return {
-        accountSummary: null,
-        funding: null,
-        fundingReference: null,
-        fundingUnavailableReason,
-      };
-    }
-    console.warn(
-      '[Portfolio] IBKR live funding snapshot failed:',
-      finalError?.message,
-    );
-    return null;
-  }
-}
-
 function buildSnapshotSummary(holdings, accountSummary) {
   // Position marks (including completed-session reference closes) are not NAV.
   // Never infer a sizing/weight denominator from signed holdings.
@@ -1095,11 +1440,15 @@ function buildDataQuality(raw, holdings, fetchedAt, referenceMarks) {
   const unavailableMarketValue = unavailableMarketValueHoldings
     .map((holding) => holding.symbol)
     .filter(Boolean);
-  const predictionMarketContracts = holdings
-    .filter((h) => Number(h.quantity || 0) !== 0 && h.isPredictionMarket)
-    .map((h) => h.symbol || h.description)
+  const predictionMarketPositions = raw
+    .filter((position) => isOpenPosition(position) && isPredictionMarketContract(position));
+  const predictionMarketContracts = predictionMarketPositions
+    .map((position) => position.symbol || position.localSymbol || position.description)
     .filter(Boolean);
-  const zeroQuantityFiltered = Math.max(0, raw.length - holdings.length);
+  const zeroQuantityFiltered = Math.max(
+    0,
+    raw.length - predictionMarketPositions.length - holdings.length,
+  );
   const liveMarkCount = holdings
     .filter((holding) => holding.priceState === 'live')
     .length;
@@ -1179,7 +1528,7 @@ function buildDataQuality(raw, holdings, fetchedAt, referenceMarks) {
     oldestReferenceSessionDate: referenceSessionDates[0] || null,
     latestReferenceSessionDate:
       referenceSessionDates[referenceSessionDates.length - 1] || null,
-    predictionMarketContractCount: predictionMarketContracts.length,
+    predictionMarketContractCount: predictionMarketPositions.length,
     predictionMarketContractSymbols: predictionMarketContracts,
     zeroQuantityFiltered,
     warningCount: warnings.length,
@@ -1218,23 +1567,27 @@ async function getPortfolioSnapshot(accountId) {
     };
   }
 
-  // Reference history uses an isolated read-only client, so it can run while
-  // the serialized funding snapshot is in flight without blocking the live
-  // stream or overlapping the account/PnL requests on their clients.
-  const referenceMarksPromise = raw.length > 0
-    ? getReferenceMarks(acct, raw).catch(
+  // Event contracts have their own live portfolio endpoint and must not enter
+  // the securities ledger, its counts, exposure analytics, or research calls.
+  const portfolioPositions = raw.filter(
+    (position) => !isPredictionMarketContract(position),
+  );
+
+  // Reference history uses an isolated read-only client and remains separate
+  // from the independently polled portfolio-balance endpoint.
+  const referenceMarksPromise = portfolioPositions.length > 0
+    ? getReferenceMarks(acct, portfolioPositions).catch(
       () => unavailableReferenceMarks(acct, 'REFERENCE_MARKS_REQUEST_FAILED'),
     )
     : null;
 
   // Avoid overlapping account/PnL socket requests; IB Gateway can otherwise
-  // time them out under the dashboard's polling load.
-  const liveFunding = acct ? await getLiveFundingSnapshotBestEffort(acct) : null;
-  const accountSummary = liveFunding?.accountSummary
-    || (acct ? await getAccountSummaryBestEffort(acct) : null);
+  // time them out under the dashboard's polling load. Balance evidence is
+  // intentionally not attached to this slower portfolio snapshot.
+  const accountSummary = acct ? await getAccountSummaryBestEffort(acct) : null;
   const pnl = acct ? await getPnLBestEffort(acct) : null;
 
-  if (!raw.length) {
+  if (!portfolioPositions.length) {
     return {
       holdings: [],
       accountSummary,
@@ -1245,10 +1598,6 @@ async function getPortfolioSnapshot(accountId) {
       dataSource: 'ibkr_api',
       liveSessionVerified,
       socketVerifiedAt,
-      funding: liveFunding?.funding || null,
-      fundingReference: liveFunding?.fundingReference || null,
-      fundingUnavailableReason:
-        liveFunding?.fundingUnavailableReason || null,
       referenceMarks: {
         status: 'empty',
         source: 'ibkr_portfolio_reference_marks',
@@ -1285,7 +1634,7 @@ async function getPortfolioSnapshot(accountId) {
       snapshotMarkFailure = failure;
     }
   }
-  const holdings = raw
+  const holdings = portfolioPositions
     .map((position) => {
       const conid = finiteNumber(position.conId ?? position.conid);
       const mark = conid != null
@@ -1332,17 +1681,18 @@ async function getPortfolioSnapshot(accountId) {
     dataSource: 'ibkr_api',
     liveSessionVerified,
     socketVerifiedAt,
-    funding: liveFunding?.funding || null,
-    fundingReference: liveFunding?.fundingReference || null,
-    fundingUnavailableReason:
-      liveFunding?.fundingUnavailableReason || null,
     fromCache: false,
   };
 }
 
 async function getProviderStatus() {
-  const status = await getSidecarProviderStatus('ibkr_portfolio');
+  const status = typeof getSidecarPortfolioStatus === 'function'
+    ? await getSidecarPortfolioStatus('ibkr_portfolio')
+    : await getSidecarProviderStatus('ibkr_portfolio');
   setIbkrConnected(Boolean(status.connected), status.message);
+  if (status.portfolioObservedAt) {
+    setIbkrLastPortfolioAt(status.portfolioObservedAt);
+  }
   return status;
 }
 
@@ -1351,7 +1701,8 @@ module.exports = {
   getPositions,
   getBalances,
   getAccountSummary,
-  getLiveFundingSnapshot,
+  getPortfolioBalance,
+  getPortfolioBalancePreview,
   getPortfolioSnapshot,
   getOpenOrders,
   getPnL,

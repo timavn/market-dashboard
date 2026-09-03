@@ -63,6 +63,11 @@ MISSING_ALARM_RESOURCES = {
     "quant-developer": "DeveloperHeartbeatMissingAlarm",
     "security": "SecurityHeartbeatMissingAlarm",
 }
+MISSING_ALARM_CONDITIONS = {
+    "quant-analyst": "AnalystHeartbeatAlarmEnabled",
+    "quant-developer": "DeveloperHeartbeatAlarmEnabled",
+    "security": "SecurityHeartbeatAlarmEnabled",
+}
 EXACT_CAPABILITY_IDS = {
     "automation.hermes",
     "dashboard.core",
@@ -250,6 +255,13 @@ class HermesInfrastructureContractTests(unittest.TestCase):
         self.assertEqual(
             environment["HERMES_INPUT_SNAPSHOT_TABLE"],
             {"tag": "Ref", "value": "HermesInputSnapshotTable"},
+        )
+        self.assertEqual(
+            environment["HERMES_WORKER_MODE"],
+            {
+                "tag": "If",
+                "value": ["AllHermesWorkerSchedulesDisabled", "retired", "active"],
+            },
         )
         gmail_environment = resources["GmailIngestorFunction"]["Properties"]["Environment"]["Variables"]
         self.assertEqual(
@@ -696,10 +708,14 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                 properties = resources[logical_id]["Properties"]
                 self.assertEqual(
                     properties["ActionsEnabled"],
-                    {
-                        "tag": "If",
-                        "value": ["OperationalAlarmsEnabled", True, False],
-                    },
+                    (
+                        {
+                            "tag": "If",
+                            "value": ["OperationalAlarmsEnabled", True, False],
+                        }
+                        if logical_id == "CloudWatchdogHeartbeatMissingAlarm"
+                        else False
+                    ),
                 )
                 self.assertEqual(
                     properties["Namespace"], "MarketDashboard/Readiness"
@@ -711,13 +727,14 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     watchdog.WATCHDOG_SERVICE_ID,
                 )
                 self.assertEqual(
-                    properties["AlarmActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
+                    properties.get("AlarmActions"),
+                    (
+                        [{"tag": "Ref", "value": "OperationsTopic"}]
+                        if logical_id == "CloudWatchdogHeartbeatMissingAlarm"
+                        else None
+                    ),
                 )
-                self.assertEqual(
-                    properties["OKActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
+                self.assertNotIn("OKActions", properties)
 
         self.assertEqual(
             resources["CloudWatchdogHeartbeatMissingAlarm"]["Properties"][
@@ -764,6 +781,10 @@ class HermesInfrastructureContractTests(unittest.TestCase):
         self.assertEqual(
             self.template["Parameters"]["AlertEmail"]["Default"],
             gmail_ingestor.GMAIL_ACCOUNT,
+        )
+        self.assertNotIn(
+            "Subscription",
+            resources["OperationsTopic"]["Properties"],
         )
         self.assertEqual(
             schedule["Target"]["Arn"],
@@ -878,6 +899,13 @@ class HermesInfrastructureContractTests(unittest.TestCase):
             invoke["Resource"],
             {"tag": "GetAtt", "value": "HedgeyePdfProcessorFunction.Arn"},
         )
+        gmail_textract = statement_for_action(gmail, "textract:AnalyzeDocument")
+        self.assertEqual(gmail_textract["Resource"], "*")
+        gmail_text_detection = statement_for_action(
+            gmail,
+            "textract:DetectDocumentText",
+        )
+        self.assertEqual(gmail_text_detection["Resource"], "*")
         textract = statement_for_action(processor, "textract:AnalyzeDocument")
         self.assertEqual(textract["Resource"], "*")
         snapshot_access = statement_for_action(processor, "dynamodb:UpdateItem")
@@ -1003,16 +1031,10 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                 self.assertEqual(dimension_value(unhealthy, "ServiceId"), contract["serviceId"])
                 self.assertEqual(
                     unhealthy["ActionsEnabled"],
-                    {"tag": "If", "value": ["OperationalAlarmsEnabled", True, False]},
+                    False,
                 )
-                self.assertEqual(
-                    unhealthy["AlarmActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
-                self.assertEqual(
-                    unhealthy["OKActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
+                self.assertNotIn("AlarmActions", unhealthy)
+                self.assertNotIn("OKActions", unhealthy)
 
                 missing = resources[MISSING_ALARM_RESOURCES[job_type]]["Properties"]
                 self.assertEqual(missing["MetricName"], "Heartbeat")
@@ -1027,9 +1049,20 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     {
                         "tag": "If",
                         "value": [
-                            "OperationalAlarmsEnabled",
+                            MISSING_ALARM_CONDITIONS[job_type],
                             "breaching",
                             "notBreaching",
+                        ],
+                    },
+                )
+                self.assertEqual(
+                    missing["ActionsEnabled"],
+                    {
+                        "tag": "If",
+                        "value": [
+                            MISSING_ALARM_CONDITIONS[job_type],
+                            True,
+                            False,
                         ],
                     },
                 )
@@ -1038,10 +1071,7 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                     missing["AlarmActions"],
                     [{"tag": "Ref", "value": "OperationsTopic"}],
                 )
-                self.assertEqual(
-                    missing["OKActions"],
-                    [{"tag": "Ref", "value": "OperationsTopic"}],
-                )
+                self.assertNotIn("OKActions", missing)
 
 
 if __name__ == "__main__":

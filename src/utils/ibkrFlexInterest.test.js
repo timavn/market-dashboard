@@ -1,4 +1,5 @@
 const {
+  deriveMonthlyPaid,
   parseFlexInterestResponse,
   parseFlexInterestStatement,
 } = require('./ibkrFlexInterest.cjs');
@@ -41,11 +42,23 @@ function interestStatementXml({ accountId = ACCOUNT_ID } = {}) {
             <CashTransaction accountId="${accountId}" transactionID="received-1"
               currency="USD" date="20260710" type="BrokerInterestReceived"
               amount="8.50" description="USD Credit Interest" />
+            <CashTransaction accountId="${accountId}" transactionID="borrow-1"
+              currency="USD" date="20260710" type="Broker Interest Paid"
+              amount="-294.87" description="USD BORROW FEES FOR JUN-2026" />
             <CashTransaction accountId="${accountId}" currency="USD"
               date="20260710" type="Dividends" amount="500" />
             <CashTransaction accountId="${accountId}" currency="BASE_SUMMARY"
               date="20260703" type="Broker Interest Paid" amount="-143.25" />
           </CashTransactions>
+          <SecuritiesBorrowedLentFeeDetails accountId="${accountId}">
+            <SecuritiesBorrowedLentFeeDetail accountId="${accountId}" currency="USD"
+              symbol="HARD" valueDate="20260710" startDate="20260709"
+              quantity="100" collateralAmount="10000" feeRate="12.5"
+              borrowFee="3.25" ibCarryCharge="0.10" ibTicketCharge="0.05"
+              totalCharges="3.40" code="Borrow" />
+            <SecuritiesBorrowedLentFeeDetail accountId="${accountId}" currency="BASE_SUMMARY"
+              symbol="BASE" valueDate="20260710" totalCharges="99" />
+          </SecuritiesBorrowedLentFeeDetails>
           <CashReport>
             <CashReportCurrency accountId="${accountId}" currency="USD"
               fromDate="20260701" toDate="20260731" startingCash="-100000"
@@ -87,6 +100,10 @@ describe('IBKR Flex interest parser', () => {
       accountId: ACCOUNT_ID,
       fromDate: '2026-07-01',
       toDate: '2026-07-31',
+      tierDetailSectionPresent: true,
+      accrualSectionPresent: true,
+      cashTransactionSectionPresent: true,
+      cashReportSectionPresent: true,
     });
     expect(result.tierDetails).toHaveLength(3);
     expect(result.accruals).toEqual([
@@ -96,11 +113,20 @@ describe('IBKR Flex interest parser', () => {
         endingAccrualBalance: -202.5,
       }),
     ]);
-    expect(result.cashTransactions).toHaveLength(2);
+    expect(result.cashTransactions).toHaveLength(3);
     expect(result.cashTransactions.map((row) => row.type)).toEqual([
       'Broker Interest Paid',
       'Broker Interest Received',
+      'Broker Interest Paid',
     ]);
+    expect(result.borrowFeeDetails).toEqual([
+      expect.objectContaining({
+        symbol: 'HARD',
+        valueDate: '2026-07-10',
+        totalCharges: 3.4,
+      }),
+    ]);
+    expect(result.borrowFeeDetailsSectionPresent).toBe(true);
     expect(result.cashReports).toEqual([
       expect.objectContaining({
         currency: 'USD',
@@ -138,6 +164,64 @@ describe('IBKR Flex interest parser', () => {
         transactionCount: 2,
       },
     ]);
+    expect(result.derived.stockBorrowFeePayments).toEqual([
+      {
+        month: '2026-06',
+        currency: 'USD',
+        amount: 294.87,
+        transactionCount: 1,
+        postedDates: ['2026-07-10'],
+        transactionIds: ['borrow-1'],
+      },
+    ]);
+    expect(result.derived.dailyStockBorrowFees).toEqual([
+      {
+        date: '2026-07-10',
+        amount: 3.4,
+        positionCount: 1,
+        rowCount: 1,
+      },
+    ]);
+  });
+
+  test('keeps securities-lending income out of margin-interest reconciliation', () => {
+    expect(deriveMonthlyPaid([
+      {
+        date: '2026-08-05',
+        currency: 'USD',
+        type: 'Broker Interest Paid',
+        amount: -56.29,
+        description: 'USD DEBIT INT FOR JUL-2026',
+      },
+      {
+        date: '2026-08-05',
+        currency: 'USD',
+        type: 'Broker Interest Received',
+        amount: 3.57,
+        description: 'USD CREDIT INT FOR JUL-2026',
+      },
+      {
+        date: '2026-08-05',
+        currency: 'USD',
+        type: 'Broker Interest Received',
+        amount: 20.58,
+        description: 'USD SHORT CREDIT INTEREST FOR JUL-2026',
+      },
+      {
+        date: '2026-08-05',
+        currency: 'USD',
+        type: 'Broker Interest Received',
+        amount: 21.85,
+        description: 'USD IBKR MANAGED SECURITIES (SYEP) FOR JUL-2026',
+      },
+    ])).toEqual([{
+      month: '2026-08',
+      currency: 'USD',
+      paid: 56.29,
+      received: 24.15,
+      net: -32.14,
+      transactionCount: 3,
+    }]);
   });
 
   test('requires an exact configured account match across the statement and rows', () => {

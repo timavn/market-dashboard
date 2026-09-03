@@ -544,11 +544,12 @@
 
 .region-mw-th {
   text-align: right;
-  font-weight: 700;
-  font-size: calc(9px * var(--mw-scale, 1));
+  font-weight: var(--dashboard-label-weight, 760);
+  font-size: var(--dashboard-label-size, clamp(7px, 0.42vw, 8px));
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6b7280;
+  letter-spacing: var(--dashboard-label-tracking, 0.04em);
+  line-height: var(--dashboard-label-line-height, 1);
+  color: var(--dashboard-muted-text, #667085);
   padding: 4px 6px 3px 4px;
   border-bottom: 1px solid var(--dashboard-border-soft);
   white-space: nowrap;
@@ -647,7 +648,7 @@
 }
 
 .region-mw-td.region-mw-td-heat.region-mw-heat--na {
-  color: #9ca3af;
+  color: var(--dashboard-muted-text-soft, #8993a2);
   background-color: #fafafa;
 }
 
@@ -765,9 +766,12 @@
 
 .mw-card-header-note {
   margin-left: auto;
-  font-size: 9px;
-  font-weight: 600;
-  color: #6b7280;
+  font-size: var(--dashboard-label-size, clamp(7px, 0.42vw, 8px));
+  font-weight: var(--dashboard-label-weight, 760);
+  color: var(--dashboard-muted-text, #667085);
+  letter-spacing: var(--dashboard-label-tracking, 0.04em);
+  line-height: var(--dashboard-label-line-height, 1);
+  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -793,13 +797,13 @@
   border: 1px solid transparent;
   border-radius: 4px;
   padding: 2px 7px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: #6b7280;
+  font-size: var(--dashboard-label-size, clamp(7px, 0.42vw, 8px));
+  font-weight: var(--dashboard-label-weight, 760);
+  letter-spacing: var(--dashboard-label-tracking, 0.04em);
+  color: var(--dashboard-muted-text, #667085);
   cursor: pointer;
   font-family: inherit;
-  line-height: 1.4;
+  line-height: var(--dashboard-label-line-height, 1);
   transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
@@ -1055,11 +1059,12 @@
 .volume-col {
   text-align: right;
   text-transform: uppercase;
-  font-size: 7px;
-  font-weight: 700;
-  color: #6b7280;
+  font-size: var(--dashboard-label-size, clamp(7px, 0.42vw, 8px));
+  font-weight: var(--dashboard-label-weight, 760);
+  color: var(--dashboard-muted-text, #667085);
+  letter-spacing: var(--dashboard-label-tracking, 0.04em);
+  line-height: var(--dashboard-label-line-height, 1);
   white-space: normal;
-  line-height: 1.15;
 }
 
 .volume-col-name {

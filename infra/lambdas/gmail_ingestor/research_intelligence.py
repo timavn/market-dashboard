@@ -13,6 +13,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
@@ -51,9 +52,14 @@ ENTITY_CATALOG = _load_json("research_entities.json")
 PRODUCTS_BY_ID = {
     product["id"]: product for product in PRODUCT_REGISTRY.get("products", [])
 }
+STRUCTURED_ONLY_TICKERS = {
+    str(token).upper()
+    for token in ENTITY_CATALOG.get("structuredOnlyTickers", [])
+}
 RESERVED_TOKENS = {
     str(token).upper() for token in ENTITY_CATALOG.get("reservedTokens", [])
 }
+RESERVED_TOKENS.update(STRUCTURED_ONLY_TICKERS)
 RESERVED_TOKENS.update(
     {
         "API",
@@ -77,7 +83,6 @@ RESERVED_TOKENS.update(
         "NOT",
         "NOW",
         "PDF",
-        "PM",
         "RANGE",
         "RISK",
         "SHOW",
@@ -92,6 +97,30 @@ RESERVED_TOKENS.update(
         "WITH",
     }
 )
+
+STRUCTURED_TICKER_COLLECTION_KEYS = {
+    "added",
+    "addedlongs",
+    "addedshorts",
+    "alerts",
+    "changes",
+    "cryptos",
+    "fullbooklongs",
+    "fullbookshorts",
+    "longs",
+    "neutrals",
+    "positions",
+    "rankings",
+    "removed",
+    "removedlongs",
+    "removedshorts",
+    "rows",
+    "securities",
+    "shorts",
+    "stocks",
+    "symbols",
+    "tickers",
+}
 
 
 def product_ids() -> List[str]:
@@ -193,7 +222,11 @@ def _controlled_exposure_catalog() -> Dict[Tuple[str, str], Dict[str, Any]]:
 CONTROLLED_EXPOSURES = _controlled_exposure_catalog()
 
 
-def canonical_ticker(value: Any) -> Optional[str]:
+def canonical_ticker(
+    value: Any,
+    *,
+    allow_structured_only: bool = False,
+) -> Optional[str]:
     if isinstance(value, dict):
         value = value.get("ticker") or value.get("symbol") or value.get("asset")
     raw = str(value or "").strip()
@@ -204,7 +237,8 @@ def canonical_ticker(value: Any) -> Optional[str]:
     candidate = parenthesized[-1] if parenthesized else raw.upper()
     candidate = ALIAS_TO_TICKER.get(candidate, candidate)
     if candidate in RESERVED_TOKENS:
-        return None
+        if not (allow_structured_only and candidate in STRUCTURED_ONLY_TICKERS):
+            return None
     if not re.fullmatch(r"[A-Z][A-Z0-9./-]{0,11}", candidate):
         return None
     return candidate
@@ -233,6 +267,22 @@ def _iter_content_blocks(
 
 def _direction_from_path(path: str, text: str = "") -> Optional[str]:
     haystack = f"{path} {text[:80]}".lower()
+    # A structured tracker trend is authoritative.  Never let a neighboring
+    # JSON key such as ``sellTrade`` or ``downside`` turn an explicit NEUTRAL
+    # row into a negative event.
+    explicit = re.search(
+        r'"?(?:trade|tradeBias|signal|trend)"?\s*[:=]\s*"?\s*(BULLISH|BEARISH|NEUTRAL|LONG|SHORT|BUY|SELL)\b',
+        text,
+        re.IGNORECASE,
+    )
+    if explicit:
+        value = explicit.group(1).upper()
+        if value in {"NEUTRAL"}:
+            return "neutral"
+        if value in {"BULLISH", "LONG", "BUY"}:
+            return "positive"
+        if value in {"BEARISH", "SHORT", "SELL"}:
+            return "negative"
     if any(token in haystack for token in ("removed", "remove", "short", "bear", "sell")):
         return "negative"
     if any(token in haystack for token in ("added", "add", "long", "bull", "buy")):
@@ -240,6 +290,44 @@ def _direction_from_path(path: str, text: str = "") -> Optional[str]:
     if "neutral" in haystack:
         return "neutral"
     return None
+
+
+def _tracker_typed_value(value: Any) -> Optional[Dict[str, Any]]:
+    """Normalize one Bitcoin Tracker row without inferring its direction."""
+    if not isinstance(value, dict):
+        return None
+    trade = str(
+        value.get("trade")
+        or value.get("trend")
+        or value.get("tradeBias")
+        or value.get("signal")
+        or ""
+    ).strip().upper()
+    if trade not in {"BULLISH", "BEARISH", "NEUTRAL"}:
+        return None
+    try:
+        lrr = Decimal(str(value.get("lrr", value.get("buyTrade"))))
+        hrr = Decimal(str(value.get("hrr", value.get("sellTrade"))))
+    except Exception:
+        return None
+    if not (lrr.is_finite() and hrr.is_finite() and lrr > 0 and hrr > 0 and lrr < hrr):
+        return None
+    return {
+        "trade": trade,
+        "lrr": lrr,
+        "hrr": hrr,
+        "trackerRange": {"lrr": lrr, "hrr": hrr},
+    }
+
+
+def _etf_pro_typed_value(value: Any) -> Optional[Dict[str, str]]:
+    if not isinstance(value, dict):
+        return None
+    action = str(value.get("action") or "").strip().upper()
+    side = str(value.get("side") or value.get("call") or "").strip().upper()
+    if action not in {"ADD", "REMOVE"} or side not in {"LONG", "SHORT"}:
+        return None
+    return {"action": action, "side": side}
 
 
 def _event_kind(product_id: str, path: str) -> str:
@@ -260,7 +348,9 @@ def _event_kind(product_id: str, path: str) -> str:
         return "portfolio_rank"
     if product_id in {"the-call", "the-macro-show"}:
         return "position_reference"
-    if product_id in {"real-time-alert", "investing-ideas", "etf-pro"}:
+    if product_id == "investing-ideas":
+        return "investing_idea_position"
+    if product_id in {"real-time-alert", "etf-pro"}:
         return "position_change"
     return "mention"
 
@@ -318,6 +408,149 @@ def _structured_ticker_references(
     data = snapshot.get("data")
     references: List[Dict[str, Any]] = []
 
+    if product_id == "bitcoin-trend-tracker":
+        # The tracker publishes two tables.  Treat each complete row as one
+        # typed reference and stop the generic walker from re-emitting the
+        # container names, range columns, or narrative JSON as separate
+        # signals.  Older snapshots that only have buyTrade/sellTrade remain
+        # compatible through _tracker_typed_value.
+        saw_tracker_table = False
+        for table_name in ("cryptos", "stocks"):
+            table = data.get(table_name) if isinstance(data, dict) else None
+            if not isinstance(table, dict):
+                continue
+            saw_tracker_table = True
+            for index, (raw_ticker, row) in enumerate(table.items()):
+                ticker = canonical_ticker(raw_ticker, allow_structured_only=True)
+                typed_value = _tracker_typed_value(row)
+                if not ticker or typed_value is None:
+                    continue
+                detail = (
+                    f"Trade {typed_value['trade']}; "
+                    f"Buy Trade {typed_value['lrr']}; "
+                    f"Sell Trade {typed_value['hrr']}"
+                )
+                reference = _reference(
+                    entity_type="ticker",
+                    entity_id=ticker,
+                    match_type="structured_membership",
+                    matched_text=ticker,
+                    excerpt=detail,
+                    field_path=f"data.{table_name}.{raw_ticker}",
+                    product_id=product_id,
+                    direction=typed_value["trade"],
+                    value=typed_value,
+                )
+                if reference:
+                    references.append(reference)
+        if saw_tracker_table:
+            return references
+
+    if product_id == "etf-pro":
+        # ETF Pro is an actionable change feed, not a prose/newsletter feed.
+        # Keep only explicit ADD/REMOVE + LONG/SHORT rows and emit one clean
+        # typed reference per ticker.
+        changes = data.get("changes") if isinstance(data, dict) else None
+        changes = changes if isinstance(changes, list) else []
+        saw_change_payload = isinstance(data, dict) and any(
+            key in data for key in ("changes", "rows")
+        )
+        for index, change in enumerate(changes):
+            if not isinstance(change, dict):
+                continue
+            ticker = canonical_ticker(change, allow_structured_only=True)
+            typed_value = _etf_pro_typed_value(change)
+            if not ticker or typed_value is None:
+                continue
+            detail = f"{typed_value['action']} {typed_value['side']}"
+            references.append(_reference(
+                entity_type="ticker",
+                entity_id=ticker,
+                match_type="structured_membership",
+                matched_text=ticker,
+                excerpt=detail,
+                field_path=f"data.changes[{index}]",
+                product_id=product_id,
+                direction=typed_value["side"],
+                value=typed_value,
+            ))
+        if saw_change_payload:
+            return references
+
+    if product_id == "investing-ideas":
+        positions = data.get("positions") if isinstance(data, dict) else None
+        if not isinstance(positions, list) or not positions:
+            positions = []
+            if isinstance(data, dict):
+                positions.extend(
+                    {
+                        "ticker": value,
+                        "side": "Long",
+                    }
+                    for value in data.get("longs") or []
+                )
+                positions.extend(
+                    {
+                        "ticker": value,
+                        "side": "Short",
+                    }
+                    for value in data.get("shorts") or []
+                )
+
+        for index, position in enumerate(positions):
+            if isinstance(position, str):
+                position = {"ticker": position}
+            if not isinstance(position, dict):
+                continue
+            # A structured position field is authoritative ticker context.
+            # ``AM`` and ``PM`` are real security symbols but are reserved for
+            # generic text extraction because they are also meridiem tokens.
+            ticker = canonical_ticker(position, allow_structured_only=True)
+            if not ticker:
+                continue
+            raw_side = str(position.get("side") or position.get("position") or "").strip()
+            side = "Long" if raw_side.lower() in {"long", "buy", "bullish"} else None
+            if raw_side.lower() in {"short", "sell", "bearish"}:
+                side = "Short"
+            if side is None:
+                continue
+            bias = "BULLISH" if side == "Long" else "BEARISH"
+            typed_value = {
+                "side": side,
+                "bias": bias,
+                "prevClose": position.get("prevClose"),
+                "lrr": position.get("lrr"),
+                "hrr": position.get("hrr"),
+            }
+            detail = json.dumps(
+                {"ticker": ticker, **typed_value},
+                sort_keys=True,
+                default=str,
+            )
+            references.append(
+                _reference(
+                    entity_type="ticker",
+                    entity_id=ticker,
+                    match_type="structured_membership",
+                    matched_text=ticker,
+                    excerpt=detail,
+                    field_path=f"data.positions[{index}]",
+                    product_id=product_id,
+                    direction="positive" if side == "Long" else "negative",
+                    value=typed_value,
+                )
+            )
+        # Do not recurse into longs/shorts/positions: those fields are
+        # redundant projections of the same row and previously created
+        # duplicate events for one security. Legacy alert-only snapshots do
+        # not have a position payload, so they continue through the generic
+        # extractor below.
+        has_position_payload = isinstance(data, dict) and any(
+            key in data for key in ("positions", "longs", "shorts")
+        )
+        if references or has_position_payload:
+            return references
+
     def signal_value(value: Dict[str, Any]) -> Any:
         for key in ("trade", "tradeBias", "signal", "trend"):
             if value.get(key) is not None:
@@ -350,7 +583,7 @@ def _structured_ticker_references(
         "momo-tracker",
     }:
         for key, value in data.items():
-            ticker = canonical_ticker(key)
+            ticker = canonical_ticker(key, allow_structured_only=True)
             if not ticker:
                 continue
             detail = json.dumps(value, sort_keys=True, default=str)
@@ -371,7 +604,7 @@ def _structured_ticker_references(
     def visit(value: Any, path: str = "data") -> None:
         if isinstance(value, dict):
             direct_value = value.get("ticker") or value.get("symbol") or value.get("asset")
-            ticker = canonical_ticker(direct_value)
+            ticker = canonical_ticker(direct_value, allow_structured_only=True)
             if ticker:
                 detail = json.dumps(value, sort_keys=True, default=str)
                 references.append(
@@ -389,7 +622,7 @@ def _structured_ticker_references(
                 )
             for key, child in value.items():
                 child_path = f"{path}.{key}"
-                key_ticker = canonical_ticker(key)
+                key_ticker = canonical_ticker(key, allow_structured_only=True)
                 if key_ticker and security_record(child):
                     detail = json.dumps(child, sort_keys=True, default=str)
                     references.append(
@@ -411,7 +644,13 @@ def _structured_ticker_references(
             for index, child in enumerate(value):
                 child_path = f"{path}[{index}]"
                 if isinstance(child, str):
-                    ticker = canonical_ticker(child)
+                    collection_key = path.rsplit(".", 1)[-1].split("[", 1)[0].lower()
+                    ticker = canonical_ticker(
+                        child,
+                        allow_structured_only=(
+                            collection_key in STRUCTURED_TICKER_COLLECTION_KEYS
+                        ),
+                    )
                     if ticker:
                         references.append(
                             _reference(
@@ -437,9 +676,26 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
     )
     references = _structured_ticker_references(snapshot, product_id)
+    searchable_data = snapshot.get("data") or {}
+    if product_id == "investing-ideas" and isinstance(searchable_data, dict):
+        # A complete Investing Ideas position book is already represented by
+        # one typed row per ticker. Do not walk the article/body text as a
+        # second event source: the newsletter repeats every ticker in the
+        # headline, table, range graphic, and HTML metadata.
+        if any(key in searchable_data for key in ("positions", "longs", "shorts")):
+            return references
+        # positions/longs/shorts are already represented by one typed
+        # structured reference per security. Leaving them in the generic text
+        # walker would re-emit ticker leaf, side, and range values as separate
+        # duplicate events.
+        searchable_data = {
+            key: value
+            for key, value in searchable_data.items()
+            if key not in {"positions", "longs", "shorts"}
+        }
     searchable = {
         "article": snapshot.get("article") or {},
-        "data": snapshot.get("data") or {},
+        "data": searchable_data,
         "trendChanges": snapshot.get("trendChanges") or [],
     }
 
@@ -449,6 +705,8 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         occupied: set[Tuple[str, str]] = set()
 
         for ticker, aliases in ALIASES_BY_TICKER.items():
+            if ticker in STRUCTURED_ONLY_TICKERS:
+                continue
             for alias in sorted(aliases, key=len, reverse=True):
                 pattern = re.compile(rf"(?<![A-Z0-9]){re.escape(alias)}(?![A-Z0-9])", re.IGNORECASE)
                 for match in pattern.finditer(text):
@@ -597,11 +855,31 @@ def build_entity_events(
             "parserVersion": PARSER_VERSION,
             "qualityStatus": "validated",
             **(
-                {"signalValue": reference["value"]}
+                {"signalValue": (
+                    reference["value"].get("trade")
+                    if product_id == "bitcoin-trend-tracker"
+                    and isinstance(reference.get("value"), dict)
+                    else reference["value"]
+                )}
                 if reference.get("value") is not None
                 else {}
             ),
         }
+        if product_id == "bitcoin-trend-tracker" and isinstance(
+            reference.get("value"),
+        dict,
+        ):
+            typed_tracker = reference["value"]
+            event["value"] = typed_tracker
+            event["trade"] = typed_tracker.get("trade")
+            event["trackerRange"] = {
+                "lrr": typed_tracker.get("lrr"),
+                "hrr": typed_tracker.get("hrr"),
+            }
+        if product_id == "etf-pro" and isinstance(reference.get("value"), dict):
+            event["value"] = reference["value"]
+            event["action"] = reference["value"].get("action")
+            event["positionSide"] = reference["value"].get("side")
         if reference.get("exposureType"):
             event["exposureType"] = reference["exposureType"]
             event["exposureId"] = reference["exposureId"]
@@ -615,6 +893,19 @@ def build_entity_events(
             )
         elif definition.get("authorities", {}).get("trade"):
             event["decisionEligible"] = bool(event.get("signalValue"))
+        else:
+            event["decisionEligible"] = False
+        if product_id == "investing-ideas" and isinstance(
+            reference.get("value"),
+            dict,
+        ):
+            typed_value = reference["value"]
+            event["positionSide"] = typed_value.get("side")
+            event["bias"] = typed_value.get("bias")
+            event["riskRange"] = {
+                "lrr": typed_value.get("lrr"),
+                "hrr": typed_value.get("hrr"),
+            }
         events.append(event)
     return events
 
@@ -624,6 +915,24 @@ def _conditional_failure(error: ClientError) -> bool:
         error.response.get("Error", {}).get("Code")
         == "ConditionalCheckFailedException"
     )
+
+
+def _dynamodb_safe(value: Any) -> Any:
+    """Convert parser-native floats before handing nested values to DynamoDB."""
+    if isinstance(value, float):
+        decimal_value = Decimal(str(value))
+        if not decimal_value.is_finite():
+            raise ValueError("DynamoDB does not support non-finite numeric values")
+        return decimal_value
+    if isinstance(value, dict):
+        return {key: _dynamodb_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_dynamodb_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_dynamodb_safe(item) for item in value)
+    if isinstance(value, set):
+        return {_dynamodb_safe(item) for item in value}
+    return value
 
 
 def _manifest_checksum(artifacts: List[Dict[str, Any]]) -> str:
@@ -657,7 +966,9 @@ def persist_entity_events(
     table = dynamodb.Table(ENTITY_EVENTS_TABLE)
     written = 0
     for event in events:
-        item = {key: value for key, value in event.items() if value is not None}
+        item = _dynamodb_safe(
+            {key: value for key, value in event.items() if value is not None}
+        )
         try:
             table.put_item(
                 Item=item,
@@ -728,6 +1039,16 @@ def update_product_manifest(
         if error:
             transition["error"] = str(error)[:1000]
         stage_history.append(transition)
+        # An artifact's event count describes the current validated parser
+        # output. Replays can legitimately reduce the count when a parser is
+        # hardened (for example, replacing legacy Investing Ideas leaf rows
+        # with one typed position event per security), so do not preserve a
+        # stale, larger count once validation/indexing succeeds.
+        effective_event_count = (
+            int(event_count)
+            if stage in {"validated", "indexed"}
+            else max(int(previous.get("eventCount", 0)), int(event_count))
+        )
         artifact = {
             **previous,
             "artifactId": artifact_id,
@@ -737,7 +1058,7 @@ def update_product_manifest(
             "sourceKey": snapshot.get("htmlSource") or snapshot.get("pdfS3Key"),
             "publishedAt": snapshot.get("publishedAt"),
             "parserVersion": PARSER_VERSION,
-            "eventCount": max(int(previous.get("eventCount", 0)), int(event_count)),
+            "eventCount": effective_event_count,
             "updatedAt": now,
         }
         if content_sha256:
@@ -810,7 +1131,7 @@ def update_product_manifest(
                 kwargs["ConditionExpression"] = (
                     "attribute_not_exists(marketDate) AND attribute_not_exists(productKey)"
                 )
-            table.put_item(**kwargs)
+            table.put_item(**{**kwargs, "Item": _dynamodb_safe(item)})
             return item
         except ClientError as write_error:
             if not _conditional_failure(write_error):

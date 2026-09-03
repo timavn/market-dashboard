@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-07-27T02:20:06Z",
+  "asOf": "2026-07-27T02:20:06Z",
+  "capturePrecision": "exact",
+  "source": "manual-official-rta-board",
+  "sourceArtifact": "repository-artifact:data/hedgeye/rta/evidence/2026-07-27-user-verified-board.json",
+  "longs": [
+    "BUG",
+    "CRWD",
+    "DDOG",
+    "RSI"
+  ],
+  "shorts": [
+    "HCA",
+    "HSY",
+    "SUJA"
+  ],
+  "notes": [
+    "The user supplied and explicitly confirmed the current official RTA board at the exact capture timestamp.",
+    "The board contains 4 long positions and 3 short positions.",
+    "Only position membership and direction are authoritative; no displayed price or performance value is treated as live market data."
+  ]
+}

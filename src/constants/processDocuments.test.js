@@ -23,6 +23,7 @@ describe('process document and rule registry', () => {
   test('publishes the Process library at addressable routes', () => {
     expect(PUBLISHED_PROCESS_DOCUMENTS.map(({ id }) => id)).toEqual([
       'the-process',
+      'exposure-lab-guide',
       'methods-index',
       'signals-and-risk-ranges',
       'position-sizing',
@@ -46,6 +47,15 @@ describe('process document and rule registry', () => {
     }));
     expect(getProcessDocumentByRoute('#/process/methods')).toEqual(
       expect.objectContaining({ id: 'methods-index', type: 'index' }),
+    );
+    expect(getProcessDocumentByRoute('#/process/exposure-lab')).toEqual(
+      expect.objectContaining({
+        id: 'exposure-lab-guide',
+        type: 'guide',
+        parentId: 'the-process',
+        editable: true,
+        version: '0.1',
+      }),
     );
     expect(getProcessDocumentByRoute('#/process/principles')).toBeNull();
     expect(getProcessDocumentByRoute('#/process/playbook')).toBeNull();

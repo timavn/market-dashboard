@@ -126,6 +126,34 @@ def operations_snapshot(now: datetime) -> dict:
 
 
 class HermesWorkerTests(unittest.TestCase):
+    def test_retired_mode_performs_no_worker_owned_writes(self):
+        database = FakeDynamo(operations_snapshot(datetime.now(timezone.utc)))
+        metrics = MagicMock()
+        notifications = FakeSns()
+
+        with (
+            patch.object(worker, "WORKER_MODE", "retired"),
+            patch.object(worker, "dynamodb", database),
+            patch.object(worker, "cloudwatch", metrics),
+            patch.object(worker, "sns", notifications),
+        ):
+            response = worker.lambda_handler(
+                {
+                    "source": "manual",
+                    "jobType": "quant-developer",
+                },
+                None,
+            )
+
+        self.assertEqual(response["status"], "RETIRED")
+        self.assertEqual(response["errorCode"], "LEGACY_HERMES_RETIRED")
+        self.assertFalse(response["writesPerformed"])
+        self.assertTrue(
+            all(not table.writes for table in database.tables.values())
+        )
+        metrics.put_metric_data.assert_not_called()
+        self.assertEqual(notifications.calls, [])
+
     def test_long_alert_roots_preserve_distinct_hash_suffixes(self):
         first = worker.canonical_alert_root(f"{'A' * 140}-FIRST")
         second = worker.canonical_alert_root(f"{'A' * 140}-SECOND")
@@ -585,7 +613,6 @@ class HermesWorkerTests(unittest.TestCase):
         self.assertEqual(
             lifecycle_events,
             [
-                "incident_opened",
                 "incident_escalated",
                 "incident_recovered",
             ],
@@ -615,7 +642,7 @@ class HermesWorkerTests(unittest.TestCase):
         ]
         self.assertEqual(unresolved, [])
 
-    def test_circuit_open_notification_is_deduplicated_by_service_and_root(self):
+    def test_circuit_open_is_dashboard_only_until_escalated(self):
         now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
         database = FakeDynamo(None)
         notifications = FakeSns()
@@ -645,13 +672,7 @@ class HermesWorkerTests(unittest.TestCase):
                 source_run_id="quant-developer#run-2",
             )
 
-        self.assertEqual(len(notifications.calls), 1)
-        payload = json.loads(notifications.calls[0]["Message"])
-        self.assertEqual(payload["eventType"], "circuit_opened")
-        self.assertEqual(
-            payload["dedupeKey"],
-            "quant-developer#HERMES_CONTROLLER_CIRCUIT_OPEN",
-        )
+        self.assertEqual(notifications.calls, [])
 
     def test_interrupted_open_uses_exact_root_row_without_duplicate_notification(self):
         now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
@@ -710,7 +731,7 @@ class HermesWorkerTests(unittest.TestCase):
 
         self.assertEqual(
             [json.loads(call["Message"])["eventType"] for call in notifications.calls],
-            ["incident_recovered"],
+            [],
         )
         root_item = database.tables[worker.ALERTS_TABLE].keyed_items[
             worker.alert_id("quant-developer", error_code)
@@ -760,18 +781,15 @@ class HermesWorkerTests(unittest.TestCase):
             response = worker.lambda_handler(event, None)
 
         body = json.loads(response["body"])
-        self.assertEqual(body["status"], "DEGRADED")
-        self.assertIn("HERMES_ALERT_SNS_PUBLISH_FAILED", body["errorCodes"])
+        self.assertEqual(body["status"], "SUCCESS")
+        self.assertNotIn("HERMES_ALERT_SNS_PUBLISH_FAILED", body["errorCodes"])
         self.assertEqual(
             database.tables[worker.RUNS_TABLE].writes[-1]["status"],
-            "warning",
+            "succeeded",
         )
         heartbeat = database.tables[worker.HEARTBEAT_TABLE].writes[-1]
-        self.assertEqual(heartbeat["status"], "warning")
-        self.assertEqual(
-            heartbeat["errorCode"],
-            "HERMES_ALERT_SNS_PUBLISH_FAILED",
-        )
+        self.assertEqual(heartbeat["status"], "success")
+        self.assertIsNone(heartbeat.get("errorCode"))
         root_item = database.tables[worker.ALERTS_TABLE].keyed_items[
             worker.alert_id(
                 "security",

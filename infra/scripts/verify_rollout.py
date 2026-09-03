@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify consecutive Gmail/Hermes heartbeat acceptance windows."""
+"""Verify consecutive Gmail, CFTC, and Hermes heartbeat acceptance windows."""
 
 from __future__ import annotations
 
@@ -13,6 +13,11 @@ from typing import Any, Dict, List
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from aws_profile_contract import (
+    LOCAL_PROFILE,
+    AwsProfileContractError,
+    verified_session,
+)
 
 
 def iso(value: Any) -> datetime:
@@ -36,6 +41,7 @@ def verify_service(
     count: int,
     max_gap_minutes: int,
     min_gap_minutes: int,
+    schedule_id: str | None = None,
 ) -> Dict[str, Any]:
     rows = query(table, service_id, count)
     failures = []
@@ -47,6 +53,10 @@ def verify_service(
         if row.get("source") != "aws-lambda" or row.get("triggerSource") != "aws-scheduler":
             failures.append(
                 f"{row.get('observedAt')}: runtime={row.get('source')}, trigger={row.get('triggerSource')}"
+            )
+        if schedule_id and row.get("scheduleId") != schedule_id:
+            failures.append(
+                f"{row.get('observedAt')}: scheduleId={row.get('scheduleId')}"
             )
         counts = row.get("counts") or {}
         if int(counts.get("errors") or 0) != 0 or int(counts.get("dropped") or 0) != 0:
@@ -85,21 +95,37 @@ def json_default(value: Any) -> Any:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", choices=("gmail", "hermes", "all"), default="all")
+    parser.add_argument("--phase", choices=("gmail", "cftc", "hermes", "all"), default="all")
     parser.add_argument(
         "--worker",
         choices=("quant-analyst", "quant-developer", "security", "all"),
         default="all",
         help="For the Hermes phase, verify one worker during staged enablement.",
     )
-    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-west-1"))
+    parser.add_argument("--region", default="us-west-1")
     parser.add_argument("--table", default="MarketDashboardServiceHeartbeats")
+    parser.add_argument("--read-profile", default=LOCAL_PROFILE)
     args = parser.parse_args()
 
-    table = boto3.resource("dynamodb", region_name=args.region).Table(args.table)
+    if args.read_profile != LOCAL_PROFILE:
+        parser.error(f"--read-profile must be {LOCAL_PROFILE}")
+    try:
+        session = verified_session(args.read_profile, purpose="api", region=args.region)
+    except AwsProfileContractError as error:
+        parser.error(f"{error.error_code}: {error.detail}")
+    table = session.resource("dynamodb", region_name=args.region).Table(args.table)
     checks = []
     if args.phase in {"gmail", "all"}:
         checks.append(verify_service(table, "gmail:timsmithaviation@gmail.com", 4, 20, 10))
+    if args.phase in {"cftc", "all"}:
+        checks.append(verify_service(
+            table,
+            "cftc:official-positioning",
+            2,
+            4400,
+            1200,
+            "market-dashboard-cftc-weekday-v1",
+        ))
     if args.phase in {"hermes", "all"}:
         worker_checks = {
             "quant-analyst": ("hermes:quant-analyst", 20, 10),

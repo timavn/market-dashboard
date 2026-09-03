@@ -1,0 +1,277 @@
+{
+  "capturedAt": "2026-07-27T02:26:10Z",
+  "asOf": "2026-07-27T02:26:10Z",
+  "capturePrecision": "exact",
+  "source": "manual-official-etf-pro-board",
+  "sourceArtifact": "repository-artifact:data/hedgeye/etfpro/evidence/2026-07-27-user-verified-current-open-positions.tsv",
+  "expectedLongCount": 24,
+  "expectedShortCount": 13,
+  "positions": [
+    {
+      "ticker": "CARZ",
+      "name": "Future Vehicles",
+      "call": "Short",
+      "dateAdded": "2026-07-24",
+      "entryPrice": 103
+    },
+    {
+      "ticker": "ETHA",
+      "name": "Ethereum",
+      "call": "Long",
+      "dateAdded": "2026-07-24",
+      "entryPrice": 14.08
+    },
+    {
+      "ticker": "WEAT",
+      "name": "Wheat",
+      "call": "Long",
+      "dateAdded": "2026-07-24",
+      "entryPrice": 24.88
+    },
+    {
+      "ticker": "CPER",
+      "name": "Copper",
+      "call": "Long",
+      "dateAdded": "2026-07-23",
+      "entryPrice": 38.57
+    },
+    {
+      "ticker": "MEME",
+      "name": "Meme",
+      "call": "Short",
+      "dateAdded": "2026-07-22",
+      "entryPrice": 7.69
+    },
+    {
+      "ticker": "PTF",
+      "name": "Technology Momentum",
+      "call": "Short",
+      "dateAdded": "2026-07-22",
+      "entryPrice": 107.65
+    },
+    {
+      "ticker": "XLK",
+      "name": "Technology Sector",
+      "call": "Short",
+      "dateAdded": "2026-07-22",
+      "entryPrice": 178.42
+    },
+    {
+      "ticker": "VTIP",
+      "name": "US TIPS",
+      "call": "Long",
+      "dateAdded": "2026-07-22",
+      "entryPrice": 49.65
+    },
+    {
+      "ticker": "EPHE",
+      "name": "Philippines",
+      "call": "Long",
+      "dateAdded": "2026-07-21",
+      "entryPrice": 25.38
+    },
+    {
+      "ticker": "RSP",
+      "name": "S&P Equal Weight",
+      "call": "Long",
+      "dateAdded": "2026-07-21",
+      "entryPrice": 212.57
+    },
+    {
+      "ticker": "EWY",
+      "name": "South Korea",
+      "call": "Short",
+      "dateAdded": "2026-07-20",
+      "entryPrice": 165.19
+    },
+    {
+      "ticker": "IPAY",
+      "name": "Digital Payments",
+      "call": "Long",
+      "dateAdded": "2026-07-20",
+      "entryPrice": 48.91
+    },
+    {
+      "ticker": "EWQ",
+      "name": "France",
+      "call": "Short",
+      "dateAdded": "2026-07-17",
+      "entryPrice": 44.94
+    },
+    {
+      "ticker": "ENZL",
+      "name": "New Zealand",
+      "call": "Long",
+      "dateAdded": "2026-07-17",
+      "entryPrice": 46.14
+    },
+    {
+      "ticker": "COLO",
+      "name": "Colombia",
+      "call": "Long",
+      "dateAdded": "2026-07-17",
+      "entryPrice": 43.88
+    },
+    {
+      "ticker": "QAT",
+      "name": "Qatar",
+      "call": "Short",
+      "dateAdded": "2026-07-16",
+      "entryPrice": 17.75
+    },
+    {
+      "ticker": "EWG",
+      "name": "Germany",
+      "call": "Short",
+      "dateAdded": "2026-07-16",
+      "entryPrice": 41.1
+    },
+    {
+      "ticker": "EWZ",
+      "name": "Brazil",
+      "call": "Long",
+      "dateAdded": "2026-07-16",
+      "entryPrice": 35.5
+    },
+    {
+      "ticker": "INDA",
+      "name": "India",
+      "call": "Short",
+      "dateAdded": "2026-07-14",
+      "entryPrice": 48.67
+    },
+    {
+      "ticker": "NOBL",
+      "name": "Dividend Aristocrats",
+      "call": "Long",
+      "dateAdded": "2026-07-14",
+      "entryPrice": 56.46
+    },
+    {
+      "ticker": "BUG",
+      "name": "Cybersecurity",
+      "call": "Long",
+      "dateAdded": "2026-07-13",
+      "entryPrice": 39.23
+    },
+    {
+      "ticker": "DESK",
+      "name": "Office REITs",
+      "call": "Long",
+      "dateAdded": "2026-07-10",
+      "entryPrice": 41.13
+    },
+    {
+      "ticker": "FAB",
+      "name": "Multi Cap Value",
+      "call": "Long",
+      "dateAdded": "2026-07-09",
+      "entryPrice": 101.18
+    },
+    {
+      "ticker": "SIL",
+      "name": "Silver Miners",
+      "call": "Short",
+      "dateAdded": "2026-07-02",
+      "entryPrice": 80.44
+    },
+    {
+      "ticker": "XLU",
+      "name": "Utilities Sector",
+      "call": "Long",
+      "dateAdded": "2026-06-30",
+      "entryPrice": 45.56
+    },
+    {
+      "ticker": "EIS",
+      "name": "Israel",
+      "call": "Short",
+      "dateAdded": "2026-06-23",
+      "entryPrice": 120.17
+    },
+    {
+      "ticker": "IAK",
+      "name": "US Insurance",
+      "call": "Long",
+      "dateAdded": "2026-06-18",
+      "entryPrice": 135.04
+    },
+    {
+      "ticker": "XLV",
+      "name": "Healthcare",
+      "call": "Long",
+      "dateAdded": "2026-06-17",
+      "entryPrice": 151.27
+    },
+    {
+      "ticker": "XLRE",
+      "name": "Real Estate",
+      "call": "Long",
+      "dateAdded": "2026-06-17",
+      "entryPrice": 44.71
+    },
+    {
+      "ticker": "URA",
+      "name": "Uranium",
+      "call": "Short",
+      "dateAdded": "2026-06-16",
+      "entryPrice": 48.06
+    },
+    {
+      "ticker": "MSTY",
+      "name": "MSTR Income Strategy",
+      "call": "Short",
+      "dateAdded": "2026-06-12",
+      "entryPrice": 15.94
+    },
+    {
+      "ticker": "FXH",
+      "name": "Healthcare Equity",
+      "call": "Long",
+      "dateAdded": "2026-06-12",
+      "entryPrice": 116.94
+    },
+    {
+      "ticker": "VYM",
+      "name": "Dividend Yield",
+      "call": "Long",
+      "dateAdded": "2026-05-12",
+      "entryPrice": 154.13
+    },
+    {
+      "ticker": "CLOZ",
+      "name": "CLOs",
+      "call": "Long",
+      "dateAdded": "2026-04-22",
+      "entryPrice": 25.63
+    },
+    {
+      "ticker": "CLOX",
+      "name": "AAA CLO",
+      "call": "Long",
+      "dateAdded": "2025-03-06",
+      "entryPrice": 24.02
+    },
+    {
+      "ticker": "AAAU",
+      "name": "Physical Gold",
+      "call": "Long",
+      "dateAdded": "2025-02-28",
+      "entryPrice": 28.23
+    },
+    {
+      "ticker": "BUXX",
+      "name": "Income Short Maturity",
+      "call": "Long",
+      "dateAdded": "2023-10-25",
+      "entryPrice": 17.6
+    }
+  ],
+  "notes": [
+    "The user supplied the full current official ETF Pro Plus open-position book and explicitly requested that it become the correction baseline.",
+    "The supplied book contains exactly 24 long positions and 13 short positions.",
+    "Checkpoint positions retain only ticker, official name, direction, entry date, and historical entry price.",
+    "Recent prices, returns, ranges, and holding periods remain only in the evidence artifact and must not be presented as live market data.",
+    "Future verified Gmail action events after this checkpoint may update the baseline; earlier events must not override it."
+  ]
+}

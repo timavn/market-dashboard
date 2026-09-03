@@ -199,10 +199,32 @@
             "parserModes": [
                 "html"
             ],
-            "parsers": {
-                "html": "hedgeye_html_dispatch"
-            },
-            "validationRule": "entity_rows",
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "entity_rows",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "top-3-things",
+      "label": "Top 3 Things",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "top 3 things",
+        "top three things"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "non_empty",
       "authorities": {
         "trade": false,
         "trend": false,
@@ -365,6 +387,12 @@
                 "html": "hedgeye_html_dispatch"
             },
             "validationRule": "entity_rows",
+      "normalizedFields": [
+        "side",
+        "bias",
+        "previousClose",
+        "riskRange"
+      ],
       "authorities": {
         "trade": false,
         "trend": false,

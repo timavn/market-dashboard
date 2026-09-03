@@ -1,5 +1,6 @@
 const {
   buildWtiSettlementMapping,
+  attachUnderlyingOverviewChart,
   getLastSettledWtiSession,
   getPredictionMarketsOverview,
   getRecentSettledWtiSessions,
@@ -7,8 +8,12 @@ const {
   normalizeWtiCadence,
   normalizeWtiMarket,
   selectWtiEvent,
+  spxCashSessionState,
+  spxUnderlyingReference,
   validateWtiGeometry,
   verifySettledWtiEvent,
+  wtiIbkrInstrument,
+  wtiUnderlyingReference,
 } = require('../watchlistProvider');
 
 const NOW = Date.parse('2026-07-21T17:00:00.000Z');
@@ -125,6 +130,281 @@ function settle(raw, settlementValue, result) {
 }
 
 describe('WTI prediction-market provider', () => {
+  test('resolves the exact ICE WTI settlement contract for IBKR', () => {
+    expect(wtiIbkrInstrument({
+      status: 'consistent_unverified',
+      source: { name: 'ICE' },
+      frontMonthContract: 'WBS 26U-ICE',
+    })).toEqual({
+      symbol: 'WTI',
+      secType: 'FUT',
+      exchange: 'IPE',
+      currency: 'USD',
+      provider: 'ibkr',
+      lastTradeDateOrContractMonth: '202609',
+      tradingClass: 'WTI',
+    });
+  });
+
+  test('uses only a fresh live IBKR quote for the WTI marker', async () => {
+    const getQuote = jest.fn().mockResolvedValue({
+      symbol: 'WTI',
+      price: 84.08,
+      source: 'ibkr',
+      dataType: 'live',
+      timestamp: new Date(NOW).toISOString(),
+    });
+    const reference = await wtiUnderlyingReference({
+      settlementMapping: {
+        status: 'consistent_unverified',
+        source: { name: 'ICE' },
+        frontMonthContract: 'WBS 26U-ICE',
+      },
+    }, { getQuote }, NOW);
+
+    expect(reference).toEqual(expect.objectContaining({
+      status: 'available',
+      label: 'WTI',
+      displayFormat: 'wti_contract',
+      tone: 'spot',
+      value: 84.08,
+      source: 'ibkr',
+    }));
+    expect(getQuote).toHaveBeenCalledWith(expect.objectContaining({
+      symbol: 'WTI',
+      secType: 'FUT',
+      exchange: 'IPE',
+      lastTradeDateOrContractMonth: '202609',
+    }));
+  });
+
+  test('uses the exact WTI contract daily close when a current quote is unavailable', async () => {
+    const afterSettlement = Date.parse('2026-07-21T19:00:00.000Z');
+    const getHistoricalBars = jest.fn().mockResolvedValue({
+      source: 'ibkr',
+      bars: [
+        { date: '2026-07-20', close: 82.91 },
+        { date: '2026-07-21', close: 83.14 },
+      ],
+    });
+    const reference = await wtiUnderlyingReference({
+      settlementMapping: {
+        status: 'consistent_unverified',
+        source: { name: 'ICE' },
+        frontMonthContract: 'WBS 26U-ICE',
+      },
+    }, {
+      getQuote: jest.fn().mockResolvedValue(null),
+      getHistoricalBars,
+    }, afterSettlement);
+
+    expect(reference).toEqual(expect.objectContaining({
+      status: 'available',
+      label: 'WTI last close',
+      displayFormat: 'wti_contract',
+      tone: 'close',
+      value: 83.14,
+      source: 'ibkr_historical_daily_close',
+      asOf: '2026-07-21',
+      historicalOnly: true,
+    }));
+    expect(getHistoricalBars).toHaveBeenCalledWith(expect.objectContaining({
+      symbol: 'WTI',
+      secType: 'FUT',
+      exchange: 'IPE',
+      lastTradeDateOrContractMonth: '202609',
+    }), '5d', '1d');
+  });
+
+  test('does not use a partial current-day bar or non-IBKR history as the WTI close', async () => {
+    const getHistoricalBars = jest.fn().mockResolvedValue({
+      source: 'ibkr',
+      bars: [
+        { date: '2026-07-20', close: 82.91 },
+        { date: '2026-07-21', close: 83.14 },
+      ],
+    });
+    const beforeSettlement = await wtiUnderlyingReference({
+      settlementMapping: {
+        status: 'consistent_unverified',
+        source: { name: 'ICE' },
+        frontMonthContract: 'WBS 26U-ICE',
+      },
+    }, {
+      getQuote: jest.fn().mockResolvedValue(null),
+      getHistoricalBars,
+    }, NOW);
+
+    expect(beforeSettlement).toEqual(expect.objectContaining({
+      status: 'available',
+      value: 82.91,
+      asOf: '2026-07-20',
+      source: 'ibkr_historical_daily_close',
+    }));
+
+    await expect(wtiUnderlyingReference({
+      settlementMapping: {
+        status: 'consistent_unverified',
+        source: { name: 'ICE' },
+        frontMonthContract: 'WBS 26U-ICE',
+      },
+    }, {
+      getQuote: jest.fn().mockResolvedValue(null),
+      getHistoricalBars: jest.fn().mockResolvedValue({
+        source: 'yahoo',
+        bars: [{ date: '2026-07-21', close: 83.14 }],
+      }),
+    }, Date.parse('2026-07-21T19:00:00.000Z')))
+      .resolves.toMatchObject({ status: 'unavailable' });
+  });
+
+  test('does not substitute a delayed or non-IBKR WTI price', async () => {
+    const workbench = {
+      settlementMapping: {
+        status: 'consistent_unverified',
+        source: { name: 'ICE' },
+        frontMonthContract: 'WBS 26U-ICE',
+      },
+    };
+
+    await expect(wtiUnderlyingReference(workbench, {
+      getQuote: jest.fn().mockResolvedValue({
+        price: 84.08,
+        source: 'yahoo',
+        dataType: 'live',
+        timestamp: new Date(NOW).toISOString(),
+      }),
+    }, NOW)).resolves.toMatchObject({ status: 'unavailable' });
+
+    await expect(wtiUnderlyingReference(workbench, {
+      getQuote: jest.fn().mockResolvedValue({
+        price: 84.08,
+        source: 'ibkr',
+        dataType: 'live',
+        timestamp: new Date(NOW - 10 * 60 * 1000).toISOString(),
+      }),
+    }, NOW)).resolves.toMatchObject({ status: 'unavailable' });
+  });
+
+  test('builds the 24-hour underlying chart only from recent IBKR bars', async () => {
+    const getHistoricalBars = jest.fn().mockResolvedValue({
+      source: 'ibkr',
+      bars: [
+        { date: '2026-07-21T16:35:00.000Z', close: 7310.25 },
+        { date: '2026-07-21T16:45:00.000Z', close: 7311.5 },
+        { date: '2026-07-21T16:55:00.000Z', close: 7312.75 },
+      ],
+    });
+    const summary = await attachUnderlyingOverviewChart({ lines: [] }, { getHistoricalBars }, {
+      instrument: { symbol: 'SPX', secType: 'IND', exchange: 'CBOE', currency: 'USD' },
+      label: 'S&P 500 index',
+      unit: 'index',
+      historicalDateFor: () => '2026-07-21',
+      isSessionOpen: () => true,
+    }, NOW);
+
+    expect(getHistoricalBars).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'SPX', secType: 'IND', exchange: 'CBOE' }),
+      '1d',
+      '5m',
+    );
+    expect(summary.chart).toEqual(expect.objectContaining({
+      status: 'available',
+      kind: 'underlying',
+      range: '24h',
+      source: 'ibkr_historical_bars',
+      availability: 'current',
+      points: [
+        { timestamp: Date.parse('2026-07-21T16:35:00.000Z'), value: 7310.25 },
+        { timestamp: Date.parse('2026-07-21T16:45:00.000Z'), value: 7311.5 },
+        { timestamp: Date.parse('2026-07-21T16:55:00.000Z'), value: 7312.75 },
+      ],
+    }));
+  });
+
+  test('uses live SPX spot only during the cash session', async () => {
+    const now = Date.parse('2026-07-21T17:00:00.000Z');
+    const getHistoricalBars = jest.fn();
+    const reference = await spxUnderlyingReference({
+      getQuote: jest.fn().mockResolvedValue({
+        symbol: 'SPX',
+        price: '7,310.25'.replace(',', ''),
+        source: 'ibkr',
+        dataType: 'live',
+        timestamp: new Date(now).toISOString(),
+      }),
+      getHistoricalBars,
+    }, now);
+
+    expect(spxCashSessionState(now)).toBe('open');
+    expect(reference).toEqual(expect.objectContaining({
+      status: 'available',
+      label: 'S&P 500',
+      displayFormat: 'spx_contract',
+      tone: 'spot',
+      session: 'open',
+      value: 7310.25,
+      source: 'ibkr',
+    }));
+    expect(getHistoricalBars).not.toHaveBeenCalled();
+  });
+
+  test('uses the exact latest completed IBKR SPX daily close outside the cash session', async () => {
+    const afterClose = Date.parse('2026-07-21T21:00:00.000Z');
+    const beforeNextOpen = Date.parse('2026-07-22T13:00:00.000Z');
+    const getHistoricalBars = jest.fn().mockResolvedValue({
+      source: 'ibkr',
+      bars: [
+        { date: '2026-07-20', close: 7288.4 },
+        { date: '2026-07-21', close: 7321.41 },
+      ],
+    });
+
+    await expect(spxUnderlyingReference({
+      getQuote: jest.fn(),
+      getHistoricalBars,
+    }, afterClose)).resolves.toEqual(expect.objectContaining({
+      status: 'available',
+      label: 'S&P 500',
+      displayFormat: 'spx_contract',
+      tone: 'close',
+      session: 'closed',
+      value: 7321.41,
+      source: 'ibkr_historical_daily_close',
+      asOf: '2026-07-21',
+    }));
+    await expect(spxUnderlyingReference({
+      getQuote: jest.fn(),
+      getHistoricalBars,
+    }, beforeNextOpen)).resolves.toEqual(expect.objectContaining({
+      status: 'available',
+      label: 'S&P 500',
+      value: 7321.41,
+      asOf: '2026-07-21',
+    }));
+  });
+
+  test('rejects non-IBKR and wrong-session SPX closes', async () => {
+    const now = Date.parse('2026-07-21T21:00:00.000Z');
+    const yahooReference = await spxUnderlyingReference({
+      getQuote: jest.fn(),
+      getHistoricalBars: jest.fn().mockResolvedValue({
+        source: 'yahoo',
+        bars: [{ date: '2026-07-21', close: 7321.41 }],
+      }),
+    }, now);
+    const staleReference = await spxUnderlyingReference({
+      getQuote: jest.fn(),
+      getHistoricalBars: jest.fn().mockResolvedValue({
+        source: 'ibkr',
+        bars: [{ date: '2026-07-20', close: 7288.4 }],
+      }),
+    }, now);
+
+    expect(yahooReference.status).toBe('unavailable');
+    expect(staleReference.status).toBe('unavailable');
+  });
+
   test('accepts only explicit daily/weekly cadences and exact WTI series', () => {
     expect(normalizeWtiCadence()).toBe('daily');
     expect(normalizeWtiCadence('WEEKLY')).toBe('weekly');
@@ -428,6 +708,22 @@ describe('WTI prediction-market provider', () => {
       kalshiFetch,
       checkGatewayHealth: jest.fn().mockResolvedValue({ ok: false }),
       getQuote: jest.fn().mockResolvedValue(null),
+      getHistoricalBars: jest.fn().mockResolvedValue({
+        source: 'ibkr',
+        bars: [{ date: '2026-07-20', close: 82.91 }],
+      }),
+      getCpiConsensus: jest.fn().mockResolvedValue({
+        status: 'available',
+        source: 'cleveland_fed_inflation_nowcasting',
+        sourceUrl: 'https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting',
+        period: '2026-07',
+        asOf: '2026-07-21T00:00:00.000Z',
+        value: 3.42,
+        points: [
+          { timestamp: NOW - 24 * 60 * 60 * 1000, value: 3.38 },
+          { timestamp: NOW, value: 3.42 },
+        ],
+      }),
       getSignalAvailability: jest.fn(async ({ market }) => market === 'cpi'
         ? {
           name: 'Hedgeye Inflation Nowcast',
@@ -448,6 +744,7 @@ describe('WTI prediction-market provider', () => {
     expect(result.ok).toBe(true);
     expect(result.markets.cpi.status).toBe('available');
     expect(result.markets.cpi.summary.lines.map((line) => line.label)).toEqual([
+      'Above 3.0%',
       'Above 3.1%',
       'Above 3.2%',
       'Above 3.3%',
@@ -455,8 +752,11 @@ describe('WTI prediction-market provider', () => {
       'Above 3.5%',
       'Above 3.6%',
       'Above 3.7%',
+      'Above 3.8%',
+      'Above 3.9%',
+      'Above 4.0%',
     ]);
-    expect(result.markets.cpi.summary.lines[3]).toEqual(expect.objectContaining({
+    expect(result.markets.cpi.summary.lines[4]).toEqual(expect.objectContaining({
       sortValue: 3.4,
       yesBid: expect.any(Number),
       yesAsk: expect.any(Number),
@@ -464,6 +764,7 @@ describe('WTI prediction-market provider', () => {
       noAsk: expect.any(Number),
       volume24h: 104,
     }));
+    expect(result.markets.cpi.summary.lines).toHaveLength(11);
     expect(result.markets.cpi.summary.reference).toEqual(expect.objectContaining({
       status: 'available',
       kind: 'forecast',
@@ -476,8 +777,17 @@ describe('WTI prediction-market provider', () => {
     });
     expect(result.markets.cpi.summary.chart).toEqual(expect.objectContaining({
       status: 'available',
-      source: 'kalshi_trade_api_v2',
-      points: [{ timestamp: NOW, close: 0.44 }],
+      kind: 'forecast',
+      source: 'cleveland_fed_inflation_nowcasting',
+      points: [
+        { timestamp: NOW - 24 * 60 * 60 * 1000, value: 3.38 },
+        { timestamp: NOW, value: 3.42 },
+      ],
+      references: expect.arrayContaining([
+        expect.objectContaining({ label: 'Low', value: 3.2 }),
+        expect.objectContaining({ label: 'Base', value: 3.4 }),
+        expect.objectContaining({ label: 'High', value: 3.6 }),
+      ]),
     }));
     expect(result.markets.spx).toEqual(expect.objectContaining({ status: 'unavailable', summary: null }));
     expect(result.markets.wti.daily.status).toBe('available');
@@ -487,6 +797,13 @@ describe('WTI prediction-market provider', () => {
       yesAsk: expect.any(Number),
       noBid: expect.any(Number),
       noAsk: expect.any(Number),
+    }));
+    expect(result.markets.wti.daily.summary.reference).toEqual(expect.objectContaining({
+      status: 'available',
+      label: 'WTI last close',
+      value: 82.91,
+      source: 'ibkr_historical_daily_close',
+      tone: 'close',
     }));
     expect(result.markets.wti.weekly.status).toBe('available');
     expect(result.policy).toEqual(expect.objectContaining({

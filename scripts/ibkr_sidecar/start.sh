@@ -36,7 +36,7 @@ if command -v lsof >/dev/null 2>&1 && lsof -i :8765 -sTCP:LISTEN >/dev/null 2>&1
   fi
   echo "ERROR: Port :8765 is occupied, but the IBKR sidecar did not answer /livez."
   echo "The existing sidecar is likely wedged or outdated."
-  echo "Restart it with: pkill -f 'uvicorn app:app' && npm run ibkr-sidecar"
+  echo "Restart the exact repo-owned process with: npm run dev:sidecar:restart"
   echo "Inspect it with: lsof -i :8765"
   exit 1
 fi
@@ -47,6 +47,7 @@ if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
 fi
 
 VENV_PYTHON="$ROOT/.venv/bin/python"
+export IBKR_SIDECAR_RUNTIME_ROOT="$ROOT/.venv"
 "$VENV_PYTHON" - "$ROOT/.venv" <<'PY'
 import os
 import sys

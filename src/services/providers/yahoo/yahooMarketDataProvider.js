@@ -29,7 +29,7 @@ async function fetchYahooQuote(yahooTicker) {
     if (result.error) return null;
 
     const meta = result.meta || {};
-    const isRateProxyTicker = yahooTicker === '^FVX' || yahooTicker === '^TNX' || yahooTicker === '^TYX';
+    const isRateProxyTicker = yahooTicker === '^TNX' || yahooTicker === '^TYX';
 
     let currentPrice = null;
     let previousClose = null;
@@ -63,11 +63,19 @@ async function fetchYahooQuote(yahooTicker) {
       previousClose: previousClose.toFixed(2),
       timestamp: Number.isFinite(meta.regularMarketTime)
         ? new Date(meta.regularMarketTime * 1000).toISOString()
-        : new Date().toISOString(),
+        : null,
     };
   } catch {
     return null;
   }
+}
+
+function explicitYahooSymbol(symbolOrInstrument) {
+  if (!symbolOrInstrument || typeof symbolOrInstrument !== 'object') return null;
+  if (symbolOrInstrument.yahooSymbol) return symbolOrInstrument.yahooSymbol;
+  return String(symbolOrInstrument.provider || '').toLowerCase() === 'yahoo'
+    ? symbolOrInstrument.providerSymbol || null
+    : null;
 }
 
 async function getQuote(symbolOrInstrument) {
@@ -75,10 +83,9 @@ async function getQuote(symbolOrInstrument) {
     typeof symbolOrInstrument === 'object'
       ? symbolOrInstrument.symbol
       : String(symbolOrInstrument).toUpperCase();
-  const explicitProviderSymbol =
-    typeof symbolOrInstrument === 'object' ? symbolOrInstrument.providerSymbol : null;
-  const mapping = explicitProviderSymbol
-    ? { source: 'yahoo', ticker: explicitProviderSymbol }
+  const yahooSymbol = explicitYahooSymbol(symbolOrInstrument);
+  const mapping = yahooSymbol
+    ? { source: 'yahoo', ticker: yahooSymbol }
     : (getTickerMappingFn || defaultMapping)(symbol);
   if (mapping.source !== 'yahoo') {
     return { canonical: null, error: 'not_yahoo_symbol' };
@@ -109,10 +116,9 @@ async function getHistoricalBars(symbolOrInstrument, range, interval) {
     typeof symbolOrInstrument === 'object'
       ? symbolOrInstrument.symbol
       : String(symbolOrInstrument).toUpperCase();
-  const explicitProviderSymbol =
-    typeof symbolOrInstrument === 'object' ? symbolOrInstrument.providerSymbol : null;
-  const mapping = explicitProviderSymbol
-    ? { source: 'yahoo', ticker: explicitProviderSymbol }
+  const yahooSymbol = explicitYahooSymbol(symbolOrInstrument);
+  const mapping = yahooSymbol
+    ? { source: 'yahoo', ticker: yahooSymbol }
     : (getTickerMappingFn || defaultMapping)(symbol);
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(mapping.ticker)}`;
   try {

@@ -48,6 +48,7 @@ function buildFakeProvider({
   failAll = false,
   failMove = false,
   invalidMove = false,
+  cboeAsOf = '2026-07-13T16:00:00-04:00',
   moveAsOf = '2026-07-13T20:30:00.000Z',
   moveHistoryEnd = '2026-07-10',
   moveHistoryRows = null,
@@ -74,7 +75,7 @@ function buildFakeProvider({
               current_price: 200,
               last_trade_time: staleCboe
                 ? '2026-07-13T12:00:00-04:00'
-                : '2026-07-13T16:00:00-04:00',
+                : cboeAsOf,
             },
           },
         };
@@ -179,6 +180,40 @@ describe('computeVolatilityMetrics', () => {
 describe('createVolatilitySnapshotService', () => {
   const afterClose = new Date('2026-07-13T20:45:00.000Z');
 
+  test('coalesces concurrent snapshot requests into one upstream provider batch', async () => {
+    const httpClient = buildFakeProvider();
+    const service = createVolatilitySnapshotService({
+      httpClient,
+      now: () => afterClose,
+      logger: { warn: jest.fn() },
+    });
+
+    const [first, second] = await Promise.all([
+      service.fetchSnapshot(),
+      service.fetchSnapshot(),
+    ]);
+
+    expect(second).toBe(first);
+    expect(httpClient.get).toHaveBeenCalledTimes(15);
+  });
+
+  test('applies the shared 30-minute Cboe freshness boundary during market hours', async () => {
+    const marketNow = new Date('2026-07-13T18:00:00.000Z');
+    const accepted = await createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({ cboeAsOf: '2026-07-13T13:30:00-04:00' }),
+      now: () => marketNow,
+      logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+    const expired = await createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({ cboeAsOf: '2026-07-13T13:29:59-04:00' }),
+      now: () => marketNow,
+      logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+
+    expect(accepted.VIX).toMatchObject({ availability: 'available', freshness: 'current' });
+    expect(expired.VIX).toMatchObject({ availability: 'unavailable', freshness: 'stale' });
+  });
+
   test('returns current Cboe rows and a validated historical MOVE row', async () => {
     const snapshot = await createVolatilitySnapshotService({
       httpClient: buildFakeProvider(),
@@ -187,6 +222,7 @@ describe('createVolatilitySnapshotService', () => {
     }).fetchSnapshot();
 
     expect(snapshot.status).toBe('partial');
+    expect(snapshot.marketSession).toBe('closed');
     expect(snapshot.RVX).toMatchObject({
       lastPx: 200,
       availability: 'available',
@@ -212,6 +248,7 @@ describe('createVolatilitySnapshotService', () => {
       now: () => new Date('2026-07-14T14:00:00.000Z'),
       logger: { warn: jest.fn() },
     }).fetchSnapshot();
+    expect(duringMarket.marketSession).toBe('open');
     expect(duringMarket.MOVE).toMatchObject({
       availability: 'historical',
       freshness: 'historical',
@@ -423,6 +460,35 @@ describe('createVolatilitySnapshotService', () => {
     expect(snapshot.VIX.availability).toBe('available');
   });
 
+  test('retries a transient provider request before degrading the row', async () => {
+    const stableProvider = buildFakeProvider();
+    let vxnQuoteAttempts = 0;
+    const httpClient = {
+      get: jest.fn(async (...args) => {
+        if (args[0].includes('quotes/_VXN.json')) {
+          vxnQuoteAttempts += 1;
+          if (vxnQuoteAttempts === 1) {
+            throw Object.assign(new Error('timeout of 12000ms exceeded'), { code: 'ECONNABORTED' });
+          }
+        }
+        return stableProvider.get(...args);
+      }),
+    };
+
+    const snapshot = await createVolatilitySnapshotService({
+      httpClient,
+      now: () => afterClose,
+      logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+
+    expect(vxnQuoteAttempts).toBe(2);
+    expect(snapshot.NazVol).toMatchObject({
+      availability: 'available',
+      freshness: 'current',
+      lastPx: 200,
+    });
+  });
+
   test('marks stale market-hours quotes unavailable', async () => {
     const duringMarket = new Date('2026-07-13T18:00:00.000Z');
     const snapshot = await createVolatilitySnapshotService({
@@ -446,13 +512,13 @@ describe('createVolatilitySnapshotService', () => {
     }).fetchSnapshot();
 
     expect(snapshot.status).toBe('unavailable');
-    for (const name of ['VIX', 'VVIX', 'RVX', 'NazVol', 'GVZ', 'OVX', 'MOVE']) {
+    for (const name of ['VIX', 'VVIX', 'RVX', 'NazVol', 'GVZ', 'OVX', 'BITVX', 'MOVE']) {
       expect(snapshot[name].availability).toBe('unavailable');
       expect(snapshot[name].lastPx).toBeNull();
     }
   });
 
-  test('clears a formerly available row when its next spot refresh fails', async () => {
+  test('retains a formerly verified row as an explicit reference when its next spot refresh fails', async () => {
     const failSymbols = new Set();
     const service = createVolatilitySnapshotService({
       httpClient: buildFakeProvider({ failSymbols }),
@@ -465,6 +531,36 @@ describe('createVolatilitySnapshotService', () => {
 
     failSymbols.add('RVX');
     const second = await service.fetchSnapshot();
-    expect(second.RVX).toMatchObject({ availability: 'unavailable', lastPx: null });
+    expect(second.RVX).toMatchObject({
+      availability: 'reference',
+      freshness: 'refresh-delayed',
+      refreshDelayed: true,
+      refreshError: 'provider_error',
+      lastPx: first.RVX.lastPx,
+      lastVerifiedAt: afterClose.toISOString(),
+      retainedUntil: new Date(afterClose.getTime() + (30 * 60 * 1000)).toISOString(),
+    });
+  });
+
+  test('expires a retained row after the shared freshness window', async () => {
+    const failSymbols = new Set();
+    let currentTime = afterClose;
+    const service = createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({ failSymbols }),
+      now: () => currentTime,
+      logger: { warn: jest.fn() },
+    });
+
+    await service.fetchSnapshot();
+    currentTime = new Date(afterClose.getTime() + (30 * 60 * 1000) + 1);
+    failSymbols.add('RVX');
+
+    const expired = await service.fetchSnapshot();
+    expect(expired.RVX).toMatchObject({
+      availability: 'unavailable',
+      freshness: 'defective',
+      lastPx: null,
+      error: 'provider_error',
+    });
   });
 });

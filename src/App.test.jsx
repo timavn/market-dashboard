@@ -3,39 +3,67 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import App from './App';
 
-jest.mock('./components/Dashboard/PortfolioDashboard', () => ({
-  processDocumentId,
-  onOpenProcess,
-  onNavigateProcess,
-  onCloseProcess,
-}) => (
-  <div data-testid="mock-dashboard">
-    Dashboard mounted
-    <button type="button" onClick={onOpenProcess}>Open process</button>
-    {processDocumentId && (
-      <div
-        data-testid="mock-process-overlay"
-        data-document-id={processDocumentId}
+let mockDashboardMounts = 0;
+let mockDashboardUnmounts = 0;
+
+jest.mock('./components/Dashboard/PortfolioDashboard', () => {
+  const mockReact = jest.requireActual('react');
+  return ({
+    processDocumentId,
+    onOpenProcess,
+    onNavigateProcess,
+    onCloseProcess,
+  }) => {
+  const [draft, setDraft] = mockReact.useState('');
+  mockReact.useEffect(() => {
+    mockDashboardMounts += 1;
+    return () => { mockDashboardUnmounts += 1; };
+  }, []);
+  return (
+    <div data-testid="mock-dashboard">
+      Dashboard mounted
+      <label>Dashboard draft<input value={draft} onChange={(event) => setDraft(event.target.value)} /></label>
+      <button type="button" onClick={onOpenProcess}>Open process</button>
+      <button
+        type="button"
+        onClick={() => onNavigateProcess('#/process/exposure-lab')}
       >
-        <button
-          type="button"
-          onClick={() => onNavigateProcess('#/process/methods')}
+        Open exposure guide
+      </button>
+      {processDocumentId && (
+        <div
+          data-testid="mock-process-overlay"
+          data-document-id={processDocumentId}
         >
-          Open methods
-        </button>
-        <button
-          type="button"
-          onClick={() => onCloseProcess({ replace: true })}
-        >
-          Close process
-        </button>
-      </div>
-    )}
-  </div>
-));
+          <button
+            type="button"
+            onClick={() => onNavigateProcess('#/process/methods')}
+          >
+            Open methods
+          </button>
+          <button
+            type="button"
+            onClick={() => onCloseProcess({ replace: true })}
+          >
+            Close process
+          </button>
+          <button
+            type="button"
+            onClick={() => onCloseProcess()}
+          >
+            Close process naturally
+          </button>
+        </div>
+      )}
+    </div>
+  );
+  };
+});
 
 describe('App hash routing', () => {
   beforeEach(() => {
+    mockDashboardMounts = 0;
+    mockDashboardUnmounts = 0;
     window.localStorage.clear();
     window.scrollTo = jest.fn();
     window.history.replaceState(null, '', '/');
@@ -54,6 +82,23 @@ describe('App hash routing', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Dashboard$/i }));
     expect(await screen.findByTestId('mock-dashboard')).toBeInTheDocument();
+  });
+
+  test('keeps a visited dashboard mounted while How It Works is open', async () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Dashboard draft'), { target: { value: 'keep me' } });
+
+    window.location.hash = '/how-it-works';
+    await waitFor(() => expect(screen.getByTestId('how-it-works-page')).toBeInTheDocument());
+    expect(screen.getByTestId('mock-dashboard')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-dashboard').closest('[data-surface-active]'))
+      .toHaveAttribute('data-surface-active', 'false');
+    expect(mockDashboardMounts).toBe(1);
+    expect(mockDashboardUnmounts).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Dashboard$/i }));
+    expect(await screen.findByDisplayValue('keep me')).toBeInTheDocument();
+    expect(mockDashboardMounts).toBe(1);
   });
 
   test('opens Process over the still-mounted dashboard and closes without leaving the SPA', async () => {
@@ -96,6 +141,46 @@ describe('App hash routing', () => {
     expect(screen.getByTestId('mock-process-overlay')).toHaveAttribute(
       'data-document-id',
       'position-sizing',
+    );
+  });
+
+  test('switching a directly addressed Process document does not back out of the app on close', async () => {
+    window.location.hash = '/process/exposure-lab';
+    const backSpy = jest.spyOn(window.history, 'back');
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open methods' }));
+    expect(window.history.state?.processOverlayEntry).not.toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close process naturally' }));
+
+    await waitFor(() => expect(screen.queryByTestId('mock-process-overlay')).not.toBeInTheDocument());
+    expect(backSpy).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('');
+    backSpy.mockRestore();
+  });
+
+  test('opens the Exposure Lab guide from the dashboard at its addressable route', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open exposure guide' }));
+
+    expect(screen.getByTestId('mock-dashboard')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-process-overlay')).toHaveAttribute(
+      'data-document-id',
+      'exposure-lab-guide',
+    );
+    expect(window.location.hash).toBe('#/process/exposure-lab');
+  });
+
+  test('opens a directly addressed Exposure Lab guide inside the overlay', () => {
+    window.location.hash = '/process/exposure-lab';
+    render(<App />);
+
+    expect(screen.getByTestId('mock-dashboard')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-process-overlay')).toHaveAttribute(
+      'data-document-id',
+      'exposure-lab-guide',
     );
   });
 

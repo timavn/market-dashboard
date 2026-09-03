@@ -59,6 +59,31 @@ describe('normalizeEvent kalshi', () => {
     expect(native).toMatchObject({ no_bid: 0.54, no_ask: 0.58 });
     expect(missingNo).toMatchObject({ no_bid: null, no_ask: null });
   });
+
+  test('preserves native top-of-book sizes and retrieval provenance without deriving NO depth', () => {
+    const event = normalizeEvent({
+      market: {
+        ticker: 'TEST-DEPTH',
+        yes_bid_dollars: '0.42',
+        yes_ask_dollars: '0.45',
+        yes_bid_size_fp: '120.00',
+        yes_ask_size_fp: '90.00',
+        updated_time: '2026-08-09T16:00:00.000Z',
+        status: 'active',
+      },
+    }, 'kalshi');
+
+    expect(event).toMatchObject({
+      yes_bid_size: 120,
+      yes_ask_size: 90,
+      no_bid_size: null,
+      no_ask_size: null,
+      market_updated_at: '2026-08-09T16:00:00.000Z',
+      order_book_provenance: 'kalshi_market_snapshot_top_of_book',
+    });
+    expect(Number.isFinite(Date.parse(event.quote_retrieved_at))).toBe(true);
+    expect(event.updated_at).toBe(event.quote_retrieved_at);
+  });
 });
 
 describe('isFinancialMacroEvent', () => {
@@ -633,6 +658,43 @@ describe('IBKR CPI payload forwarding', () => {
     expect(sidecarRequest).toHaveBeenCalledWith('/refresh', expect.objectContaining({
       method: 'POST',
       body: { cpi, catalogContracts: [] },
+      timeoutMs: 30000,
+    }));
+  });
+
+  test('forced prediction refresh asks the sidecar for snapshots and missing-only retries', async () => {
+    jest.resetModules();
+    const sidecarRequest = jest.fn().mockResolvedValue({
+      events: [],
+      providers: { ibkr: { status: 'catalog_unavailable' } },
+      fetched_at: '2026-06-19T16:00:00Z',
+      refreshEvidence: {
+        mode: 'on_demand_prediction_fanout',
+        brokerSnapshotRequestedCount: 0,
+      },
+    });
+    jest.doMock('../providers/ibkrHttp', () => ({
+      sidecarRequest,
+      SIDECAR_BASE: 'http://sidecar.test',
+    }));
+    const { fetchIBKREvents } = require('../providers/ibkrProvider');
+    const cpi = { releaseKey: 'KXCPIYOY#2026-08' };
+
+    await fetchIBKREvents({
+      cpi,
+      catalogContracts: [{ conId: 456 }],
+      forceRefresh: true,
+      retryMissing: true,
+    });
+
+    expect(sidecarRequest).toHaveBeenCalledWith('/refresh', expect.objectContaining({
+      method: 'POST',
+      body: {
+        cpi,
+        catalogContracts: [{ conId: 456 }],
+        forceRefresh: true,
+        retryMissing: true,
+      },
       timeoutMs: 30000,
     }));
   });

@@ -1,0 +1,15 @@
+# Tested together for The Analyst sidecar. Keep this environment isolated.
+mcp==1.29.0
+uvicorn==0.40.0
+httpx==0.28.1
+fastembed==0.7.4
+PyMuPDF==1.26.5
+boto3==1.40.59
+ruff==0.15.22
+
+# OpenBB ODP and only the public/providerless extensions used by The Analyst.
+openbb-core==1.6.13
+openbb-equity==1.6.2
+openbb-economy==1.6.2
+openbb-yfinance==1.6.3
+openbb-fred==1.6.2

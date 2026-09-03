@@ -1,12 +1,58 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, Text, Badge, Button } from '@tremor/react';
-import { getEventsForMonth, formatDateKey, EVENT_TYPE_COLORS } from '../../constants/marketEvents';
+import {
+  MARKET_EVENTS_SOURCE_URL,
+  isMarketDateCovered,
+  marketEventEtDateKey,
+  useMarketEvents,
+} from '../../hooks/useMarketEvents';
 import { notesService } from '../../services/api/notesService';
+
+const formatDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatEtTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Time unavailable';
+  return `${new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)} ET`;
+};
+
+const formatCoverage = (coverage) => {
+  if (!coverage?.from || !coverage?.to) return null;
+  const from = new Date(`${coverage.from}T12:00:00.000Z`);
+  const to = new Date(`${coverage.to}T12:00:00.000Z`);
+  const start = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(from);
+  const end = new Intl.DateTimeFormat('en-US', {
+    month: from.getUTCMonth() === to.getUTCMonth() ? undefined : 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(to);
+  return `${start}–${end}`;
+};
+
+const eventTooltip = (event) => [
+  `${event.countryCode} ${event.name}`,
+  formatEtTime(event.startAt),
+  `Forecast: ${event.forecast || 'unavailable'}`,
+  `Previous: ${event.previous || 'unavailable'}`,
+  'Source: Forex Factory',
+].join(' · ');
 
 const MarketCalendar = () => {
   const [viewMode, setViewMode] = useState('week'); // 'week' or 'month'
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [events, setEvents] = useState([]);
   const [calendarNotes, setCalendarNotes] = useState({}); // dateKey -> note content
   const [selectedDay, setSelectedDay] = useState(null);
   const [dayNote, setDayNote] = useState('');
@@ -14,6 +60,15 @@ const MarketCalendar = () => {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const marketEventsResource = useMarketEvents();
+  const marketEventsAvailable = marketEventsResource.availability === 'live'
+    && marketEventsResource.data?.status === 'verified';
+  const marketEventsCoverage = marketEventsAvailable
+    ? marketEventsResource.data.coverage
+    : null;
+  const events = marketEventsAvailable
+    ? marketEventsResource.data.events
+    : [];
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -59,29 +114,6 @@ const MarketCalendar = () => {
     }
     return days;
   }, [viewMode, getWeekStart]);
-
-  // Load events for current month or week
-  useEffect(() => {
-    if (viewMode === 'month') {
-      const monthEvents = getEventsForMonth(year, month);
-      setEvents(monthEvents);
-    } else {
-      // For week view, get events for the week
-      const weekEvents = [];
-      weekDaysList.forEach(date => {
-        const dateYear = date.getFullYear();
-        const dateMonth = date.getMonth();
-        const monthEvents = getEventsForMonth(dateYear, dateMonth);
-        const dayEvents = monthEvents.filter(event => {
-          return event.date.getDate() === date.getDate() &&
-                 event.date.getMonth() === date.getMonth() &&
-                 event.date.getFullYear() === date.getFullYear();
-        });
-        weekEvents.push(...dayEvents);
-      });
-      setEvents(weekEvents);
-    }
-  }, [year, month, viewMode, weekDaysList]);
 
   // Load calendar notes for the current month or week
   useEffect(() => {
@@ -247,11 +279,9 @@ const MarketCalendar = () => {
       targetDate = new Date(year, month, dayOrDate);
     }
     
-    return events.filter(event => {
-      return event.date.getDate() === targetDate.getDate() &&
-             event.date.getMonth() === targetDate.getMonth() &&
-             event.date.getFullYear() === targetDate.getFullYear();
-    });
+    const targetDateKey = formatDateKey(targetDate);
+    if (!isMarketDateCovered(targetDateKey, marketEventsCoverage)) return [];
+    return events.filter((event) => marketEventEtDateKey(event.startAt) === targetDateKey);
   };
 
   const hasNote = (dayOrDate) => {
@@ -331,6 +361,14 @@ const MarketCalendar = () => {
 
   const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const calendarDays = getCalendarDays();
+  const displayedWeekFrom = weekDaysList.length ? formatDateKey(weekDaysList[0]) : null;
+  const displayedWeekTo = weekDaysList.length
+    ? formatDateKey(weekDaysList[weekDaysList.length - 1])
+    : null;
+  const displaysProviderWeek = viewMode === 'week'
+    && displayedWeekFrom === marketEventsCoverage?.from
+    && displayedWeekTo === marketEventsCoverage?.to;
+  const providerCoverageLabel = formatCoverage(marketEventsCoverage);
 
   return (
     <Card className="bg-gray-50 dark:bg-gray-800" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -400,6 +438,55 @@ const MarketCalendar = () => {
         </div>
       </div>
 
+      <div
+        role="status"
+        aria-live="polite"
+        className="text-xs text-gray-500 dark:text-gray-400"
+        style={{ marginBottom: '10px', minHeight: '18px', display: 'flex', alignItems: 'center', gap: '6px' }}
+      >
+        {marketEventsResource.initialLoading || ['idle', 'loading'].includes(marketEventsResource.availability) ? (
+          <span>Loading verified market events… Notes remain available.</span>
+        ) : !marketEventsAvailable ? (
+          <>
+            <span title={marketEventsResource.error?.message || undefined}>
+              Market events unavailable. Notes remain available.
+            </span>
+            <button
+              type="button"
+              onClick={marketEventsResource.refresh}
+              className="text-blue-600 dark:text-blue-400 underline"
+            >
+              Retry
+            </button>
+          </>
+        ) : displaysProviderWeek ? (
+          <>
+            <span>High-impact events:</span>
+            <a
+              href={MARKET_EVENTS_SOURCE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-600 dark:text-blue-400 underline"
+            >
+              Forex Factory
+            </a>
+            <span>· {providerCoverageLabel} ET</span>
+          </>
+        ) : (
+          <>
+            <span>Market-event coverage is current-week only ({providerCoverageLabel} ET).</span>
+            <a
+              href={MARKET_EVENTS_SOURCE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-600 dark:text-blue-400 underline"
+            >
+              Forex Factory
+            </a>
+          </>
+        )}
+      </div>
+
       {/* Calendar View */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '500px' }}>
         {viewMode === 'week' ? (
@@ -453,14 +540,15 @@ const MarketCalendar = () => {
                   {/* Events */}
                   {dayEvents.length > 0 && (
                     <div className="flex flex-col gap-1">
-                      {dayEvents.map((event, idx) => (
+                      {dayEvents.map((event) => (
                         <Badge
-                          key={idx}
-                          color={EVENT_TYPE_COLORS[event.type] || 'gray'}
+                          key={event.id}
+                          color="red"
                           size="sm"
                           className="text-xs"
+                          title={eventTooltip(event)}
                         >
-                          {event.name} {event.time && `(${event.time})`}
+                          {event.countryCode} {event.name} ({formatEtTime(event.startAt)})
                         </Badge>
                       ))}
                     </div>
@@ -546,15 +634,15 @@ const MarketCalendar = () => {
 
                     {/* Events */}
                     <div className="overflow-y-auto" style={{ maxHeight: '30px' }}>
-                      {dayEvents.slice(0, 2).map((event, idx) => (
+                      {dayEvents.slice(0, 2).map((event) => (
                         <Badge
-                          key={idx}
-                          color={EVENT_TYPE_COLORS[event.type] || 'gray'}
+                          key={event.id}
+                          color="red"
                           size="xs"
                           className="mb-1 block text-xs truncate"
-                          title={event.name}
+                          title={eventTooltip(event)}
                         >
-                          {event.name}
+                          {event.countryCode} {event.name}
                         </Badge>
                       ))}
                       {dayEvents.length > 2 && (
@@ -607,13 +695,14 @@ const MarketCalendar = () => {
                 <div className="mb-3">
                   <Text className="text-sm font-medium dark:text-gray-300 mb-2">Market Events:</Text>
                   <div className="flex flex-wrap gap-2">
-                    {getEventsForDay(selectedDay).map((event, idx) => (
+                    {getEventsForDay(selectedDay).map((event) => (
                       <Badge
-                        key={idx}
-                        color={EVENT_TYPE_COLORS[event.type] || 'gray'}
+                        key={event.id}
+                        color="red"
                         size="sm"
+                        title={eventTooltip(event)}
                       >
-                        {event.name} {event.time && `(${event.time})`}
+                        {event.countryCode} {event.name} ({formatEtTime(event.startAt)})
                       </Badge>
                     ))}
                   </div>
@@ -675,4 +764,3 @@ const MarketCalendar = () => {
 };
 
 export default MarketCalendar;
-

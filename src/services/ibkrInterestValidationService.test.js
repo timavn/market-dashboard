@@ -4,11 +4,15 @@ const path = require('path');
 const {
   buildDerivedSummary,
   buildMatches,
+  buildStockBorrowFeeSummary,
   createIbkrInterestValidationService,
+  flexReportingRange,
   hasMonthlyReconciliation,
   latestVerifiedTierSchedule,
   remainingPredictionUpper,
+  resolveDebitRateEvidence,
   requireLiveObservation,
+  requireLiveBalanceInterestObservation,
 } = require('./ibkrInterestValidationService.cjs');
 const {
   createInterestValidationStore,
@@ -22,6 +26,8 @@ function flexSnapshot(overrides = {}) {
     reportHash: 'a'.repeat(64),
     revisionHash: 'b'.repeat(64),
     fetchedAt: '2026-07-27T11:00:00.000Z',
+    fromDate: '2026-06-13',
+    toDate: '2026-07-26',
     tierDetails: [{
       currency: 'USD',
       interestType: 'Debit Interest',
@@ -68,20 +74,26 @@ function liveObservation(overrides = {}) {
     },
     summary: {
       baseCurrency: 'USD',
+      'TotalCashValue-S': 50000,
+      'TotalCashValue-C': 0,
+      'TotalCashValue-Z': 0,
       'SettledCashByDate-S': '20260727:50000',
       'SettledCashByDate-C': '20260727:0',
-      'SettledCashByDate-Z': null,
-      'TotalCashValue-Z': null,
+      'SettledCashByDate-Z': '20260727:0',
       FxCashBalance: 0,
       'MaintMarginReq-C': 0,
       'AccruedCash-S': -326.79,
     },
     forecast: {
       eligible: true,
+      forecastKind: 'completed_session_window',
       sessionDate: '2026-07-27',
+      basisSessionDate: '2026-07-27',
+      cashAnchorDate: '2026-07-27',
       nextSessionDate: '2026-07-28',
       accrualDays: 1,
       currentSessionCloseAt: '2026-07-27T20:00:00.000Z',
+      currentSessionScheduled: true,
       currentSessionComplete: true,
       priorCompletedSessionDate: '2026-07-24',
       latestCompletedSessionDate: '2026-07-27',
@@ -89,6 +101,11 @@ function liveObservation(overrides = {}) {
     },
     market_calendar: {
       verifiedNyDate: '2026-07-27',
+      forecastKind: 'completed_session_window',
+      sessionDate: '2026-07-27',
+      basisSessionDate: '2026-07-27',
+      cashAnchorDate: '2026-07-27',
+      accrualDays: 1,
       currentSessionScheduled: true,
       currentSessionCloseAt: '2026-07-27T20:00:00.000Z',
       currentSessionComplete: true,
@@ -98,6 +115,16 @@ function liveObservation(overrides = {}) {
       liquidHours: '20260727:0930-1600;20260728:0930-1600',
       source: 'ibkr_contract_details_and_historical_schedule',
     },
+    position_scope: {
+      mode: 'stocks_only',
+      allSupportedForBalance: true,
+      allStock: true,
+      allBaseCurrency: true,
+      stockPositionCount: 1,
+      eventPositionCount: 0,
+    },
+    event_position_evidence: [],
+    event_accounting: null,
     short_positions: [{
       conId: 1,
       symbol: 'SHORT',
@@ -116,6 +143,79 @@ function liveObservation(overrides = {}) {
     },
     evidence_hash: 'c'.repeat(64),
     ...overrides,
+  };
+}
+
+function closedDayObservation({
+  sessionDate,
+  observedAt,
+  accrualDays,
+  evidenceHash = 'd'.repeat(64),
+} = {}) {
+  const basisSessionDate = '2026-07-31';
+  const nextSessionDate = '2026-08-03';
+  const compactSessionDate = sessionDate.replaceAll('-', '');
+  const compactNextSessionDate = nextSessionDate.replaceAll('-', '');
+  const base = liveObservation();
+  return {
+    ...base,
+    observed_at: observedAt,
+    socket_verified_at: observedAt,
+    account_values_observed_at: observedAt,
+    positions_observed_at: observedAt,
+    executions_observed_at: observedAt,
+    summary: {
+      ...base.summary,
+      'TotalCashValue-S': 50000,
+      'TotalCashValue-C': 0,
+      'TotalCashValue-Z': 0,
+      'SettledCashByDate-S': `${compactSessionDate}:49000;${compactNextSessionDate}:50000`,
+      'SettledCashByDate-C': `${compactSessionDate}:0;${compactNextSessionDate}:0`,
+      'SettledCashByDate-Z': `${compactSessionDate}:0;${compactNextSessionDate}:0`,
+    },
+    forecast: {
+      eligible: true,
+      forecastKind: 'closed_day_remaining_window',
+      sessionDate,
+      basisSessionDate,
+      cashAnchorDate: sessionDate,
+      nextSessionDate,
+      accrualDays,
+      currentSessionCloseAt: null,
+      currentSessionScheduled: false,
+      currentSessionComplete: false,
+      priorCompletedSessionDate: basisSessionDate,
+      latestCompletedSessionDate: basisSessionDate,
+      verification: 'ibkr_liquid_hours_and_broker_time',
+    },
+    market_calendar: {
+      verifiedNyDate: sessionDate,
+      forecastKind: 'closed_day_remaining_window',
+      sessionDate,
+      basisSessionDate,
+      cashAnchorDate: sessionDate,
+      accrualDays,
+      currentSessionScheduled: false,
+      currentSessionCloseAt: null,
+      currentSessionComplete: false,
+      priorCompletedSessionDate: basisSessionDate,
+      latestCompletedSessionDate: basisSessionDate,
+      nextSessionDate,
+      liquidHours: '20260731:0930-1600;20260801:CLOSED;20260802:CLOSED;20260803:0930-1600',
+      source: 'ibkr_contract_details_and_historical_schedule',
+    },
+    short_positions: base.short_positions.map((position) => ({
+      ...position,
+      priorCloseSessionDate: basisSessionDate,
+      priorCloseObservedAt: observedAt,
+      snapshotTimestamp: observedAt,
+    })),
+    execution_evidence: {
+      asOf: observedAt,
+      count: 0,
+      rows: [],
+    },
+    evidence_hash: evidenceHash,
   };
 }
 
@@ -183,6 +283,11 @@ describe('IBKR interest validation service', () => {
       securitiesCash: 50000,
       commoditiesCash: 0,
       ibuklCash: 0,
+      positionScope: 'stocks_only',
+      forecastKind: 'completed_session_window',
+      basisSessionDate: '2026-07-27',
+      eventMarketValue: 0,
+      kalshiMarketValue: 0,
       liveAccruedCash: -326.79,
     });
 
@@ -248,6 +353,331 @@ describe('IBKR interest validation service', () => {
     }));
   });
 
+  test('records distinct exact-account live MTD checkpoints independently of forecasts', () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    const snapshot = {
+      available: true,
+      status: 'live',
+      source: 'ibkr_live_session',
+      accountId: ACCOUNT,
+      fromCache: false,
+      observedAt: '2026-07-27T21:00:00.000Z',
+      socketVerifiedAt: '2026-07-27T21:00:00.000Z',
+      cash: { netAccruedInterest: -326.79 },
+    };
+
+    expect(requireLiveBalanceInterestObservation(snapshot, ACCOUNT, {
+      now: new Date('2026-07-27T21:00:01.000Z'),
+    })).toMatchObject({
+      account: ACCOUNT,
+      sessionDate: '2026-07-27',
+      liveAccruedCash: -326.79,
+    });
+
+    const first = harness.service.recordBalanceObservation(snapshot);
+    harness.setNow('2026-07-27T21:00:16.000Z');
+    const duplicate = harness.service.recordBalanceObservation({
+      ...snapshot,
+      observedAt: '2026-07-27T21:00:15.000Z',
+      socketVerifiedAt: '2026-07-27T21:00:15.000Z',
+    });
+    harness.setNow('2026-07-27T21:00:31.000Z');
+    const changed = harness.service.recordBalanceObservation({
+      ...snapshot,
+      observedAt: '2026-07-27T21:00:30.000Z',
+      socketVerifiedAt: '2026-07-27T21:00:30.000Z',
+      cash: { netAccruedInterest: -327.82 },
+    });
+
+    expect(first.appended).toBe(true);
+    expect(duplicate.appended).toBe(false);
+    expect(changed.appended).toBe(true);
+    expect(harness.service.history()).toMatchObject({
+      observations: [
+        {
+          sessionDate: '2026-07-27',
+          observedAt: '2026-07-27T21:00:00.000Z',
+          liveNetAccrued: -326.79,
+          source: 'ibkr_live_portfolio_balance',
+        },
+        {
+          sessionDate: '2026-07-27',
+          observedAt: '2026-07-27T21:00:30.000Z',
+          liveNetAccrued: -327.82,
+          source: 'ibkr_live_portfolio_balance',
+        },
+      ],
+    });
+    expect(harness.service.recordBalanceObservation({
+      ...snapshot,
+      accountId: 'U00000000',
+    })).toEqual({
+      appended: false,
+      reason: 'interest_balance_observation_account_mismatch',
+    });
+    expect(() => harness.service.recordBalanceObservation({
+      ...snapshot,
+      fromCache: true,
+    })).toThrow(expect.objectContaining({
+      code: 'interest_balance_observation_unverified',
+    }));
+  });
+
+  test('refreshes unchanged live MTD evidence without duplicating the audit journal', async () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    await harness.service.run({ force: false });
+    const recordCount = harness.store.readRecords('observations').length;
+
+    harness.setNow('2026-07-27T21:00:50.000Z');
+    expect(harness.service.recordBalanceObservation({
+      available: true,
+      status: 'live',
+      source: 'ibkr_live_session',
+      accountId: ACCOUNT,
+      fromCache: false,
+      observedAt: '2026-07-27T21:00:50.000Z',
+      socketVerifiedAt: '2026-07-27T21:00:50.000Z',
+      cash: { netAccruedInterest: -326.79 },
+    })).toEqual({
+      appended: false,
+      reason: 'interest_balance_observation_unchanged',
+    });
+
+    expect(harness.store.readRecords('observations')).toHaveLength(recordCount);
+    expect(harness.service.getStatus().mtd).toMatchObject({
+      liveNetAccrued: -326.79,
+      liveNetAccruedStatus: 'live',
+      liveNetAccruedObservedAt: '2026-07-27T21:00:50.000Z',
+      liveNetAccruedSource: 'ibkr_live_portfolio_balance',
+    });
+
+    harness.setNow('2026-07-27T21:01:36.000Z');
+    expect(harness.service.getStatus().mtd).toMatchObject({
+      liveNetAccrued: null,
+      liveNetAccruedStatus: 'unavailable',
+      liveNetAccruedObservedAt: null,
+      liveNetAccruedSource: null,
+    });
+  });
+
+  test('does not duplicate a legacy forecast-time checkpoint with the same date and value', () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    harness.store.appendRecord('observations', {
+      identity: '2026-07-27|legacy-evidence-hash',
+      source: 'ibkr_live_interest_observation',
+      sessionDate: '2026-07-27',
+      observedAt: '2026-07-27T20:59:59.000Z',
+      socketVerifiedAt: '2026-07-27T20:59:58.000Z',
+      liveAccruedCash: -326.79,
+      verified: true,
+    });
+
+    expect(harness.service.recordBalanceObservation({
+      available: true,
+      status: 'live',
+      source: 'ibkr_live_session',
+      accountId: ACCOUNT,
+      fromCache: false,
+      observedAt: '2026-07-27T21:00:00.000Z',
+      socketVerifiedAt: '2026-07-27T21:00:00.000Z',
+      cash: { netAccruedInterest: -326.79 },
+    })).toEqual({
+      appended: false,
+      reason: 'interest_balance_observation_unchanged',
+    });
+    expect(harness.store.readRecords('observations')).toHaveLength(1);
+    expect(harness.service.history().observations).toEqual([
+      expect.objectContaining({
+        sessionDate: '2026-07-27',
+        liveNetAccrued: -326.79,
+        source: 'ibkr_live_interest_observation',
+      }),
+    ]);
+  });
+
+  test('accepts reconciled live event-contract accounting while keeping shorts stock-only', () => {
+    const currentTime = new Date('2026-07-27T21:00:01.000Z');
+    const mixed = liveObservation({
+      summary: {
+        ...liveObservation().summary,
+        'TotalCashValue-C': 1000,
+        'SettledCashByDate-C': '20260727:1000',
+        'MaintMarginReq-C': 1490,
+      },
+      position_scope: {
+        mode: 'stocks_and_event_contracts',
+        allSupportedForBalance: true,
+        allStock: false,
+        allBaseCurrency: true,
+        stockPositionCount: 1,
+        eventPositionCount: 2,
+        eventVenues: ['FORECASTX', 'KALSHI'],
+      },
+      event_position_evidence: [
+        { conId: 11, quantity: 499.17, exchange: 'KALSHI', secType: 'OPT', currency: 'USD', multiplier: 1 },
+        { conId: 12, quantity: 990.83, exchange: 'FORECASTX', secType: 'FOP', currency: 'USD', multiplier: 1 },
+      ],
+      event_accounting: {
+        venues: ['FORECASTX', 'KALSHI'],
+        positionCount: 2,
+        marketValue: 1490,
+        initialMargin: 1490,
+        maintenanceMargin: 1490,
+        availableFunds: 728,
+        equityWithLoanValue: 1000,
+        theoreticalAvailableFunds: 1000,
+        availableFundsHoldback: 272,
+        capacityContribution: 0,
+        verification: 'ibkr_event_contract_commodity_segment_reconciled',
+        accountValues: {
+          'GrossPositionValue-C': 1490,
+          'NetLiquidation-C': 2490,
+          'TotalCashValue-C': 1000,
+          'InitMarginReq-C': 1490,
+          'MaintMarginReq-C': 1490,
+          'AvailableFunds-C': 728,
+          'EquityWithLoanValue-C': 1000,
+        },
+      },
+    });
+
+    expect(requireLiveObservation(mixed, ACCOUNT, { now: currentTime }))
+      .toMatchObject({
+        positionScope: 'stocks_and_event_contracts',
+        eventVenues: ['FORECASTX', 'KALSHI'],
+        eventMarketValue: 1490,
+        kalshiMarketValue: 1490,
+        commodityAvailableFunds: 728,
+        commodityMaintenanceMargin: 1490,
+        eventAccountingVerified: true,
+        shortPositions: [{ symbol: 'SHORT' }],
+      });
+
+    expect(() => requireLiveObservation({
+      ...mixed,
+      event_position_evidence: mixed.event_position_evidence.map((row) => (
+        row.exchange === 'KALSHI' ? { ...row, secType: 'FOP' } : row
+      )),
+    }, ACCOUNT, { now: currentTime })).toThrow(expect.objectContaining({
+      code: 'interest_observation_event_accounting_unverified',
+    }));
+    expect(() => requireLiveObservation({
+      ...mixed,
+      event_position_evidence: mixed.event_position_evidence.map((row) => (
+        row.exchange === 'FORECASTX' ? { ...row, secType: 'STK' } : row
+      )),
+    }, ACCOUNT, { now: currentTime })).toThrow(expect.objectContaining({
+      code: 'interest_observation_event_accounting_unverified',
+    }));
+
+    const legacyKalshi = {
+      ...mixed,
+      position_scope: {
+        ...mixed.position_scope,
+        mode: 'stocks_and_kalshi',
+        eventVenues: undefined,
+      },
+      event_position_evidence: mixed.event_position_evidence.map((row) => ({
+        ...row,
+        exchange: 'KALSHI',
+        secType: 'OPT',
+      })),
+      event_accounting: {
+        ...mixed.event_accounting,
+        venues: undefined,
+        venue: 'KALSHI',
+        verification: 'ibkr_kalshi_commodity_segment_reconciled',
+      },
+    };
+    expect(requireLiveObservation(legacyKalshi, ACCOUNT, { now: currentTime }))
+      .toMatchObject({
+        positionScope: 'stocks_and_event_contracts',
+        eventVenues: ['KALSHI'],
+        eventMarketValue: 1490,
+      });
+
+    expect(() => requireLiveObservation({
+      ...mixed,
+      event_accounting: {
+        ...mixed.event_accounting,
+        maintenanceMargin: 1489.98,
+      },
+    }, ACCOUNT, { now: currentTime })).toThrow(expect.objectContaining({
+      code: 'interest_observation_event_accounting_unverified',
+    }));
+  });
+
+  test('anchors a closed-day forecast to the current value date, not Friday', () => {
+    const currentTime = new Date('2026-08-01T16:00:01.000Z');
+    const closed = closedDayObservation({
+      sessionDate: '2026-08-01',
+      observedAt: '2026-08-01T16:00:00.000Z',
+      accrualDays: 2,
+    });
+
+    expect(requireLiveObservation(closed, ACCOUNT, { now: currentTime }))
+      .toMatchObject({
+        sessionDate: '2026-08-01',
+        basisSessionDate: '2026-07-31',
+        cashAnchorDate: '2026-08-01',
+        securitiesCash: 49000,
+      });
+
+    expect(() => requireLiveObservation({
+      ...closed,
+      forecast: {
+        ...closed.forecast,
+        cashAnchorDate: '2026-07-31',
+      },
+      market_calendar: {
+        ...closed.market_calendar,
+        cashAnchorDate: '2026-07-31',
+      },
+    }, ACCOUNT, { now: currentTime })).toThrow(expect.objectContaining({
+      code: 'interest_observation_calendar_unverified',
+    }));
+
+    expect(() => requireLiveObservation({
+      ...closed,
+      summary: {
+        ...closed.summary,
+        'TotalCashValue-S': 50001,
+      },
+    }, ACCOUNT, { now: currentTime })).toThrow(expect.objectContaining({
+      code: 'interest_observation_cash_ladder_unreconciled',
+    }));
+  });
+
+  test('requests the rolling Flex window through the prior reporting date', async () => {
+    expect(flexReportingRange({ date: '2026-08-08' })).toEqual({
+      fromDate: '2026-06-24',
+      toDate: '2026-08-07',
+    });
+    expect(flexReportingRange({ date: '2026-08-09' })).toEqual({
+      fromDate: '2026-06-24',
+      toDate: '2026-08-07',
+    });
+    expect(flexReportingRange({ date: '2026-08-10' })).toEqual({
+      fromDate: '2026-06-24',
+      toDate: '2026-08-07',
+    });
+
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    harness.setNow('2026-08-08T11:00:00.000Z');
+
+    await harness.service.run({ force: false });
+
+    expect(harness.flexService.sync).toHaveBeenCalledWith({
+      fromDate: '2026-06-24',
+      toDate: '2026-08-07',
+    });
+    expect(harness.sidecarRequestImpl).toHaveBeenCalledTimes(1);
+  });
+
   test('derives decimal account-specific tiers and observed principal coverage', () => {
     const schedule = latestVerifiedTierSchedule(
       [flexSnapshot()],
@@ -287,6 +717,224 @@ describe('IBKR interest validation service', () => {
         annualRate: 0.0075,
       }],
     }));
+  });
+
+  test('uses a current official Pro schedule provisionally only after stale Flex corroboration', async () => {
+    const resolved = await resolveDebitRateEvidence({
+      snapshots: [flexSnapshot({
+        tierDetails: [{
+          ...flexSnapshot().tierDetails[0],
+          valueDate: '2026-07-12',
+          rate: 5.12,
+        }],
+      })],
+      sessionDate: '2026-08-10',
+      fetchOfficialSchedule: async () => ({
+        source: 'ibkr_official_margin_rates',
+        url: 'https://www.interactivebrokers.com/en/trading/margin-rates.php',
+        fetchedAt: '2026-08-10T21:00:00.000Z',
+        scheduleHash: 'f'.repeat(64),
+        plan: 'IBKR Pro',
+        currency: 'USD',
+        provisional: true,
+        liteAnnualRate: 0.0613,
+        tiers: [{ label: 'USD tier 1', upTo: null, annualRate: 0.0513 }],
+      }),
+    });
+
+    expect(resolved).toMatchObject({
+      provisional: true,
+      tiers: [{ annualRate: 0.0513 }],
+      rateEvidence: {
+        source: 'ibkr_official_margin_rates',
+        scheduleHash: 'f'.repeat(64),
+        provisional: true,
+        corroboratedBy: {
+          rateDate: '2026-07-12',
+          firstTierAnnualRate: 0.0512,
+        },
+      },
+    });
+  });
+
+  test('does not turn an empty current-month Flex detail set into verified zero', () => {
+    const summary = buildDerivedSummary({
+      config: {
+        timeZone: 'America/New_York',
+        accountFingerprint: 'fingerprint',
+        accountMasked: '••••9973',
+        guardMode: 'graduated',
+      },
+      store: {
+        readRecords: () => [],
+      },
+      flexSnapshots: [flexSnapshot({
+        fromDate: '2026-06-24',
+        toDate: '2026-08-07',
+        fetchedAt: '2026-08-10T11:00:00.000Z',
+        derived: { dailyDebitActuals: [], monthlyPaid: [] },
+      })],
+      generatedAt: '2026-08-10T21:00:00.000Z',
+      lastRun: null,
+      lastError: { code: 'interest_observation_provider_offline' },
+      forecastError: { code: 'interest_observation_provider_offline' },
+    });
+
+    expect(summary.mtd).toMatchObject({
+      status: 'awaiting',
+      verifiedDebit: null,
+      actualDayCount: 0,
+      throughDate: null,
+    });
+    expect(summary.forecast.status).toBe('unavailable');
+  });
+
+  test('verifies an explicit zero debit row through the row coverage date', () => {
+    const actual = {
+      kind: 'daily',
+      valueDate: '2026-08-07',
+      fromDate: '2026-08-07',
+      toDate: '2026-08-09',
+      currency: 'USD',
+      debitAmount: 0,
+      accrualDays: 3,
+      verified: true,
+    };
+    const summary = buildDerivedSummary({
+      config: {
+        timeZone: 'America/New_York',
+        accountFingerprint: 'fingerprint',
+        accountMasked: '••••9973',
+        guardMode: 'graduated',
+      },
+      store: {
+        readRecords: (kind) => (kind === 'actuals' ? [actual] : []),
+      },
+      flexSnapshots: [flexSnapshot({
+        expectedAccountFingerprint: 'fingerprint',
+        fromDate: '2026-06-24',
+        toDate: '2026-08-10',
+        fetchedAt: '2026-08-10T11:00:00.000Z',
+        derived: {
+          dailyDebitActuals: [{
+            date: '2026-08-07',
+            fromDate: '2026-08-07',
+            toDate: '2026-08-09',
+            currency: 'USD',
+            totalInterest: 0,
+            debitAmount: 0,
+            accrualDays: 3,
+            rowCount: 1,
+          }],
+          monthlyPaid: [],
+        },
+      })],
+      generatedAt: '2026-08-10T21:00:00.000Z',
+      lastRun: null,
+      lastError: null,
+    });
+
+    expect(summary.mtd).toMatchObject({
+      status: 'verified',
+      verifiedDebit: 0,
+      actualDayCount: 3,
+      throughDate: '2026-08-09',
+    });
+  });
+
+  test('separates verified posted stock borrow fees from margin interest', () => {
+    const summary = buildStockBorrowFeeSummary({
+      expectedAccountFingerprint: 'fingerprint',
+      currentNyDate: '2026-08-10',
+      flexSnapshots: [flexSnapshot({
+        expectedAccountFingerprint: 'fingerprint',
+        cashTransactionSectionPresent: true,
+        cashTransactions: [{
+          transactionId: 'borrow-1',
+          date: '2026-08-05',
+          currency: 'USD',
+          type: 'Broker Interest Paid',
+          amount: -405.83,
+          description: 'USD BORROW FEES FOR JUL-2026',
+        }],
+        borrowFeeDetails: [],
+        borrowFeeDetailsSectionPresent: false,
+        derived: {
+          dailyDebitActuals: [],
+          monthlyPaid: [],
+          stockBorrowFeePayments: [{
+            month: '2026-07',
+            currency: 'USD',
+            amount: 405.83,
+            transactionCount: 1,
+            postedDates: ['2026-08-05'],
+          }],
+          dailyStockBorrowFees: [],
+        },
+      })],
+    });
+
+    expect(summary).toMatchObject({
+      status: 'verified',
+      daily: {
+        status: 'awaiting',
+        reason: 'flex_query_borrow_fee_details_not_configured',
+      },
+      aggregate: {
+        status: 'verified',
+        total: 405.83,
+        periodFrom: '2026-06-13',
+        periodTo: '2026-07-26',
+        months: [{
+          month: '2026-07',
+          amount: 405.83,
+        }],
+      },
+    });
+  });
+
+  test('publishes a daily stock borrow total only from verified fee-detail charges', () => {
+    const summary = buildStockBorrowFeeSummary({
+      expectedAccountFingerprint: 'fingerprint',
+      currentNyDate: '2026-08-10',
+      flexSnapshots: [flexSnapshot({
+        expectedAccountFingerprint: 'fingerprint',
+        borrowFeeDetailsSectionPresent: true,
+        borrowFeeDetails: [
+          {
+            currency: 'USD',
+            symbol: 'HARD',
+            valueDate: '2026-08-07',
+            totalCharges: 1.25,
+          },
+          {
+            currency: 'USD',
+            symbol: 'HARD2',
+            valueDate: '2026-08-07',
+            totalCharges: 0.75,
+          },
+        ],
+        derived: {
+          dailyDebitActuals: [],
+          monthlyPaid: [],
+          stockBorrowFeePayments: [],
+          dailyStockBorrowFees: [{
+            date: '2026-08-07',
+            amount: 2,
+            positionCount: 2,
+            rowCount: 2,
+          }],
+        },
+      })],
+    });
+
+    expect(summary.daily).toMatchObject({
+      status: 'verified',
+      valueDate: '2026-08-07',
+      amount: 2,
+      positionCount: 2,
+      rowCount: 2,
+    });
   });
 
   test('matches weekend forecasts only after all daily actuals or one verified bundled actual arrive', () => {
@@ -363,12 +1011,46 @@ describe('IBKR interest validation service', () => {
         brokerInterest: -120,
       }],
     }])).toBe(false);
+    expect(hasMonthlyReconciliation([{
+      ...reconciled,
+      cashTransactions: [
+        {
+          date: '2026-07-03',
+          currency: 'USD',
+          type: 'Broker Interest Paid',
+          amount: -143.25,
+          description: 'USD DEBIT INT FOR JUN-2026',
+        },
+        {
+          date: '2026-07-10',
+          currency: 'USD',
+          type: 'Broker Interest Received',
+          amount: 8.5,
+          description: 'USD CREDIT INT FOR JUN-2026',
+        },
+        {
+          date: '2026-07-10',
+          currency: 'USD',
+          type: 'Broker Interest Paid',
+          amount: -294.87,
+          description: 'USD BORROW FEES FOR JUN-2026',
+        },
+      ],
+      cashReports: [{
+        currency: 'USD',
+        brokerInterest: -429.62,
+      }],
+    }])).toBe(true);
   });
 
   test('removes reported weekend days from the outstanding upper estimate', () => {
     const prediction = {
       identity: '2026-07-31',
       valueDate: '2026-07-31',
+      basisSessionDate: '2026-07-31',
+      cashAnchorDate: '2026-07-31',
+      nextSessionDate: '2026-08-03',
+      kind: 'completed_session_window',
       coveredValueDates: ['2026-07-31', '2026-08-01', '2026-08-02'],
       accrualDays: 3,
       upper: 10,
@@ -395,6 +1077,10 @@ describe('IBKR interest validation service', () => {
     store.appendRecord('predictions', {
       identity: '2026-07-31',
       valueDate: '2026-07-31',
+      basisSessionDate: '2026-07-31',
+      cashAnchorDate: '2026-07-31',
+      nextSessionDate: '2026-08-03',
+      kind: 'completed_session_window',
       issuedAt: '2026-07-31T21:00:00.000Z',
       prospective: true,
       verified: true,
@@ -446,6 +1132,38 @@ describe('IBKR interest validation service', () => {
       liveNegativeAccrued: null,
       combinedReserve: null,
     }));
+    expect(summary.forecast).toMatchObject({
+      status: 'issued',
+      valueDate: '2026-07-31',
+      activeForDate: '2026-08-01',
+      coveredValueDates: ['2026-07-31', '2026-08-01', '2026-08-02'],
+      coverageFrom: '2026-07-31',
+      coverageThrough: '2026-08-02',
+      basisSessionDate: '2026-07-31',
+      nextSessionDate: '2026-08-03',
+      kind: 'completed_session_window',
+      point: 8,
+    });
+
+    const mondaySummary = buildDerivedSummary({
+      config: {
+        timeZone: 'America/New_York',
+        accountFingerprint: 'fingerprint',
+        accountMasked: '••••9973',
+        guardMode: 'graduated',
+      },
+      store,
+      flexSnapshots: [],
+      generatedAt: '2026-08-03T16:00:00.000Z',
+      lastRun: null,
+      lastError: null,
+    });
+    expect(mondaySummary.forecast).toMatchObject({
+      status: 'awaiting',
+      activeForDate: '2026-08-03',
+      coveredValueDates: [],
+      point: null,
+    });
   });
 
   test('keeps stale live accrued cash out of the applied model reserve', () => {
@@ -508,10 +1226,17 @@ describe('IBKR interest validation service', () => {
       available: true,
       status: 'provisional',
       modelStatus: 'provisional',
+      actionable: false,
       accountMatched: true,
+      capabilities: {
+        ready: false,
+        status: 'incomplete',
+        missingSections: ['interestAccruals', 'cashTransactions', 'cashReport'],
+      },
       latest: {
         valueDate: '2026-07-27',
         raw: 4.56,
+        lower: 3.42,
         point: 4.56,
         upper: 5.7,
         actual: null,
@@ -531,6 +1256,93 @@ describe('IBKR interest validation service', () => {
 
     await harness.service.run({ force: true });
     expect(harness.store.readRecords('predictions')).toHaveLength(1);
+  });
+
+  test('issues a Saturday remaining-window forecast and does not overlap it on Sunday', async () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    harness.setNow('2026-08-01T16:00:00.000Z');
+    harness.sidecarRequestImpl.mockResolvedValue(closedDayObservation({
+      sessionDate: '2026-08-01',
+      observedAt: '2026-08-01T16:00:00.000Z',
+      accrualDays: 2,
+    }));
+
+    const saturday = await harness.service.run({ force: false });
+    expect(saturday.forecast).toMatchObject({
+      status: 'issued',
+      valueDate: '2026-08-01',
+      activeForDate: '2026-08-01',
+      coveredValueDates: ['2026-08-01', '2026-08-02'],
+      coverageFrom: '2026-08-01',
+      coverageThrough: '2026-08-02',
+      basisSessionDate: '2026-07-31',
+      cashAnchorDate: '2026-08-01',
+      nextSessionDate: '2026-08-03',
+      kind: 'closed_day_remaining_window',
+      accrualDays: 2,
+    });
+    expect(harness.store.readRecords('predictions')).toHaveLength(1);
+
+    harness.setNow('2026-08-02T16:00:00.000Z');
+    const sunday = await harness.service.run({ force: false });
+    expect(harness.sidecarRequestImpl).toHaveBeenCalledTimes(1);
+    expect(harness.store.readRecords('predictions')).toHaveLength(1);
+    expect(sunday.forecast).toMatchObject({
+      valueDate: '2026-08-01',
+      activeForDate: '2026-08-02',
+      coveredValueDates: ['2026-08-01', '2026-08-02'],
+    });
+  });
+
+  test('issues a verified numeric zero for a Sunday-only remaining window', async () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    harness.setNow('2026-08-02T16:00:00.000Z');
+    harness.sidecarRequestImpl.mockResolvedValue({
+      ...closedDayObservation({
+        sessionDate: '2026-08-02',
+        observedAt: '2026-08-02T16:00:00.000Z',
+        accrualDays: 1,
+        evidenceHash: 'e'.repeat(64),
+      }),
+      short_positions: [],
+    });
+
+    const status = await harness.service.run({ force: false });
+    expect(status.forecast).toMatchObject({
+      status: 'issued',
+      valueDate: '2026-08-02',
+      activeForDate: '2026-08-02',
+      coveredValueDates: ['2026-08-02'],
+      accrualDays: 1,
+      point: 0,
+    });
+  });
+
+  test('throttles failed weekend retries for fifteen minutes and records the miss', async () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    harness.setNow('2026-08-01T16:00:00.000Z');
+    harness.sidecarRequestImpl.mockRejectedValue(Object.assign(
+      new Error('provider offline'),
+      { code: 'interest_observation_provider_offline' },
+    ));
+
+    await harness.service.run({ force: false });
+    harness.setNow('2026-08-01T16:05:00.000Z');
+    await harness.service.run({ force: false });
+    expect(harness.sidecarRequestImpl).toHaveBeenCalledTimes(1);
+
+    harness.setNow('2026-08-01T16:16:00.000Z');
+    await harness.service.run({ force: false });
+    expect(harness.sidecarRequestImpl).toHaveBeenCalledTimes(2);
+    expect(harness.store.readRecords('misses')).toEqual([
+      expect.objectContaining({
+        sessionDate: '2026-08-01',
+        reason: 'interest_observation_provider_offline',
+      }),
+    ]);
   });
 
   test('matches next-day actuals and updates learning calibration without rewriting forecast', async () => {
@@ -576,6 +1388,93 @@ describe('IBKR interest validation service', () => {
     expect(status.latest.residual).toBe(0.14);
   });
 
+  test('publishes an explicit forecast miss and immediately downgrades the model', async () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    await harness.service.run({ force: true });
+    harness.setSnapshots([
+      flexSnapshot({
+        reportHash: 'd'.repeat(64),
+        revisionHash: 'e'.repeat(64),
+        fetchedAt: '2026-07-28T11:00:00.000Z',
+        toDate: '2026-07-27',
+        derived: {
+          dailyDebitActuals: [
+            ...flexSnapshot().derived.dailyDebitActuals,
+            {
+              date: '2026-07-27',
+              currency: 'USD',
+              totalInterest: -7,
+              debitAmount: 7,
+              rowCount: 1,
+            },
+          ],
+          monthlyPaid: [],
+        },
+      }),
+    ]);
+    harness.setNow('2026-07-28T11:00:00.000Z');
+
+    const status = await harness.service.run({ force: false });
+
+    expect(status).toMatchObject({
+      status: 'provisional',
+      modelStatus: 'provisional',
+      modelStatusReason: 'latest_verified_forecast_miss',
+      actionable: false,
+      comparison: {
+        status: 'verified',
+        outcome: 'miss',
+        valueDate: '2026-07-27',
+        forecastLower: 3.42,
+        forecastPoint: 4.56,
+        forecastUpper: 5.7,
+        actual: 7,
+        residual: 2.44,
+      },
+    });
+  });
+
+  test('checks Flex at the morning slots only until the forecast actual arrives', async () => {
+    const harness = serviceHarness();
+    cleanup.push(harness.dataDir);
+    await harness.service.run({ force: true });
+
+    harness.setSnapshots([flexSnapshot({
+      reportHash: 'd'.repeat(64),
+      revisionHash: 'e'.repeat(64),
+      fetchedAt: '2026-07-28T13:36:00.000Z',
+      toDate: '2026-07-27',
+      derived: {
+        dailyDebitActuals: [
+          ...flexSnapshot().derived.dailyDebitActuals,
+          {
+            date: '2026-07-27',
+            currency: 'USD',
+            totalInterest: -4.7,
+            debitAmount: 4.7,
+            rowCount: 1,
+          },
+        ],
+        monthlyPaid: [],
+      },
+    })]);
+    harness.setNow('2026-07-28T13:36:00.000Z');
+    await harness.service.run({ force: false });
+    expect(harness.flexService.sync).toHaveBeenCalledTimes(2);
+
+    harness.setNow('2026-07-28T16:06:00.000Z');
+    await harness.service.run({ force: false });
+    expect(harness.flexService.sync).toHaveBeenCalledTimes(2);
+    expect(harness.service.getStatus().comparison).toMatchObject({
+      status: 'verified',
+      forecastPoint: 4.56,
+      actual: 4.7,
+      residual: 0.14,
+      verifiedAt: '2026-07-28T13:36:00.000Z',
+    });
+  });
+
   test('never publishes another account validation as actionable', async () => {
     const harness = serviceHarness();
     cleanup.push(harness.dataDir);
@@ -590,7 +1489,7 @@ describe('IBKR interest validation service', () => {
     }));
   });
 
-  test('keeps provider failures unavailable without refreshing stale timestamps', async () => {
+  test('keeps verified MTD and stored forecast evidence visible when a new forecast fails', async () => {
     const harness = serviceHarness();
     cleanup.push(harness.dataDir);
     await harness.service.run({ force: true });
@@ -603,16 +1502,23 @@ describe('IBKR interest validation service', () => {
 
     const failed = await harness.service.run({ force: true });
     expect(failed).toMatchObject({
-      available: false,
-      status: 'unavailable',
-      latest: null,
+      available: true,
+      status: 'provisional',
+      latest: {
+        valueDate: '2026-07-27',
+        point: 4.56,
+      },
       mtd: {
-        verifiedDebit: null,
+        status: 'verified',
+        verifiedDebit: 3.5,
         liveNetAccrued: null,
       },
+      forecast: {
+        status: 'unavailable',
+      },
       guard: {
-        available: false,
-        appliedReserve: null,
+        available: true,
+        appliedReserve: 9.2,
       },
       error: {
         code: 'interest_observation_provider_offline',
@@ -623,7 +1529,7 @@ describe('IBKR interest validation service', () => {
     harness.setNow('2026-08-15T21:00:00.000Z');
     const laterStatus = harness.service.getStatus();
     expect(laterStatus.generatedAt).toBe(failedGeneratedAt);
-    expect(laterStatus.available).toBe(false);
-    expect(laterStatus.guard.appliedReserve).toBeNull();
+    expect(laterStatus.available).toBe(true);
+    expect(laterStatus.mtd.verifiedDebit).toBe(3.5);
   });
 });

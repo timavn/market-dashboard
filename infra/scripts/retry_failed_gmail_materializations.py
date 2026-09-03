@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Retry exactly the current Call, Macro Show, and Risk Range Gmail failures.
+"""Retry exactly the current Gmail parser-layout incident.
 
-The operator cannot supply Gmail message IDs. Prepare mode derives one unique
-message for each allowlisted report type from the newest genuine Scheduler
-failure and writes an authenticated mode-0600 incident receipt outside the
+The operator cannot supply Gmail message IDs. Prepare mode derives the exact
+three messages from the current runtime quarantine and their live ledger rows,
+then writes an authenticated mode-0600 incident receipt outside the
 repository. Apply mode runs after the guarded base deployment has disabled the
 Gmail schedule. It re-verifies the receipt and every selected live ledger row,
 then invokes the canonical Gmail Lambda with only those three IDs.
@@ -55,6 +55,7 @@ EXPECTED_LEDGER_TABLE = "HermesEmailIngestLedger"
 RUNTIME_STATE_MESSAGE_ID = "runtime#gmail#timsmithaviation@gmail.com"
 RUNTIME_STATE_ATTACHMENT_ID = "history-cursor"
 MESSAGE_QUEUE_ATTACHMENT_PREFIX = "message-queue#"
+EXPECTED_INCIDENT_PROFILE = "gmail-parser-layout-v1"
 MESSAGE_QUEUE_RESUMABLE_STATUSES = frozenset(
     {"PENDING", "RETRYABLE", "COMPLETED"}
 )
@@ -65,35 +66,34 @@ MESSAGE_QUEUE_TRANSIENT_RETRY_CODES = frozenset(
     }
 )
 EXPECTED_REPORT_TYPES = (
-    "the-call",
-    "the-macro-show",
+    "market-structure",
     "risk-ranges",
+    "investing-ideas",
 )
 EXPECTED_ERROR_CODE = "GMAIL_RESEARCH_MATERIALIZATION_ERROR"
+EXPECTED_HEARTBEAT_STATUS = "warning"
+EXPECTED_HEARTBEAT_ERROR_CODE = "GMAIL_QUARANTINED_ARTIFACTS_PENDING"
+EXPECTED_HEARTBEAT_COUNTS = {
+    "messages": 0,
+    "stored": 0,
+    "skipped": 0,
+    "errors": 0,
+    "dropped": 3,
+    "remaining": 0,
+}
+EXPECTED_QUARANTINE_COUNT = len(EXPECTED_REPORT_TYPES)
+EXPECTED_FAILURE_COUNT = len(EXPECTED_REPORT_TYPES)
 EXPECTED_MATERIALIZATION_ATTEMPT_VERSION = (
     "gmail-materialized-v4-canonical-verification"
 )
 EXPECTED_MATERIALIZATION_MAX_ATTEMPTS = 3
-RISK_RANGE_RETRY_ERROR_CODES = frozenset(
-    {
-        "RISK_RANGE_PUBLICATION_INVALID",
-        "RISK_RANGE_DUPLICATE_TICKER_CONFLICT",
-        "RISK_RANGE_TRANSACTION_LIMIT_EXCEEDED",
-        "RISK_RANGE_TRANSACTION_WRITE_FAILED",
-        "RISK_RANGE_PUBLICATION_VERIFICATION_FAILED",
-        "RISK_RANGE_STALE_PUBLICATION_REJECTED",
-        "RISK_RANGE_PUBLICATION_ORDER_UNVERIFIED",
-    }
-)
-EXPECTED_FAILURE_COUNT = len(EXPECTED_REPORT_TYPES)
 MAX_PREPARE_HEARTBEAT_AGE_SECONDS = 22.5 * 60
-FAILURE_ROW_LOOKBACK_SECONDS = 2 * 60
 FAILURE_ROW_FUTURE_TOLERANCE_SECONDS = 5
-MAX_LEDGER_SCAN_PAGES = 20
-LEDGER_SCAN_PAGE_LIMIT = 1000
-MAX_INVOCATIONS = 5
+MAX_LEDGER_QUERY_PAGES = 20
+LEDGER_QUERY_PAGE_LIMIT = 1000
+MAX_INVOCATIONS = EXPECTED_QUARANTINE_COUNT
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-RECEIPT_SCHEMA_VERSION = 1
+RECEIPT_SCHEMA_VERSION = 2
 RECEIPT_KIND = "market-dashboard-gmail-targeted-retry"
 AMBIENT_CREDENTIAL_KEYS = (
     "AWS_ACCESS_KEY_ID",
@@ -111,6 +111,21 @@ AMBIENT_CREDENTIAL_KEYS = (
     "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
     "AWS_SHARED_CREDENTIALS_FILE",
     "AWS_CONFIG_FILE",
+)
+
+# These are retained as documentation for the separate historical publication
+# incident. The current parser-layout profile deliberately does not accept
+# them as retryable evidence.
+LEGACY_RISK_RANGE_RETRY_ERROR_CODES = frozenset(
+    {
+        "RISK_RANGE_PUBLICATION_INVALID",
+        "RISK_RANGE_DUPLICATE_TICKER_CONFLICT",
+        "RISK_RANGE_TRANSACTION_LIMIT_EXCEEDED",
+        "RISK_RANGE_TRANSACTION_WRITE_FAILED",
+        "RISK_RANGE_PUBLICATION_VERIFICATION_FAILED",
+        "RISK_RANGE_STALE_PUBLICATION_REJECTED",
+        "RISK_RANGE_PUBLICATION_ORDER_UNVERIFIED",
+    }
 )
 
 
@@ -291,6 +306,7 @@ def load_incident_receipt(path: Path, *, key_path: Path) -> dict[str, Any]:
     if (
         payload.get("schemaVersion") != RECEIPT_SCHEMA_VERSION
         or payload.get("kind") != RECEIPT_KIND
+        or payload.get("incidentProfile") != EXPECTED_INCIDENT_PROFILE
         or payload.get("account") != EXPECTED_ACCOUNT
         or payload.get("region") != EXPECTED_REGION
         or payload.get("functionName") != EXPECTED_FUNCTION
@@ -566,14 +582,17 @@ def validate_failure_heartbeat_contract(
         or row.get("triggerSource") != "aws-scheduler"
         or row.get("scheduleId") != EXPECTED_SCHEDULE
         or row.get("scheduled") is not True
-        or row.get("status") != "error"
-        or row.get("errorCode") != EXPECTED_ERROR_CODE
-        or integer_value(counts.get("errors")) != EXPECTED_FAILURE_COUNT
-        or integer_value(counts.get("dropped")) != 0
+        or row.get("status") != EXPECTED_HEARTBEAT_STATUS
+        or row.get("errorCode") != EXPECTED_HEARTBEAT_ERROR_CODE
+        or {
+            key: integer_value(counts.get(key))
+            for key in EXPECTED_HEARTBEAT_COUNTS
+        }
+        != EXPECTED_HEARTBEAT_COUNTS
     ):
         raise TargetedRetryFailure(
             "GMAIL_FAILURE_HEARTBEAT_MISMATCH",
-            "The latest genuine Gmail Scheduler heartbeat is not the exact three-failure incident.",
+            "The latest genuine Gmail Scheduler heartbeat is not the exact current quarantine incident.",
         )
     if parse_timestamp(row.get("observedAt")) is None:
         raise TargetedRetryFailure(
@@ -609,104 +628,124 @@ def validate_latest_failure_heartbeat(
         raise TargetedRetryFailure(
             "GMAIL_FAILURE_HEARTBEAT_STALE",
             (
-                "Prepare the private incident receipt while the exact failed "
-                "Scheduler heartbeat is still current."
+                "Prepare the private incident receipt while the exact current "
+                "quarantine Scheduler heartbeat is still fresh."
             ),
         )
     return row
 
 
-def _scan_failure_rows(
+def _query_failure_rows(
     ledger_table: Any,
-    *,
-    observed_at: datetime,
+    message_id: str,
 ) -> list[Mapping[str, Any]]:
+    """Read one quarantined message partition without scanning the ledger."""
     rows: list[Mapping[str, Any]] = []
     exclusive_start_key = None
-    earliest = (
-        observed_at - timedelta(seconds=FAILURE_ROW_LOOKBACK_SECONDS)
-    ).isoformat()
-    latest = (
-        observed_at
-        + timedelta(seconds=FAILURE_ROW_FUTURE_TOLERANCE_SECONDS)
-    ).isoformat()
-    for _page_number in range(MAX_LEDGER_SCAN_PAGES):
+    for _page_number in range(MAX_LEDGER_QUERY_PAGES):
         request: dict[str, Any] = {
+            "KeyConditionExpression": Key("messageId").eq(message_id),
             "ConsistentRead": True,
-            "Limit": LEDGER_SCAN_PAGE_LIMIT,
-            "ProjectionExpression": (
-                "messageId, attachmentId, #status, reportType, "
-                "materializationStatus, errorCode, retryable, updatedAt"
-            ),
-            "FilterExpression": (
-                "#status = :error AND materializationStatus = :error "
-                "AND errorCode = :errorCode AND retryable = :retryable "
-                "AND reportType IN (:call, :macro, :risk) "
-                "AND updatedAt BETWEEN :earliest AND :latest"
-            ),
-            "ExpressionAttributeNames": {"#status": "status"},
-            "ExpressionAttributeValues": {
-                ":error": "ERROR",
-                ":errorCode": EXPECTED_ERROR_CODE,
-                ":retryable": True,
-                ":call": "the-call",
-                ":macro": "the-macro-show",
-                ":risk": "risk-ranges",
-                ":earliest": earliest,
-                ":latest": latest,
-            },
+            "Limit": LEDGER_QUERY_PAGE_LIMIT,
         }
         if exclusive_start_key:
             request["ExclusiveStartKey"] = exclusive_start_key
-        response = ledger_table.scan(**request)
+        response = ledger_table.query(**request)
         rows.extend(response.get("Items") or [])
         exclusive_start_key = response.get("LastEvaluatedKey")
         if not exclusive_start_key:
             return rows
     raise TargetedRetryFailure(
-        "GMAIL_LEDGER_SCAN_LIMIT_EXCEEDED",
-        "The bounded Gmail failure-ledger scan exceeded 20 pages.",
+        "GMAIL_LEDGER_QUERY_LIMIT_EXCEEDED",
+        "The bounded Gmail failure-ledger query exceeded 20 pages.",
     )
+
+
+def _runtime_quarantine_index(
+    state: Mapping[str, Any],
+    *,
+    require_exact: bool,
+) -> dict[str, Mapping[str, Any]]:
+    raw_items = state.get("quarantinedMessages") or []
+    if not isinstance(raw_items, list):
+        raise TargetedRetryFailure(
+            "GMAIL_QUARANTINE_STATE_INVALID",
+            "The Gmail runtime quarantine state is invalid.",
+        )
+    indexed: dict[str, Mapping[str, Any]] = {}
+    for raw_item in raw_items:
+        if not isinstance(raw_item, Mapping):
+            raise TargetedRetryFailure(
+                "GMAIL_QUARANTINE_STATE_INVALID",
+                "The Gmail runtime quarantine state is invalid.",
+            )
+        message_id = str(raw_item.get("messageId") or "")
+        if (
+            not message_id
+            or raw_item.get("errorCode") != EXPECTED_ERROR_CODE
+            or message_id in indexed
+        ):
+            raise TargetedRetryFailure(
+                "GMAIL_ACTIVE_FAILURE_SET_AMBIGUOUS",
+                "The current Gmail quarantine set is missing, duplicated, or from another incident.",
+            )
+        indexed[message_id] = raw_item
+    if require_exact and len(indexed) != EXPECTED_QUARANTINE_COUNT:
+        raise TargetedRetryFailure(
+            "GMAIL_ACTIVE_FAILURE_SET_AMBIGUOUS",
+            "The current Gmail quarantine set is not exactly the expected incident.",
+        )
+    return indexed
 
 
 def select_current_failures(
     ledger_table: Any,
     heartbeat: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    """Select one unique current failed message for every allowed report type."""
+    """Select the exact persistent quarantine set from runtime-owned IDs."""
 
-    observed_at = parse_timestamp(heartbeat.get("observedAt"))
-    if observed_at is None:
+    if parse_timestamp(heartbeat.get("observedAt")) is None:
         raise TargetedRetryFailure(
             "GMAIL_FAILURE_HEARTBEAT_MISMATCH",
-            "The latest Gmail failure heartbeat has an invalid timestamp.",
+            "The latest Gmail quarantine heartbeat has an invalid timestamp.",
         )
+    state = ledger_table.get_item(
+        Key={
+            "messageId": RUNTIME_STATE_MESSAGE_ID,
+            "attachmentId": RUNTIME_STATE_ATTACHMENT_ID,
+        },
+        ConsistentRead=True,
+    ).get("Item") or {}
+    quarantine_index = _runtime_quarantine_index(
+        state,
+        require_exact=True,
+    )
     selected_by_type: dict[str, dict[str, Any]] = {}
     duplicate_types: set[str] = set()
-    for row in _scan_failure_rows(
-        ledger_table,
-        observed_at=observed_at,
-    ):
-        report_type = str(row.get("reportType") or "")
-        if report_type not in EXPECTED_REPORT_TYPES:
-            continue
-        updated_at = parse_timestamp(row.get("updatedAt"))
-        if updated_at is None:
-            continue
-        age = (observed_at - updated_at).total_seconds()
-        if (
-            age < -FAILURE_ROW_FUTURE_TOLERANCE_SECONDS
-            or age > FAILURE_ROW_LOOKBACK_SECONDS
-            or row.get("status") != "ERROR"
-            or row.get("materializationStatus") != "ERROR"
-            or row.get("errorCode") != EXPECTED_ERROR_CODE
-            or row.get("retryable") is not True
-            or not str(row.get("messageId") or "")
-            or not str(row.get("attachmentId") or "")
-        ):
-            continue
+    for message_id in quarantine_index:
+        candidates = [
+            row
+            for row in _query_failure_rows(ledger_table, message_id)
+            if (
+                row.get("messageId") == message_id
+                and str(row.get("reportType") or "") in EXPECTED_REPORT_TYPES
+                and row.get("status") == "ERROR"
+                and row.get("materializationStatus") == "ERROR"
+                and row.get("errorCode") == EXPECTED_ERROR_CODE
+                and row.get("retryable") is True
+                and str(row.get("attachmentId") or "")
+                and parse_timestamp(row.get("updatedAt")) is not None
+            )
+        ]
+        if len(candidates) != 1:
+            raise TargetedRetryFailure(
+                "GMAIL_ACTIVE_FAILURE_SET_AMBIGUOUS",
+                "The runtime quarantine does not resolve to one unique active ledger row per message.",
+            )
+        row = candidates[0]
+        report_type = str(row["reportType"])
         candidate = {
-            "messageId": str(row["messageId"]),
+            "messageId": message_id,
             "attachmentId": str(row["attachmentId"]),
             "reportType": report_type,
             "updatedAt": str(row["updatedAt"]),
@@ -745,8 +784,8 @@ def heartbeat_receipt_evidence(row: Mapping[str, Any]) -> dict[str, Any]:
         "status": row.get("status"),
         "errorCode": row.get("errorCode"),
         "counts": {
-            "errors": integer_value(counts.get("errors")),
-            "dropped": integer_value(counts.get("dropped")),
+            key: integer_value(counts.get(key))
+            for key in EXPECTED_HEARTBEAT_COUNTS
         },
     }
 
@@ -758,6 +797,7 @@ def incident_receipt_payload(
     return {
         "schemaVersion": RECEIPT_SCHEMA_VERSION,
         "kind": RECEIPT_KIND,
+        "incidentProfile": EXPECTED_INCIDENT_PROFILE,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "account": EXPECTED_ACCOUNT,
         "region": EXPECTED_REGION,
@@ -789,24 +829,7 @@ def _is_active_receipt_failure(
         or current.get("retryable") is not True
     ):
         return False
-    error_code = current.get("errorCode")
-    if error_code == EXPECTED_ERROR_CODE:
-        return True
-    attempt_count = integer_value(
-        current.get("materializationAttemptCount")
-    )
-    return (
-        report_type == "risk-ranges"
-        and isinstance(error_code, str)
-        and error_code in RISK_RANGE_RETRY_ERROR_CODES
-        and current.get("materializationAttemptVersion")
-        == EXPECTED_MATERIALIZATION_ATTEMPT_VERSION
-        and attempt_count is not None
-        and 0 < attempt_count <= EXPECTED_MATERIALIZATION_MAX_ATTEMPTS
-        and current_updated_at is not None
-        and receipt_updated_at is not None
-        and current_updated_at > receipt_updated_at
-    )
+    return current.get("errorCode") == EXPECTED_ERROR_CODE
 
 
 def _is_recovered_receipt_row(current: Mapping[str, Any]) -> bool:
@@ -854,6 +877,18 @@ def verify_incident_live_evidence(
             "GMAIL_INCIDENT_EVIDENCE_DRIFT",
             "The authoritative Gmail failure heartbeat no longer matches the receipt.",
         )
+
+    runtime_state = ledger_table.get_item(
+        Key={
+            "messageId": RUNTIME_STATE_MESSAGE_ID,
+            "attachmentId": RUNTIME_STATE_ATTACHMENT_ID,
+        },
+        ConsistentRead=True,
+    ).get("Item") or {}
+    quarantine_index = _runtime_quarantine_index(
+        runtime_state,
+        require_exact=False,
+    )
 
     selected: list[dict[str, Any]] = []
     for failure in receipt.get("failures") or []:
@@ -904,6 +939,11 @@ def verify_incident_live_evidence(
             raise TargetedRetryFailure(
                 "GMAIL_INCIDENT_EVIDENCE_DRIFT",
                 "A selected failed-ledger row no longer matches the receipt.",
+            )
+        if active_failure and message_id not in quarantine_index:
+            raise TargetedRetryFailure(
+                "GMAIL_INCIDENT_EVIDENCE_DRIFT",
+                "An active selected failure is no longer present in the runtime quarantine.",
             )
         selected.append(
             {
@@ -1075,10 +1115,6 @@ def require_idle_or_exact_incident_runtime_state(
             and (
                 error_code == EXPECTED_ERROR_CODE
                 or error_code in MESSAGE_QUEUE_TRANSIENT_RETRY_CODES
-                or (
-                    report_type == "risk-ranges"
-                    and error_code in RISK_RANGE_RETRY_ERROR_CODES
-                )
             )
         )
         rows_match_exact_incident = (
@@ -1338,8 +1374,8 @@ def prepare_incident(
         now=now,
     )
     ledger_table = dynamodb.Table(EXPECTED_LEDGER_TABLE)
-    selected = select_current_failures(ledger_table, heartbeat)
     require_idle_runtime_state(ledger_table)
+    selected = select_current_failures(ledger_table, heartbeat)
     receipt = write_incident_receipt(
         receipt_path,
         incident_receipt_payload(heartbeat, selected),
@@ -1519,6 +1555,7 @@ def run(
     profile_name: str,
     *,
     mode: str,
+    incident_profile: str = EXPECTED_INCIDENT_PROFILE,
     receipt_path: Path,
     receipt_key_path: Path,
     session_factory: Callable[..., Any] = boto3.Session,
@@ -1527,6 +1564,11 @@ def run(
     now: datetime | None = None,
     release_commit: str | None = None,
 ) -> dict[str, Any]:
+    if incident_profile != EXPECTED_INCIDENT_PROFILE:
+        raise TargetedRetryFailure(
+            "GMAIL_INCIDENT_PROFILE_INVALID",
+            "The targeted retry incident profile is not allowlisted.",
+        )
     if mode == "prepare":
         return prepare_incident(
             profile_name,
@@ -1578,6 +1620,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--incident",
+        required=True,
+        choices=(EXPECTED_INCIDENT_PROFILE,),
+        help=(
+            "Allowlisted incident profile; this command only supports "
+            f"{EXPECTED_INCIDENT_PROFILE}."
+        ),
+    )
+    parser.add_argument(
         "--receipt",
         type=Path,
         required=True,
@@ -1591,13 +1642,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--admin-profile",
-        default=EXPECTED_ADMIN_PROFILE,
+        required=True,
         help=(
-            "IAM Identity Center profile "
+            "Required IAM Identity Center profile "
             f"(must be {EXPECTED_ADMIN_PROFILE})."
         ),
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--release-commit",
+        help=(
+            "Exact 40-character tested Lambda release commit; required for "
+            "apply mode."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.apply and COMMIT_PATTERN.fullmatch(str(args.release_commit or "")) is None:
+        parser.error("--release-commit is required for --apply and must be a 40-character commit")
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1608,8 +1669,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run(
                     args.admin_profile,
                     mode="prepare" if args.prepare else "apply",
+                    incident_profile=args.incident,
                     receipt_path=args.receipt,
                     receipt_key_path=args.receipt_key,
+                    release_commit=args.release_commit,
                 ),
                 indent=2,
                 sort_keys=True,

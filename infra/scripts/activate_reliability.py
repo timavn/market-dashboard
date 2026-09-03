@@ -47,12 +47,21 @@ from prepare_tested_release import (
     require_commit,
     verify_release_receipt,
 )
+from aws_profile_contract import (
+    ADMIN_PROFILE as EXPECTED_ADMIN_PROFILE,
+    LOCAL_PROFILE as DEFAULT_READ_PROFILE,
+    AwsProfileContractError,
+    verified_session,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INFRA_DIR = REPO_ROOT / "infra"
 MANIFEST_PATH = REPO_ROOT / "ops" / "services.json"
 CONTRACT_PATH = INFRA_DIR / "lambdas" / "hermes_worker" / "service_contract.json"
+DEFAULT_ANALYST_SHADOW_ACCEPTANCE = (
+    REPO_ROOT / "docs" / "THE_ANALYST_SHADOW_ACCEPTANCE.md"
+)
 
 EXPECTED_ACCOUNT = "915328198276"
 EXPECTED_REGION = "us-west-1"
@@ -68,6 +77,7 @@ DEPLOYMENT_ROLE_ARN = (
 CONTROL_PARAMETERS = (
     "CloudWatchdogScheduleState",
     "GmailScheduleState",
+    "CftcScheduleState",
     "QuantAnalystScheduleState",
     "QuantDeveloperScheduleState",
     "SecurityScheduleState",
@@ -90,6 +100,7 @@ ALL_PARAMETER_NAMES = (
 )
 PHASE_ENABLES = {
     "disabled": (),
+    "cftc": ("CftcScheduleState",),
     "developer": (
         "CloudWatchdogScheduleState",
         "QuantDeveloperScheduleState",
@@ -111,6 +122,11 @@ PHASE_ENABLES = {
         "QuantAnalystScheduleState",
         "QuantDeveloperScheduleState",
         "SecurityScheduleState",
+    ),
+    "consolidated": (
+        "CloudWatchdogScheduleState",
+        "GmailScheduleState",
+        "OperationalAlarmsState",
     ),
     "alarms": CONTROL_PARAMETERS,
     "full": CONTROL_PARAMETERS,
@@ -142,6 +158,7 @@ PRIOR_WORKERS = {
 }
 ALARM_NAMES = (
     "market-dashboard-runtime-failure-queue-v2",
+    "market-dashboard-runtime-failure-arrival-v2",
     "market-dashboard-gmail-heartbeat-missing-v2",
     "market-dashboard-gmail-unhealthy-v2",
     "market-dashboard-hermes-analyst-heartbeat-missing-v2",
@@ -161,6 +178,16 @@ ALARM_CONTRACTS = {
         "period": 300,
         "comparison": "GreaterThanOrEqualToThreshold",
         "missingData": "notBreaching",
+        "notify": False,
+    },
+    "market-dashboard-runtime-failure-arrival-v2": {
+        "namespace": "AWS/SQS",
+        "metric": "NumberOfMessagesSent",
+        "statistic": "Sum",
+        "period": 300,
+        "comparison": "GreaterThanOrEqualToThreshold",
+        "missingData": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-gmail-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -171,6 +198,7 @@ ALARM_CONTRACTS = {
         "serviceId": "gmail:timsmithaviation@gmail.com",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-gmail-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -180,6 +208,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "gmail:timsmithaviation@gmail.com",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-analyst-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -190,6 +219,8 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:quant-analyst",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "scheduleParameter": "QuantAnalystScheduleState",
+        "notify": True,
     },
     "market-dashboard-hermes-analyst-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -199,6 +230,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:quant-analyst",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-developer-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -209,6 +241,8 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:quant-developer",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "scheduleParameter": "QuantDeveloperScheduleState",
+        "notify": True,
     },
     "market-dashboard-hermes-developer-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -218,6 +252,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:quant-developer",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-security-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -228,6 +263,8 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:security",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "scheduleParameter": "SecurityScheduleState",
+        "notify": True,
     },
     "market-dashboard-hermes-security-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -237,6 +274,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:security",
         "missingData": "notBreaching",
+        "notify": False,
     },
     "market-dashboard-hermes-cloud-watchdog-heartbeat-missing-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -247,6 +285,7 @@ ALARM_CONTRACTS = {
         "serviceId": "hermes:cloud-watchdog",
         "missingDataWhenEnabled": "breaching",
         "missingDataWhenDisabled": "notBreaching",
+        "notify": True,
     },
     "market-dashboard-hermes-cloud-watchdog-unhealthy-v2": {
         "namespace": "MarketDashboard/Readiness",
@@ -256,6 +295,7 @@ ALARM_CONTRACTS = {
         "comparison": "LessThanThreshold",
         "serviceId": "hermes:cloud-watchdog",
         "missingData": "notBreaching",
+        "notify": False,
     },
 }
 
@@ -263,6 +303,16 @@ DESERIALIZER = TypeDeserializer()
 REDACTION_PATTERN = re.compile(
     r"(?i)(client_secret|refresh_token|access_token|authorization|password)"
     r"([\"'\s:=]+)([^,}\s]+)"
+)
+REQUIRED_SHADOW_RUNS = (
+    "Brief me now #1",
+    "Brief me now #2",
+    "Brief me now #3",
+    "Brief me now #4",
+    "Brief me now #5",
+    "Historical research search",
+    "Compare research with portfolio",
+    "Market history / chart question",
 )
 
 
@@ -422,6 +472,31 @@ def verify_rollback_export(raw_path: str | os.PathLike[str] | None) -> dict[str,
     }
 
 
+def exported_control_state(raw_path: str | os.PathLike[str]) -> dict[str, str]:
+    stack_path = Path(raw_path) / "cloudformation-stack.json"
+    try:
+        payload = json.loads(stack_path.read_text(encoding="utf-8"))
+        stacks = payload.get("Stacks") or []
+        parameters = stack_parameters(stacks[0]) if len(stacks) == 1 else {}
+    except (OSError, ValueError, TypeError, IndexError) as error:
+        raise ActivationFailure(
+            "ROLLBACK_CONTROL_STATE_INVALID",
+            "The rollback export does not contain one readable stack parameter set.",
+        ) from error
+    controls = {name: parameters.get(name) for name in CONTROL_PARAMETERS}
+    # A rollback export captured before the official CFTC resource was first
+    # deployed has no CftcScheduleState. Its only safe equivalent is disabled.
+    if controls.get("CftcScheduleState") is None:
+        controls["CftcScheduleState"] = "DISABLED"
+    if any(value not in {"ENABLED", "DISABLED"} for value in controls.values()):
+        raise ActivationFailure(
+            "ROLLBACK_CONTROL_STATE_INVALID",
+            "The rollback export contains an invalid or missing control state.",
+            detail={"controls": controls},
+        )
+    return {name: str(value) for name, value in controls.items()}
+
+
 def safe_text(value: Any, limit: int = 500) -> str:
     """Bound diagnostics and redact credential-shaped values."""
 
@@ -473,6 +548,126 @@ def parse_timestamp(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def verify_analyst_shadow_acceptance(
+    raw_path: str | os.PathLike[str] | None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Require the explicit seven-day Analyst acceptance log before cutover."""
+
+    path = Path(raw_path or DEFAULT_ANALYST_SHADOW_ACCEPTANCE)
+    if not path.is_file() or path.is_symlink():
+        raise ActivationFailure(
+            "ANALYST_SHADOW_ACCEPTANCE_MISSING",
+            "The Analyst shadow acceptance log is missing or unsafe.",
+        )
+    contents = path.read_text(encoding="utf-8")
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+
+    def field(label: str) -> str:
+        match = re.search(
+            rf"^{re.escape(label)}:\s*(.+?)\s*$",
+            contents,
+            flags=re.MULTILINE,
+        )
+        value = str(match.group(1) if match else "").strip()
+        if not value or value.startswith("_"):
+            raise ActivationFailure(
+                "ANALYST_SHADOW_ACCEPTANCE_INCOMPLETE",
+                f"{label} is not complete in the Analyst shadow log.",
+            )
+        return value
+
+    started_at = parse_timestamp(field("Shadow start"))
+    eligible_at = parse_timestamp(field("Earliest eligible cutover date"))
+    if started_at is None or eligible_at is None:
+        raise ActivationFailure(
+            "ANALYST_SHADOW_ACCEPTANCE_DATE_INVALID",
+            "The shadow start and earliest cutover date must be ISO dates or timestamps.",
+        )
+    if (current.date() - started_at.date()).days < 7 or current < eligible_at:
+        raise ActivationFailure(
+            "ANALYST_SHADOW_WINDOW_INCOMPLETE",
+            "The mandatory seven-calendar-day Analyst shadow window has not elapsed.",
+            detail={
+                "shadowStart": started_at.isoformat(),
+                "earliestEligibleAt": eligible_at.isoformat(),
+                "checkedAt": current.isoformat(),
+            },
+        )
+
+    observed_runs: dict[str, list[str]] = {}
+    for line in contents.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) >= 5 and cells[1] in REQUIRED_SHADOW_RUNS:
+            observed_runs[cells[1]] = cells
+    missing_runs = [name for name in REQUIRED_SHADOW_RUNS if name not in observed_runs]
+    incomplete_runs = []
+    for name, cells in observed_runs.items():
+        evidence = cells[0:5]
+        if any(not value or value.startswith("_") for value in evidence):
+            incomplete_runs.append(name)
+            continue
+        normalized_result = cells[2].lower()
+        if not normalized_result.startswith(("pass", "success", "accepted", "ok", "✅")):
+            incomplete_runs.append(name)
+    if missing_runs or incomplete_runs:
+        raise ActivationFailure(
+            "ANALYST_SHADOW_RUNS_INCOMPLETE",
+            "Every required Analyst shadow run must have passing evidence.",
+            detail={"missing": missing_runs, "incomplete": incomplete_runs},
+        )
+
+    checkbox_values = re.findall(
+        r"^- \[([ xX])\] ",
+        contents,
+        flags=re.MULTILINE,
+    )
+    if len(checkbox_values) < 11 or any(value.lower() != "x" for value in checkbox_values):
+        raise ActivationFailure(
+            "ANALYST_SHADOW_CHECKLIST_INCOMPLETE",
+            "Every Analyst shadow acceptance checkbox must pass before cutover.",
+            detail={
+                "checked": sum(value.lower() == "x" for value in checkbox_values),
+                "total": len(checkbox_values),
+            },
+        )
+
+    decision = field("Decision").lower()
+    decision_at = parse_timestamp(field("Decision date"))
+    reviewed_by = field("Evidence reviewed by")
+    retention_end = parse_timestamp(field("30-day rollback-retention end date"))
+    if (
+        decision not in {"approved", "pass", "accepted"}
+        or decision_at is None
+        or decision_at > current
+    ):
+        raise ActivationFailure(
+            "ANALYST_SHADOW_DECISION_NOT_APPROVED",
+            "The shadow acceptance decision must be explicitly approved and dated no later than cutover.",
+        )
+    if retention_end is None or (retention_end.date() - current.date()).days < 30:
+        raise ActivationFailure(
+            "ANALYST_ROLLBACK_RETENTION_INVALID",
+            "The rollback-retention end date must preserve at least 30 calendar days after cutover.",
+        )
+
+    return {
+        "passed": True,
+        "path": str(path.resolve()),
+        "sha256": hashlib.sha256(contents.encode("utf-8")).hexdigest(),
+        "shadowStart": started_at.isoformat(),
+        "earliestEligibleAt": eligible_at.isoformat(),
+        "decisionAt": decision_at.isoformat(),
+        "rollbackRetentionEndsAt": retention_end.isoformat(),
+        "reviewedBy": reviewed_by,
+        "requiredRunCount": len(REQUIRED_SHADOW_RUNS),
+        "acceptanceCheckCount": len(checkbox_values),
+    }
 
 
 def minutes_old(value: Any, *, now: datetime | None = None) -> float | None:
@@ -625,7 +820,21 @@ def target_control_state(
                 "STACK_CONTROL_STATE_INVALID",
                 f"{name} has unsupported state {current}.",
             )
-        # Every phase is an exact, fail-closed desired state. This prevents a
+        if phase == "cftc":
+            target[name] = "ENABLED" if name == "CftcScheduleState" else current
+            continue
+        # CFTC activation is an independent official-data rollout. Existing
+        # Hermes/Gmail stages must not be changed just to enable it, and the
+        # older phases must not silently disable it after activation.
+        if name == "CftcScheduleState":
+            if phase in {"cftc", "alarms", "full"}:
+                target[name] = "ENABLED"
+            elif phase == "disabled":
+                target[name] = "DISABLED"
+            else:
+                target[name] = current
+            continue
+        # Every legacy phase is an exact, fail-closed desired state. This prevents a
         # later-stage schedule or alarm from surviving an earlier recovery
         # phase and makes the Developer -> Gmail -> Security -> Analyst order
         # auditable from CloudFormation parameters.
@@ -838,6 +1047,78 @@ def heartbeat_window(
     }
 
 
+def event_rule_heartbeat(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    service_id: str,
+    rule_id: str,
+    max_age_minutes: float = 10,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Verify one fresh, healthy heartbeat from an exact EventBridge rule."""
+
+    selected = list(rows[:1])
+    failures: list[dict[str, str]] = []
+    if len(selected) != 1:
+        failures.append(
+            {
+                "code": "HEARTBEAT_COUNT_INSUFFICIENT",
+                "message": "Expected one cloud-watchdog heartbeat.",
+            }
+        )
+    if selected:
+        row = selected[0]
+        observed = str(row.get("observedAt") or "")
+        if row.get("status") != "success":
+            failures.append(
+                {
+                    "code": "HEARTBEAT_STATUS_UNHEALTHY",
+                    "message": f"{observed}: status={row.get('status') or 'missing'}.",
+                }
+            )
+        if (
+            row.get("serviceId") != service_id
+            or row.get("source") != "aws-lambda"
+            or row.get("triggerSource") != "aws-events"
+            or row.get("ruleId") != rule_id
+            or row.get("scheduled") is not True
+        ):
+            failures.append(
+                {
+                    "code": "HEARTBEAT_PROVENANCE_INVALID",
+                    "message": (
+                        f"{observed}: heartbeat was not emitted by the exact "
+                        "cloud-watchdog EventBridge rule."
+                    ),
+                }
+            )
+    latest_at = selected[0].get("observedAt") if selected else None
+    age = minutes_old(latest_at, now=now)
+    if age is None or age < -1 or age > max_age_minutes:
+        failures.append(
+            {
+                "code": "HEARTBEAT_STALE",
+                "message": (
+                    "Latest cloud-watchdog heartbeat is missing or invalid."
+                    if age is None
+                    else (
+                        f"Latest cloud-watchdog heartbeat is {age:.1f}m old; "
+                        f"limit is {max_age_minutes:.1f}m."
+                    )
+                ),
+            }
+        )
+    return {
+        "passed": not failures,
+        "serviceId": service_id,
+        "required": 1,
+        "observed": len(selected),
+        "latestAt": latest_at,
+        "failures": failures,
+        "warnings": [],
+    }
+
+
 def require_heartbeat(result: Mapping[str, Any], code: str) -> None:
     if result.get("passed"):
         return
@@ -913,6 +1194,86 @@ def parse_lambda_result(
         "skippedCount": integer_value(inner.get("skippedCount")),
         "errorCount": integer_value(inner.get("errorCount")),
         "errorCodes": error_codes,
+    }
+
+
+def parse_cftc_canary_result(response: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the read-only official CFTC calculation response."""
+    if response.get("FunctionError"):
+        raise ActivationFailure(
+            "CFTC_CANARY_RUNTIME_ERROR",
+            "The official CFTC Lambda returned FunctionError during its read-only canary.",
+        )
+    payload_stream = response.get("Payload")
+    raw_payload = payload_stream.read() if hasattr(payload_stream, "read") else payload_stream
+    try:
+        encoded = raw_payload.decode() if isinstance(raw_payload, bytes) else raw_payload
+        result = json.loads(encoded or "{}")
+    except (TypeError, ValueError, UnicodeError, json.JSONDecodeError):
+        raise ActivationFailure(
+            "CFTC_CANARY_RESPONSE_INVALID",
+            "The official CFTC Lambda returned an invalid read-only response.",
+        ) from None
+    if (
+        not isinstance(result, Mapping)
+        or result.get("ok") is not True
+        or result.get("result") != "dry-run"
+        or integer_value(result.get("metricsCount")) != 35
+        or not re.fullmatch(r"[a-f0-9]{64}", str(result.get("sourceContentHash") or ""))
+        or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(result.get("reportDate") or ""))
+        or not isinstance(result.get("snapshot"), Mapping)
+        or result["snapshot"].get("source") != "cftc-public-reporting-environment"
+        or result["snapshot"].get("calculationVersion") != "cftc-combined-net-sample-z-v1"
+    ):
+        raise ActivationFailure(
+            "CFTC_CANARY_RESPONSE_INVALID",
+            "The official CFTC read-only calculation did not satisfy the snapshot contract.",
+        )
+    return {
+        "passed": True,
+        "result": "dry-run",
+        "reportDate": result["reportDate"],
+        "metricsCount": 35,
+        "contentComplete": result.get("contentComplete") is True,
+        "sourceContentHash": result["sourceContentHash"],
+        "_snapshot": result["snapshot"],
+    }
+
+
+def parse_cftc_write_result(response: Mapping[str, Any]) -> dict[str, Any]:
+    if response.get("FunctionError"):
+        raise ActivationFailure(
+            "CFTC_CURRENT_WRITE_FAILED",
+            "The one-time official CFTC current write returned FunctionError.",
+        )
+    payload_stream = response.get("Payload")
+    raw_payload = payload_stream.read() if hasattr(payload_stream, "read") else payload_stream
+    try:
+        encoded = raw_payload.decode() if isinstance(raw_payload, bytes) else raw_payload
+        result = json.loads(encoded or "{}")
+    except (TypeError, ValueError, UnicodeError, json.JSONDecodeError):
+        raise ActivationFailure(
+            "CFTC_CURRENT_WRITE_RESPONSE_INVALID",
+            "The one-time official CFTC current write returned invalid JSON.",
+        ) from None
+    if (
+        not isinstance(result, Mapping)
+        or result.get("ok") is not True
+        or result.get("result") not in {"created", "unchanged", "revised"}
+        or integer_value(result.get("metricsCount")) != 35
+        or not re.fullmatch(r"[a-f0-9]{64}", str(result.get("sourceContentHash") or ""))
+    ):
+        raise ActivationFailure(
+            "CFTC_CURRENT_WRITE_RESPONSE_INVALID",
+            "The one-time official CFTC current write did not satisfy the snapshot contract.",
+        )
+    return {
+        "passed": True,
+        "result": result["result"],
+        "reportDate": result.get("reportDate"),
+        "metricsCount": 35,
+        "contentComplete": result.get("contentComplete") is True,
+        "sourceContentHash": result["sourceContentHash"],
     }
 
 
@@ -1112,6 +1473,17 @@ def verify_schedule(
                 "message": f"{name} input does not match the exact canary provenance contract.",
             }
         )
+    retry_policy = target.get("RetryPolicy") or {}
+    if (
+        integer_value(retry_policy.get("MaximumEventAgeInSeconds")) != 900
+        or integer_value(retry_policy.get("MaximumRetryAttempts")) != 0
+    ):
+        failures.append(
+            {
+                "code": "SCHEDULE_RETRY_POLICY_MISMATCH",
+                "message": f"{name} must use a 900-second event age and zero retries.",
+            }
+        )
     return {
         "passed": not failures,
         "name": name,
@@ -1157,6 +1529,7 @@ def verify_alarms(
     *,
     actions_enabled: bool,
     topic_arn: str,
+    controls: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     by_name = {str(alarm.get("AlarmName")): alarm for alarm in alarms}
     failures: list[dict[str, str]] = []
@@ -1168,6 +1541,12 @@ def verify_alarms(
             )
             continue
         contract = ALARM_CONTRACTS[name]
+        schedule_parameter = contract.get("scheduleParameter")
+        alarm_actions_enabled = actions_enabled and (
+            not schedule_parameter
+            or controls is None
+            or controls.get(str(schedule_parameter)) == "ENABLED"
+        )
         if (
             alarm.get("Namespace") != contract["namespace"]
             or alarm.get("MetricName") != contract["metric"]
@@ -1195,7 +1574,7 @@ def verify_alarms(
         if not expected_missing_data:
             expected_missing_data = contract[
                 "missingDataWhenEnabled"
-                if actions_enabled
+                if alarm_actions_enabled
                 else "missingDataWhenDisabled"
             ]
         if alarm.get("TreatMissingData") != expected_missing_data:
@@ -1221,28 +1600,32 @@ def verify_alarms(
                         "message": f"{name} does not monitor {service_id}.",
                     }
                 )
-        if alarm.get("ActionsEnabled") is not actions_enabled:
+        expected_actions_enabled = (
+            alarm_actions_enabled if contract.get("notify") else False
+        )
+        if alarm.get("ActionsEnabled") is not expected_actions_enabled:
             failures.append(
                 {
                     "code": "ALARM_ACTION_STATE_MISMATCH",
                     "message": (
                         f"{name} ActionsEnabled={alarm.get('ActionsEnabled')}; "
-                        f"expected {actions_enabled}."
+                        f"expected {expected_actions_enabled}."
                     ),
                 }
             )
-        if set(alarm.get("AlarmActions") or []) != {topic_arn}:
+        expected_alarm_actions = {topic_arn} if contract.get("notify") else set()
+        if set(alarm.get("AlarmActions") or []) != expected_alarm_actions:
             failures.append(
                 {
                     "code": "ALARM_ACTION_TARGET_MISMATCH",
-                    "message": f"{name} alarm action is not the exact operations topic.",
+                    "message": f"{name} alarm action does not match its notification policy.",
                 }
             )
-        if set(alarm.get("OKActions") or []) != {topic_arn}:
+        if set(alarm.get("OKActions") or []) != set():
             failures.append(
                 {
                     "code": "ALARM_OK_ACTION_TARGET_MISMATCH",
-                    "message": f"{name} recovery action is not the exact operations topic.",
+                    "message": f"{name} must not publish an OK recovery transition.",
                 }
             )
     return {
@@ -1254,21 +1637,37 @@ def verify_alarms(
     }
 
 
-def confirmed_operations_subscription(
+def internal_only_operations_subscription(
     subscriptions: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    confirmed = [
+    email_routes = [
         item
         for item in subscriptions
         if item.get("Protocol") in {"email", "email-json"}
-        and item.get("SubscriptionArn") not in {None, "", "PendingConfirmation"}
     ]
-    if not confirmed:
+    if email_routes:
         raise ActivationFailure(
-            "SNS_SUBSCRIPTION_UNCONFIRMED",
-            "No confirmed email subscription exists on the operations topic.",
+            "SNS_OPERATIONAL_EMAIL_ROUTE_PRESENT",
+            "The operations topic must not have email or email-json subscriptions.",
+            detail={
+                "emailSubscriptionCount": len(email_routes),
+                "pendingEmailSubscriptionCount": sum(
+                    1
+                    for item in email_routes
+                    if item.get("SubscriptionArn")
+                    in {None, "", "PendingConfirmation"}
+                ),
+            },
         )
-    return {"passed": True, "confirmedEmailSubscriptions": len(confirmed)}
+    protocols: dict[str, int] = {}
+    for item in subscriptions:
+        protocol = str(item.get("Protocol") or "unknown")
+        protocols[protocol] = protocols.get(protocol, 0) + 1
+    return {
+        "passed": True,
+        "emailSubscriptionCount": 0,
+        "protocolCounts": protocols,
+    }
 
 
 def require_check(result: Mapping[str, Any], fallback_code: str) -> None:
@@ -1305,13 +1704,13 @@ def validate_artifact_bucket_ownership(
 class AwsRuntime:
     """Narrow AWS adapter used by the activation controller."""
 
-    def __init__(self, *, profile: str | None, region: str) -> None:
+    def __init__(self, *, profile: str | None, region: str, session: Any | None = None) -> None:
         config = Config(
             connect_timeout=5,
             read_timeout=330,
             retries={"max_attempts": 2, "mode": "standard"},
         )
-        self.session = boto3.Session(profile_name=profile or None, region_name=region)
+        self.session = session or boto3.Session(profile_name=profile or None, region_name=region)
         self.region = region
         self.sts = self.session.client("sts", config=config)
         self.cloudformation = self.session.client("cloudformation", config=config)
@@ -1528,6 +1927,7 @@ class ActivationController:
         rollback_export: str | os.PathLike[str] | None = None,
         release_receipt: str | os.PathLike[str] | None = None,
         release_receipt_key: str | os.PathLike[str] | None = None,
+        shadow_acceptance: str | os.PathLike[str] | None = None,
         auth_probe_only: bool = False,
     ) -> None:
         self.runtime = runtime
@@ -1538,6 +1938,7 @@ class ActivationController:
         self.rollback_export = rollback_export
         self.release_receipt = release_receipt
         self.release_receipt_key = release_receipt_key
+        self.shadow_acceptance = shadow_acceptance
         self.auth_probe_only = auth_probe_only
         self.rollback_verification: dict[str, Any] | None = None
         self.release_verification: dict[str, Any] | None = None
@@ -1588,6 +1989,14 @@ class ActivationController:
         if getattr(self, "rollback_verification", None) is None:
             self.rollback_verification = verify_rollback_export(
                 getattr(self, "rollback_export", None)
+            )
+        if getattr(self, "phase", None) == "consolidated":
+            self.shadow_acceptance_verification = verify_analyst_shadow_acceptance(
+                getattr(self, "shadow_acceptance", None)
+            )
+        if getattr(self, "phase", None) == "rollback":
+            self.rollback_controls = exported_control_state(
+                self.rollback_verification["path"]
             )
         validate_artifact_bucket_ownership(
             self.runtime.artifact_bucket_tags()
@@ -1717,6 +2126,48 @@ class ActivationController:
     def gmail_contract(self) -> Mapping[str, Any]:
         return self.services["gmail.ingestion"]
 
+    def cftc_contract(self) -> Mapping[str, Any]:
+        return self.services["cftc.official-ingestion"]
+
+    def cftc_heartbeat(self) -> dict[str, Any]:
+        contract = self.cftc_contract()
+        service_id = contract["aws"]["heartbeatServiceId"]
+        rows = self.runtime.heartbeat_rows(
+            self.resources["serviceHeartbeatTable"], service_id, limit=1
+        )
+        latest = rows[0] if rows else None
+        latest_at = latest.get("observedAt") if latest else None
+        age = minutes_old(latest_at)
+        failures: list[dict[str, str]] = []
+        if not latest:
+            failures.append({
+                "code": "HEARTBEAT_COUNT_INSUFFICIENT",
+                "message": "No scheduled official CFTC heartbeat exists.",
+            })
+        elif (
+            latest.get("status") != "success"
+            or latest.get("scheduleId") != contract["aws"]["scheduleId"]
+            or latest.get("scheduled") is not True
+        ):
+            failures.append({
+                "code": "HEARTBEAT_PROVENANCE_INVALID",
+                "message": "The latest CFTC heartbeat is not a successful Scheduler invocation.",
+            })
+        if age is None or age < -5 or age > int(contract["readinessMaxAgeMinutes"]):
+            failures.append({
+                "code": "HEARTBEAT_STALE",
+                "message": "The latest scheduled CFTC heartbeat is outside its readiness window.",
+            })
+        return {
+            "passed": not failures,
+            "serviceId": service_id,
+            "required": 1,
+            "observed": len(rows),
+            "latestAt": latest_at,
+            "failures": failures,
+            "warnings": [],
+        }
+
     def gmail_heartbeat(
         self, *, observed_after: Any | None = None
     ) -> dict[str, Any]:
@@ -1756,6 +2207,18 @@ class ActivationController:
             allowed_statuses={"success", "warning"},
         )
 
+    def cloud_watchdog_heartbeat(self) -> dict[str, Any]:
+        service_id = "hermes:cloud-watchdog"
+        rule_id = "market-dashboard-hermes-cloud-watchdog-v1"
+        rows = self.runtime.heartbeat_rows(
+            self.resources["serviceHeartbeatTable"], service_id, limit=1
+        )
+        return event_rule_heartbeat(
+            rows,
+            service_id=service_id,
+            rule_id=rule_id,
+        )
+
     def secret_check(self) -> dict[str, Any]:
         result = validate_secret_metadata(
             self.runtime.secret_description(self.parameters["GmailOAuthSecretName"])
@@ -1763,7 +2226,11 @@ class ActivationController:
         return {key: value for key, value in result.items() if not key.startswith("_")}
 
     def function_check(self, kind: str) -> dict[str, Any]:
-        resource_key = "gmailFunction" if kind == "GMAIL" else "hermesFunction"
+        resource_key = {
+            "GMAIL": "gmailFunction",
+            "CFTC": "cftcFunction",
+            "HERMES": "hermesFunction",
+        }[kind]
         function_name = self.resources[resource_key]
         return validate_function_configuration(
             self.runtime.function_configuration(function_name),
@@ -1772,7 +2239,11 @@ class ActivationController:
         )
 
     def function_checks(self) -> list[dict[str, Any]]:
-        return [self.function_check("GMAIL"), self.function_check("HERMES")]
+        return [
+            self.function_check("GMAIL"),
+            self.function_check("CFTC"),
+            self.function_check("HERMES"),
+        ]
 
     def bridge_check(self, worker: str = "quant-developer") -> dict[str, Any]:
         snapshot_type = "portfolio" if worker == "quant-analyst" else "operations"
@@ -1806,6 +2277,89 @@ class ActivationController:
             )
         return {"passed": True, **result}
 
+    def canary_cftc(self) -> dict[str, Any]:
+        fixture_expectations = {
+            "2026-04-28": {
+                "13874A": (-96215, 7946, 0.77, 0.15),
+                "088691": (91574, -3924, -1.33, -0.92),
+                "124603": (-2284, 706, 0.08, -0.14),
+            },
+            "2026-08-11": {
+                "13874A": (25427, 32375, 2.42, 1.62),
+            },
+        }
+        fixtures: list[dict[str, Any]] = []
+        for report_date, expected_rows in fixture_expectations.items():
+            response = self.runtime.invoke(
+                self.resources["cftcFunction"],
+                {
+                    "source": "activation-canary",
+                    "scheduleId": "market-dashboard-cftc-weekday-v1-activation-canary",
+                    "targetReportDate": report_date,
+                    "dryRun": True,
+                    "write": False,
+                },
+            )
+            parsed = parse_cftc_canary_result(response)
+            rows = {
+                str(row.get("cftcContractMarketCode") or ""): row
+                for row in parsed["_snapshot"].get("data") or []
+                if isinstance(row, Mapping)
+            }
+            for code, expected in expected_rows.items():
+                row = rows.get(code) or {}
+                actual = (
+                    integer_value(row.get("latest")),
+                    integer_value(row.get("wwChg")),
+                    numeric_value(row.get("zScore1Y")),
+                    numeric_value(row.get("zScore3Y")),
+                )
+                if actual != expected:
+                    raise ActivationFailure(
+                        "CFTC_PARITY_FIXTURE_MISMATCH",
+                        f"Official CFTC parity fixture {report_date}/{code} did not match.",
+                        detail={"reportDate": report_date, "contractCode": code},
+                    )
+            if parsed["contentComplete"] is not True:
+                raise ActivationFailure(
+                    "CFTC_PARITY_FIXTURE_INCOMPLETE",
+                    f"Official CFTC parity fixture {report_date} is incomplete.",
+                )
+            fixtures.append({
+                "reportDate": report_date,
+                "passed": True,
+                "sourceContentHash": parsed["sourceContentHash"],
+            })
+
+        current = parse_cftc_canary_result(self.runtime.invoke(
+            self.resources["cftcFunction"],
+            {
+                "source": "activation-canary",
+                "scheduleId": "market-dashboard-cftc-weekday-v1-activation-canary",
+                "dryRun": True,
+                "write": False,
+            },
+        ))
+        return {
+            "passed": True,
+            "result": "dry-run",
+            "reportDate": current["reportDate"],
+            "metricsCount": current["metricsCount"],
+            "contentComplete": current["contentComplete"],
+            "sourceContentHash": current["sourceContentHash"],
+            "parityFixtures": fixtures,
+        }
+
+    def write_current_cftc(self) -> dict[str, Any]:
+        return parse_cftc_write_result(self.runtime.invoke(
+            self.resources["cftcFunction"],
+            {
+                "source": "activation-rollout",
+                "scheduleId": "market-dashboard-cftc-weekday-v1-activation-write",
+                "write": True,
+            },
+        ))
+
     def canary_worker(self, worker: str) -> dict[str, Any]:
         contract = self.contract["workers"][worker]
         response = self.runtime.invoke(
@@ -1827,6 +2381,7 @@ class ActivationController:
         self, controls: Mapping[str, str]
     ) -> list[dict[str, Any]]:
         gmail = self.gmail_contract()
+        cftc = self.cftc_contract()
         specifications = [
             {
                 "name": gmail["aws"]["scheduleId"],
@@ -1838,7 +2393,19 @@ class ActivationController:
                     "scheduleId": gmail["aws"]["scheduleId"],
                     "poll": "incremental",
                 },
-            }
+            },
+            {
+                "name": cftc["aws"]["scheduleId"],
+                "expected_state": controls["CftcScheduleState"],
+                "expression": cftc["aws"]["scheduleExpression"],
+                "timezone_name": cftc["aws"]["scheduleTimeZone"],
+                "target_function_name": self.resources["cftcFunction"],
+                "expected_input": {
+                    "source": "aws-scheduler",
+                    "scheduleId": cftc["aws"]["scheduleId"],
+                    "mode": "current",
+                },
+            },
         ]
         for worker, contract in self.contract["workers"].items():
             specifications.append(
@@ -1893,10 +2460,11 @@ class ActivationController:
             self.runtime.alarms(),
             actions_enabled=controls["OperationalAlarmsState"] == "ENABLED",
             topic_arn=topic_arn,
+            controls=controls,
         )
 
     def subscription_check(self) -> dict[str, Any]:
-        return confirmed_operations_subscription(
+        return internal_only_operations_subscription(
             self.runtime.subscriptions(self.operations_topic_arn())
         )
 
@@ -1906,6 +2474,98 @@ class ActivationController:
             # Emergency recovery is intentionally independent of OAuth,
             # Lambda, bridge, subscription, and heartbeat health. Its only
             # purpose is to force every runtime control off.
+            return checks
+        if self.phase == "consolidated":
+            required_enabled = (
+                "CloudWatchdogScheduleState",
+                "GmailScheduleState",
+            )
+            disabled = [
+                name
+                for name in required_enabled
+                if self.parameters.get(name) != "ENABLED"
+            ]
+            if disabled:
+                raise ActivationFailure(
+                    "CONSOLIDATED_PREREQUISITE_DISABLED",
+                    (
+                        "Consolidation requires Gmail ingestion and the cloud "
+                        "watchdog to already be enabled."
+                    ),
+                    detail={"controls": disabled},
+                )
+            gmail_schedule = self.schedule_specifications(self.parameters)[0]
+            gmail_schedule_check = self.schedule_check(gmail_schedule)
+            require_check(
+                gmail_schedule_check,
+                "GMAIL_SCHEDULE_CANARY_FAILED",
+            )
+            checks.append(gmail_schedule_check)
+            watchdog_rule = self.watchdog_rule_check(self.parameters)
+            require_check(
+                watchdog_rule,
+                "CLOUD_WATCHDOG_RULE_UNHEALTHY",
+            )
+            checks.append(watchdog_rule)
+            checks.append(self.secret_check())
+            checks.append(self.function_check("GMAIL"))
+            gmail = self.gmail_heartbeat()
+            require_heartbeat(gmail, "GMAIL_SCHEDULE_CANARY_FAILED")
+            checks.append(gmail)
+            watchdog = self.cloud_watchdog_heartbeat()
+            require_heartbeat(
+                watchdog,
+                "CLOUD_WATCHDOG_HEARTBEAT_UNHEALTHY",
+            )
+            checks.append(watchdog)
+            checks.append(self.subscription_check())
+            return checks
+        if self.phase == "rollback":
+            controls = getattr(self, "rollback_controls", None)
+            if not isinstance(controls, Mapping):
+                raise ActivationFailure(
+                    "ROLLBACK_CONTROL_STATE_INVALID",
+                    "Verified rollback controls were not loaded.",
+                )
+            if controls.get("GmailScheduleState") == "ENABLED":
+                checks.append(self.secret_check())
+                checks.append(self.function_check("GMAIL"))
+            if controls.get("CftcScheduleState") == "ENABLED":
+                checks.append(self.function_check("CFTC"))
+            enabled_workers = [
+                worker
+                for worker, parameter in WORKER_PARAMETER.items()
+                if controls.get(parameter) == "ENABLED"
+            ]
+            if enabled_workers:
+                checks.append(self.function_check("HERMES"))
+                if "quant-analyst" in enabled_workers:
+                    checks.append(self.bridge_check("quant-analyst"))
+                if any(worker != "quant-analyst" for worker in enabled_workers):
+                    checks.append(self.bridge_check("quant-developer"))
+            if controls.get("OperationalAlarmsState") == "ENABLED":
+                checks.append(self.subscription_check())
+            return checks
+        if self.phase == "cftc":
+            checks.append(self.function_check("CFTC"))
+            if self.parameters["CftcScheduleState"] == "ENABLED":
+                heartbeat = self.cftc_heartbeat()
+                require_heartbeat(heartbeat, "CFTC_SCHEDULE_CANARY_FAILED")
+                checks.append(heartbeat)
+            if self.apply:
+                checks.append(self.canary_cftc())
+                if self.parameters["CftcScheduleState"] == "DISABLED":
+                    checks.append(self.write_current_cftc())
+            else:
+                checks.append({
+                    "passed": True,
+                    "pendingApply": True,
+                    "code": "CFTC_READ_ONLY_CANARY_WILL_RUN",
+                    "message": (
+                        "Apply mode will invoke one read-only official CFTC calculation "
+                        "before enabling its schedule."
+                    ),
+                })
             return checks
         if self.phase == "gmail":
             if not getattr(self, "auth_probe_only", False):
@@ -2028,6 +2688,7 @@ class ActivationController:
 
         capture("gmailOAuthSecretMetadata", self.secret_check)
         capture("gmailFunction", lambda: self.function_check("GMAIL"))
+        capture("cftcFunction", lambda: self.function_check("CFTC"))
         capture("hermesFunction", lambda: self.function_check("HERMES"))
         for specification in self.schedule_specifications(controls):
             name = str(specification["name"])
@@ -2037,10 +2698,11 @@ class ActivationController:
             )
         capture("event-rule:cloud-watchdog", lambda: self.watchdog_rule_check(controls))
         capture("alarms", lambda: self.alarm_check(controls))
-        if controls["OperationalAlarmsState"] == "ENABLED":
-            capture("operationsSubscription", self.subscription_check)
+        capture("operationsSubscription", self.subscription_check)
         if controls["GmailScheduleState"] == "ENABLED":
             capture("heartbeat:gmail", self.gmail_heartbeat)
+        if controls["CftcScheduleState"] == "ENABLED":
+            capture("heartbeat:cftc", self.cftc_heartbeat)
         for worker in self.contract["workers"]:
             if controls[WORKER_PARAMETER[worker]] == "ENABLED":
                 capture(
@@ -2209,11 +2871,7 @@ class ActivationController:
         require_check(watchdog_rule_check, "WATCHDOG_RULE_VERIFICATION_FAILED")
         alarm_check = self.alarm_check(expected_controls)
         require_check(alarm_check, "ALARM_VERIFICATION_FAILED")
-        subscription_check = (
-            self.subscription_check()
-            if expected_controls["OperationalAlarmsState"] == "ENABLED"
-            else {"passed": True, "notApplicable": True}
-        )
+        subscription_check = self.subscription_check()
         return {
             "passed": True,
             "controls": deployed_controls,
@@ -2443,7 +3101,11 @@ class ActivationController:
                     ),
                 },
             }
-        controls = target_control_state(self.phase, self.parameters)
+        controls = (
+            dict(self.rollback_controls)
+            if self.phase == "rollback"
+            else target_control_state(self.phase, self.parameters)
+        )
         report: dict[str, Any] = {
             "passed": True,
             "mode": "apply" if self.apply else "dry-run",
@@ -2456,6 +3118,12 @@ class ActivationController:
             report["rollbackExport"] = getattr(
                 self, "rollback_verification", None
             )
+            if self.phase == "consolidated":
+                report["shadowAcceptance"] = getattr(
+                    self, "shadow_acceptance_verification", None
+                )
+            if self.phase == "rollback":
+                report["rollbackControlsSource"] = self.rollback_verification["path"]
         if not self.apply:
             report["mutation"] = {
                 "performed": False,
@@ -2493,6 +3161,7 @@ class ActivationController:
             if controls.get(name) == "ENABLED"
             and (
                 name == "GmailScheduleState"
+                or name == "CftcScheduleState"
                 or name in WORKER_PARAMETER.values()
             )
         }
@@ -2536,6 +3205,32 @@ class ActivationController:
                         "code": "GMAIL_SCHEDULE_OBSERVATION_PENDING",
                     }
                 heartbeat_checks.append(gmail_result)
+
+            if controls["CftcScheduleState"] == "ENABLED":
+                newly_enabled = "CftcScheduleState" in heartbeat_watermarks
+                if newly_enabled:
+                    cftc_result = {
+                        "passed": False,
+                        "pending": True,
+                        "code": "CFTC_SCHEDULE_OBSERVATION_PENDING",
+                        "serviceId": "cftc:official-positioning",
+                        "message": (
+                            "The official CFTC schedule is enabled; its first weekday "
+                            "4:15 PM Eastern heartbeat is pending."
+                        ),
+                    }
+                else:
+                    cftc_result = self.cftc_heartbeat()
+                    require_heartbeat(cftc_result, "CFTC_SCHEDULE_CANARY_FAILED")
+                heartbeat_checks.append(cftc_result)
+
+            if self.phase == "consolidated":
+                watchdog_result = self.cloud_watchdog_heartbeat()
+                require_heartbeat(
+                    watchdog_result,
+                    "CLOUD_WATCHDOG_HEARTBEAT_UNHEALTHY",
+                )
+                heartbeat_checks.append(watchdog_result)
 
             for worker in self.contract["workers"]:
                 parameter_name = WORKER_PARAMETER[worker]
@@ -2705,7 +3400,7 @@ class ActivationController:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Inspect or stage the production Gmail/Hermes schedules and operational alarms. "
+            "Inspect or stage production ingestion, legacy worker schedules, and operational alarms. "
             "No AWS mutation occurs without --apply."
         )
     )
@@ -2714,17 +3409,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=(
             "status",
             "disabled",
+            "cftc",
             "developer",
             "gmail",
             "security",
             "analyst",
+            "consolidated",
+            "rollback",
             "alarms",
             "full",
         ),
         default="status",
         help=(
-            "Rollout gate to inspect/apply; disabled is the apply-only "
-            "all-controls-off recovery phase (default: status)."
+            "Rollout gate to inspect/apply; cftc independently enables the "
+            "official weekday feed after a read-only calculation canary; consolidated retains Gmail, the "
+            "cloud watchdog, and alarms while retiring all worker schedules; "
+            "disabled is the apply-only all-controls-off recovery phase "
+            "(default: status)."
         ),
     )
     parser.add_argument(
@@ -2738,7 +3439,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--read-profile",
-        help="Optional AWS profile for read-only status/dry-run inspection.",
+        default=DEFAULT_READ_PROFILE,
+        help=f"AWS profile for read-only status/dry-run inspection (must be {DEFAULT_READ_PROFILE}).",
     )
     parser.add_argument(
         "--cloudformation-role-arn",
@@ -2770,6 +3472,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Private HMAC key used to authenticate the tested-release receipt.",
     )
     parser.add_argument(
+        "--shadow-acceptance",
+        default=os.environ.get(
+            "MARKET_DASHBOARD_ANALYST_SHADOW_ACCEPTANCE",
+            str(DEFAULT_ANALYST_SHADOW_ACCEPTANCE),
+        ),
+        help=(
+            "Completed Analyst shadow acceptance log; mandatory for the "
+            "consolidated apply phase."
+        ),
+    )
+    parser.add_argument(
         "--auth-probe-only",
         action="store_true",
         help=(
@@ -2783,8 +3496,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--apply requires an explicit rollout --phase.")
     if args.phase == "disabled" and not args.apply:
         parser.error("--phase disabled is an apply-only recovery command.")
-    if args.apply and not args.admin_profile:
-        parser.error("--apply requires an explicit --admin-profile.")
+    if args.phase == "rollback" and not args.apply:
+        parser.error("--phase rollback is an apply-only recovery command.")
+    if args.apply and args.admin_profile != EXPECTED_ADMIN_PROFILE:
+        parser.error(f"--apply requires --admin-profile {EXPECTED_ADMIN_PROFILE}.")
+    if not args.apply and args.admin_profile:
+        parser.error("--admin-profile is only valid with --apply.")
+    if not args.apply and args.read_profile != DEFAULT_READ_PROFILE:
+        parser.error(f"--read-profile must be {DEFAULT_READ_PROFILE}.")
     if args.apply and not args.rollback_export:
         parser.error(
             "--apply requires --rollback-export or "
@@ -2805,8 +3524,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = parse_args(argv)
-        profile = args.admin_profile if args.apply else (args.read_profile or args.admin_profile)
-        runtime = AwsRuntime(profile=profile, region=args.region)
+        profile = args.admin_profile if args.apply else (args.read_profile or DEFAULT_READ_PROFILE)
+        try:
+            session = verified_session(
+                profile,
+                purpose="admin" if args.apply else "api",
+                region=args.region,
+            )
+        except AwsProfileContractError as error:
+            raise ActivationFailure(error.error_code, error.detail) from None
+        runtime = AwsRuntime(profile=profile, region=args.region, session=session)
         controller = ActivationController(
             runtime,
             phase=args.phase,
@@ -2816,6 +3543,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             rollback_export=args.rollback_export,
             release_receipt=args.release_receipt,
             release_receipt_key=args.release_receipt_key,
+            shadow_acceptance=args.shadow_acceptance,
             auth_probe_only=args.auth_probe_only,
         )
         identity = controller.initialize()

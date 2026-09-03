@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import HedgeyeShowPanel, { getRecentShowMarketDays, getSnapshotPositions } from '../HedgeyeShowPanel';
+import PersistentSurface from '../../common/PersistentSurface';
 import { MarketDataService } from '../../../services/api/marketDataService';
 
 jest.mock('../../../services/api/marketDataService', () => ({
@@ -70,6 +71,33 @@ describe('HedgeyeShowPanel', () => {
     expect(await screen.findByText('No Call snapshots are available for the last five market days.')).toBeInTheDocument();
     expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
     expect(screen.queryByText('META')).not.toBeInTheDocument();
+  });
+
+  test('keeps its snapshot and interaction state without an activation-only reload', async () => {
+    const days = getRecentShowMarketDays(5);
+    MarketDataService.getHedgeyeSnapshot.mockImplementation(async (_type, date) => (
+      date === days[0].dateKey
+        ? snapshot(days[0].dateKey, { longs: ['AAPL'], shorts: [], neutrals: [] })
+        : null
+    ));
+    const panel = (
+      <HedgeyeShowPanel snapshotType="the-call" title="Call" onClose={jest.fn()} />
+    );
+    const view = render(<PersistentSurface active>{panel}</PersistentSurface>);
+
+    expect(await screen.findByText('Current')).toBeInTheDocument();
+    const initialCallCount = MarketDataService.getHedgeyeSnapshot.mock.calls.length;
+    expect(initialCallCount).toBeGreaterThan(0);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search Call positions' }), {
+      target: { value: 'AAPL' },
+    });
+
+    view.rerender(<PersistentSurface active={false}>{panel}</PersistentSurface>);
+    view.rerender(<PersistentSurface active>{panel}</PersistentSurface>);
+
+    expect(MarketDataService.getHedgeyeSnapshot).toHaveBeenCalledTimes(initialCallCount);
+    expect(screen.getByRole('textbox', { name: 'Search Call positions' })).toHaveValue('AAPL');
+    expect(screen.getAllByText('AAPL').length).toBeGreaterThan(0);
   });
 
   test('removes known Macro Show boilerplate artifacts without fabricating positions', () => {

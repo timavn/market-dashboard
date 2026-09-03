@@ -191,11 +191,22 @@ describe('IBKR Flex interest service', () => {
       expectedAccountFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       reportHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       revisionHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      tierDetailSectionPresent: true,
+      accrualSectionPresent: true,
+      cashTransactionSectionPresent: true,
+      cashReportSectionPresent: true,
       tierDetails: [expect.objectContaining({ totalInterest: -12.5 })],
       derived: {
         dailyDebitActuals: [expect.objectContaining({ debitAmount: 12.5 })],
         monthlyPaid: [expect.objectContaining({ paid: 125 })],
       },
+    });
+    expect(service.status().latest.sectionPresence).toEqual({
+      tierInterestDetails: true,
+      interestAccruals: true,
+      cashTransactions: true,
+      cashReport: true,
+      stockBorrowFeeDetails: false,
     });
     expect(JSON.stringify(snapshot)).not.toContain(ACCOUNT_ID);
     expect(JSON.stringify(snapshot)).not.toContain(TOKEN);

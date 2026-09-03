@@ -1,0 +1,105 @@
+_config_version: 39
+
+model:
+  default: openai/gpt-5.6-luna
+  provider: nous
+  base_url: https://inference-api.nousresearch.com/v1
+
+# Keep the included Nous subscription as the primary route. If Nous reports
+# that its credits or billing allowance are exhausted, Hermes continues the
+# turn against Tim's separately billed OpenAI API project using the same Luna
+# model. The credential is stored only in the isolated Analyst auth store.
+fallback_providers:
+  - provider: openai-api
+    model: gpt-5.6-luna
+
+agent:
+  gateway_timeout: 1800
+  api_max_retries: 3
+  reasoning_effort: medium
+  service_tier: ''
+  tool_use_enforcement: auto
+  task_completion_guidance: false
+  parallel_tool_call_guidance: false
+  environment_probe: false
+  coding_context: 'off'
+  verify_on_stop: false
+  disabled_toolsets:
+    - terminal
+    - file
+    - browser
+    - web
+    - memory
+    - delegation
+    - cron
+    - code_execution
+    - computer
+    - image
+    - vision
+
+# The Analyst has a deliberately small, fixed tool surface. Keeping these thirteen
+# schemas eager avoids Hermes' tool_search/tool_describe bridge and lets the
+# Express gateway validate every lifecycle event against the exact MCP tool
+# allowlist.
+tools:
+  tool_search:
+    enabled: off
+
+platform_toolsets:
+  cli:
+    - market-dashboard-analyst
+
+mcp_servers:
+  market-dashboard-analyst:
+    url: http://127.0.0.1:6951/mcp
+    headers:
+      Authorization: Bearer ${ANALYST_SERVICE_TOKEN}
+    enabled: true
+    connect_timeout: 20
+    timeout: 120
+    supports_parallel_tool_calls: true
+    tools:
+      resources: false
+      prompts: false
+      include:
+        - get_research_coverage
+        - get_briefing_packet
+        - get_market_situation_context
+        - search_research
+        - get_research_source
+        - get_research_page_image
+        - get_portfolio_context
+        - get_balance_context
+        - get_live_market_snapshot
+        - get_prediction_market_snapshot
+        - get_market_history
+        - get_company_fundamentals
+        - get_macro_series
+
+display:
+  tool_progress: 'off'
+  memory_notifications: 'off'
+
+compression:
+  enabled: true
+  threshold: 0.55
+  target_ratio: 0.25
+  protect_last_n: 20
+
+# Dashboard conversation names are explicit UI state. Hermes must never derive
+# or upgrade them from the opening prompt.
+auxiliary:
+  title_generation:
+    enabled: false
+
+checkpoints:
+  enabled: false
+
+kanban:
+  dispatch_in_gateway: false
+
+mcp_discovery_timeout: 20
+tool_output:
+  max_bytes: 250000
+  max_lines: 5000
+  max_line_length: 2000

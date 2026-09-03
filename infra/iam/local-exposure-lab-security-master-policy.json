@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadCompleteExposureLabArchive",
+      "Effect": "Allow",
+      "Action": "dynamodb:Scan",
+      "Resource": [
+        "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeDailySnapshot",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/HedgeyeRiskRanges"
+      ]
+    },
+    {
+      "Sid": "ReadExposureLabSecurityMaster",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-west-1:915328198276:table/ExposureLabSecurityMasterV1",
+        "arn:aws:dynamodb:us-west-1:915328198276:table/ExposureLabSecurityMasterV1/index/recordType-sortKey-index"
+      ]
+    },
+    {
+      "Sid": "WriteVersionedExposureLabReviews",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:TransactWriteItems"
+      ],
+      "Resource": "arn:aws:dynamodb:us-west-1:915328198276:table/ExposureLabSecurityMasterV1"
+    }
+  ]
+}

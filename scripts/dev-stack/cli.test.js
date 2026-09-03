@@ -7,35 +7,49 @@ const path = require('node:path');
 const {
   applyBridgeStatusPayload,
   applyControllerStatusPayload,
+  authenticationCheck,
+  authenticationGroup,
   bridgeRecoveryLabel,
   childEnvironment,
   configuredBridgeAwsProfile,
   credentialPreflightFailureState,
   discoverOwnedBridgeProcessIds,
+  discoverOwnedSidecarProcessIds,
+  expectedCapabilityIdsForEnv,
   formatMorningReport,
   hasExactBridgeCommandSignature,
   hasExactControllerCommandSignature,
+  hasExactAnalystHermesRuntimeSignature,
+  hasExactSidecarCommandSignature,
+  hasManagedSidecarRuntime,
   hasExpectedDashboardSignature,
   heartbeatAgeMs,
   hasStartupReadinessMismatch,
   hermesBridgeEnabled,
+  isRecoverableOrphanedAnalystHermes,
   mergedMorningReport,
   morningExitCode,
   localNotificationsEnabled,
+  loginStatusUrl,
   pathIsInRoot,
   planServiceNotificationTransition,
   planStateWriteNotification,
   preflightAwsService,
   processServiceStatus,
   reconcileDisabledBridgeProcesses,
+  reconcileOrphanedAnalystHermes,
+  reconcileOwnedSidecarProcesses,
   recoveryActions,
   readinessUrl,
+  restartIbkrSidecar,
   restartPolicyFor,
   services,
+  sidecarProcessSnapshot,
   supervisedServiceNames,
   sendMacNotification,
   systemSourceIsStale,
   validateSystemReadinessReport,
+  validateLoginStatusReport,
   validProcessId,
   writeJsonAtomically,
 } = require('./cli');
@@ -212,6 +226,81 @@ test('renders a concise checklist and documented exit codes', () => {
   assert.equal(morningExitCode('invalid'), 3);
 });
 
+test('morning authentication keeps optional AWS Admin signed out neutral', () => {
+  const checkedAt = '2026-07-21T17:00:00.000Z';
+  const authentication = authenticationGroup({
+    service: {
+      details: [
+        { id: 'ibkr-gateway', status: 'online', state: 'connected', required: true, checkedAt },
+        { id: 'aws-api', status: 'online', state: 'fresh', required: true, checkedAt },
+        { id: 'aws-bridge', status: 'closed', state: 'disabled', required: false, checkedAt },
+        {
+          id: 'aws-admin',
+          status: 'closed',
+          state: 'signed_out',
+          required: false,
+          checkedAt,
+          reason: 'AWS Admin SSO session has expired; refresh it before operator changes.',
+        },
+        { id: 'gmail-oauth', status: 'online', state: 'fresh', required: true, checkedAt },
+      ],
+    },
+  });
+  const admin = authentication.checks.find(check => check.id === 'aws-admin-sso');
+  assert.deepEqual(
+    { status: admin.status, blocking: admin.blocking, summary: admin.summary },
+    {
+      status: 'pass',
+      blocking: false,
+      summary: 'Signed out — required only for operator changes.',
+    },
+  );
+  const report = mergedMorningReport(localGroup(), systemReport(), {}, authentication);
+  assert.equal(report.status, 'ready');
+  assert.match(formatMorningReport(report), /AUTHENTICATION/);
+});
+
+test('morning authentication distinguishes IBKR socket, AWS authorization, and Gmail expiry', () => {
+  assert.equal(authenticationCheck({ id: 'ibkr-gateway', status: 'offline', state: 'socket_disabled' }, {
+    id: 'auth-ibkr',
+    label: 'IBKR Gateway',
+  }).errorCode, 'IBKR_SOCKET_DISABLED');
+  assert.equal(authenticationCheck({ id: 'aws-api', status: 'offline', state: 'forbidden' }, {
+    id: 'auth-aws-api',
+    label: 'AWS API',
+  }).errorCode, 'AWS_AUTHORIZATION_DENIED');
+  assert.equal(authenticationCheck({ id: 'gmail-oauth', status: 'offline', state: 'expired' }, {
+    id: 'auth-gmail',
+    label: 'Gmail OAuth',
+  }).errorCode, 'GMAIL_AUTH_REQUIRED');
+});
+
+test('validates the sanitized login-status contract without exposing action diagnostics', () => {
+  const report = {
+    version: 1,
+    checkedAt: '2026-07-21T17:00:00.000Z',
+    service: {
+      id: 'logins',
+      details: [
+        { id: 'ibkr-gateway', status: 'online', required: true },
+        { id: 'gmail-oauth', status: 'online', required: true },
+        { id: 'aws-admin', status: 'closed', required: false },
+        { id: 'aws-api', status: 'online', required: true },
+        { id: 'aws-bridge', status: 'closed', required: false },
+      ],
+    },
+    actions: {
+      'aws-admin-login': {
+        state: 'awaiting_user',
+        errorCode: null,
+      },
+    },
+  };
+  assert.equal(validateLoginStatusReport(report), report);
+  assert.equal(loginStatusUrl, 'http://127.0.0.1:3001/api/login-status');
+  assert.throws(() => validateLoginStatusReport({ ...report, version: 2 }), /unsupported version/i);
+});
+
 test('repo ownership only accepts this repo or its descendants', () => {
   const repo = path.resolve(__dirname, '../..');
   assert.equal(pathIsInRoot(repo), true);
@@ -314,6 +403,183 @@ test('disabled-mode process discovery matches only the exact repo bridge command
   }), [101, 103, 105, 107]);
 });
 
+test('sidecar process discovery distinguishes managed runtime owners from stale clients', () => {
+  const repo = path.resolve(__dirname, '../..');
+  const sidecar = path.join(repo, 'scripts/ibkr_sidecar');
+  const runtime = path.join(sidecar, '.venv');
+  const commands = new Map([
+    [201, `${runtime}/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8765 --loop asyncio`],
+    [202, `/usr/bin/python3 -m uvicorn app:app --host 127.0.0.1 --port 8765 --loop asyncio`],
+    [203, `${runtime}/bin/python -m uvicorn other:app --host 127.0.0.1 --port 8765`],
+    [204, `${runtime}/bin/python -m uvicorn app:app --host 127.0.0.1 --port 9999`],
+  ]);
+  const workingDirectories = new Map([
+    [201, sidecar],
+    [202, sidecar],
+    [203, sidecar],
+    [204, sidecar],
+  ]);
+  const inspection = {
+    pids: [...commands.keys()],
+    commandFor: pid => commands.get(pid),
+    cwdFor: pid => workingDirectories.get(pid),
+    alive: () => true,
+  };
+
+  assert.equal(hasExactSidecarCommandSignature(commands.get(201), sidecar), true);
+  assert.equal(hasManagedSidecarRuntime(commands.get(201), sidecar), true);
+  assert.equal(hasManagedSidecarRuntime(commands.get(202), sidecar), false);
+  assert.deepEqual(discoverOwnedSidecarProcessIds(inspection), [201, 202]);
+  assert.deepEqual(sidecarProcessSnapshot({ ...inspection, listener: () => 201 }), {
+    processPids: [201, 202],
+    managedProcessPids: [201],
+    processCount: 2,
+    managedProcessCount: 1,
+    ownerPid: 201,
+    recommendedKeepPid: 201,
+    duplicatePids: [202],
+    duplicateCount: 1,
+    runtimeVerified: true,
+  });
+});
+
+test('sidecar reconciliation retains one owner and verifies stale process removal', async () => {
+  let discoveryPass = 0;
+  const terminated = [];
+  const result = await reconcileOwnedSidecarProcesses({
+    keepPid: 401,
+    discover: () => {
+      discoveryPass += 1;
+      return discoveryPass === 1 ? [401, 402] : [401];
+    },
+    terminateProcess: async pid => terminated.push(pid),
+  });
+
+  assert.deepEqual(terminated, [402]);
+  assert.deepEqual(result, {
+    verified: true,
+    clean: true,
+    discoveredPids: [401, 402],
+    terminatedPids: [402],
+    remainingPids: [401],
+    keepPid: 401,
+    errorCode: null,
+    detail: 'Exactly one managed sidecar is retained.',
+  });
+});
+
+test('reclaims only an exact detached Analyst Hermes update respawn', async () => {
+  const hermes = path.join(os.homedir(), '.hermes/hermes-agent/venv/bin/hermes');
+  const commandText = [
+    path.join(os.homedir(), '.hermes/hermes-agent/venv/bin/python3'),
+    hermes,
+    '-p analyst serve --isolated --skip-build --host 127.0.0.1 --port 9121',
+  ].join(' ');
+  assert.equal(hasExactAnalystHermesRuntimeSignature(commandText), true);
+  assert.equal(isRecoverableOrphanedAnalystHermes({
+    pid: 88914,
+    commandText,
+    environmentText: 'HERMES_DESKTOP_CHILD_PID=97486 HERMES_HOME=/tmp/hermes',
+    parentPid: 1,
+  }), true);
+  // The updater inherits the PID of a separate live Desktop backend. That PID
+  // does not own this fixed-port Analyst process and must not block recovery.
+  assert.equal(isRecoverableOrphanedAnalystHermes({
+    pid: 88914,
+    commandText,
+    environmentText: 'HERMES_DESKTOP_CHILD_PID=97486',
+    parentPid: 1,
+  }), true);
+  // A marker naming the listener itself is genuine Desktop ownership.
+  assert.equal(isRecoverableOrphanedAnalystHermes({
+    pid: 88914,
+    commandText,
+    environmentText: 'HERMES_DESKTOP_CHILD_PID=88914',
+    parentPid: 1,
+  }), false);
+  // Terminal-driven updates do not carry a Desktop marker at all.
+  assert.equal(isRecoverableOrphanedAnalystHermes({
+    pid: 88914,
+    commandText,
+    environmentText: '',
+    parentPid: 1,
+  }), true);
+  // Only a detached process is eligible; a live non-init parent retains
+  // lifecycle ownership until it exits.
+  assert.equal(isRecoverableOrphanedAnalystHermes({
+    pid: 88914,
+    commandText,
+    environmentText: 'HERMES_DESKTOP_CHILD_PID=97486',
+    parentPid: 99123,
+  }), false);
+  assert.equal(isRecoverableOrphanedAnalystHermes({
+    pid: 88914,
+    commandText: commandText.replace('--port 9121', '--port 9119'),
+    environmentText: 'HERMES_DESKTOP_CHILD_PID=97486',
+    parentPid: 1,
+  }), false);
+
+  const terminated = [];
+  let listenerPass = 0;
+  const result = await reconcileOrphanedAnalystHermes({
+    listener: () => (listenerPass++ === 0 ? 88914 : null),
+    commandFor: () => commandText,
+    environmentFor: () => 'HERMES_DESKTOP_CHILD_PID=97486',
+    parentPidFor: () => 1,
+    alive: () => true,
+    terminateProcess: async (pid) => terminated.push(pid),
+  });
+  assert.deepEqual(terminated, [88914]);
+  assert.deepEqual(result, { recovered: true, pid: 88914 });
+});
+
+test('sidecar-only repair signals the exact owned uvicorn PID and never Gateway', async () => {
+  const gatewayPid = 50621;
+  const terminated = [];
+  let snapshotPass = 0;
+  const snapshots = [
+    {
+      processPids: [201],
+      managedProcessPids: [201],
+      processCount: 1,
+      managedProcessCount: 1,
+      ownerPid: 201,
+      recommendedKeepPid: 201,
+      duplicatePids: [],
+      duplicateCount: 0,
+      runtimeVerified: true,
+    },
+    {
+      processPids: [202],
+      managedProcessPids: [202],
+      processCount: 1,
+      managedProcessCount: 1,
+      ownerPid: 202,
+      recommendedKeepPid: 202,
+      duplicatePids: [],
+      duplicateCount: 0,
+      runtimeVerified: true,
+    },
+  ];
+
+  const result = await restartIbkrSidecar({
+    state: { supervisor: { pid: 99 } },
+    snapshot: () => snapshots[Math.min(snapshotPass++, snapshots.length - 1)],
+    terminateProcess: async pid => terminated.push(pid),
+    alive: pid => [99, 201, 202, gatewayPid].includes(pid),
+    owned: pid => [99, 201, 202].includes(pid),
+    healthCheck: async () => true,
+    pause: async () => {},
+    timeoutMs: 1_000,
+  });
+
+  assert.deepEqual(terminated, [201]);
+  assert.equal(terminated.includes(gatewayPid), false);
+  assert.equal(result.previousPid, 201);
+  assert.equal(result.pid, 202);
+  assert.equal(result.gatewaySignalled, false);
+});
+
 test('disabled-mode reconciliation terminates discovered writers and stays degraded if one remains', async () => {
   let discoveryPass = 0;
   const terminated = [];
@@ -408,10 +674,13 @@ test('the outbound bridge is default-off and only joins the supervisor through e
     HERMES_BRIDGE_ENABLED: 'true',
   }), false);
 
-  assert.deepEqual(supervisedServiceNames({}), ['sidecar', 'api', 'ui', 'controller']);
+  assert.deepEqual(
+    supervisedServiceNames({}),
+    ['sidecar', 'analystSidecar', 'analystHermes', 'api', 'ui', 'controller'],
+  );
   assert.deepEqual(
     supervisedServiceNames({ HERMES_BRIDGE_ENABLED: 'true' }),
-    ['sidecar', 'api', 'ui', 'controller', 'bridge'],
+    ['sidecar', 'analystSidecar', 'analystHermes', 'api', 'ui', 'controller', 'bridge'],
   );
   assert.deepEqual(processServiceStatus('bridge', {
     enabled: false,
@@ -441,6 +710,13 @@ test('the outbound bridge is default-off and only joins the supervisor through e
     lastFailureAt: null,
     awsProfile: null,
   });
+});
+
+test('the API health probe tolerates a busy verified quote refresh without slowing other probes', () => {
+  assert.ok(services.api.healthTimeoutMs >= 5_000);
+  assert.equal(services.ui.healthTimeoutMs, undefined);
+  assert.ok(services.sidecar.healthTimeoutMs >= 5_000);
+  assert.ok(services.analystSidecar.healthTimeoutMs >= 5_000);
 });
 
 test('supervisor heartbeat freshness rejects excessive future clock skew', () => {
@@ -478,18 +754,25 @@ test('the LaunchAgent persists the default-off bridge flag and validates its pro
     'utf8',
   );
 
+  assert.match(template, /<key>LEGACY_HERMES_MODE<\/key>\s*<string>__LEGACY_HERMES_MODE__<\/string>/);
   assert.match(template, /<key>HERMES_BRIDGE_ENABLED<\/key>\s*<string>__HERMES_BRIDGE_ENABLED__<\/string>/);
   assert.match(template, /<key>HERMES_OPERATIONS_BRIDGE_ENABLED<\/key>\s*<string>__HERMES_OPERATIONS_BRIDGE_ENABLED__<\/string>/);
   assert.match(template, /<key>HERMES_PORTFOLIO_BRIDGE_ENABLED<\/key>\s*<string>__HERMES_PORTFOLIO_BRIDGE_ENABLED__<\/string>/);
-  assert.match(template, /<key>HERMES_RELIABILITY_CONTROLLER_MODE<\/key>\s*<string>__HERMES_CONTROLLER_MODE__<\/string>/);
-  assert.match(template, /<key>HERMES_RELIABILITY_ENABLED_ACTIONS<\/key>\s*<string>__HERMES_CONTROLLER_ENABLED_ACTIONS__<\/string>/);
+  assert.match(template, /<key>READINESS_CONTROLLER_MODE<\/key>\s*<string>__HERMES_CONTROLLER_MODE__<\/string>/);
+  assert.match(template, /<key>READINESS_CONTROLLER_ENABLED_ACTIONS<\/key>\s*<string>__HERMES_CONTROLLER_ENABLED_ACTIONS__<\/string>/);
+  assert.match(installer, /LEGACY_HERMES_MODE="\$\{LEGACY_HERMES_MODE:-shadow\}"/);
+  assert.match(installer, /LEGACY_HERMES_MODE must be shadow or read-only/);
   assert.match(installer, /BRIDGE_ENABLED="\$\{HERMES_BRIDGE_ENABLED:-false\}"/);
-  assert.match(installer, /CONTROLLER_MODE="\$\{HERMES_RELIABILITY_CONTROLLER_MODE:-shadow\}"/);
-  assert.match(installer, /CONTROLLER_ENABLED_ACTIONS="\$\{HERMES_RELIABILITY_ENABLED_ACTIONS:-\}"/);
-  assert.match(installer, /HERMES_RELIABILITY_CONTROLLER_MODE must be shadow or active/);
-  assert.match(installer, /Unknown Hermes controller action ID/);
+  assert.match(installer, /READINESS_CONTROLLER_MODE\+x/);
+  assert.match(installer, /READINESS_CONTROLLER_ENABLED_ACTIONS\+x/);
+  assert.match(installer, /HERMES_RELIABILITY_CONTROLLER_MODE:-shadow/);
+  assert.match(installer, /HERMES_RELIABILITY_ENABLED_ACTIONS:-/);
+  assert.match(installer, /restart-ibkr-sidecar/);
+  assert.match(installer, /READINESS_CONTROLLER_MODE must be shadow or active/);
+  assert.match(installer, /Unknown readiness controller action ID/);
   assert.match(installer, /if \[\[ "\$OPERATIONS_BRIDGE_ENABLED" == "false" && "\$PORTFOLIO_BRIDGE_ENABLED" == "false" \]\]; then\s+[\s\S]*?BRIDGE_AWS_PROFILE=""/);
   assert.match(installer, /s\|__HERMES_BRIDGE_ENABLED__\|\$\{bridge_enabled_xml\}\|g/);
+  assert.match(installer, /s\|__LEGACY_HERMES_MODE__\|\$\{legacy_hermes_mode_xml\}\|g/);
   assert.match(installer, /s\|__HERMES_OPERATIONS_BRIDGE_ENABLED__\|\$\{operations_bridge_enabled_xml\}\|g/);
   assert.match(installer, /s\|__HERMES_PORTFOLIO_BRIDGE_ENABLED__\|\$\{portfolio_bridge_enabled_xml\}\|g/);
   assert.match(installer, /s\|__HERMES_CONTROLLER_MODE__\|\$\{controller_mode_xml\}\|g/);
@@ -855,7 +1138,7 @@ test('bridge activity retains separate input and publish failure diagnostics', (
 test('controller activity reports process health without treating monitored incidents as process failure', () => {
   const item = {};
   assert.equal(applyControllerStatusPayload(item, {
-    service: 'hermes-reliability-controller',
+    service: 'dashboard-readiness-controller',
     observedAt: '2026-07-27T16:00:00.000Z',
     status: 'ready',
     mode: 'shadow',
@@ -889,6 +1172,24 @@ test('controller activity reports process health without treating monitored inci
   assert.equal(item.lastResultStatus, 'error');
   assert.equal(item.lastErrorCode, 'READINESS_TELEMETRY_STALE');
   assert.equal(item.lastDetail, 'Readiness is stale.');
+});
+
+test('read-only consolidation expects the generic readiness capability', () => {
+  assert.deepEqual(
+    expectedCapabilityIdsForEnv({ LEGACY_HERMES_MODE: 'read-only' }),
+    [
+      'automation.readiness',
+      'dashboard.core',
+      'portfolio.live',
+      'prediction.display',
+      'prediction.ibkrExecution',
+      'research.current',
+    ],
+  );
+  assert.equal(
+    expectedCapabilityIdsForEnv({ LEGACY_HERMES_MODE: 'shadow' })[0],
+    'automation.hermes',
+  );
 });
 
 test('bridge recovery guidance names the exact failing layer', () => {

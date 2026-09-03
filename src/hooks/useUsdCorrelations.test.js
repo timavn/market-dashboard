@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { useUsdCorrelations } from './useUsdCorrelations';
+import { CORRELATION_REFERENCE_STORAGE_KEY, useUsdCorrelations } from './useUsdCorrelations';
+import { resetSessionResourceStore } from '../utils/sessionResourceStore';
 
 jest.mock('../services/api/usdMarketService', () => ({
   USDMarketService: { getCorrelations: jest.fn() },
@@ -49,6 +50,16 @@ const FXVL_SNAPSHOT = {
 };
 
 describe('useUsdCorrelations', () => {
+  beforeEach(() => {
+    resetSessionResourceStore();
+    window.sessionStorage?.clear();
+  });
+
+  afterEach(() => {
+    resetSessionResourceStore();
+    window.sessionStorage?.clear();
+  });
+
   test('recovers automatically when the API is unavailable during startup', async () => {
     const service = {
       getCorrelations: jest.fn()
@@ -67,6 +78,36 @@ describe('useUsdCorrelations', () => {
     await waitFor(() => expect(result.current.correlations).toEqual(LIVE_RESPONSE.correlations));
     expect(service.getCorrelations).toHaveBeenCalledTimes(2);
     expect(result.current.error).toBeNull();
+  });
+
+  test('hydrates the normalized correlation view from the raw persisted provider payload', async () => {
+    window.sessionStorage.setItem(CORRELATION_REFERENCE_STORAGE_KEY, JSON.stringify({
+      schemaVersion: 1,
+      resourceKey: 'usd-correlations',
+      scopeKey: 'dashboard',
+      observedAt: LIVE_RESPONSE.timestamp,
+      persistedAt: new Date().toISOString(),
+      data: LIVE_RESPONSE,
+    }));
+    let resolveRequest;
+    const service = {
+      getCorrelations: jest.fn(() => new Promise((resolve) => { resolveRequest = resolve; })),
+    };
+    const { result, unmount } = renderHook(() => useUsdCorrelations({
+      service,
+      retryDelaysMs: [10000],
+      failurePollMs: 10000,
+      successPollMs: 10000,
+    }));
+
+    expect(result.current.correlations).toEqual(LIVE_RESPONSE.correlations);
+    expect(result.current.rollingStats).toEqual(LIVE_RESPONSE.rollingStats);
+    expect(result.current.refreshing).toBe(true);
+
+    await waitFor(() => expect(service.getCorrelations).toHaveBeenCalled());
+    resolveRequest(LIVE_RESPONSE);
+    await waitFor(() => expect(result.current.error).toBeNull());
+    unmount();
   });
 
   test('manual retry immediately starts a new request', async () => {
@@ -107,7 +148,7 @@ describe('useUsdCorrelations', () => {
     await waitFor(() => expect(result.current.fxvlSnapshot).toEqual(FXVL_SNAPSHOT));
   });
 
-  test('clears verified rows when a scheduled refresh fails', async () => {
+  test('retains the dated snapshot when a scheduled refresh fails', async () => {
     const service = {
       getCorrelations: jest.fn()
         .mockResolvedValueOnce({ ...LIVE_RESPONSE, fxvlSnapshot: FXVL_SNAPSHOT })
@@ -123,9 +164,10 @@ describe('useUsdCorrelations', () => {
 
     await waitFor(() => expect(result.current.correlations).toEqual(LIVE_RESPONSE.correlations));
     await waitFor(() => expect(result.current.error).toBe('provider unavailable'));
-    expect(result.current.correlations).toBeNull();
-    expect(result.current.rollingStats).toBeNull();
-    expect(result.current.fxvlSnapshot).toBeNull();
+    expect(result.current.correlations).toEqual(LIVE_RESPONSE.correlations);
+    expect(result.current.rollingStats).toEqual(LIVE_RESPONSE.rollingStats);
+    expect(result.current.fxvlSnapshot).toEqual(FXVL_SNAPSHOT);
+    expect(result.current.availability).toBe('refresh-delayed');
   });
 
   test('rejects responses that are not explicitly current', async () => {

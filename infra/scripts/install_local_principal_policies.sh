@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 API_POLICY_PATH="${INFRA_DIR}/iam/local-readiness-catalog-policy.json"
+API_ANALYST_POLICY_PATH="${INFRA_DIR}/iam/local-analyst-pdf-intake-policy.json"
 BRIDGE_POLICY_PATH="${INFRA_DIR}/iam/local-bridge-policy.json"
 POLICY_VALIDATOR="${SCRIPT_DIR}/validate_local_iam_policy.py"
 REQUIRED_ACCOUNT_ID="915328198276"
@@ -20,6 +21,7 @@ CREATE_BRIDGE_USER="false"
 REMOVE_LEGACY_HEARTBEAT_POLICY="false"
 LEGACY_HEARTBEAT_POLICY_NAME="MarketDashboardServiceHeartbeatsQuery"
 API_POLICY_NAME="MarketDashboardLocalReadinessCatalog"
+API_ANALYST_POLICY_NAME="MarketDashboardAnalystPdfIntake"
 API_POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${API_POLICY_NAME}"
 API_POLICY_OWNER_TAG="market-dashboard-readiness-v2"
 API_POLICY_PURPOSE_TAG="local-readiness-catalog"
@@ -28,7 +30,7 @@ usage() {
   printf '%s\n' \
     "Usage: $0 [--verify | --apply] --admin-profile PROFILE [options]" \
     "" \
-    "Install or verify the two intentionally separate least-privilege IAM policies." \
+    "Install or verify the intentionally separate least-privilege IAM policies." \
     "The dashboard API can query owned tables; the outbound bridge can only publish." \
     "" \
     "Options:" \
@@ -45,8 +47,8 @@ usage() {
     "                              After complete API verification, remove the exact obsolete policy" \
     "  --help                      Show this help" \
     "" \
-    "The API catalog uses a tagged customer-managed policy because the exact" \
-    "catalog plus the legacy inline grant exceeds AWS's aggregate inline-policy quota." \
+    "The API catalog uses a tagged customer-managed policy; the narrowly bounded" \
+    "Analyst PDF intake grant remains separate from that versioned catalog." \
     "This script never creates access keys or edits local AWS credential files."
 }
 
@@ -136,11 +138,15 @@ if [[ "$REGION" != "$REQUIRED_REGION" ]]; then
   echo "Refusing region ${REGION}; this installer is pinned to ${REQUIRED_REGION}." >&2
   exit 2
 fi
-if [[ "$SCOPE" != "bridge" && ! -f "$API_POLICY_PATH" ]]; then
-  echo "Dashboard API IAM policy document is missing: ${API_POLICY_PATH}" >&2
-  exit 2
+if [[ "$SCOPE" == "api" || "$SCOPE" == "both" ]]; then
+  for required_api_policy in "$API_POLICY_PATH" "$API_ANALYST_POLICY_PATH"; do
+    if [[ ! -f "$required_api_policy" ]]; then
+      echo "Dashboard API IAM policy document is missing: ${required_api_policy}" >&2
+      exit 2
+    fi
+  done
 fi
-if [[ "$SCOPE" != "api" && ! -f "$BRIDGE_POLICY_PATH" ]]; then
+if [[ ( "$SCOPE" == "bridge" || "$SCOPE" == "both" ) && ! -f "$BRIDGE_POLICY_PATH" ]]; then
   echo "Bridge IAM policy document is missing: ${BRIDGE_POLICY_PATH}" >&2
   exit 2
 fi
@@ -227,10 +233,11 @@ if [[ ! "$CALLER_ARN" =~ ^arn:aws:sts::${ACCOUNT_ID}:assumed-role/AWSReservedSSO
 fi
 
 POLICY_PATHS=()
-if [[ "$SCOPE" != "bridge" ]]; then
+if [[ "$SCOPE" == "api" || "$SCOPE" == "both" ]]; then
   POLICY_PATHS+=("$API_POLICY_PATH")
+  POLICY_PATHS+=("$API_ANALYST_POLICY_PATH")
 fi
-if [[ "$SCOPE" != "api" ]]; then
+if [[ "$SCOPE" == "bridge" || "$SCOPE" == "both" ]]; then
   POLICY_PATHS+=("$BRIDGE_POLICY_PATH")
 fi
 
@@ -662,7 +669,7 @@ simulate_statement_access() {
   local principal_arn="arn:aws:iam::${ACCOUNT_ID}:user/${user_name}"
   local failure_count=0
 
-  while IFS=$'\x1f' read -r action resource enclosing_operation leading_keys; do
+  while IFS=$'\x1f' read -r action resource enclosing_operation leading_keys s3_prefix; do
     [[ -n "$action" && -n "$resource" ]] || continue
     local decision
     local -a context_entries=()
@@ -674,6 +681,11 @@ simulate_statement_access() {
     if [[ -n "$leading_keys" ]]; then
       context_entries+=(
         "ContextKeyName=dynamodb:LeadingKeys,ContextKeyValues=${leading_keys},ContextKeyType=stringList"
+      )
+    fi
+    if [[ -n "$s3_prefix" ]]; then
+      context_entries+=(
+        "ContextKeyName=s3:prefix,ContextKeyValues=${s3_prefix},ContextKeyType=string"
       )
     fi
     if [[ "${#context_entries[@]}" -gt 0 ]]; then
@@ -739,11 +751,14 @@ for statement in policy["Statement"]:
             "dynamodb:LeadingKeys must be nonempty comma-safe strings for simulation."
         )
     rendered_leading_keys = ",".join(leading_keys)
+    s3_prefix = condition.get("StringEquals", {}).get("s3:prefix", "")
+    if not isinstance(s3_prefix, str) or "," in s3_prefix or "\x1f" in s3_prefix:
+        raise SystemExit("s3:prefix must be a comma-safe string for simulation.")
     for action in actions:
         for resource in resources:
             print(
                 "\x1f".join(
-                    [action, resource, enclosing, rendered_leading_keys]
+                    [action, resource, enclosing, rendered_leading_keys, s3_prefix]
                 )
             )
 PY
@@ -794,22 +809,28 @@ remove_legacy_heartbeat_policy() {
   echo "Removed and verified absent ${LEGACY_HEARTBEAT_POLICY_NAME} on ${user_name}."
 }
 
-if [[ "$SCOPE" != "bridge" ]]; then
+if [[ "$SCOPE" == "api" || "$SCOPE" == "both" ]]; then
   ensure_user "$API_USER" "false"
   install_or_check_api_managed_policy \
     "$API_USER" \
     "$API_POLICY_PATH"
   simulate_statement_access "$API_USER" "$API_POLICY_PATH"
   ensure_api_inline_policy_absent "$API_USER"
+  install_or_check_policy \
+    "$API_USER" \
+    "$API_ANALYST_POLICY_NAME" \
+    "$API_ANALYST_POLICY_PATH"
+  simulate_statement_access "$API_USER" "$API_ANALYST_POLICY_PATH"
   if [[ "$REMOVE_LEGACY_HEARTBEAT_POLICY" == "true" ]]; then
     remove_legacy_heartbeat_policy "$API_USER"
   fi
   if [[ "$MODE" == "apply" ]]; then
     simulate_statement_access "$API_USER" "$API_POLICY_PATH"
+    simulate_statement_access "$API_USER" "$API_ANALYST_POLICY_PATH"
   fi
 fi
 
-if [[ "$SCOPE" != "api" ]]; then
+if [[ "$SCOPE" == "bridge" || "$SCOPE" == "both" ]]; then
   ensure_user "$BRIDGE_USER" "$CREATE_BRIDGE_USER"
   install_or_check_policy \
     "$BRIDGE_USER" \
@@ -819,9 +840,9 @@ if [[ "$SCOPE" != "api" ]]; then
 fi
 
 echo "IAM ${MODE} completed for ${SCOPE} scope in account ${ACCOUNT_ID} (${REGION})."
-if [[ "$SCOPE" != "bridge" ]]; then
+if [[ "$SCOPE" == "api" || "$SCOPE" == "both" ]]; then
   echo "Configure the API with its ${API_USER} credentials."
 fi
-if [[ "$SCOPE" != "api" ]]; then
+if [[ "$SCOPE" == "bridge" || "$SCOPE" == "both" ]]; then
   echo "Configure HERMES_BRIDGE_AWS_PROFILE with credentials for ${BRIDGE_USER}; do not reuse the API principal."
 fi

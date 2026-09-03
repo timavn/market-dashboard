@@ -16,6 +16,8 @@ const {
   getCurrentCpiRelease,
   releaseKeyForEvent,
 } = require('../services/predictionMarketsIngest/cpiRelease');
+const { loadOfficialCpiFinals } = require('../services/predictionMarketsIngest/cpiOfficial');
+const { loadCpiBenchmarks } = require('../services/predictionMarketsIngest/cpiBenchmarkProvider');
 const {
   getLastSettledSpxCloseSession,
   getLastSettledWtiSession,
@@ -23,12 +25,17 @@ const {
   getPredictionMarketWatchlist,
   getRecentSettledSpxCloseSessions,
   getRecentSettledWtiSessions,
+  getSpxCoverSnapshot,
   getSpxCloseWorkbench,
   getWtiWorkbench,
 } = require('../services/predictionMarketsIngest/watchlistProvider');
 const {
   getOverviewSignalAvailability,
+  getRiskRangeHistoryAvailability,
 } = require('../services/predictionMarketsIngest/signalAvailabilityProvider');
+const {
+  getLatestSpxRtaRiskRange,
+} = require('../services/predictionMarketsIngest/rtaRiskRangeProvider');
 const {
   getCpiCatalogReconcilerStatus,
   reconcileCurrentCpiCatalog,
@@ -100,13 +107,15 @@ function eventDeadlineMs(event = {}) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function isLiveTradingEvent(event) {
+function isLiveTradingEvent(event, now = new Date()) {
   if (!event || event.source_api === 'IBKR_PORTFOLIO' || event.heldPosition) return false;
   if (nonLiveFlagsForEvent(event).some((flag) => NON_LIVE_TRADING_FLAGS.has(flag))) return false;
   const status = String(event.status || 'open').toLowerCase();
   if (!['open', 'active'].includes(status)) return false;
   const expiresAt = eventDeadlineMs(event);
-  if (expiresAt != null && expiresAt <= Date.now()) return false;
+  const observedAt = new Date(now).getTime();
+  if (!Number.isFinite(observedAt)) return false;
+  if (expiresAt != null && expiresAt <= observedAt) return false;
   return true;
 }
 
@@ -274,7 +283,7 @@ function buildCpiReadiness({
 } = {}) {
   const currentLive = events.filter((event) => (
     eventMatchesRelease(event, release)
-    && isLiveTradingEvent(event)
+    && isLiveTradingEvent(event, now)
     && isFreshQuote(event, now, maxAgeSeconds)
     && hasNativeExecutableBook(event)
   ));
@@ -786,6 +795,55 @@ router.get('/cpi/current', async (_req, res) => {
   }
 });
 
+// GET /api/prediction-markets/cpi/finals
+// Historical headline CPI is sourced from the official BLS CPI-U index. It is
+// separate from the live contract endpoint so an unavailable BLS request can
+// never make a stale or inferred market quote executable.
+router.get('/cpi/finals', async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    return res.json(await loadOfficialCpiFinals());
+  } catch (error) {
+    console.error('[PM Ingest] official CPI finals error:', error.message);
+    return res.status(502).json({
+      ok: false,
+      source: 'bls_official',
+      finals: [],
+      error: error.message || 'Official CPI finals are unavailable.',
+    });
+  }
+});
+
+// GET /api/prediction-markets/cpi/benchmarks?month=YYYY-MM
+// Research forecasts are isolated by provider. A failed source stays visible as
+// unavailable and can never be replaced by an inferred or expired value.
+router.get('/cpi/benchmarks', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const month = String(req.query.month || '').trim();
+  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) {
+    return res.status(400).json({
+      ok: false,
+      code: 'CPI_BENCHMARK_MONTH_INVALID',
+      error: 'CPI benchmark month must use YYYY-MM.',
+      sources: [],
+    });
+  }
+  try {
+    return res.json(await loadCpiBenchmarks({ month }));
+  } catch (error) {
+    console.error('[PM Ingest] CPI benchmark error:', error.message);
+    return res.status(error.code === 'CPI_BENCHMARK_MONTH_INVALID' ? 400 : 502).json({
+      ok: false,
+      code: error.code || 'CPI_BENCHMARKS_UNAVAILABLE',
+      error: error.message || 'CPI forecast benchmarks are unavailable.',
+      period: month,
+      metric: 'headline-cpi-yoy',
+      unit: 'percent',
+      sources: [],
+    });
+  }
+});
+
 // GET /api/prediction-markets/aggregated-events
 router.get('/aggregated-events', async (req, res) => {
   try {
@@ -851,7 +909,11 @@ router.get('/aggregated-events', async (req, res) => {
 router.get('/watchlist', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
-    const result = await getPredictionMarketWatchlist();
+    const forceRefresh = String(req.query?.forceRefresh || '').toLowerCase() === 'true';
+    const result = await getPredictionMarketWatchlist({
+      forceRefresh,
+      retryMissing: forceRefresh,
+    });
     res.json(result);
   } catch (err) {
     console.error('[PM Ingest] watchlist error:', err.message);
@@ -863,13 +925,45 @@ router.get('/watchlist', async (req, res) => {
   }
 });
 
+// GET /api/prediction-markets/overview/spx
+// Keep the SPX chart request independent from WTI/CPI history workloads.
+router.get('/overview/spx', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const result = await getPredictionMarketsOverview({
+      marketKeys: ['spx'],
+      getSignalAvailability: getOverviewSignalAvailability,
+      getRiskRangeHistory: getRiskRangeHistoryAvailability,
+      getSpxRtaRiskRange: getLatestSpxRtaRiskRange,
+    });
+    res.json({
+      ok: result.ok,
+      fetchedAt: result.fetchedAt,
+      market: result.markets.spx,
+      policy: result.policy,
+    });
+  } catch (err) {
+    console.error('[PM Ingest] SPX overview error:', err.message);
+    res.status(500).json({
+      ok: false,
+      code: 'SPX_OVERVIEW_ERROR',
+      error: err.message,
+      market: { status: 'unavailable', summary: null },
+    });
+  }
+});
+
 // GET /api/prediction-markets/overview
 // Each market is isolated so one unavailable provider or contract never blanks the hub.
 router.get('/overview', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
+    const excludeSpx = String(req.query.excludeSpx || '').toLowerCase() === 'true';
     const result = await getPredictionMarketsOverview({
+      marketKeys: excludeSpx ? ['cpi', 'wtiDaily', 'wtiWeekly'] : undefined,
       getSignalAvailability: getOverviewSignalAvailability,
+      getRiskRangeHistory: getRiskRangeHistoryAvailability,
+      getSpxRtaRiskRange: getLatestSpxRtaRiskRange,
     });
     res.json(result);
   } catch (err) {
@@ -961,7 +1055,7 @@ router.get('/wti/recent-settled', async (req, res) => {
 });
 
 // GET /api/prediction-markets/spx-close
-// Dedicated live, no-store snapshot for the broker-enabled 4 p.m. cash S&P ladder.
+// Dedicated live, no-store snapshot for the direct 4 p.m. cash S&P ladder.
 router.get('/spx-close', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
@@ -974,6 +1068,28 @@ router.get('/spx-close', async (req, res) => {
       ok: false,
       code: err.code || 'SPX_LIVE_UNAVAILABLE',
       error: err.message,
+      markets: [],
+    });
+  }
+});
+
+// GET /api/prediction-markets/spx-close/cover
+// Canonical compact-cover ladder. This response is either a verified direct
+// Kalshi ladder or an explicitly historical closing quote snapshot; it never
+// returns settled outcome rows.
+router.get('/spx-close/cover', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const result = await getSpxCoverSnapshot();
+    res.json(result);
+  } catch (err) {
+    console.error('[PM Ingest] SPX cover error:', err.message);
+    res.status(503).json({
+      ok: false,
+      mode: 'unavailable',
+      code: err.code || 'SPX_COVER_UNAVAILABLE',
+      error: err.message,
+      executable: false,
       markets: [],
     });
   }

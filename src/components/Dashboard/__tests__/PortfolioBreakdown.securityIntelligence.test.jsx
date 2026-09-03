@@ -1,12 +1,20 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import PortfolioBreakdown from '../PortfolioBreakdown';
+import PortfolioBreakdown, { calculateLeveragedProductsFitScale } from '../PortfolioBreakdown';
+import PersistentSurface from '../../common/PersistentSurface';
 import { MarketDataService } from '../../../services/api/marketDataService';
+import { getLeveragedProducts } from '../../../constants/leveragedProductCatalog';
+
+const {
+  buildSecurityIntelligence,
+  manifestChecksumForArtifacts,
+} = require('../../../utils/securityIntelligence.cjs');
 
 jest.mock('../../../services/api/marketDataService', () => ({
   MarketDataService: {
     getSecurityIntelligence: jest.fn(),
+    getLeveragedProductOverlap: jest.fn(),
     getSecurityRiskMetrics: jest.fn(),
     getVolatilitySnapshot: jest.fn(),
     getUsdCorrelations: jest.fn(),
@@ -53,6 +61,30 @@ const priorDate = () => {
   return value.toISOString().slice(0, 10);
 };
 
+const indexedResearchManifest = (productKey, date, eventCount = 0) => {
+  const artifacts = [{
+    artifactId: `${productKey}-${date}`,
+    stage: 'indexed',
+    eventCount,
+    parserVersion: 'portfolio-breakdown-test',
+  }];
+  return {
+    marketDate: date,
+    productKey,
+    schemaVersion: 1,
+    state: 'indexed',
+    parserVersion: 'portfolio-breakdown-test',
+    artifactCount: 1,
+    receivedCount: 1,
+    parsedCount: 1,
+    validatedCount: 1,
+    indexedCount: 1,
+    entityEventCount: eventCount,
+    manifestChecksum: manifestChecksumForArtifacts(artifacts),
+    artifacts,
+  };
+};
+
 const expectCellProvenance = (cell, expected) => {
   const accessibleProvenance = [
     cell?.getAttribute('title'),
@@ -60,6 +92,12 @@ const expectCellProvenance = (cell, expected) => {
   ].filter(Boolean).join(' · ');
   expect(accessibleProvenance).toEqual(expect.stringMatching(expected));
 };
+
+test('shrinks a levered-products row only when its rendered width exceeds the fixed cell', () => {
+  expect(calculateLeveragedProductsFitScale(220, 180)).toBe(1);
+  expect(calculateLeveragedProductsFitScale(200, 250)).toBeCloseTo(196 / 250, 6);
+  expect(calculateLeveragedProductsFitScale(0, 250)).toBe(1);
+});
 
 const portfolioData = {
   summary: { totalValue: 100000 },
@@ -286,30 +324,115 @@ const currentEnvelope = () => {
   };
 };
 
+const clozEnvelope = () => {
+  const today = marketDate();
+  const envelope = currentEnvelope();
+  envelope.products = [
+    {
+      id: 'risk-ranges',
+      label: 'Risk Ranges',
+      status: 'indexed',
+      marketDate: today,
+      eventCount: 2,
+    },
+    ...envelope.products,
+  ];
+  envelope.bySymbol = {
+    CLOZ: {
+      symbol: 'CLOZ',
+      state: 'complete',
+      decision: {},
+      supplementalRange: null,
+      exposures: [{ id: 'credit', type: 'factor', label: 'Credit' }],
+      directReferences: [],
+      inferredReferences: [
+        {
+          id: 'cloz-risk-ranges-credit-map',
+          marketDate: today,
+          productId: 'risk-ranges',
+          productLabel: 'Risk Ranges',
+          kind: 'risk_range',
+          excerpt: 'Investment Grade Corporate Bond ETF',
+          matchedText: 'Investment Grade',
+          matchType: 'inferred_exposure',
+          exposureId: 'credit',
+          exposureType: 'factor',
+          exposureLabel: 'Credit',
+          qualityStatus: 'indexed',
+          publishedAt: `${today}T11:20:40Z`,
+          sourceUrl: '/research/risk-ranges',
+        },
+        {
+          id: 'cloz-early-look-credit-map',
+          marketDate: today,
+          productId: 'early-look',
+          productLabel: 'Early Look',
+          kind: 'supplemental_risk_range',
+          excerpt: 'High Yield (HYG)',
+          matchedText: 'High Yield',
+          matchType: 'inferred_exposure',
+          exposureId: 'credit',
+          exposureType: 'factor',
+          exposureLabel: 'Credit',
+          qualityStatus: 'indexed',
+          publishedAt: `${today}T11:48:26Z`,
+          sourceUrl: '/research/early-look',
+          decisionEligible: false,
+        },
+      ],
+      history: [
+        {
+          marketDate: priorDate(),
+          directReferences: [],
+          inferredReferences: [
+            {
+              id: 'cloz-prior-credit-map',
+              productId: 'the-macro-show',
+              productLabel: 'Macro Show',
+              kind: 'factor_mention',
+              excerpt: 'Credit spreads remain contained.',
+              matchedText: 'Credit',
+              matchType: 'inferred_exposure',
+              exposureId: 'credit',
+              exposureType: 'factor',
+              exposureLabel: 'Credit',
+              qualityStatus: 'validated',
+            },
+          ],
+        },
+      ],
+      coverage: { state: 'complete', reasons: [] },
+    },
+  };
+  return envelope;
+};
+
 const registeredResearchProducts = [
   ['risk-ranges', 'Risk Ranges'],
   ['early-look', 'Early Look'],
-  ['crypto-quant', 'Crypto Quant'],
   ['bitcoin-trend-tracker', 'Bitcoin Tracker'],
   ['portfolio-solutions', 'Portfolio Solutions'],
-  ['momo-tracker', 'MOMO Tracker'],
   ['signal-strength', 'Signal Strength'],
   ['real-time-alert', 'Real-Time Alerts'],
   ['the-macro-show', 'Macro Show'],
   ['the-call', 'The Call'],
-  ['volume', 'Volume / Market Structure'],
-  ['market-structure', 'Market Situation Report'],
-  ['cftc-positioning', 'CFTC Positioning'],
   ['etf-pro', 'ETF Pro'],
   ['investing-ideas', 'Investing Ideas'],
 ];
 
 beforeEach(() => {
   MarketDataService.getSecurityIntelligence.mockReset();
+  MarketDataService.getLeveragedProductOverlap.mockReset();
   MarketDataService.getSecurityRiskMetrics.mockReset();
   MarketDataService.getVolatilitySnapshot.mockReset();
   MarketDataService.getUsdCorrelations.mockReset();
   MarketDataService.getSecurityIntelligence.mockResolvedValue(currentEnvelope());
+  MarketDataService.getLeveragedProductOverlap.mockResolvedValue({
+    available: false,
+    status: 'unavailable',
+    weightedOverlapPct: null,
+    fromCache: false,
+  });
   MarketDataService.getSecurityRiskMetrics.mockResolvedValue({
     status: 'available',
     historicalOnly: true,
@@ -690,7 +813,7 @@ test('does not refetch bulk intelligence when only portfolio snapshot timestamps
   });
   fireEvent.click(screen.getAllByRole('button', { name: 'Show research intelligence for GLD' })[0]);
   const panel = screen.getByLabelText('Research intelligence for GLD');
-  await waitFor(() => expect(within(panel).getByText('BUY')).toBeInTheDocument());
+  await waitFor(() => expect(within(panel).getAllByText('BULLISH').length).toBeGreaterThanOrEqual(2));
   await waitFor(() => expect(within(panel).getByText('0.42')).toBeInTheDocument());
 
   view.rerender(
@@ -714,12 +837,13 @@ test('does not refetch bulk intelligence when only portfolio snapshot timestamps
   );
 
   await waitFor(() => {
-    expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1);
+    expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(2);
     expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getVolatilitySnapshot).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getUsdCorrelations).toHaveBeenCalledTimes(1);
   });
-  expect(within(screen.getByLabelText('Research intelligence for GLD')).getByText('BUY')).toBeInTheDocument();
+  expect(within(screen.getByLabelText('Research intelligence for GLD')).getAllByText('BULLISH').length)
+    .toBeGreaterThanOrEqual(2);
   expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledWith(expect.objectContaining({
     symbols: ['GLD', 'NEM'],
     historyDays: 5,
@@ -836,7 +960,7 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
   expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledWith(expect.objectContaining({
     symbols: ['GLD', 'NEM'],
-    historyDays: 5,
+    historyDays: 0,
   }));
   expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledWith(
     ['GLD', 'NEM'],
@@ -874,7 +998,7 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(2));
   expect(MarketDataService.getSecurityIntelligence.mock.calls[1][0]).toEqual(expect.objectContaining({
     symbols: ['GLD', 'NEM'],
-    historyDays: 5,
+    historyDays: 0,
   }));
 
   const toggles = screen.getAllByRole('button', { name: 'Show research intelligence for GLD' });
@@ -892,14 +1016,22 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(firstPane.querySelector('.pcv2-ledger-bottom-spacer')).not.toBeInTheDocument();
 
   const firstPanel = screen.getByLabelText('Research intelligence for GLD');
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(3));
+  expect(MarketDataService.getSecurityIntelligence.mock.calls[2][0]).toEqual(expect.objectContaining({
+    symbols: ['GLD', 'NEM'],
+    historyDays: 5,
+  }));
   expect(firstExpandedRow).toHaveClass('is-expanded');
   firstPane.scrollTop = 260;
   fireEvent.scroll(firstPane);
   expect(firstPane.scrollTop).toBe(260);
 
-  await waitFor(() => expect(within(firstPanel).getByText('BUY')).toBeInTheDocument());
-  expect(within(firstPanel).getByText('BULLISH')).toBeInTheDocument();
-  expect(within(firstPanel).getByText('2,900–3,010')).toBeInTheDocument();
+  await waitFor(() => expect(within(firstPanel).getAllByText('BULLISH').length).toBeGreaterThanOrEqual(2));
+  expect(within(firstPanel).getAllByText('BULLISH').length).toBeGreaterThanOrEqual(2);
+  expect(within(firstPanel).getByText('Levered products')).toBeInTheDocument();
+  expect(within(firstPanel).getByRole('button', {
+    name: 'View UGLD +2× details for GLD',
+  })).toBeInTheDocument();
   expect(within(firstPanel).getByText('ADDED')).toBeInTheDocument();
   expect(within(firstPanel).getByText('+3 · ATH')).toBeInTheDocument();
   expect(within(firstPanel).getByText('0.42')).toBeInTheDocument();
@@ -912,7 +1044,8 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(within(firstPanel).getByTitle('A stop reference requires verified IBKR average cost and historical ATR14.')).toHaveTextContent('—');
   expect(firstPanel.querySelector('.pcv2-intel-meta')).not.toBeInTheDocument();
 
-  const tradeCell = within(firstPanel).getByText('BUY').closest('.pcv2-intel-cell');
+  const decisionValues = within(firstPanel).getByLabelText('GLD decision intelligence');
+  const [tradeCell] = [...decisionValues.children];
   const betaCell = within(firstPanel).getByText('0.42').closest('.pcv2-intel-cell');
   const zScoreCell = within(firstPanel).getByText('+1.25').closest('.pcv2-intel-cell');
   expectCellProvenance(tradeCell, /Momo Tracker · [A-Z][a-z]{2} \d{1,2}/);
@@ -936,10 +1069,13 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(within(firstPanel).queryByText('Today’s references')).not.toBeInTheDocument();
   const callRow = within(firstPanel).getByText('The Call').closest('.pcv2-intel-reference-row');
   const macroRow = within(firstPanel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
-  expect(within(callRow).getByText('1 fact for GLD')).toBeInTheDocument();
-  expect(within(macroRow).getByText('1 fact for GLD')).toBeInTheDocument();
+  expect(within(callRow).getByText('Gold remains a preferred long.')).toBeInTheDocument();
+  expect(within(macroRow).getByText('N/A')).toBeInTheDocument();
+  expect(within(macroRow).queryByRole('button', {
+    name: 'View Macro Show context for GLD',
+  })).not.toBeInTheDocument();
   expect(within(callRow).getByText(/^\d{2}:\d{2}$/)).toBeInTheDocument();
-  expect(within(macroRow).getByText(/^\d{2}:\d{2}$/)).toBeInTheDocument();
+  expect(within(macroRow).getByText('—')).toBeInTheDocument();
 
   const primaryDecisionHeaders = within(firstPanel).getByLabelText('Decision intelligence headers');
   expect(within(primaryDecisionHeaders).getAllByText(/.+/).map((node) => node.textContent)).toEqual([
@@ -967,7 +1103,7 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   const secondaryDecisionHeaders = within(firstPanel)
     .getByLabelText('Decision intelligence secondary headers');
   expect(within(secondaryDecisionHeaders).getAllByText(/.+/).map((node) => node.textContent)).toEqual([
-    'Primary range',
+    'Levered products',
     'Signal strength',
     'RR structure',
     'Other exposure',
@@ -1024,7 +1160,190 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(firstPane.scrollTop).toBe(scrollTopBeforeCollapse);
 });
 
-test('renders indexed products without evidence as N/A with a disabled source control', async () => {
+test('resumes retained portfolio research without an activation-only request', async () => {
+  const view = render(
+    <PersistentSurface active>
+      <PortfolioBreakdown portfolioData={portfolioData} />
+    </PersistentSurface>,
+  );
+
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(MarketDataService.getVolatilitySnapshot).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(MarketDataService.getUsdCorrelations).toHaveBeenCalledTimes(1));
+
+  view.rerender(
+    <PersistentSurface active={false}>
+      <PortfolioBreakdown portfolioData={portfolioData} />
+    </PersistentSurface>,
+  );
+  view.rerender(
+    <PersistentSurface active>
+      <PortfolioBreakdown portfolioData={portfolioData} />
+    </PersistentSurface>,
+  );
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1);
+  expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1);
+  expect(MarketDataService.getVolatilitySnapshot).toHaveBeenCalledTimes(1);
+  expect(MarketDataService.getUsdCorrelations).toHaveBeenCalledTimes(1);
+});
+
+test('keeps a retained volatility reference visible with explicit refresh-delayed provenance', async () => {
+  const now = Date.now();
+  MarketDataService.getVolatilitySnapshot.mockResolvedValue({
+    lastUpdated: new Date(now - 2 * 60 * 1000).toISOString(),
+    GVZ: {
+      lastPx: 18.25,
+      availability: 'reference',
+      freshness: 'refresh-delayed',
+      refreshDelayed: true,
+      asOf: new Date(now - 2 * 60 * 1000).toISOString(),
+      lastVerifiedAt: new Date(now - 60 * 1000).toISOString(),
+      retainedUntil: new Date(now + 29 * 60 * 1000).toISOString(),
+      sourceLabel: 'Cboe delayed',
+      quoteMode: 'delayed',
+    },
+  });
+  render(<PortfolioBreakdown portfolioData={portfolioData} />);
+
+  const toggles = await screen.findAllByRole('button', { name: 'Show research intelligence for GLD' });
+  fireEvent.click(toggles[0]);
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  const volatilityCell = await within(panel).findByLabelText(
+    /GVZ 18\.25 · GVZ · Refresh delayed · last verified/i,
+  );
+
+  expect(volatilityCell).toHaveTextContent('GVZ 18.25');
+  expect(volatilityCell).toHaveAttribute('title', expect.stringMatching(/Refresh delayed · last verified/i));
+});
+
+test('shows leveraged product links in the secondary card cell and opens a centered product modal', async () => {
+  render(<PortfolioBreakdown portfolioData={portfolioData} />);
+
+  const showResearchButtons = await screen.findAllByRole('button', {
+    name: 'Show research intelligence for GLD',
+  });
+  fireEvent.click(showResearchButtons[0]);
+
+  const researchPanel = await screen.findByLabelText('Research intelligence for GLD');
+  expect(within(researchPanel).getByText('Levered products')).toBeInTheDocument();
+  const panel = within(researchPanel).getByLabelText('GLD supplemental decision intelligence');
+  const fittedProducts = within(panel).getByTestId('leveraged-products-GLD');
+  expect(fittedProducts).toContainElement(fittedProducts.querySelector('.pcv2-leveraged-products-content'));
+  expect(fittedProducts).toHaveAttribute('data-fit-scale');
+  const productLink = within(panel).getByRole('button', {
+    name: 'View UGLD +2× details for GLD',
+  });
+  expect(productLink).toBeInTheDocument();
+  expect(productLink).toHaveClass('is-positive');
+  expect(productLink).not.toHaveClass('is-proxy');
+  expect(within(productLink).getByText('UGLD')).toHaveClass('pcv2-leveraged-product-ticker');
+
+  const proxyProductLink = within(panel).getByRole('button', {
+    name: 'View UGL +2× details for GLD',
+  });
+  expect(proxyProductLink).toHaveClass('is-proxy');
+  expect(within(proxyProductLink).getByText('UGL')).toHaveClass('pcv2-leveraged-product-ticker');
+
+  fireEvent.click(productLink);
+  const modal = screen.getByTestId('leveraged-product-modal');
+  expect(modal).toHaveAttribute('role', 'dialog');
+  expect(within(modal).getByRole('heading', { name: 'UGLD' })).toBeInTheDocument();
+  expect(within(modal).getByText('Tracks')).toBeInTheDocument();
+  expect(within(modal).getByText('GLD fit')).toBeInTheDocument();
+  expect(within(modal).getByText('Direct')).toBeInTheDocument();
+  expect(within(modal).getByText('Daily reset · Multi-day returns may diverge.')).toBeInTheDocument();
+  expect(within(modal).queryByText('Live quote required')).not.toBeInTheDocument();
+  const positiveDirection = within(modal).getByTestId('leveraged-product-direction');
+  expect(positiveDirection).toHaveClass('is-positive');
+  expect(positiveDirection).toHaveTextContent('+2× daily');
+  expect(positiveDirection).not.toHaveTextContent(/Long|Inverse/);
+
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByTestId('leveraged-product-modal')).not.toBeInTheDocument();
+
+  const inverseProductLink = within(panel).getByRole('button', {
+    name: 'View GLL −2× details for GLD',
+  });
+  expect(inverseProductLink).toHaveClass('is-negative');
+  fireEvent.click(inverseProductLink);
+  const negativeDirection = screen.getByTestId('leveraged-product-direction');
+  expect(negativeDirection).toHaveClass('is-negative');
+  expect(negativeDirection).toHaveTextContent('−2× daily');
+  expect(negativeDirection).not.toHaveTextContent(/Long|Inverse/);
+});
+
+test('labels IAK broad-financial products as loose proxies with exact issuer links', () => {
+  const products = getLeveragedProducts('IAK');
+  expect(products.map((product) => product.ticker)).toEqual(['UYG', 'FAS', 'FAZ']);
+
+  products.forEach((product) => {
+    expect(product).toMatchObject({
+      reference: 'Financial Select Sector Index',
+      matchType: 'proxy',
+      fitLabel: 'Loose proxy',
+      fitNote: 'Broad financials; insurance is only a minority of this benchmark.',
+      overlapReferenceSymbol: 'XLF',
+    });
+  });
+
+  expect(products.find((product) => product.ticker === 'UYG')?.issuerUrl)
+    .toBe('https://www.proshares.com/our-etfs/leveraged-and-inverse/uyg');
+  expect(products.find((product) => product.ticker === 'FAZ')?.issuerUrl)
+    .toBe('https://www.direxion.com/product/daily-financial-bull-bear-3x-etfs');
+});
+
+test('shows current verified weighted holdings overlap beside an IAK proxy', async () => {
+  MarketDataService.getLeveragedProductOverlap.mockResolvedValueOnce({
+    available: true,
+    status: 'available',
+    baseSymbol: 'IAK',
+    referenceSymbol: 'XLF',
+    weightedOverlapPct: 9.6,
+    sharedHoldings: 17,
+    baseHoldings: 57,
+    referenceHoldings: 77,
+    asOf: marketDate(),
+    method: 'weighted_constituent_overlap',
+    fromCache: false,
+    sources: [
+      { symbol: 'IAK', provider: 'iShares', asOf: marketDate() },
+      { symbol: 'XLF', provider: 'State Street', asOf: marketDate() },
+    ],
+  });
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [{
+      ...portfolioData.holdings[0],
+      symbol: 'IAK',
+      description: 'iShares U.S. Insurance ETF',
+    }],
+  }} />);
+
+  fireEvent.click(await screen.findByRole('button', {
+    name: 'Show research intelligence for IAK',
+  }));
+  const panel = await screen.findByLabelText('IAK supplemental decision intelligence');
+  fireEvent.click(within(panel).getByRole('button', {
+    name: 'View FAZ −3× details for IAK',
+  }));
+
+  const modal = screen.getByTestId('leveraged-product-modal');
+  expect(await within(modal).findByText('Loose proxy · 10% overlap')).toBeInTheDocument();
+  expect(within(modal).getByText(/17 shared holdings/)).toBeInTheDocument();
+  expect(MarketDataService.getLeveragedProductOverlap).toHaveBeenCalledWith(expect.objectContaining({
+    baseSymbol: 'IAK',
+    referenceSymbol: 'XLF',
+  }));
+});
+
+test('renders indexed products without evidence as N/A with a disabled detail summary', async () => {
   const envelope = currentEnvelope();
   envelope.bySymbol.GLD.inferredReferences = [];
   MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
@@ -1041,13 +1360,12 @@ test('renders indexed products without evidence as N/A with a disabled source co
   const macroRow = within(panel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
   expect(within(macroRow).getByText('N/A')).toBeInTheDocument();
   expect(within(macroRow).queryByRole('button')).not.toBeInTheDocument();
-  expect(within(macroRow).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
+  expect(within(macroRow).queryByText('VIEW ›')).not.toBeInTheDocument();
   const callRow = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
-  expect(callRow.children).toHaveLength(4);
+  expect(callRow.children).toHaveLength(3);
   expect(callRow.children[0]).toHaveClass('pcv2-intel-span-2');
   expect(callRow.children[1]).toHaveClass('pcv2-intel-span-2');
-  expect(callRow.children[2]).toHaveClass('pcv2-intel-span-14');
-  expect(callRow.children[3]).toHaveClass('pcv2-intel-span-2');
+  expect(callRow.children[2]).toHaveClass('pcv2-intel-span-16');
 });
 
 test('renders the registered product roster once in registry order', async () => {
@@ -1058,7 +1376,13 @@ test('renders the registered product roster once in registry order', async () =>
     label,
     status: 'indexed',
     marketDate: today,
-  }));
+  })).concat([
+    { id: 'cftc-positioning', label: 'CFTC Positioning', status: 'indexed', marketDate: today },
+    { id: 'crypto-quant', label: 'Crypto Quant', status: 'indexed', marketDate: today },
+    { id: 'market-structure', label: 'Market Situation Report', status: 'indexed', marketDate: today },
+    { id: 'momo-tracker', label: 'MOMO Tracker', status: 'indexed', marketDate: today },
+    { id: 'volume', label: 'Volume / Market Structure', status: 'indexed', marketDate: today },
+  ]);
   MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
 
   render(<PortfolioBreakdown portfolioData={{
@@ -1077,7 +1401,309 @@ test('renders the registered product roster once in registry order', async () =>
   registeredResearchProducts.forEach(([, label], index) => {
     expect(within(rows[index]).getByText(label)).toBeInTheDocument();
   });
+  expect(rows).toHaveLength(registeredResearchProducts.length);
+  expect(within(panel).queryByText('CFTC Positioning')).not.toBeInTheDocument();
+  expect(within(panel).queryByText('Crypto Quant')).not.toBeInTheDocument();
+  expect(within(panel).queryByText('Market Situation Report')).not.toBeInTheDocument();
+  expect(within(panel).queryByText('MOMO Tracker')).not.toBeInTheDocument();
+  expect(within(panel).queryByText('Volume / Market Structure')).not.toBeInTheDocument();
   expect(within(panel).queryByText('unknown')).not.toBeInTheDocument();
+});
+
+test('shows only structured PM evidence and suppresses timestamp collisions', async () => {
+  const today = marketDate();
+  const historyDate = priorDate();
+  const timestampSnapshots = (date) => [
+    {
+      date,
+      snapshotType: 'signal-strength',
+      publishedAt: `${date}T16:29:00Z`,
+      article: {
+        bodyText: `View it in your browser ${date} 12:29 PM EDT Signal Strength Stocks.`,
+      },
+      data: { added: ['AFRM'], removed: [] },
+    },
+    {
+      date,
+      snapshotType: 'real-time-alert',
+      publishedAt: `${date}T19:36:00Z`,
+      article: { bodyText: `View it in your browser ${date} 03:36 PM EDT SELL SIGNAL.` },
+      data: {},
+    },
+    {
+      date,
+      snapshotType: 'etf-pro',
+      publishedAt: `${date}T18:05:00Z`,
+      article: { bodyText: `View it in your browser ${date} 02:05 PM EDT ETF Pro Plus.` },
+      data: {},
+    },
+  ];
+  const envelope = buildSecurityIntelligence({
+    symbols: ['PM'],
+    marketDate: today,
+    historyDays: 1,
+    now: new Date(`${today}T22:00:00Z`),
+    snapshots: [
+      ...timestampSnapshots(today),
+      ...timestampSnapshots(historyDate),
+      {
+        date: today,
+        snapshotType: 'investing-ideas',
+        publishedAt: `${today}T20:00:00Z`,
+        data: {
+          positions: [{
+            ticker: 'PM',
+            side: 'Long',
+            prevClose: 189.57,
+            lrr: 182,
+            hrr: 201,
+          }],
+        },
+      },
+    ],
+    productManifests: [
+      indexedResearchManifest('signal-strength', today),
+      indexedResearchManifest('real-time-alert', today),
+      indexedResearchManifest('etf-pro', today),
+      indexedResearchManifest('investing-ideas', today),
+    ],
+    riskRangeEnvelope: { status: 'stale', available: false, ranges: {} },
+  });
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [{
+      ...portfolioData.holdings[0],
+      symbol: 'PM',
+      conid: 'PM-1',
+      description: 'Philip Morris International',
+      price: 186,
+    }],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for PM' }));
+
+  const panel = screen.getByLabelText('Research intelligence for PM');
+  await within(panel).findByText('Investing Ideas');
+  const rowFor = (productId) => within(panel).getByTestId(
+    new RegExp(`research-product-row-.*-${productId}$`),
+  );
+  ['signal-strength', 'real-time-alert', 'etf-pro'].forEach((productId) => {
+    const row = rowFor(productId);
+    expect(within(row).getByText('N/A')).toBeInTheDocument();
+    expect(within(row).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  const investingRow = rowFor('investing-ideas');
+  expect(within(investingRow).getByText('PM Investing Ideas risk range is 182–201.')).toBeInTheDocument();
+  fireEvent.click(within(investingRow).getByRole('button', {
+    name: 'View Investing Ideas facts for PM',
+  }));
+  const context = within(panel).getByRole('region', { name: 'Investing Ideas facts for PM' });
+  expect(within(context).getByText('PM Investing Ideas position is LONG.')).toBeInTheDocument();
+  expect(within(panel).getAllByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveLength(1);
+  await waitFor(() => expect(within(panel).getByText(/Previous 5 market days/))
+    .toHaveTextContent('Previous 5 market days (0 product rows)'));
+});
+
+test('shows MOMO Tracker only for securities with direct MOMO coverage', async () => {
+  const today = marketDate();
+  const envelope = currentEnvelope();
+  envelope.products.push({
+    id: 'momo-tracker',
+    label: 'MOMO Tracker',
+    status: 'indexed',
+    marketDate: today,
+    eventCount: 1,
+  });
+  envelope.bySymbol.GOOGL = {
+    symbol: 'GOOGL',
+    state: 'complete',
+    decision: {},
+    supplementalRange: null,
+    exposures: [],
+    directReferences: [{
+      id: 'googl-momo-direct',
+      marketDate: today,
+      productId: 'momo-tracker',
+      productLabel: 'MOMO Tracker',
+      kind: 'tracker_trade',
+      direction: 'BULLISH',
+      value: 'BULLISH',
+      excerpt: 'Trade BULLISH; Buy Trade 317; Sell Trade 377',
+      matchedText: 'GOOGL',
+      matchType: 'direct',
+      qualityStatus: 'indexed',
+      publishedAt: `${today}T11:47:44Z`,
+      sourceUrl: '/research/momo-tracker',
+    }],
+    inferredReferences: [],
+    history: [],
+    coverage: { state: 'complete', reasons: [] },
+  };
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [
+      {
+        ...portfolioData.holdings[0],
+        symbol: 'GOOGL',
+        description: 'Alphabet',
+      },
+      portfolioData.holdings[2],
+    ],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GOOGL' }));
+  const googlPanel = screen.getByLabelText('Research intelligence for GOOGL');
+  await within(googlPanel).findByText('FULL');
+  const momoRow = within(googlPanel).getByText('MOMO Tracker').closest('.pcv2-intel-reference-row');
+  expect(within(momoRow).getByText('GOOGL trade signal is BULLISH.')).toBeInTheDocument();
+  expect(within(googlPanel).queryByText('Market Situation Report')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for NEM' }));
+  const nemPanel = screen.getByLabelText('Research intelligence for NEM');
+  await within(nemPanel).findByText('FULL');
+  expect(within(nemPanel).queryByText('MOMO Tracker')).not.toBeInTheDocument();
+  expect(within(nemPanel).queryByText('Market Situation Report')).not.toBeInTheDocument();
+});
+
+test('renders only canonical bias labels when tracker direction conflicts with its structured value', async () => {
+  const today = marketDate();
+  const envelope = currentEnvelope();
+  envelope.products.push(
+    {
+      id: 'risk-ranges',
+      label: 'Risk Ranges',
+      status: 'indexed',
+      marketDate: today,
+      eventCount: 1,
+    },
+    {
+      id: 'momo-tracker',
+      label: 'MOMO Tracker',
+      status: 'indexed',
+      marketDate: today,
+      eventCount: 1,
+    },
+  );
+  envelope.bySymbol = {
+    AMZN: {
+      ...envelope.bySymbol.GLD,
+      symbol: 'AMZN',
+      decision: {
+        ...envelope.bySymbol.GLD.decision,
+        trade: {
+          status: 'available',
+          value: 'BULLISH',
+          sourceId: 'momo-tracker',
+          sourceLabel: 'MOMO Tracker',
+          sourceDate: today,
+        },
+        trend: {
+          status: 'available',
+          value: 'BULLISH',
+          sourceId: 'risk-ranges',
+          sourceLabel: 'Risk Ranges',
+          sourceDate: today,
+        },
+      },
+      directReferences: [
+        {
+          id: 'amzn-momo-negative-narrative',
+          marketDate: today,
+          productId: 'momo-tracker',
+          productLabel: 'MOMO Tracker',
+          kind: 'trade_signal',
+          direction: 'NEGATIVE',
+          value: 'BULLISH',
+          matchedText: 'AMZN',
+          excerpt: 'AMZN: {"trend":"BULLISH","buyTrade":"258","sellTrade":"300"}',
+          matchType: 'direct',
+          qualityStatus: 'indexed',
+          publishedAt: `${today}T13:00:00Z`,
+          sourceUrl: '/research/momo-tracker',
+        },
+        {
+          id: 'amzn-risk-range',
+          marketDate: today,
+          productId: 'risk-ranges',
+          productLabel: 'Risk Ranges',
+          kind: 'primary_risk_range',
+          direction: 'NEGATIVE',
+          value: { lrr: 258, hrr: 300, trend: 'BULLISH' },
+          matchedText: 'AMZN',
+          excerpt: 'AMZN LRR 258 – HRR 300; Trend BULLISH',
+          matchType: 'direct',
+          qualityStatus: 'indexed',
+          publishedAt: `${today}T12:00:00Z`,
+          sourceUrl: '/research/risk-ranges',
+        },
+      ],
+      inferredReferences: [],
+      history: [],
+    },
+  };
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [{
+      ...portfolioData.holdings[0],
+      symbol: 'AMZN',
+      description: 'Amazon',
+    }],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for AMZN' }));
+  const panel = screen.getByLabelText('Research intelligence for AMZN');
+  await waitFor(() => expect(within(panel).getAllByText('BULLISH').length).toBeGreaterThanOrEqual(2));
+
+  const decisionValues = within(panel).getByLabelText('AMZN decision intelligence');
+  expect(within(decisionValues.children[0]).getByText('BULLISH')).toBeInTheDocument();
+  expect(within(decisionValues.children[1]).getByText('BULLISH')).toBeInTheDocument();
+  expect(within(panel).getByText('AMZN trade signal is BULLISH.')).toBeInTheDocument();
+  const riskRangeRow = within(panel).getByTestId(
+    /research-product-row-.*-risk-ranges$/,
+  );
+  fireEvent.click(within(riskRangeRow).getByRole('button', {
+    name: 'View Risk Ranges facts for AMZN',
+  }));
+  expect(within(panel).getByText('AMZN trend is BULLISH.')).toBeInTheDocument();
+  expect(within(panel).queryByText('NEGATIVE')).not.toBeInTheDocument();
+});
+
+test('shows a compact loading state before the expanded research payload arrives', async () => {
+  let resolveCurrent;
+  const pendingCurrent = new Promise((resolve) => {
+    resolveCurrent = resolve;
+  });
+  MarketDataService.getSecurityIntelligence.mockReturnValueOnce(pendingCurrent);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [portfolioData.holdings[0]],
+  }} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  expect(panel).toHaveAttribute('aria-busy', 'true');
+  expect(within(panel).getByRole('status')).toHaveTextContent('Loading verified research');
+  expect(within(panel).queryByTestId(/research-product-row-/)).not.toBeInTheDocument();
+
+  resolveCurrent(currentEnvelope());
+  await waitFor(() => expect(within(panel).getAllByText('BULLISH').length).toBeGreaterThanOrEqual(2));
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(2));
+  expect(MarketDataService.getSecurityIntelligence.mock.calls[0][0]).toEqual(expect.objectContaining({
+    historyDays: 0,
+  }));
+  expect(MarketDataService.getSecurityIntelligence.mock.calls[1][0]).toEqual(expect.objectContaining({
+    historyDays: 5,
+  }));
 });
 
 test('fails closed with an unavailable roster when the bulk research request fails', async () => {
@@ -1097,16 +1723,17 @@ test('fails closed with an unavailable roster when the bulk research request fai
   expect(rows).toHaveLength(registeredResearchProducts.length);
   rows.forEach((row) => {
     expect(within(row).getByText('UNAVAILABLE')).toBeInTheDocument();
-    expect(within(row).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
+    expect(within(row).queryByText('VIEW ›')).not.toBeInTheDocument();
     expect(within(row).queryByRole('button')).not.toBeInTheDocument();
   });
 });
 
-test('expands direct and mapped evidence as independent plain-text fact lists', async () => {
+test('renders a controlled alias mention while keeping mapped-only products empty', async () => {
   const envelope = currentEnvelope();
   envelope.bySymbol.GLD.directReferences[0] = {
     ...envelope.bySymbol.GLD.directReferences[0],
     matchedText: 'Gold',
+    matchType: 'direct_alias',
     excerpt: 'The desk reviewed the macro backdrop. Gold remains a preferred long. Risk stays contained.',
     sourceUrl: 'javascript:alert(1)',
   };
@@ -1134,32 +1761,117 @@ test('expands direct and mapped evidence as independent plain-text fact lists', 
   const callRow = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
   const macroRow = within(panel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
   fireEvent.click(within(callRow).getByRole('button', { name: 'View The Call context for GLD' }));
-  fireEvent.click(within(macroRow).getByRole('button', { name: 'View Macro Show context for GLD' }));
 
   const callContext = within(panel).getByRole('region', { name: 'The Call facts for GLD' });
-  const macroContext = within(panel).getByRole('region', { name: 'Macro Show facts for GLD' });
   expect(callContext).toBeInTheDocument();
-  expect(macroContext).toBeInTheDocument();
   expect(within(callContext).getByText('Gold remains a preferred long.')).toBeInTheDocument();
-  expect(within(macroContext).getByText(
-    'Mapped from Gold: Gold exposure remains supported.'
-  )).toBeInTheDocument();
   expect(within(callContext).getAllByRole('listitem')).toHaveLength(1);
-  expect(within(macroContext).getAllByRole('listitem')).toHaveLength(1);
-  expect(within(panel).queryByText(/^(BEFORE|FOCUS|AFTER|DIRECT|MAPPED ·)/)).not.toBeInTheDocument();
+  expect(within(macroRow).getByText('N/A')).toBeInTheDocument();
+  expect(within(macroRow).queryByRole('button', {
+    name: 'View Macro Show context for GLD',
+  })).not.toBeInTheDocument();
+  expect(within(macroRow).queryByText('VIEW ›')).not.toBeInTheDocument();
+  expect(within(panel).queryByRole('region', { name: 'Macro Show facts for GLD' })).not.toBeInTheDocument();
+  expect(within(panel).queryByText(/Mapped from/i)).not.toBeInTheDocument();
   expect(within(callContext).getByText('SOURCE UNAVAILABLE')).toBeInTheDocument();
   expect(within(callContext).queryByRole('link', { name: 'OPEN SOURCE ↗' })).not.toBeInTheDocument();
   expect(within(callRow).getByRole('button', {
     name: 'Collapse The Call context for GLD',
-  })).toHaveTextContent('HIDE ↑');
-  expect(within(macroRow).getByRole('button', {
-    name: 'Collapse Macro Show context for GLD',
-  })).toHaveTextContent('HIDE ↑');
-  expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1);
+  })).toHaveTextContent('Gold remains a preferred long.');
+  expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(2);
 
   fireEvent.click(within(callRow).getByRole('button', { name: 'Collapse The Call context for GLD' }));
   expect(within(panel).queryByRole('region', { name: 'The Call facts for GLD' })).not.toBeInTheDocument();
-  expect(within(panel).getByRole('region', { name: 'Macro Show facts for GLD' })).toBeInTheDocument();
+});
+
+test('rejects CLOZ credit mappings from Risk Ranges, Early Look, and history', async () => {
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(clozEnvelope());
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [{
+      ...portfolioData.holdings[0],
+      symbol: 'CLOZ',
+      conid: 'CLOZ-1',
+      description: 'Janus Henderson AAA CLO ETF',
+    }],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for CLOZ' }));
+
+  const panel = screen.getByLabelText('Research intelligence for CLOZ');
+  await within(panel).findByText('FULL');
+  await waitFor(() => expect(within(panel).getByText('Previous 5 market days (0 product rows)')).toBeInTheDocument());
+  const riskRow = within(panel).getByText('Risk Ranges').closest('.pcv2-intel-reference-row');
+  const earlyRow = within(panel).getByText('Early Look').closest('.pcv2-intel-reference-row');
+
+  expect(within(riskRow).getByText('N/A')).toBeInTheDocument();
+  expect(within(earlyRow).getByText('N/A')).toBeInTheDocument();
+  expect(within(riskRow).queryByRole('button', { name: /Risk Ranges context for CLOZ/ })).not.toBeInTheDocument();
+  expect(within(earlyRow).queryByRole('button', { name: /Early Look context for CLOZ/ })).not.toBeInTheDocument();
+  expect(within(panel).queryByText(/Mapped from Credit/i)).not.toBeInTheDocument();
+  expect(within(panel).queryByText(/Investment Grade Corporate Bond ETF|High Yield \(HYG\)/i)).not.toBeInTheDocument();
+  expect(within(panel).getByText('Previous 5 market days (0 product rows)')).toBeInTheDocument();
+});
+
+test('keeps direct primary and supplemental CLOZ risk ranges', async () => {
+  const envelope = clozEnvelope();
+  const today = marketDate();
+  envelope.bySymbol.CLOZ.directReferences = [
+    {
+      id: 'cloz-primary-range',
+      marketDate: today,
+      productId: 'risk-ranges',
+      productLabel: 'Risk Ranges',
+      kind: 'primary_risk_range',
+      direction: 'BULLISH',
+      excerpt: 'LRR 26.1 – HRR 26.8; Trend BULLISH',
+      matchedText: 'CLOZ',
+      matchType: 'direct',
+      qualityStatus: 'indexed',
+      publishedAt: `${today}T11:20:40Z`,
+      sourceUrl: '/research/risk-ranges',
+      value: { lrr: 26.1, hrr: 26.8, trend: 'BULLISH' },
+      decisionEligible: true,
+    },
+  ];
+  envelope.bySymbol.CLOZ.supplementalRange = {
+    status: 'available',
+    pipelineStatus: 'indexed',
+    lrr: 26,
+    hrr: 26.9,
+    trend: 'BULLISH',
+    sourceId: 'early-look',
+    sourceLabel: 'Early Look',
+    sourceDate: today,
+    publishedAt: `${today}T11:48:26Z`,
+    sourceUrl: '/research/early-look',
+    decisionEligible: false,
+  };
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [{
+      ...portfolioData.holdings[0],
+      symbol: 'CLOZ',
+      conid: 'CLOZ-1',
+      description: 'Janus Henderson AAA CLO ETF',
+    }],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for CLOZ' }));
+
+  const panel = screen.getByLabelText('Research intelligence for CLOZ');
+  await within(panel).findByText('FULL');
+  const riskRow = within(panel).getByText('Risk Ranges').closest('.pcv2-intel-reference-row');
+  const earlyRow = within(panel).getByText('Early Look').closest('.pcv2-intel-reference-row');
+  fireEvent.click(within(riskRow).getByRole('button', { name: 'View Risk Ranges context for CLOZ' }));
+  fireEvent.click(within(earlyRow).getByRole('button', { name: 'View Early Look context for CLOZ' }));
+
+  expect(within(panel).getByText('CLOZ risk range is 26.1–26.8.')).toBeInTheDocument();
+  expect(within(earlyRow).getByText('CLOZ risk range is 26–26.9.')).toBeInTheDocument();
+  expect(within(panel).queryByText(/Mapped from Credit/i)).not.toBeInTheDocument();
 });
 
 test('caps narrative fallback at four exact source sentences and one source link', async () => {
@@ -1189,12 +1901,13 @@ test('caps narrative fallback at four exact source sentences and one source link
   const panel = screen.getByLabelText('Research intelligence for GLD');
   await within(panel).findByText('FULL');
   const row = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
-  expect(within(row).getByText('4 facts for GLD')).toBeInTheDocument();
+  expect(within(row).getByText('GLD fact 1.')).toBeInTheDocument();
   fireEvent.click(within(row).getByRole('button', { name: 'View The Call context for GLD' }));
 
   const context = within(panel).getByRole('region', { name: 'The Call facts for GLD' });
-  expect(within(context).getAllByRole('listitem')).toHaveLength(4);
-  expect(within(context).getByText('GLD fact 1.')).toBeInTheDocument();
+  expect(within(context).getAllByRole('listitem')).toHaveLength(3);
+  expect(within(context).queryByText('GLD fact 1.')).not.toBeInTheDocument();
+  expect(within(context).getByText('GLD fact 2.')).toBeInTheDocument();
   expect(within(context).queryByText('GLD fact 5.')).not.toBeInTheDocument();
   expect(within(context).getAllByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveLength(1);
 });
@@ -1219,7 +1932,7 @@ test('renders missing ingestion as UNAVAILABLE instead of N/A', async () => {
   const macroRow = within(panel).getByText('Macro Show').closest('.pcv2-intel-reference-row');
   expect(within(macroRow).getByText('UNAVAILABLE')).toBeInTheDocument();
   expect(within(macroRow).queryByRole('button')).not.toBeInTheDocument();
-  expect(within(macroRow).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
+  expect(within(macroRow).queryByText('VIEW ›')).not.toBeInTheDocument();
 });
 
 test('renders Portfolio Solutions as four deterministic fact sentences and one source link', async () => {
@@ -1292,22 +2005,20 @@ test('renders Portfolio Solutions as four deterministic fact sentences and one s
   await within(panel).findByText('FULL');
   expect(within(panel).getAllByText('Portfolio Solutions')).toHaveLength(1);
   const row = within(panel).getByText('Portfolio Solutions').closest('.pcv2-intel-reference-row');
-  expect(within(row).getByText('4 facts for GLD')).toBeInTheDocument();
+  expect(within(row).getByText('GLD is ranked #4 today.')).toBeInTheDocument();
   fireEvent.click(within(row).getByRole('button', {
-    name: 'View Portfolio Solutions context for GLD',
+    name: 'View Portfolio Solutions facts for GLD',
   }));
   const context = within(panel).getByRole('region', {
     name: 'Portfolio Solutions facts for GLD',
   });
   expect(within(context).getByText(
-    'GLD is ranked #4 in today’s ETF re-rank.'
-  )).toBeInTheDocument();
-  expect(within(context).getByText(
     'Recommended position sizing is 2% – 6%.'
   )).toBeInTheDocument();
   expect(within(context).getByText('Weekly rank change is +3.')).toBeInTheDocument();
   expect(within(context).getByText('Monthly rank change is +7.')).toBeInTheDocument();
-  expect(within(context).getAllByRole('listitem')).toHaveLength(4);
+  expect(within(context).getAllByRole('listitem')).toHaveLength(3);
+  expect(within(context).queryByText('GLD is ranked #4 today.')).not.toBeInTheDocument();
   expect(within(context).getByText(/Source: Portfolio Solutions · .+ · 10:26 ET/)).toBeInTheDocument();
   expect(within(context).getAllByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveLength(1);
   expect(within(context).getByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveAttribute(
@@ -1316,8 +2027,52 @@ test('renders Portfolio Solutions as four deterministic fact sentences and one s
   );
   expect(within(row).getByRole('button', {
     name: 'Collapse Portfolio Solutions context for GLD',
-  })).toHaveTextContent('HIDE ↑');
+  })).toHaveTextContent('GLD is ranked #4 today.');
   expect(within(panel).queryByText(/prepared exclusively/i)).not.toBeInTheDocument();
+});
+
+test('uses a current Portfolio Solutions listing as a reference-only bullish Trade and Trend display', async () => {
+  const envelope = currentEnvelope();
+  const today = marketDate();
+  envelope.products.push({
+    id: 'portfolio-solutions',
+    label: 'Portfolio Solutions',
+    status: 'indexed',
+    marketDate: today,
+  });
+  envelope.bySymbol.GLD.decision = {};
+  envelope.bySymbol.GLD.directReferences = [{
+    id: 'portfolio-rank-display',
+    marketDate: today,
+    productId: 'portfolio-solutions',
+    productLabel: 'Portfolio Solutions',
+    kind: 'portfolio_solutions_rank',
+    excerpt: 'GLD ranked #4',
+    value: 4,
+    matchType: 'direct',
+    qualityStatus: 'indexed',
+    publishedAt: `${today}T14:26:05.000Z`,
+    sourceUrl: '/research/portfolio-solutions',
+  }];
+  MarketDataService.getSecurityIntelligence.mockResolvedValueOnce(envelope);
+
+  render(<PortfolioBreakdown portfolioData={{
+    ...portfolioData,
+    holdings: [portfolioData.holdings[0]],
+  }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
+
+  const panel = screen.getByLabelText('Research intelligence for GLD');
+  await within(panel).findByText('FULL');
+  const decisionValues = within(panel).getByLabelText('GLD decision intelligence');
+  const [tradeCell, trendCell] = [...decisionValues.children];
+  expect(within(tradeCell).getByText('BULLISH')).toBeInTheDocument();
+  expect(within(trendCell).getByText('BULLISH')).toBeInTheDocument();
+  expect(tradeCell).toHaveClass('is-reference');
+  expect(trendCell).toHaveClass('is-reference');
+  expect(tradeCell).toHaveAttribute('aria-label', expect.stringContaining('Portfolio Solutions'));
+  expect(trendCell).toHaveAttribute('aria-label', expect.stringContaining('Portfolio Solutions'));
 });
 
 test('shows the canonical beta-derived position-size band and calculation', async () => {
@@ -1515,24 +2270,22 @@ test('retains last-verified decisions as reference-only context after a refresh 
 
   fireEvent.click(screen.getAllByRole('button', { name: 'Show research intelligence for GLD' })[0]);
   const panel = screen.getByLabelText('Research intelligence for GLD');
-  expect(await within(panel).findByText('BUY')).toBeInTheDocument();
+  await waitFor(() => expect(within(panel).getAllByText('BULLISH').length).toBeGreaterThanOrEqual(2));
 
   MarketDataService.getSecurityIntelligence.mockRejectedValueOnce(new Error('research offline'));
   fireEvent.click(screen.getByRole('button', { name: 'Refresh portfolio and research' }));
 
-  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(2));
-  const tradeCell = within(panel).getByText('BUY').closest('.pcv2-intel-cell');
-  const trendCell = within(panel).getByText('BULLISH').closest('.pcv2-intel-cell');
-  const rangeCell = within(panel).getByText('2,900–3,010').closest('.pcv2-intel-cell');
+  await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(4));
+  const decisionValues = within(panel).getByLabelText('GLD decision intelligence');
+  const [tradeCell, trendCell] = [...decisionValues.children];
   const signalCell = within(panel).getByText('ADDED').closest('.pcv2-intel-cell');
   await waitFor(() => (
     expectCellProvenance(tradeCell, /Last verified · Momo Tracker · .* · refresh failed/)
   ));
-  [tradeCell, trendCell, rangeCell, signalCell].forEach((cell) => (
+  [tradeCell, trendCell, signalCell].forEach((cell) => (
     expect(cell).toHaveClass('is-reference')
   ));
   expectCellProvenance(trendCell, /Last verified · Risk Ranges · .* · refresh failed/);
-  expectCellProvenance(rangeCell, /Last verified · Risk Ranges · .* · refresh failed/);
   expectCellProvenance(signalCell, /Last verified · Signal Strength · .* · refresh failed/);
   const coverageCell = within(panel).getByText('FULL').closest('.pcv2-intel-cell');
   expectCellProvenance(
@@ -1608,11 +2361,12 @@ test('shows explicitly non-executable lastVerifiedDecision fields without promot
   fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
 
   const panel = screen.getByLabelText('Research intelligence for GLD');
-  const tradeCell = (await within(panel).findByText('SELL')).closest('.pcv2-intel-cell');
-  const trendCell = within(panel).getByText('BEARISH').closest('.pcv2-intel-cell');
-  const rangeCell = within(panel).getByText('2,880–3,000').closest('.pcv2-intel-cell');
+  await waitFor(() => expect(within(panel).getAllByText('BEARISH').length).toBeGreaterThanOrEqual(2));
+  const decisionValues = within(panel).getByLabelText('GLD decision intelligence');
+  const [tradeCell, trendCell] = [...decisionValues.children];
+  await waitFor(() => expect(within(panel).getByText('REMOVED')).toBeInTheDocument());
   const signalCell = within(panel).getByText('REMOVED').closest('.pcv2-intel-cell');
-  [tradeCell, trendCell, rangeCell, signalCell].forEach((cell) => {
+  [tradeCell, trendCell, signalCell].forEach((cell) => {
     expect(cell).toHaveClass('is-reference');
     expectCellProvenance(cell, /Last verified · .* · reference only/);
   });
@@ -1679,7 +2433,7 @@ test('does not promote stale or unauthorized products into current decision fiel
   const callRow = within(screen.getByLabelText('Research intelligence for GLD'))
     .getByText('The Call').closest('.pcv2-intel-reference-row');
   expect(within(callRow).getByText('N/A')).toBeInTheDocument();
-  expect(within(callRow).getByText('VIEW ›')).toHaveClass('pcv2-intel-reference-source-disabled');
+  expect(within(callRow).queryByText('VIEW ›')).not.toBeInTheDocument();
   const coverageCell = screen.getByText('PARTIAL').closest('.pcv2-intel-cell');
   expectCellProvenance(coverageCell, /Risk Ranges missing/);
   expect(screen.queryByText('Risk Ranges missing')).not.toBeInTheDocument();
@@ -1717,7 +2471,7 @@ test('does not treat an entire prior-market-day envelope as current research', a
   await waitFor(() => expect(within(panel).getByText('The Call')).toBeInTheDocument());
   const callRow = within(panel).getByText('The Call').closest('.pcv2-intel-reference-row');
   expect(within(callRow).getByText('UNAVAILABLE')).toBeInTheDocument();
-  expect(within(panel).queryByText('BUY')).not.toBeInTheDocument();
+  expect(within(panel).queryByText('BULLISH')).not.toBeInTheDocument();
   expect(within(panel).queryByText('BULLISH')).not.toBeInTheDocument();
   expect(within(panel).getAllByText('UNAVAILABLE').length).toBeGreaterThanOrEqual(1);
 });
@@ -1765,22 +2519,23 @@ test('shows completed IBKR closes as reference values without enabling sizing or
 
   const row = getLedgerRowBySymbol('GLD');
   expect(within(row).getByText('10.00%')).toBeInTheDocument();
-  expect(within(row).getByRole('cell', {
+  const priceCell = within(row).getByRole('cell', {
     name: 'Prior close $200.00 from 2026-07-24',
-  })).toHaveTextContent('$200.00');
+  });
+  expect(priceCell).toHaveTextContent('$200.00D');
+  const delayedMarker = within(priceCell).getByRole('button', {
+    name: /Verified completed-session close from 2026-07-24; reference only/,
+  });
+  expect(delayedMarker).toHaveTextContent('D');
+  fireEvent.click(delayedMarker);
+  expect(screen.getByRole('status')).toHaveTextContent(/Updated Jul 24, 2026/);
   expect(within(row).getByRole('cell', {
     name: 'Day gain/loss +1.01%',
   })).toHaveTextContent('+1.01%');
   expect(within(row).queryByText('$198.00')).not.toBeInTheDocument();
   expect(within(row).getByRole('cell', { name: 'Reference only' })).toHaveTextContent('Ref only');
   expect(within(row).queryByRole('textbox')).not.toBeInTheDocument();
-  const referenceIcon = within(row).getByLabelText('EOD reference close');
-  expect(referenceIcon).toHaveClass('pcv2-mark-status--reference');
-  expect(referenceIcon).not.toHaveClass('pcv2-mark-status--error');
-  expect(referenceIcon).toHaveAttribute(
-    'title',
-    'EOD close from 2026-07-24; reference only, not a live executable mark',
-  );
+  expect(within(row).queryByLabelText('EOD reference close')).not.toBeInTheDocument();
 });
 
 test('shows a verified IBKR live last and signed Day G/L percentage', async () => {

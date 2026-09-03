@@ -197,7 +197,7 @@ describe('WTI Daily and Weekly settlement geometry', () => {
 
     expect(resolveWtiMarketAtValue(market, 83.99)).toBe('no');
     expect(resolveWtiMarketAtValue(market, 84)).toBe('yes');
-    expect(describeWtiGeometry(market)).toBe('WTI > $83.99');
+    expect(describeWtiGeometry(market)).toBe('Above $83.99');
   });
 
   test('Weekly lower tail, bounded bucket, and upper tail honor explicit boundaries', () => {
@@ -219,7 +219,9 @@ describe('WTI Daily and Weekly settlement geometry', () => {
     expect(resolveWtiMarketAtValue(bucket, 84.5)).toBe('yes');
     expect(resolveWtiMarketAtValue(bucket, 84.99)).toBe('yes');
     expect(resolveWtiMarketAtValue(upperTail, 90)).toBe('yes');
-    expect(describeWtiGeometry(bucket)).toBe('WTI [$84.50 – $84.99]');
+    expect(describeWtiGeometry(lowerTail)).toBe('Below $80.00');
+    expect(describeWtiGeometry(bucket)).toBe('$84.50–$84.99');
+    expect(describeWtiGeometry(upperTail)).toBe('At least $90.00');
   });
 
   test('withholds a boundary resolution when Weekly inclusivity is absent', () => {
@@ -296,6 +298,19 @@ describe('localized WTI reference inputs and positions', () => {
 
     expect(normalizeOvxReference(snapshot, { now: NOW })).toEqual(expect.objectContaining({
       status: 'available', value: 64.45, quoteMode: 'delayed', executable: false,
+    }));
+    expect(normalizeOvxReference({
+      ...snapshot,
+      OVX: {
+        ...snapshot.OVX,
+        availability: 'reference',
+        freshness: 'refresh-delayed',
+        refreshDelayed: true,
+        lastVerifiedAt: '2026-07-21T18:30:00.000Z',
+        retainedUntil: '2026-07-21T19:00:00.000Z',
+      },
+    }, { now: NOW })).toEqual(expect.objectContaining({
+      status: 'refresh-delayed', value: 64.45, refreshDelayed: true, executable: false,
     }));
     expect(normalizeOvxReference({ ...snapshot, OVX: { ...snapshot.OVX, freshness: 'stale' } }, { now: NOW }).status).toBe('unavailable');
     expect(normalizeOvxReference(snapshot, { now: NOW, historical: true }).status).toBe('unavailable');

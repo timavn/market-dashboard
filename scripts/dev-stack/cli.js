@@ -8,9 +8,14 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, execFileSync } = require('child_process');
+const { randomBytes } = require('crypto');
+const { spawn, spawnSync, execFileSync } = require('child_process');
 const { buildSystemReadiness } = require('../../src/utils/systemReadiness.cjs');
 const { computeRuntimeFingerprint } = require('../../src/utils/runtimeFingerprint.cjs');
+const {
+  legacyHermesIsReadOnly,
+  normalizeLegacyHermesMode,
+} = require('../../src/utils/legacyHermesMode.cjs');
 const { preflightAwsProfile } = require('../ops/aws_profile_preflight');
 
 const root = path.resolve(__dirname, '../..');
@@ -28,17 +33,45 @@ const readinessBaseUrl = String(
   process.env.MARKET_DASHBOARD_API_URL || process.env.REACT_APP_BACKEND_URL || 'http://127.0.0.1:3001',
 ).replace(/\/$/, '');
 const readinessUrl = `${readinessBaseUrl}/api/system-readiness`;
+const loginStatusUrl = `${readinessBaseUrl}/api/login-status`;
 const readinessTimeoutMs = Math.max(1_000, Number(process.env.MARKET_DASHBOARD_READINESS_TIMEOUT_MS) || 35_000);
+// A forced authentication check runs the bounded IBKR/Gmail probes plus the
+// three explicit AWS profile preflights. Do not turn a slow cold SSO cache
+// into a false "unavailable" result before the server's own probe budget.
+const loginStatusTimeoutMs = Math.max(1_000, Number(process.env.MARKET_DASHBOARD_LOGIN_STATUS_TIMEOUT_MS) || 30_000);
 const morningStartTimeoutMs = Math.max(5_000, Number(process.env.MARKET_DASHBOARD_START_TIMEOUT_MS) || 60_000);
+// API/UI intentionally start only after the Analyst sidecar, Hermes gateway,
+// and deep JSON-RPC contract have completed. Keep launchd/bootstrap callers
+// alive for that bounded gate while still returning as soon as both are ready.
+const dashboardBootstrapTimeoutMs = Math.max(
+  morningStartTimeoutMs,
+  Number(process.env.MARKET_DASHBOARD_BOOTSTRAP_TIMEOUT_MS) || 600_000,
+);
 const bridgeHeartbeatMaxAgeMs = Math.max(
   90_000,
   Number(process.env.HERMES_BRIDGE_HEARTBEAT_MAX_AGE_MS) || 180_000,
 );
 const controllerHeartbeatMaxAgeMs = Math.max(
   120_000,
-  Number(process.env.HERMES_CONTROLLER_HEARTBEAT_MAX_AGE_MS) || 180_000,
+  Number(process.env.READINESS_CONTROLLER_HEARTBEAT_MAX_AGE_MS)
+    || Number(process.env.HERMES_CONTROLLER_HEARTBEAT_MAX_AGE_MS)
+    || 180_000,
 );
 const monitorIntervalMs = Math.max(1_000, Number(process.env.MARKET_DASHBOARD_MONITOR_INTERVAL_MS) || 5_000);
+// The API can briefly defer its health response while a verified multi-region
+// quote refresh is completing. Give that one service enough time to answer so
+// useful in-flight work does not look like a crashed process to the supervisor.
+const apiHealthTimeoutMs = Math.max(
+  5_000,
+  Number(process.env.MARKET_DASHBOARD_API_HEALTH_TIMEOUT_MS) || 10_000,
+);
+// Both sidecars can briefly serialize health behind a burst of verified IBKR
+// or research work. Keep their probes bounded, but do not restart a healthy
+// live-data process merely because three 1.5-second probes queued behind it.
+const sidecarHealthTimeoutMs = Math.max(
+  5_000,
+  Number(process.env.MARKET_DASHBOARD_SIDECAR_HEALTH_TIMEOUT_MS) || 10_000,
+);
 const awsPreflightRetryMs = Math.max(
   30_000,
   Number(process.env.MARKET_DASHBOARD_AWS_PREFLIGHT_RETRY_MS) || 60_000,
@@ -48,18 +81,28 @@ const restartWindowMs = 5 * 60 * 1000;
 const circuitOpenMs = 5 * 60 * 1000;
 const defaultBridgeAwsProfile = 'market-dashboard-bridge';
 const enabledFlagValues = new Set(['1', 'true', 'yes', 'on', 'enabled']);
-const expectedCapabilityIds = Object.freeze([
-  'automation.hermes',
+function expectedCapabilityIdsForEnv(env = process.env) {
+  const automationCapability = legacyHermesIsReadOnly(
+    normalizeLegacyHermesMode(env.LEGACY_HERMES_MODE),
+  )
+    ? 'automation.readiness'
+    : 'automation.hermes';
+  return Object.freeze([
+  automationCapability,
   'dashboard.core',
   'portfolio.live',
   'prediction.display',
   'prediction.ibkrExecution',
   'research.current',
-]);
+  ]);
+}
+const expectedCapabilityIds = expectedCapabilityIdsForEnv();
 const services = {
-  api: { port: 3001, health: 'http://127.0.0.1:3001/api/health', args: ['server.js'], env: { NODE_ENV: 'development' }, critical: true },
+  api: { port: 3001, health: 'http://127.0.0.1:3001/api/health', healthTimeoutMs: apiHealthTimeoutMs, args: ['server.js'], env: { NODE_ENV: 'development' }, critical: true },
   ui: { port: 3000, health: 'http://127.0.0.1:3000/', args: [path.join(root, 'node_modules/@craco/craco/dist/bin/craco.js'), 'start'], env: { PORT: '3000', CI: 'true', BROWSER: 'none', GENERATE_SOURCEMAP: 'false', TSC_COMPILE_ON_ERROR: 'true', BROWSERSLIST_IGNORE_OLD_DATA: 'true', NODE_OPTIONS: '--max-old-space-size=3072 --require ./scripts/cra-dev-require-hook.js' }, critical: true },
-  sidecar: { port: 8765, health: 'http://127.0.0.1:8765/livez', shell: true, args: ['scripts/ibkr_sidecar/start.sh'], env: {}, critical: false },
+  sidecar: { port: 8765, health: 'http://127.0.0.1:8765/livez', healthTimeoutMs: sidecarHealthTimeoutMs, shell: true, args: ['scripts/ibkr_sidecar/start.sh'], env: {}, critical: false },
+  analystSidecar: { port: 6951, health: 'http://127.0.0.1:6951/healthz', healthTimeoutMs: sidecarHealthTimeoutMs, shell: true, args: ['scripts/analyst_sidecar/start.sh'], env: {}, critical: false },
+  analystHermes: { port: 9121, health: 'http://127.0.0.1:9121/api/status', shell: true, args: ['scripts/analyst/start_hermes.sh'], env: {}, critical: false },
   bridge: {
     processOnly: true,
     args: [path.join(root, 'scripts/ops/hermes_snapshot_bridge.js')],
@@ -77,6 +120,19 @@ const services = {
 };
 const bridgeScriptPath = path.join(root, 'scripts/ops/hermes_snapshot_bridge.js');
 const controllerScriptPath = path.join(root, 'scripts/ops/hermes_reliability_controller.js');
+const sidecarDir = path.join(root, 'scripts/ibkr_sidecar');
+const sidecarStartPath = path.join(sidecarDir, 'start.sh');
+const sidecarRuntimeDir = path.join(sidecarDir, '.venv');
+const analystSidecarDir = path.join(root, 'scripts/analyst_sidecar');
+const analystSidecarStartPath = path.join(analystSidecarDir, 'start.sh');
+const analystHermesStartPath = path.join(root, 'scripts/analyst/start_hermes.sh');
+const analystContractPath = path.join(root, 'scripts/analyst/check_hermes_contract.mjs');
+const analystBinPath = path.join(os.homedir(), '.local/bin/analyst');
+const hermesBinPaths = new Set([
+  path.join(os.homedir(), '.local/bin/hermes'),
+  path.join(os.homedir(), '.hermes/hermes-agent/venv/bin/hermes'),
+]);
+let analystRuntimeEnvironment = Object.freeze({});
 
 function hermesBridgeEnabled(env = process.env) {
   const legacy = enabledFlagValues.has(
@@ -92,7 +148,7 @@ function hermesBridgeEnabled(env = process.env) {
 }
 
 function supervisedServiceNames(env = process.env) {
-  return ['sidecar', 'api', 'ui', 'controller', 'bridge']
+  return ['sidecar', 'analystSidecar', 'analystHermes', 'api', 'ui', 'controller', 'bridge']
     .filter((name) => name !== 'bridge' || hermesBridgeEnabled(env));
 }
 
@@ -100,6 +156,8 @@ const localServiceLabels = {
   ui: 'Dashboard UI',
   api: 'Express API',
   sidecar: 'IBKR sidecar',
+  analystSidecar: 'Analyst research sidecar',
+  analystHermes: 'The Analyst Hermes gateway',
   bridge: 'Hermes snapshot bridge',
   controller: 'Hermes reliability controller',
 };
@@ -211,7 +269,9 @@ function preflightAwsService(name, {
   env = process.env,
   preflight = preflightAwsProfile,
 } = {}) {
-  const purpose = name === 'api' || name === 'bridge' ? name : null;
+  const purpose = name === 'api' || name === 'analystSidecar'
+    ? 'api'
+    : (name === 'bridge' ? 'bridge' : null);
   if (!purpose) return null;
   const profile = purpose === 'api'
     ? 'market-dashboard-local'
@@ -287,9 +347,29 @@ function clearAwsCredentialEnvironment(environment) {
   return environment;
 }
 
-function childEnvironment(name, inheritedEnv = process.env) {
-  const environment = { ...inheritedEnv, ...(services[name]?.env || {}) };
-  if (name === 'controller') {
+function createAnalystRuntimeEnvironment(random = randomBytes) {
+  return Object.freeze({
+    ANALYST_SERVICE_TOKEN: random(32).toString('hex'),
+    HERMES_DASHBOARD_SESSION_TOKEN: random(32).toString('hex'),
+    ANALYST_CONTRACT_VERIFIED: 'false',
+  });
+}
+
+function childEnvironment(name, inheritedEnv = process.env, runtimeEnvironment = analystRuntimeEnvironment) {
+  const environment = { ...inheritedEnv };
+  delete environment.ANALYST_SERVICE_TOKEN;
+  delete environment.HERMES_DASHBOARD_SESSION_TOKEN;
+  delete environment.ANALYST_CONTRACT_VERIFIED;
+  if (name === 'api') {
+    Object.assign(environment, runtimeEnvironment);
+  } else if (name === 'analystSidecar') {
+    environment.ANALYST_SERVICE_TOKEN = runtimeEnvironment.ANALYST_SERVICE_TOKEN;
+  } else if (name === 'analystHermes') {
+    environment.ANALYST_SERVICE_TOKEN = runtimeEnvironment.ANALYST_SERVICE_TOKEN;
+    environment.HERMES_DASHBOARD_SESSION_TOKEN = runtimeEnvironment.HERMES_DASHBOARD_SESSION_TOKEN;
+  }
+  Object.assign(environment, services[name]?.env || {});
+  if (name === 'controller' || name === 'analystHermes') {
     // The local controller acts only through loopback APIs and must never
     // inherit credentials that could expand it into a cloud control plane.
     clearAwsCredentialEnvironment(environment);
@@ -297,7 +377,7 @@ function childEnvironment(name, inheritedEnv = process.env) {
     delete environment.AWS_DEFAULT_PROFILE;
     return environment;
   }
-  if (name === 'api') {
+  if (name === 'api' || name === 'analystSidecar') {
     clearAwsCredentialEnvironment(environment);
     environment.AWS_PROFILE = 'market-dashboard-local';
     environment.AWS_DEFAULT_PROFILE = 'market-dashboard-local';
@@ -319,6 +399,54 @@ function childEnvironment(name, inheritedEnv = process.env) {
   environment.AWS_PROFILE = profile;
   environment.AWS_SDK_LOAD_CONFIG = '1';
   return environment;
+}
+
+function runAnalystContractCheck({
+  runtimeEnvironment = analystRuntimeEnvironment,
+  run = spawnSync,
+} = {}) {
+  const checkedAt = new Date().toISOString();
+  const result = run(process.execPath, [analystContractPath, '--deep'], {
+    cwd: root,
+    env: { ...process.env, ...runtimeEnvironment },
+    encoding: 'utf8',
+    timeout: 240_000,
+    maxBuffer: 256 * 1024,
+  });
+  if (result?.status !== 0) {
+    return {
+      verified: false,
+      checkedAt,
+      error: String(result?.stderr || result?.error?.message || 'Hermes JSON-RPC contract check failed.')
+        .trim()
+        .slice(0, 500),
+    };
+  }
+  try {
+    const evidence = JSON.parse(String(result.stdout || ''));
+    const required = [
+      'list',
+      'create',
+      'mostRecent',
+      'history',
+      'interrupt',
+      'promptStreaming',
+      'messageStart',
+      'messageDelta',
+      'messageComplete',
+      'mcpToolHistory',
+      'mcpToolResume',
+      'reconnect',
+      'resume',
+      'persistence',
+    ];
+    if (!required.every((name) => evidence?.checks?.[name] === true)) {
+      throw new Error('Hermes contract evidence is incomplete.');
+    }
+    return { verified: true, checkedAt, evidence };
+  } catch (error) {
+    return { verified: false, checkedAt, error: error.message };
+  }
 }
 
 function localNotificationsEnabled(env = process.env, platform = process.platform) {
@@ -475,6 +603,27 @@ function processCommand(pid) {
   if (!validProcessId(pid)) return '';
   try { return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim(); } catch { return ''; }
 }
+function processEnvironment(pid) {
+  if (!validProcessId(pid)) return '';
+  try {
+    const scoped = execFileSync('ps', ['eww', '-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim();
+    if (/\bHERMES_DESKTOP_CHILD_PID=/.test(scoped)) return scoped;
+  } catch {}
+  try {
+    return execFileSync('ps', ['eww', '-p', String(pid)], { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .slice(1)
+      .join(' ')
+      .trim();
+  } catch { return ''; }
+}
+function processParentPid(pid) {
+  if (!validProcessId(pid)) return null;
+  try {
+    const value = Number(execFileSync('ps', ['-p', String(pid), '-o', 'ppid='], { encoding: 'utf8' }).trim());
+    return validProcessId(value) ? value : null;
+  } catch { return null; }
+}
 function processCwd(pid) {
   if (!validProcessId(pid)) return '';
   try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch {}
@@ -513,13 +662,101 @@ function hasExactControllerCommandSignature(commandText, cwd) {
   if (!pathIsInRoot(cwd)) return false;
   return path.resolve(cwd, entrypoint) === controllerScriptPath;
 }
+function hasExactSidecarCommandSignature(commandText, cwd) {
+  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const resolvedCwd = cwd ? path.resolve(cwd) : '';
+  const portIndex = tokens.indexOf('--port');
+  const hasUvicorn = tokens.some((token) => path.basename(token) === 'uvicorn')
+    || tokens.includes('uvicorn');
+  return resolvedCwd === sidecarDir
+    && hasUvicorn
+    && tokens.includes('app:app')
+    && portIndex >= 0
+    && tokens[portIndex + 1] === String(services.sidecar.port);
+}
+function hasManagedSidecarRuntime(commandText, cwd, environment = '') {
+  return hasExactSidecarCommandSignature(commandText, cwd)
+    && (String(commandText || '').includes(`${sidecarRuntimeDir}${path.sep}`)
+      || String(environment || '').includes(`IBKR_SIDECAR_RUNTIME_ROOT=${sidecarRuntimeDir}`));
+}
+function hasExactAnalystSidecarCommandSignature(commandText, cwd) {
+  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const resolvedCwd = cwd ? path.resolve(cwd) : '';
+  const portIndex = tokens.indexOf('--port');
+  const hasUvicorn = tokens.some((token) => path.basename(token) === 'uvicorn')
+    || tokens.includes('uvicorn');
+  return resolvedCwd === analystSidecarDir
+    && hasUvicorn
+    && tokens.includes('app:app')
+    && portIndex >= 0
+    && tokens[portIndex + 1] === String(services.analystSidecar.port);
+}
+function hasExactAnalystHermesCommandSignature(commandText, cwd) {
+  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const resolvedCwd = cwd ? path.resolve(cwd) : '';
+  const portIndex = tokens.indexOf('--port');
+  const usesAnalystBinary = tokens.includes(analystBinPath)
+    || tokens.some((token) => hermesBinPaths.has(path.resolve(resolvedCwd || root, token)));
+  const profileIndex = tokens.indexOf('-p');
+  return resolvedCwd === root
+    && usesAnalystBinary
+    && (tokens.includes(analystBinPath) || (profileIndex >= 0 && tokens[profileIndex + 1] === 'analyst'))
+    && tokens.includes('serve')
+    && tokens.includes('--isolated')
+    && portIndex >= 0
+    && tokens[portIndex + 1] === String(services.analystHermes.port);
+}
+function hasExactAnalystHermesRuntimeSignature(commandText) {
+  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const portIndex = tokens.indexOf('--port');
+  const hostIndex = tokens.indexOf('--host');
+  const profileIndex = tokens.indexOf('-p');
+  const usesAnalystBinary = tokens.includes(analystBinPath)
+    || tokens.some((token) => hermesBinPaths.has(path.resolve(token)));
+  return usesAnalystBinary
+    && profileIndex >= 0
+    && tokens[profileIndex + 1] === 'analyst'
+    && tokens.includes('serve')
+    && tokens.includes('--isolated')
+    && tokens.includes('--skip-build')
+    && hostIndex >= 0
+    && ['127.0.0.1', 'localhost'].includes(tokens[hostIndex + 1])
+    && portIndex >= 0
+    && tokens[portIndex + 1] === String(services.analystHermes.port);
+}
+function desktopBackendPids(environmentText) {
+  const match = String(environmentText || '').match(
+    /(?:^|\s)HERMES_DESKTOP_CHILD_PID=([0-9,]+)(?=\s|$)/,
+  );
+  if (!match) return [];
+  return match[1]
+    .split(',')
+    .map((value) => Number(value))
+    .filter(validProcessId);
+}
+function isRecoverableOrphanedAnalystHermes({
+  pid,
+  commandText,
+  environmentText,
+  parentPid,
+} = {}) {
+  if (!validProcessId(pid) || !hasExactAnalystHermesRuntimeSignature(commandText)) return false;
+  if (![0, 1].includes(Number(parentPid))) return false;
+  // HERMES_DESKTOP_CHILD_PID is a list of Desktop-owned backend PIDs, not a
+  // parent/owner PID. `hermes update` inherits that list and then respawns a
+  // fixed-port manual gateway with start_new_session=True. The new Analyst
+  // process is therefore PPID 1 and can carry the PID of a separate, still-live
+  // Desktop backend. Treat it as Desktop-owned only when the marker names the
+  // listener itself; a different live marker must not strand port 9121 outside
+  // dashboard supervision. Terminal-driven updates have no marker and are the
+  // same safe handoff shape.
+  return !desktopBackendPids(environmentText).includes(Number(pid));
+}
 function hasExpectedDashboardSignature(commandText, cwd) {
   const cmd = String(commandText || '');
   const tokens = cmd.split(/\s+/).filter(Boolean);
   const resolvedCwd = cwd ? path.resolve(cwd) : '';
   const cliPath = path.join(root, 'scripts/dev-stack/cli.js');
-  const sidecarDir = path.join(root, 'scripts/ibkr_sidecar');
-  const sidecarStart = path.join(root, 'scripts/ibkr_sidecar/start.sh');
   const cracoRoot = `${path.join(root, 'node_modules/@craco/craco')}${path.sep}`;
 
   const supervisorCommand = tokens.includes(cliPath)
@@ -530,9 +767,15 @@ function hasExpectedDashboardSignature(commandText, cwd) {
   if (hasExactControllerCommandSignature(commandText, cwd)) return true;
   if (tokens.some(token => token.startsWith(cracoRoot))
       && (tokens.includes('start') || tokens.some(token => token.endsWith('/start.js')))) return true;
-  if (resolvedCwd === sidecarDir && cmd.includes('uvicorn') && tokens.includes('app:app')) return true;
+  if (hasExactSidecarCommandSignature(commandText, cwd)) return true;
+  if (hasExactAnalystSidecarCommandSignature(commandText, cwd)) return true;
+  if (hasExactAnalystHermesCommandSignature(commandText, cwd)) return true;
   if ((resolvedCwd === root || resolvedCwd === sidecarDir)
-      && (tokens.includes('scripts/ibkr_sidecar/start.sh') || tokens.includes(sidecarStart))) return true;
+      && (tokens.includes('scripts/ibkr_sidecar/start.sh') || tokens.includes(sidecarStartPath))) return true;
+  if ((resolvedCwd === root || resolvedCwd === analystSidecarDir)
+      && (tokens.includes('scripts/analyst_sidecar/start.sh') || tokens.includes(analystSidecarStartPath))) return true;
+  if (resolvedCwd === root
+      && (tokens.includes('scripts/analyst/start_hermes.sh') || tokens.includes(analystHermesStartPath))) return true;
   return false;
 }
 function isOwned(pid) {
@@ -545,11 +788,13 @@ function isAlive(pid) {
   if (!validProcessId(pid)) return false;
   try { process.kill(Number(pid), 0); return true; } catch { return false; }
 }
-function listProcessIds() {
-  return execFileSync('ps', ['-axo', 'pid='], { encoding: 'utf8', timeout: 5_000 })
-    .split(/\s+/)
-    .map(value => Number(value))
-    .filter(pid => Number.isInteger(pid) && pid > 0);
+function listProcessRows() {
+  return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 5_000 })
+    .split(/\r?\n/)
+    .map((line) => String(line).match(/^\s*(\d+)\s+(.+)$/))
+    .filter(Boolean)
+    .map((match) => ({ pid: Number(match[1]), command: match[2] }))
+    .filter(({ pid }) => Number.isInteger(pid) && pid > 0);
 }
 function discoverOwnedBridgeProcessIds({
   pids,
@@ -557,7 +802,14 @@ function discoverOwnedBridgeProcessIds({
   cwdFor = processCwd,
   alive = isAlive,
 } = {}) {
-  const candidates = Array.isArray(pids) ? pids : listProcessIds();
+  // Reading the complete process table once is materially cheaper than
+  // launching one `ps` process for every PID on the machine. The latter can
+  // starve launchd-managed children and delay credential checks/recovery.
+  const candidates = Array.isArray(pids)
+    ? pids
+    : listProcessRows()
+      .filter(({ command }) => command.includes('hermes_snapshot_bridge.js'))
+      .map(({ pid }) => pid);
   return [...new Set(candidates)]
     .filter(pid => Number.isInteger(Number(pid)) && Number(pid) > 0 && Number(pid) !== process.pid)
     .map(pid => Number(pid))
@@ -568,6 +820,77 @@ function discoverOwnedBridgeProcessIds({
       return hasExactBridgeCommandSignature(commandText, cwdFor(pid));
     })
     .sort((left, right) => left - right);
+}
+function discoverOwnedSidecarProcessIds({
+  pids,
+  commandFor = processCommand,
+  cwdFor = processCwd,
+  alive = isAlive,
+} = {}) {
+  const candidates = Array.isArray(pids)
+    ? pids
+    : listProcessRows()
+      .filter(({ command }) => (
+        command.includes('uvicorn')
+        && command.includes('app:app')
+        && (
+          command.includes(`--port ${services.sidecar.port}`)
+          || command.includes(`--port=${services.sidecar.port}`)
+        )
+      ))
+      .map(({ pid }) => pid);
+  return [...new Set(candidates)]
+    .filter(pid => Number.isInteger(Number(pid)) && Number(pid) > 0)
+    .map(pid => Number(pid))
+    .filter(pid => alive(pid))
+    .filter((pid) => {
+      const command = String(commandFor(pid) || '');
+      // Avoid an lsof cwd lookup for every system process. Only a command with
+      // the distinctive uvicorn/app/port shape can be this sidecar.
+      if (!command.includes('uvicorn') || !command.includes('app:app')) return false;
+      if (!command.includes(`--port ${services.sidecar.port}`)
+          && !command.includes(`--port=${services.sidecar.port}`)) return false;
+      return hasExactSidecarCommandSignature(command, cwdFor(pid));
+    })
+    .sort((left, right) => left - right);
+}
+function sidecarProcessSnapshot({
+  pids,
+  commandFor = processCommand,
+  environmentFor = processEnvironment,
+  cwdFor = processCwd,
+  alive = isAlive,
+  listener = () => listenerPid(services.sidecar.port),
+} = {}) {
+  const processPids = discoverOwnedSidecarProcessIds({ pids, commandFor, cwdFor, alive });
+  const listenerPidValue = Number(listener()) || null;
+  const managedProcessPids = processPids.filter(pid => (
+    hasManagedSidecarRuntime(commandFor(pid), cwdFor(pid), environmentFor(pid))
+  ));
+  const listenerIsOwned = listenerPidValue !== null && processPids.includes(listenerPidValue);
+  const listenerIsManaged = listenerIsOwned
+    && hasManagedSidecarRuntime(
+      commandFor(listenerPidValue),
+      cwdFor(listenerPidValue),
+      environmentFor(listenerPidValue),
+    );
+  const ownerPid = listenerIsManaged ? listenerPidValue : null;
+  const startupPid = listenerPidValue === null && managedProcessPids.length === 1
+    ? managedProcessPids[0]
+    : null;
+  const recommendedKeepPid = ownerPid || startupPid;
+  const duplicatePids = processPids.filter(pid => pid !== recommendedKeepPid);
+  return {
+    processPids,
+    managedProcessPids,
+    processCount: processPids.length,
+    managedProcessCount: managedProcessPids.length,
+    ownerPid,
+    recommendedKeepPid,
+    duplicatePids,
+    duplicateCount: duplicatePids.length,
+    runtimeVerified: Boolean(recommendedKeepPid),
+  };
 }
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function restartPolicyFor({ history = [], now = Date.now(), critical = false, countFailure = true } = {}) {
@@ -591,7 +914,7 @@ function restartPolicyFor({ history = [], now = Date.now(), critical = false, co
     delayMs: Math.min(4_000, 1_000 * 2 ** Math.max(0, recent.length - 1)),
   };
 }
-async function httpOk(url) { try { const response = await fetch(url, { signal: AbortSignal.timeout(1500) }); return response.ok; } catch { return false; } }
+async function httpOk(url, timeoutMs = 1_500) { try { const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) }); return response.ok; } catch { return false; } }
 function heartbeatAgeMs(value, now = Date.now()) {
   const observedAt = Date.parse(String(value || ''));
   if (!Number.isFinite(observedAt)) return null;
@@ -752,7 +1075,7 @@ function applyBridgeStatusPayload(item, payload, observedAt = new Date().toISOSt
 }
 
 function applyControllerStatusPayload(item, payload, observedAt = new Date().toISOString()) {
-  if (!item || payload?.service !== 'hermes-reliability-controller'
+  if (!item || !['dashboard-readiness-controller', 'hermes-reliability-controller'].includes(payload?.service)
       || !['ready', 'degraded'].includes(payload.status)) {
     return false;
   }
@@ -827,6 +1150,35 @@ async function terminate(pid) {
   for (let n = 0; n < 10 && isAlive(pid); n++) await sleep(1000);
   if (isAlive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch {} }
 }
+async function reconcileOrphanedAnalystHermes({
+  listener = () => listenerPid(services.analystHermes.port),
+  commandFor = processCommand,
+  environmentFor = processEnvironment,
+  parentPidFor = processParentPid,
+  alive = isAlive,
+  terminateProcess = terminate,
+} = {}) {
+  const pid = Number(listener()) || null;
+  if (!pid || isOwned(pid)) return { recovered: false, pid };
+  const recoverable = isRecoverableOrphanedAnalystHermes({
+    pid,
+    commandText: commandFor(pid),
+    environmentText: environmentFor(pid),
+    parentPid: parentPidFor(pid),
+    alive,
+  });
+  if (!recoverable) return { recovered: false, pid };
+
+  await terminateProcess(pid);
+  const remainingPid = Number(listener()) || null;
+  if (remainingPid === pid && alive(pid)) {
+    throw new Error(`Orphaned Analyst Hermes PID ${pid} did not stop.`);
+  }
+  console.warn(
+    `[dashboard-supervisor] Reclaimed detached Analyst Hermes PID ${pid} after a Hermes update handoff.`,
+  );
+  return { recovered: true, pid };
+}
 async function reconcileDisabledBridgeProcesses({
   discover = discoverOwnedBridgeProcessIds,
   terminateProcess = terminate,
@@ -882,6 +1234,73 @@ async function reconcileDisabledBridgeProcesses({
       : 'Both outbound bridge partitions are disabled.',
   };
 }
+async function reconcileOwnedSidecarProcesses({
+  keepPid = null,
+  discover = discoverOwnedSidecarProcessIds,
+  terminateProcess = terminate,
+} = {}) {
+  let discoveredPids;
+  try {
+    discoveredPids = discover();
+  } catch (error) {
+    return {
+      verified: false,
+      clean: false,
+      discoveredPids: [],
+      terminatedPids: [],
+      remainingPids: [],
+      keepPid: null,
+      errorCode: 'IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED',
+      detail: String(error?.message || error || 'Sidecar process discovery failed.').slice(0, 500),
+    };
+  }
+
+  const retainedPid = validProcessId(keepPid) && discoveredPids.includes(Number(keepPid))
+    ? Number(keepPid)
+    : null;
+  const stalePids = discoveredPids.filter(pid => pid !== retainedPid);
+  // Signal the exact stale set concurrently. A wedged IBKR socket may take
+  // the full termination grace period; serial cleanup would multiply that
+  // delay by the number of orphaned clients and hold the whole dashboard down.
+  const terminationResults = await Promise.allSettled(
+    stalePids.map(pid => terminateProcess(pid)),
+  );
+  const terminatedPids = stalePids.filter((_, index) => (
+    terminationResults[index]?.status === 'fulfilled'
+  ));
+
+  let remainingPids;
+  try {
+    remainingPids = discover();
+  } catch (error) {
+    return {
+      verified: false,
+      clean: false,
+      discoveredPids,
+      terminatedPids,
+      remainingPids: [],
+      keepPid: retainedPid,
+      errorCode: 'IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED',
+      detail: String(error?.message || error || 'Sidecar process verification failed.').slice(0, 500),
+    };
+  }
+
+  const clean = retainedPid === null
+    ? remainingPids.length === 0
+    : remainingPids.length === 1 && remainingPids[0] === retainedPid;
+  return {
+    verified: true,
+    clean,
+    discoveredPids,
+    terminatedPids,
+    remainingPids,
+    keepPid: retainedPid,
+    errorCode: clean ? null : 'IBKR_SIDECAR_DUPLICATES',
+    detail: clean
+      ? 'Exactly one managed sidecar is retained.'
+      : `Repo-owned sidecar processes remain after cleanup: ${remainingPids.join(', ') || 'none'}.`,
+  };
+}
 async function stop(options = {}) {
   const quiet = options.quiet === true;
   const preserveState = options.preserveState === true;
@@ -901,6 +1320,10 @@ async function stop(options = {}) {
     if (isOwned(pid)) await terminate(pid);
     else console.warn(`Refusing to stop unknown listener PID ${pid} on port ${service.port}.`);
   }
+  const sidecarCleanup = await reconcileOwnedSidecarProcesses({ keepPid: null });
+  if (!sidecarCleanup.clean && !quiet) {
+    console.warn(`[dashboard-supervisor] IBKR sidecar cleanup incomplete: ${sidecarCleanup.detail}`);
+  }
   if (!preserveState) removeState();
   if (!quiet) console.log('Dashboard stack stopped.');
 }
@@ -910,24 +1333,39 @@ async function waitFor(name, timeout = 30000) {
     if (readState()?.children?.[name]?.credentialPreflightBlocked) return false;
     if (services[name].processOnly) {
       if (processServiceStatus(name, readState()?.children?.[name]).ready) return true;
-    } else if (await httpOk(services[name].health)) return true;
+    } else if (await httpOk(services[name].health, services[name].healthTimeoutMs)) return true;
     await sleep(500);
   }
   return false;
 }
 async function runMonitor() {
   ensureDirs();
+  analystRuntimeEnvironment = createAnalystRuntimeEnvironment();
+  await reconcileOrphanedAnalystHermes();
   assertPorts();
   const previousState = readState();
   const bridgeEnabled = hermesBridgeEnabled();
   const activeServiceNames = supervisedServiceNames();
   const notificationsActive = localNotificationsEnabled();
+  // Run the two exact-principal checks before any long-lived child has a pipe
+  // attached to this supervisor. A synchronous AWS CLI probe after uvicorn or
+  // CRA starts can stall while those child pipes are active. The API and
+  // Analyst sidecar intentionally share the same approved API principal.
+  const startupAwsPreflights = {
+    api: preflightAwsService('api'),
+    bridge: bridgeEnabled ? preflightAwsService('bridge') : null,
+  };
   const state = {
     version: 2,
     root,
     startedAt: new Date().toISOString(),
     sourceFingerprint: computeRuntimeFingerprint(root),
     bridgeEnabled,
+    analystContract: {
+      verified: false,
+      checkedAt: null,
+      error: 'The Analyst services have not completed their startup contract check.',
+    },
     supervisor: { pid: process.pid },
     children: {},
     notifications: notificationsActive && previousState?.notifications
@@ -984,7 +1422,7 @@ async function runMonitor() {
         } catch {
           const fatalPattern = name === 'bridge'
             ? /\[hermes-bridge\]\s+fatal:/i
-            : /\[hermes-reliability-controller\]\s+fatal:/i;
+            : /\[(?:readiness-controller|hermes-reliability-controller)\]\s+fatal:/i;
           if (streamName === 'stderr' && fatalPattern.test(line)) {
             const observedAt = new Date().toISOString();
             parsedStatus = true;
@@ -1012,11 +1450,30 @@ async function runMonitor() {
     writeState(state);
   }
 
-  async function startOne(name, { initial = false } = {}) {
+  async function startOne(name, {
+    initial = false,
+    awsPreflightResult,
+  } = {}) {
     const service = services[name];
     if (processOutputBuffers[name]) {
       processOutputBuffers[name].stdout = '';
       processOutputBuffers[name].stderr = '';
+    }
+    if (name === 'sidecar') {
+      // A restart must begin from a single clean sidecar. The process scan is
+      // restricted to this repository's exact sidecar command and cwd, so an
+      // unrelated API client or Gateway listener is never touched.
+      const cleanup = await reconcileOwnedSidecarProcesses({ keepPid: null });
+      if (!cleanup.verified || !cleanup.clean) {
+        state.children.sidecar = {
+          ...(state.children.sidecar || {}),
+          status: 'degraded',
+          errorCode: cleanup.errorCode,
+          lastDetail: cleanup.detail,
+          sidecarProcessCleanup: cleanup,
+        };
+        writeState(state);
+      }
     }
     let existing = service.processOnly
       ? Number((initial ? previousState : state)?.children?.[name]?.pid) || null
@@ -1035,7 +1492,9 @@ async function runMonitor() {
       return false;
     }
 
-    const awsPreflight = preflightAwsService(name);
+    const awsPreflight = awsPreflightResult === undefined
+      ? preflightAwsService(name)
+      : awsPreflightResult;
     if (awsPreflight && !awsPreflight.ok) {
       if (existingOwned) await terminate(existing);
       state.children[name] = credentialPreflightFailureState(name, awsPreflight, {
@@ -1046,6 +1505,13 @@ async function runMonitor() {
       return false;
     }
 
+    if (['api', 'analystSidecar', 'analystHermes'].includes(name) && existingOwned) {
+      // These three processes share supervisor-scoped credentials. A process
+      // left behind by an older supervisor must never be adopted with a token
+      // the newly-started peers do not possess.
+      await terminate(existing);
+      existing = null;
+    }
     if (service.processOnly && existingOwned) {
       await terminate(existing);
       existing = null;
@@ -1054,7 +1520,7 @@ async function runMonitor() {
       state.children[name] = {
         pid: existing,
         external: true,
-        status: await httpOk(service.health) ? 'ready' : 'starting',
+        status: await httpOk(service.health, service.healthTimeoutMs) ? 'ready' : 'starting',
         startedAt: new Date().toISOString(),
         healthFailures: 0,
         restarts: (histories[name] || []).length,
@@ -1085,6 +1551,15 @@ async function runMonitor() {
         lastPublishFailures: [],
         awsProfile: name === 'bridge' ? configuredBridgeAwsProfile() : null,
       } : {}),
+      ...(name === 'sidecar' ? {
+        sidecarProcessPids: [],
+        managedSidecarProcessPids: [],
+        sidecarProcessCount: 0,
+        managedSidecarProcessCount: 0,
+        duplicatePids: [],
+        duplicateCount: 0,
+        sidecarRuntimeVerified: false,
+      } : {}),
     };
     writeState(state);
     child.on('error', (error) => {
@@ -1106,6 +1581,90 @@ async function runMonitor() {
     return true;
   }
 
+  async function reconcileSidecarState({ restartIfMissing = true } = {}) {
+    const before = sidecarProcessSnapshot();
+    const cleanup = await reconcileOwnedSidecarProcesses({
+      keepPid: before.recommendedKeepPid,
+    });
+    const after = sidecarProcessSnapshot();
+    const item = state.children.sidecar;
+    if (item) {
+      item.sidecarProcessPids = after.processPids;
+      item.managedSidecarProcessPids = after.managedProcessPids;
+      item.sidecarProcessCount = after.processCount;
+      item.managedSidecarProcessCount = after.managedProcessCount;
+      item.duplicatePids = after.duplicatePids;
+      item.duplicateCount = after.duplicateCount;
+      item.sidecarRuntimeVerified = after.runtimeVerified;
+      item.sidecarProcessCleanup = cleanup;
+      if (!cleanup.verified || !cleanup.clean || after.duplicateCount > 0) {
+        item.status = 'degraded';
+        item.errorCode = cleanup.errorCode || 'IBKR_SIDECAR_DUPLICATES';
+        item.lastDetail = cleanup.detail;
+      } else if (item.errorCode === 'IBKR_SIDECAR_DUPLICATES'
+          || item.errorCode === 'IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED') {
+        item.errorCode = null;
+        item.lastDetail = null;
+      }
+      if (cleanup.terminatedPids.length > 0) {
+        console.warn(
+          `[dashboard-supervisor] Reconciled IBKR sidecar PIDs: ${cleanup.terminatedPids.join(', ')}`,
+        );
+      }
+      writeState(state);
+    }
+
+    const listener = listenerPid(services.sidecar.port);
+    const shouldStart = restartIfMissing
+      && !state.stopping
+      && after.processCount === 0
+      && !listener
+      && !restartPending.has('sidecar');
+    if (shouldStart) await startOne('sidecar');
+    return { before, cleanup, after, restarted: shouldStart };
+  }
+
+  async function verifyAnalystHermesAfterRestart() {
+    const gatewayReady = await waitFor('analystHermes', 90_000);
+    const previouslyVerified = analystRuntimeEnvironment.ANALYST_CONTRACT_VERIFIED === 'true';
+    state.analystContract = gatewayReady
+      ? runAnalystContractCheck()
+      : {
+        verified: false,
+        checkedAt: new Date().toISOString(),
+        error: 'The Analyst Hermes gateway did not become ready after restart.',
+      };
+    analystRuntimeEnvironment = Object.freeze({
+      ...analystRuntimeEnvironment,
+      ANALYST_CONTRACT_VERIFIED: state.analystContract.verified ? 'true' : 'false',
+    });
+
+    const item = state.children.analystHermes;
+    if (item) {
+      item.status = gatewayReady && state.analystContract.verified ? 'ready' : 'degraded';
+      item.errorCode = state.analystContract.verified
+        ? null
+        : 'ANALYST_HERMES_CONTRACT_UNVERIFIED';
+      item.lastDetail = state.analystContract.error || null;
+      item.healthFailures = state.analystContract.verified ? 0 : Number(item.healthFailures || 0);
+      if (state.analystContract.verified) item.lastHealthyAt = new Date().toISOString();
+    }
+    writeState(state);
+
+    // The API deliberately receives the contract flag only at process start.
+    // A compatibility failure must fail closed, while a later successful
+    // Hermes update should re-enable chat without a manual dashboard restart.
+    if (previouslyVerified !== state.analystContract.verified
+        && state.children.api
+        && !restartPending.has('api')) {
+      void scheduleRestart('api', {
+        reason: 'analyst-contract-state-changed',
+        countFailure: false,
+      });
+    }
+    return state.analystContract.verified;
+  }
+
   async function terminateOwnedService(name) {
     const service = services[name];
     const pid = service.processOnly
@@ -1113,6 +1672,10 @@ async function runMonitor() {
       : listenerPid(service.port);
     if (!pid || !isAlive(pid)) return true;
     if (!isOwned(pid)) {
+      if (name === 'analystHermes') {
+        const handoff = await reconcileOrphanedAnalystHermes();
+        if (handoff.recovered) return true;
+      }
       state.children[name] = {
         ...state.children[name],
         pid,
@@ -1194,7 +1757,10 @@ async function runMonitor() {
       await sleep(policy.delayMs);
       if (state.stopping) return;
       if (!(await terminateOwnedService(name))) return;
-      await startOne(name);
+      const started = await startOne(name);
+      if (started && name === 'analystHermes') {
+        await verifyAnalystHermesAfterRestart();
+      }
     } finally {
       restartPending.delete(name);
     }
@@ -1233,12 +1799,59 @@ async function runMonitor() {
   if (!bridgeEnabled) {
     await reconcileDisabledBridgeState();
   }
-  for (const name of activeServiceNames) await startOne(name, { initial: true });
+  for (const name of ['sidecar', 'analystSidecar']) {
+    if (activeServiceNames.includes(name)) {
+      await startOne(name, {
+        initial: true,
+        awsPreflightResult: name === 'analystSidecar'
+          ? startupAwsPreflights.api
+          : undefined,
+      });
+    }
+  }
+  const analystSidecarReady = activeServiceNames.includes('analystSidecar')
+    && await waitFor('analystSidecar', 180_000);
+  if (activeServiceNames.includes('analystHermes')) {
+    await startOne('analystHermes', { initial: true });
+  }
+  const analystHermesReady = activeServiceNames.includes('analystHermes')
+    && await waitFor('analystHermes', 90_000);
+  state.analystContract = analystSidecarReady && analystHermesReady
+    ? runAnalystContractCheck()
+    : {
+      verified: false,
+      checkedAt: new Date().toISOString(),
+      error: !analystSidecarReady
+        ? 'The Analyst research sidecar did not become ready.'
+        : 'The Analyst Hermes gateway did not become ready.',
+    };
+  analystRuntimeEnvironment = Object.freeze({
+    ...analystRuntimeEnvironment,
+    ANALYST_CONTRACT_VERIFIED: state.analystContract.verified ? 'true' : 'false',
+  });
+  for (const name of activeServiceNames) {
+    if (['sidecar', 'analystSidecar', 'analystHermes'].includes(name)) continue;
+    await startOne(name, {
+      initial: true,
+      awsPreflightResult: name === 'api'
+        ? startupAwsPreflights.api
+        : (name === 'bridge' ? startupAwsPreflights.bridge : undefined),
+    });
+  }
   for (const name of ['api', 'ui']) {
     if (state.children[name]?.credentialPreflightBlocked) continue;
     state.children[name].status = await waitFor(name) ? 'ready' : 'starting';
   }
   if (state.children.sidecar) state.children.sidecar.status = await waitFor('sidecar', 5000) ? 'ready' : 'degraded';
+  if (state.children.analystSidecar) {
+    state.children.analystSidecar.status = analystSidecarReady ? 'ready' : 'degraded';
+  }
+  if (state.children.analystHermes) {
+    state.children.analystHermes.status = analystHermesReady && state.analystContract.verified
+      ? 'ready'
+      : 'degraded';
+  }
+  if (state.children.sidecar) await reconcileSidecarState({ restartIfMissing: false });
   if (state.children.controller) {
     state.children.controller.status = await waitFor('controller', 5000) ? 'ready' : 'degraded';
   }
@@ -1253,7 +1866,7 @@ async function runMonitor() {
     observeServiceNotification(name, item);
   }
   writeState(state);
-  const degradedServices = ['sidecar', 'controller', ...(bridgeEnabled ? ['bridge'] : [])]
+  const degradedServices = ['sidecar', 'analystSidecar', 'analystHermes', 'controller', ...(bridgeEnabled ? ['bridge'] : [])]
     .filter(name => state.children[name]?.status !== 'ready');
   console.log(`Dashboard ${degradedServices.length === 0 ? 'READY' : `DEGRADED: ${degradedServices.join(', ')} unavailable`} (UI :3000, API :3001)`);
   timer = setInterval(async () => {
@@ -1263,6 +1876,9 @@ async function runMonitor() {
       if (!bridgeEnabled) {
         await reconcileDisabledBridgeState();
         observeServiceNotification('bridge', state.children.bridge);
+      }
+      if (state.children.sidecar && !restartPending.has('sidecar')) {
+        await reconcileSidecarState();
       }
       for (const name of activeServiceNames) {
         const service = services[name];
@@ -1279,7 +1895,7 @@ async function runMonitor() {
             observeServiceNotification(name, state.children[name]);
             continue;
           }
-          await startOne(name);
+          await startOne(name, { awsPreflightResult: awsPreflight });
           continue;
         }
         const circuitUntil = Date.parse(String(item.circuitOpenUntil || ''));
@@ -1312,9 +1928,33 @@ async function runMonitor() {
         } else {
           const pid = listenerPid(service.port);
           const owned = Boolean(pid && isOwned(pid));
-          const healthy = Boolean(owned && await httpOk(service.health));
+          const healthy = Boolean(owned && await httpOk(service.health, service.healthTimeoutMs));
+          const sidecarProcessFailure = name === 'sidecar'
+            && (Number(item.duplicateCount || 0) > 0
+              || item.sidecarProcessCleanup?.verified === false);
           item.pid = pid;
           item.external = children[name]?.pid !== pid;
+          if (name === 'analystHermes' && pid && !owned) {
+            const handoff = await reconcileOrphanedAnalystHermes();
+            if (handoff.recovered) {
+              item.pid = null;
+              item.external = false;
+              item.status = 'restarting';
+              item.errorCode = null;
+              item.healthFailures = 0;
+              state.analystContract = {
+                verified: false,
+                checkedAt: new Date().toISOString(),
+                error: 'Hermes was updated; the replacement gateway is being verified.',
+              };
+              writeState(state);
+              void scheduleRestart(name, {
+                reason: 'hermes-update-handoff',
+                countFailure: false,
+              });
+              continue;
+            }
+          }
           if (pid && !owned) {
             item.status = 'blocked';
             item.errorCode = 'LOCAL_PORT_OWNERSHIP_CONFLICT';
@@ -1322,12 +1962,16 @@ async function runMonitor() {
             observeServiceNotification(name, item);
             continue;
           }
-          item.status = healthy ? 'ready' : (pid ? 'starting' : 'down');
-          item.errorCode = healthy
-            ? null
-            : (item.errorCode || `LOCAL_${name.toUpperCase()}_UNHEALTHY`);
-          item.healthFailures = healthy ? 0 : Number(item.healthFailures || 0) + 1;
-          if (healthy) item.lastHealthyAt = new Date().toISOString();
+          item.status = sidecarProcessFailure
+            ? 'degraded'
+            : (healthy ? 'ready' : (pid ? 'starting' : 'down'));
+          item.errorCode = sidecarProcessFailure
+            ? (item.sidecarProcessCleanup?.errorCode || 'IBKR_SIDECAR_DUPLICATES')
+            : (healthy ? null : (item.errorCode || `LOCAL_${name.toUpperCase()}_UNHEALTHY`));
+          item.healthFailures = sidecarProcessFailure
+            ? Number(item.healthFailures || 0) + 1
+            : (healthy ? 0 : Number(item.healthFailures || 0) + 1);
+          if (healthy && !sidecarProcessFailure) item.lastHealthyAt = new Date().toISOString();
         }
 
         observeServiceNotification(name, item);
@@ -1365,11 +2009,12 @@ async function start(options = {}) {
     const log = path.join(logDir, 'supervisor.log');
     const daemon = spawn(process.execPath, [__filename, 'monitor'], { cwd: root, detached: true, stdio: ['ignore', fs.openSync(log, 'a'), fs.openSync(log, 'a')], env: process.env });
     daemon.unref();
-    for (let n = 0; n < 60; n++) {
+    for (let n = 0; n < Math.ceil(dashboardBootstrapTimeoutMs / 500); n++) {
       await sleep(500);
       const supervisorState = readState();
       if (supervisorState?.children?.api?.credentialPreflightBlocked) break;
-      if ((await httpOk(services.ui.health)) && (await httpOk(services.api.health))) break;
+      if ((await httpOk(services.ui.health, services.ui.healthTimeoutMs))
+          && (await httpOk(services.api.health, services.api.healthTimeoutMs))) break;
     }
     const supervisorState = readState();
     if (supervisorState?.children?.api?.credentialPreflightBlocked) {
@@ -1392,8 +2037,8 @@ async function restart(options = {}) {
       timeout: 10_000,
     });
     const [apiReady, uiReady] = await Promise.all([
-      waitFor('api', morningStartTimeoutMs),
-      waitFor('ui', morningStartTimeoutMs),
+      waitFor('api', dashboardBootstrapTimeoutMs),
+      waitFor('ui', dashboardBootstrapTimeoutMs),
     ]);
     if (!apiReady || !uiReady) throw new Error('The loaded dashboard LaunchAgent did not restore API/UI health.');
     if (!quiet) console.log('Dashboard stack restarted through the loaded LaunchAgent.');
@@ -1401,6 +2046,85 @@ async function restart(options = {}) {
   }
   await stop({ quiet });
   return start({ detach: options.detach ?? isDetach, json: options.json ?? asJson, quiet });
+}
+
+async function restartIbkrSidecar({
+  state = readState(),
+  snapshot = sidecarProcessSnapshot,
+  terminateProcess = terminate,
+  alive = isAlive,
+  owned = isOwned,
+  healthCheck = () => httpOk(services.sidecar.health),
+  pause = sleep,
+  timeoutMs = 45_000,
+  now = Date.now,
+} = {}) {
+  const supervisorPid = Number(state?.supervisor?.pid) || null;
+  if (!supervisorPid || !alive(supervisorPid) || !owned(supervisorPid)) {
+    throw new Error(
+      'Refusing sidecar repair because no repo-owned dashboard supervisor is active.',
+    );
+  }
+
+  const before = snapshot();
+  const targetPid = Number(before?.ownerPid) || null;
+  if (
+    !targetPid
+    || before?.runtimeVerified !== true
+    || !Array.isArray(before?.managedProcessPids)
+    || !before.managedProcessPids.includes(targetPid)
+    || !alive(targetPid)
+    || !owned(targetPid)
+  ) {
+    throw new Error(
+      'Refusing sidecar repair because the port-8765 owner is not the exact repo-managed IBKR sidecar.',
+    );
+  }
+  if (Number(before?.duplicateCount || 0) > 0) {
+    throw new Error(
+      'Refusing sidecar repair while multiple repo-owned sidecars are present; run the supervisor reconciliation first.',
+    );
+  }
+
+  // Only this exact uvicorn PID is signalled. Gateway/TWS is a Java process,
+  // cannot pass the sidecar signature above, and is never a repair target.
+  await terminateProcess(targetPid);
+
+  const deadline = now() + Math.max(1_000, Number(timeoutMs) || 45_000);
+  let after = snapshot();
+  while (now() < deadline) {
+    const replacementPid = Number(after?.ownerPid) || null;
+    if (
+      replacementPid
+      && replacementPid !== targetPid
+      && after?.runtimeVerified === true
+      && Number(after?.duplicateCount || 0) === 0
+      && alive(replacementPid)
+      && owned(replacementPid)
+      && await healthCheck()
+    ) {
+      return {
+        ok: true,
+        action: 'restart-ibkr-sidecar',
+        previousPid: targetPid,
+        pid: replacementPid,
+        sidecarProcessCount: after.processCount,
+        gatewaySignalled: false,
+        observedAt: new Date().toISOString(),
+      };
+    }
+    await pause(500);
+    after = snapshot();
+  }
+  throw new Error(
+    `Repo-owned IBKR sidecar PID ${targetPid} stopped, but the supervisor did not restore one healthy replacement within ${timeoutMs}ms.`,
+  );
+}
+
+async function restartSidecarCommand() {
+  const result = await restartIbkrSidecar();
+  console.log(JSON.stringify(result));
+  return result;
 }
 async function status() {
   const report = await doctorReport();
@@ -1438,12 +2162,36 @@ async function doctorReport() {
     }
     const pid = listenerPid(service.port);
     const owned = Boolean(pid && isOwned(pid));
-    const healthy = await httpOk(service.health);
+    const healthy = await httpOk(service.health, service.healthTimeoutMs);
+    const sidecarSnapshot = name === 'sidecar' ? sidecarProcessSnapshot() : null;
+    const sidecarDuplicateFailure = Boolean(sidecarSnapshot?.duplicateCount > 0);
     const tradingReady = name === 'sidecar' ? await httpOk('http://127.0.0.1:8765/readyz') : healthy;
+    const analystContractFailure = name === 'analystHermes'
+      && state?.analystContract?.verified !== true;
     const status = pid && !owned
       ? 'blocked'
-      : (tradingReady ? 'ready' : (healthy ? 'degraded' : (pid ? 'starting' : 'down')));
-    report.services[name] = { pid, running: Boolean(pid), owned, healthy, ready: owned && tradingReady, status };
+      : (sidecarDuplicateFailure
+        ? 'degraded'
+        : (analystContractFailure
+          ? 'degraded'
+          : (tradingReady ? 'ready' : (healthy ? 'degraded' : (pid ? 'starting' : 'down')))));
+    report.services[name] = {
+      pid,
+      running: Boolean(pid),
+      owned,
+      healthy,
+      ready: owned && tradingReady && !sidecarDuplicateFailure && !analystContractFailure,
+      status,
+      ...(sidecarSnapshot || {}),
+      ...(sidecarDuplicateFailure ? {
+        errorCode: 'IBKR_SIDECAR_DUPLICATES',
+        detail: `Repo-owned sidecar process(es) require cleanup: ${sidecarSnapshot.duplicatePids.join(', ')}.`,
+      } : {}),
+      ...(analystContractFailure ? {
+        errorCode: 'ANALYST_HERMES_CONTRACT_UNVERIFIED',
+        detail: state?.analystContract?.error || 'The Hermes JSON-RPC contract is not verified.',
+      } : {}),
+    };
   }
   const ownershipBlocked = Object.entries(report.services)
     .some(([name, service]) => services[name].port && service.running && !service.owned);
@@ -1454,6 +2202,8 @@ async function doctorReport() {
     ? 'down'
     : (
       report.services.sidecar.ready
+      && report.services.analystSidecar.ready
+      && report.services.analystHermes.ready
       && report.services.bridge.ready
       && report.services.controller.ready
         ? 'ready'
@@ -1470,11 +2220,18 @@ async function localStackGroup() {
       : null;
     const pid = service.processOnly ? processSnapshot.pid : listenerPid(service.port);
     const owned = service.processOnly ? processSnapshot.owned : Boolean(pid && isOwned(pid));
-    const healthy = service.processOnly ? processSnapshot.healthy : await httpOk(service.health);
+    const healthy = service.processOnly
+      ? processSnapshot.healthy
+      : await httpOk(service.health, service.healthTimeoutMs);
+    const sidecarSnapshot = name === 'sidecar' ? sidecarProcessSnapshot() : null;
+    const sidecarDuplicateFailure = Boolean(sidecarSnapshot?.duplicateCount > 0);
+    const analystContractFailure = name === 'analystHermes'
+      && state?.analystContract?.verified !== true;
     const intentionallyDisabled = service.processOnly
       && processSnapshot?.status === 'disabled'
       && processSnapshot?.intentionallyDisabled === true;
-    const checkPassed = intentionallyDisabled || Boolean(pid && owned && healthy);
+    const checkPassed = intentionallyDisabled
+      || Boolean(pid && owned && healthy && !sidecarDuplicateFailure && !analystContractFailure);
     let summary;
     let recovery;
     const processErrorCode = processSnapshot?.lastPublishErrorCode
@@ -1485,6 +2242,21 @@ async function localStackGroup() {
     if (intentionallyDisabled) {
       summary = 'Outbound operations and portfolio publishing are intentionally disabled; the bridge is idle.';
       recovery = null;
+    } else if (sidecarDuplicateFailure) {
+      summary = `Repo-owned IBKR sidecar duplicate process(es) remain connected to Gateway: ${sidecarSnapshot.duplicatePids.join(', ')}.`;
+      recovery = {
+        kind: 'command',
+        label: 'Restart the repo-owned local stack to reconcile IBKR sidecar processes.',
+        command: 'npm run dev:restart -- --detach',
+      };
+    } else if (analystContractFailure) {
+      summary = state?.analystContract?.error
+        || 'The Analyst Hermes JSON-RPC contract has not been verified.';
+      recovery = {
+        kind: 'command',
+        label: 'Restart the repo-owned stack to rerun the pinned Hermes contract check.',
+        command: 'npm run dev:restart -- --detach',
+      };
     } else if (pid && !owned) {
       summary = service.processOnly
         ? `Supervisor state points to unknown ${name} PID ${pid}; it will not be adopted or stopped.`
@@ -1538,11 +2310,15 @@ async function localStackGroup() {
       summary,
       errorCode: checkPassed
         ? null
-        : (pid && !owned
-          ? 'LOCAL_PORT_OWNERSHIP_CONFLICT'
-          : (!pid
+        : sidecarDuplicateFailure
+          ? 'IBKR_SIDECAR_DUPLICATES'
+          : analystContractFailure
+            ? 'ANALYST_HERMES_CONTRACT_UNVERIFIED'
+          : pid && !owned
+            ? 'LOCAL_PORT_OWNERSHIP_CONFLICT'
+            : !pid
             ? `LOCAL_${name.toUpperCase()}_NOT_RUNNING`
-            : (processErrorCode || `LOCAL_${name.toUpperCase()}_UNHEALTHY`))),
+            : (processErrorCode || `LOCAL_${name.toUpperCase()}_UNHEALTHY`),
       detail: intentionallyDisabled
         ? 'Both bridge partition controls are false; no bridge process or outbound AWS writer is running.'
         : service.processOnly
@@ -1558,7 +2334,9 @@ async function localStackGroup() {
             ? processSnapshot.lastDetail || null
             : null,
         ].filter(Boolean).join(' ')
-        : service.health,
+        : (sidecarDuplicateFailure
+          ? `Sidecar process PIDs ${sidecarSnapshot.processPids.join(', ') || 'none'}; duplicate PIDs ${sidecarSnapshot.duplicatePids.join(', ') || 'none'}.`
+          : service.health),
       observedAt: new Date().toISOString(),
       ageSeconds: 0,
       impact: intentionallyDisabled
@@ -1576,6 +2354,7 @@ async function localStackGroup() {
         healthMode: intentionallyDisabled
           ? 'disabled'
           : (service.processOnly ? 'process-heartbeat' : 'http'),
+        ...(sidecarSnapshot || {}),
       },
       local: {
         name,
@@ -1584,6 +2363,7 @@ async function localStackGroup() {
         owned,
         healthy,
         ...(processSnapshot || {}),
+        ...(sidecarSnapshot || {}),
       },
     };
   }));
@@ -1713,6 +2493,211 @@ async function fetchSystemReadiness() {
   return validateSystemReadinessReport(parsed);
 }
 
+const LOGIN_STATUS_VALUES = new Set(['online', 'offline', 'attention', 'closed', 'unknown']);
+const LOGIN_DETAIL_IDS = new Set([
+  'ibkr-gateway',
+  'gmail-oauth',
+  'aws-admin',
+  'aws-api',
+  'aws-bridge',
+]);
+
+function validateLoginStatusReport(report) {
+  if (!report || typeof report !== 'object' || report.version !== 1) {
+    throw new Error('Login status response has an unsupported version.');
+  }
+  if (!report.service || report.service.id !== 'logins') {
+    throw new Error('Login status response is missing the Logins service.');
+  }
+  if (!Number.isFinite(Date.parse(String(report.checkedAt || '')))) {
+    throw new Error('Login status response is missing a valid checkedAt timestamp.');
+  }
+  if (!Array.isArray(report.service.details)) {
+    throw new Error('Login status response is missing its details array.');
+  }
+  for (const detail of report.service.details) {
+    if (!detail || !LOGIN_DETAIL_IDS.has(String(detail.id || ''))
+        || !LOGIN_STATUS_VALUES.has(String(detail.status || ''))
+        || typeof detail.required !== 'boolean') {
+      throw new Error('Login status response contains an invalid authentication detail.');
+    }
+  }
+  return report;
+}
+
+async function fetchLoginStatus({ refresh = null } = {}) {
+  const requestUrl = refresh
+    ? `${loginStatusUrl}?refresh=${encodeURIComponent(refresh === true ? '1' : refresh)}`
+    : loginStatusUrl;
+  let response;
+  try {
+    response = await fetch(requestUrl, { signal: AbortSignal.timeout(loginStatusTimeoutMs) });
+  } catch (error) {
+    throw new Error(`Could not reach ${loginStatusUrl}: ${error.message}`);
+  }
+  const body = await response.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error(`Login status endpoint returned HTTP ${response.status} with a non-JSON body.`);
+  }
+  if (!response.ok) {
+    throw new Error(`Login status endpoint returned HTTP ${response.status}.`);
+  }
+  return validateLoginStatusReport(parsed);
+}
+
+function loginDetailErrorCode(detail) {
+  const state = String(detail?.state || '').trim().toLowerCase();
+  if (detail?.id === 'gmail-oauth' && state === 'expired') return 'GMAIL_AUTH_REQUIRED';
+  if (state === 'signed_out' || state === 'expired') return 'AWS_ADMIN_LOGIN_REQUIRED';
+  if (state === 'wrong_principal') return 'AWS_PROFILE_WRONG_PRINCIPAL';
+  if (state === 'forbidden') return 'AWS_AUTHORIZATION_DENIED';
+  if (state === 'socket_disabled') return 'IBKR_SOCKET_DISABLED';
+  if (state === 'sidecar_unavailable') return 'IBKR_SIDECAR_UNAVAILABLE';
+  if (state === 'disconnected') return 'IBKR_GATEWAY_DISCONNECTED';
+  return null;
+}
+
+function authenticationCheck(detail, {
+  id,
+  label,
+  recovery = null,
+  optional = false,
+} = {}) {
+  const status = String(detail?.status || 'unknown');
+  const state = String(detail?.state || 'unverified');
+  const sourceId = String(detail?.id || id || '');
+  const observedAt = detail?.verifiedAt || detail?.checkedAt || new Date().toISOString();
+  const errorCode = loginDetailErrorCode({
+    ...detail,
+    id: detail?.id || id,
+  });
+  if (sourceId === 'aws-admin') {
+    let summary = 'Ready for operator changes.';
+    if (state === 'signed_out' || state === 'expired') {
+      summary = 'Signed out — required only for operator changes.';
+    } else if (status !== 'online') {
+      summary = 'Operator AWS SSO is not verified; trading readiness is unaffected.';
+    }
+    return {
+      id: 'aws-admin-sso',
+      label,
+      status: 'pass',
+      blocking: false,
+      summary,
+      detail: detail?.reason || null,
+      observedAt,
+      errorCode,
+      impact: 'Deployments, IAM changes, backfills, and replays require the approved administrator SSO session.',
+      recovery: null,
+    };
+  }
+
+  if (status === 'online' || (status === 'closed' && state === 'disabled')) {
+    return {
+      id,
+      label,
+      status: 'pass',
+      blocking: !optional,
+      summary: status === 'closed' ? 'Intentionally disabled.' : 'Verified and operational.',
+      detail: null,
+      observedAt,
+      errorCode: null,
+      recovery: null,
+    };
+  }
+
+  const failed = status === 'offline';
+  return {
+    id,
+    label,
+    status: failed ? 'fail' : 'warn',
+    blocking: !optional,
+    summary: detail?.reason || 'Authentication could not be verified.',
+    detail: state,
+    observedAt,
+    errorCode: errorCode || `${id.replace(/[^a-z0-9]+/gi, '_').toUpperCase()}_${failed ? 'FAILED' : 'UNVERIFIED'}`,
+    impact: `${label} is required for its enabled dashboard capability.`,
+    recovery,
+  };
+}
+
+function authenticationGroup(loginReport) {
+  const details = new Map(
+    loginReport.service.details.map((detail) => [String(detail.id), detail]),
+  );
+  return {
+    id: 'authentication',
+    label: 'Authentication',
+    checks: [
+      authenticationCheck(details.get('ibkr-gateway'), {
+        id: 'auth-ibkr',
+        label: 'IBKR Gateway',
+        recovery: {
+          kind: 'manual',
+          label: 'Open IB Gateway from the Systems panel, finish login, then wait for live portfolio verification.',
+        },
+      }),
+      authenticationCheck(details.get('aws-api'), {
+        id: 'auth-aws-api',
+        label: 'AWS API',
+        recovery: {
+          kind: 'command',
+          label: 'Verify the dashboard read profile.',
+          command: 'node scripts/ops/aws_profile_preflight.js --purpose api --profile market-dashboard-local',
+        },
+      }),
+      authenticationCheck(details.get('aws-bridge'), {
+        id: 'auth-aws-bridge',
+        label: 'AWS Bridge',
+        optional: details.get('aws-bridge')?.required !== true,
+        recovery: {
+          kind: 'command',
+          label: 'Restart the repo-owned bridge after fixing its dedicated profile.',
+          command: 'npm run dev:restart',
+        },
+      }),
+      authenticationCheck(details.get('aws-admin'), {
+        id: 'auth-aws-admin',
+        label: 'AWS Admin',
+        optional: true,
+      }),
+      authenticationCheck(details.get('gmail-oauth'), {
+        id: 'auth-gmail',
+        label: 'Gmail OAuth',
+        recovery: {
+          kind: 'manual',
+          label: 'Refresh Gmail OAuth only if the Gmail authentication proof is expired or revoked.',
+        },
+      }),
+    ],
+  };
+}
+
+function unavailableAuthenticationGroup(message) {
+  return {
+    id: 'authentication',
+    label: 'Authentication',
+    checks: [{
+      id: 'auth-status',
+      label: 'Authentication status',
+      status: 'fail',
+      blocking: true,
+      summary: message,
+      errorCode: 'AUTHENTICATION_STATUS_UNAVAILABLE',
+      detail: loginStatusUrl,
+      observedAt: new Date().toISOString(),
+      recovery: {
+        kind: 'command',
+        label: 'Restore the local API, then rerun the authentication checks.',
+        command: 'npm run auth:status',
+      },
+    }],
+  };
+}
+
 function summarizeGroups(groups, minimumStatus = 'ready') {
   const readiness = buildSystemReadiness(groups);
   const rank = { ready: 0, degraded: 1, blocked: 2 };
@@ -1721,8 +2706,8 @@ function summarizeGroups(groups, minimumStatus = 'ready') {
   return { status: derived, summary: readiness.summary };
 }
 
-function mergedMorningReport(localGroup, systemReport, metadata = {}) {
-  const groups = [localGroup, ...(systemReport?.groups || [])];
+function mergedMorningReport(localGroup, systemReport, metadata = {}, authentication = null) {
+  const groups = [localGroup, ...(systemReport?.groups || []), ...(authentication ? [authentication] : [])];
   const aggregate = buildSystemReadiness(groups, {
     now: systemReport?.checkedAt || new Date(),
   });
@@ -1959,6 +2944,60 @@ function morningExitCode(status) {
   return 3;
 }
 
+async function authStatus() {
+  try {
+    const report = await fetchLoginStatus({ refresh: '1' });
+    if (asJson) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log('Market Dashboard Authentication');
+      for (const detail of report.service.details) {
+        const optional = detail.required ? '' : ' (optional)';
+        console.log(`- ${detail.label}${optional}: ${detail.state || detail.status}`);
+        if (detail.reason) console.log(`  ${detail.reason}`);
+      }
+      const admin = report.service.details.find((detail) => detail.id === 'aws-admin');
+      console.log(admin?.state === 'signed_out' || admin?.state === 'expired'
+        ? '- AWS Admin: Signed out — required only for operator changes.'
+        : '- AWS Admin: Operator changes use the approved administrator SSO session.');
+    }
+    const requiredFailure = report.service.details.some((detail) => (
+      detail.required && !['online', 'closed'].includes(detail.status)
+    ));
+    process.exitCode = requiredFailure ? 1 : 0;
+  } catch (error) {
+    const message = `Authentication status unavailable: ${error.message}`;
+    if (asJson) {
+      console.log(JSON.stringify({ status: 'blocked', errorCode: 'AUTHENTICATION_STATUS_UNAVAILABLE', error: message }));
+    } else {
+      console.error(message);
+    }
+    process.exitCode = 2;
+  }
+}
+
+function authAdminLogin() {
+  const environment = { ...process.env };
+  clearAwsCredentialEnvironment(environment);
+  delete environment.AWS_PROFILE;
+  delete environment.AWS_DEFAULT_PROFILE;
+  environment.AWS_PAGER = '';
+  console.log('Clearing the cached AWS SSO session. Complete browser authorization manually when prompted.');
+  execFileSync('aws', ['sso', 'logout'], { env: environment, stdio: 'inherit' });
+  execFileSync('aws', ['sso', 'login', '--profile', 'market-dashboard-admin'], {
+    env: environment,
+    stdio: 'inherit',
+  });
+  execFileSync(process.execPath, [
+    path.join(root, 'scripts/ops/aws_profile_preflight.js'),
+    '--purpose',
+    'admin',
+    '--profile',
+    'market-dashboard-admin',
+  ], { env: environment, stdio: 'inherit' });
+  console.log('AWS Admin SSO is verified for operator changes.');
+}
+
 async function morning() {
   let localGroup = await localStackGroup();
   let localRecovery = { attempted: false, mode: 'read-only', startedServices: [] };
@@ -1973,7 +3012,9 @@ async function morning() {
       status: 'blocked',
       checkedAt: new Date().toISOString(),
       groups: [unavailableSystemGroup('The local API is unavailable, so dependency readiness could not be collected.')],
-    }, { localRecovery, checkOnly, systemReadinessAvailable: false });
+    }, { localRecovery, checkOnly, systemReadinessAvailable: false }, unavailableAuthenticationGroup(
+      'The local API is unavailable, so authentication status could not be collected.',
+    ));
     if (asJson) console.log(JSON.stringify(report, null, 2));
     else console.log(formatMorningReport(report));
     process.exitCode = 2;
@@ -2040,14 +3081,33 @@ async function morning() {
       valid: false,
       systemReadinessAvailable: false,
       preflightError: fetchError.message,
-    });
+    }, unavailableAuthenticationGroup(
+      'The local API readiness contract could not be collected, so authentication status is unavailable.',
+    ));
     if (asJson) console.log(JSON.stringify(report, null, 2));
     else console.log(formatMorningReport(report));
     process.exitCode = 3;
     return;
   }
 
-  const report = mergedMorningReport(localGroup, systemReport, { localRecovery, checkOnly, valid: true });
+  let loginReport = null;
+  let loginError = null;
+  try {
+    loginReport = await fetchLoginStatus();
+  } catch (error) {
+    loginError = error;
+  }
+  const report = mergedMorningReport(
+    localGroup,
+    systemReport,
+    {
+      localRecovery,
+      checkOnly,
+      valid: !loginError,
+      authenticationError: loginError?.message || null,
+    },
+    loginError ? unavailableAuthenticationGroup(loginError.message) : authenticationGroup(loginReport),
+  );
   if (asJson) console.log(JSON.stringify(report, null, 2));
   else console.log(formatMorningReport(report));
   process.exitCode = morningExitCode(report.status);
@@ -2062,8 +3122,11 @@ async function main() {
   if (command === 'monitor') return runMonitor();
   if (command === 'stop') return stop();
   if (command === 'restart') return restart();
+  if (command === 'restart-sidecar') return restartSidecarCommand();
   if (command === 'status') return status();
   if (command === 'doctor') return doctor();
+  if (command === 'auth-status') return authStatus();
+  if (command === 'auth-admin-login') return authAdminLogin();
   if (command === 'morning') return morning();
   if (command === 'start') return start();
   throw new Error(`Unknown command: ${command}`);
@@ -2102,17 +3165,31 @@ if (require.main === module) {
 module.exports = {
   applyBridgeStatusPayload,
   applyControllerStatusPayload,
+  authStatus,
+  authenticationCheck,
+  authAdminLogin,
   bridgeRecoveryLabel,
   childEnvironment,
+  createAnalystRuntimeEnvironment,
   configuredBridgeAwsProfile,
   credentialPreflightFailureState,
   discoverOwnedBridgeProcessIds,
+  discoverOwnedSidecarProcessIds,
+  expectedCapabilityIdsForEnv,
   formatMorningReport,
   hasExactBridgeCommandSignature,
   hasExactControllerCommandSignature,
+  hasExactAnalystHermesCommandSignature,
+  hasExactAnalystHermesRuntimeSignature,
+  hasExactAnalystSidecarCommandSignature,
+  hasExactSidecarCommandSignature,
+  hasManagedSidecarRuntime,
   hasExpectedDashboardSignature,
   heartbeatAgeMs,
   hermesBridgeEnabled,
+  isRecoverableOrphanedAnalystHermes,
+  authenticationGroup,
+  fetchLoginStatus,
   launchAgentIsLoaded,
   localNotificationsEnabled,
   mergedMorningReport,
@@ -2123,16 +3200,24 @@ module.exports = {
   preflightAwsService,
   processServiceStatus,
   reconcileDisabledBridgeProcesses,
+  reconcileOrphanedAnalystHermes,
+  reconcileOwnedSidecarProcesses,
   recoveryActions,
   readinessUrl,
+  loginStatusUrl,
+  restartIbkrSidecar,
   restartPolicyFor,
+  runAnalystContractCheck,
   sendMacNotification,
   services,
+  sidecarProcessSnapshot,
   supervisedServiceNames,
   summarizeGroups,
   systemSourceIsStale,
   hasStartupReadinessMismatch,
   validateSystemReadinessReport,
+  validateLoginStatusReport,
+  unavailableAuthenticationGroup,
   validProcessId,
   writeJsonAtomically,
 };

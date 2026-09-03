@@ -4,19 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
-import random
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from ib_insync import Contract, IB
 
+from gateway_connection_governor import GatewayConnectionGovernor
+
 PERSISTENT_CONNECT = os.environ.get("IBKR_PERSISTENT_CONNECT", "true").lower() == "true"
 MAX_STREAM_SUBS = int(os.environ.get("IBKR_MAX_STREAM_SUBS", "100"))
 STREAM_DEBOUNCE_MS = int(os.environ.get("IBKR_STREAM_DEBOUNCE_MS", "150"))
-RECONNECT_BASE_MS = int(os.environ.get("IBKR_RECONNECT_BASE_MS", "1000"))
+QUOTE_WAIT_SEC = max(0.1, float(os.environ.get("IBKR_QUOTE_WAIT_SEC", "2.5")))
+QUOTE_QUALIFY_TIMEOUT_SEC = max(
+    0.1,
+    float(os.environ.get("IBKR_QUOTE_QUALIFY_TIMEOUT_SEC", "3.0")),
+)
+QUOTE_MAX_CONCURRENCY = max(1, int(os.environ.get("IBKR_QUOTE_MAX_CONCURRENCY", "6")))
+FORCED_QUOTE_MAX_CONCURRENCY = max(
+    1,
+    int(os.environ.get("IBKR_FORCED_QUOTE_MAX_CONCURRENCY", "12")),
+)
+QUOTE_POLL_SEC = 0.05
 ACCOUNT_SUMMARY_REFRESH_SEC = float(os.environ.get("IBKR_ACCOUNT_SUMMARY_REFRESH_SEC", "30"))
-CLIENT_ID_MAX_ATTEMPTS = int(os.environ.get("IB_GATEWAY_CLIENT_ID_ATTEMPTS", "10"))
 PORTFOLIO_SYNC_TIMEOUT_SEC = float(os.environ.get("IBKR_PORTFOLIO_SYNC_TIMEOUT_SEC", "8"))
 
 ACCOUNT_SUMMARY_TAG_SET = {
@@ -38,19 +49,51 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _quote_timestamp_age_sec(value: Any, now: Optional[datetime] = None) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    reference = now or datetime.now(timezone.utc)
+    return (reference - parsed.astimezone(timezone.utc)).total_seconds()
+
+
+def raw_quote_is_ready(raw: Optional[Dict[str, Any]], max_age_sec: float = 60.0) -> bool:
+    """Return true only for a provider-timestamped, non-frozen market mark."""
+    if not raw or raw.get("priceState") != "market_mark":
+        return False
+    def positive(value: Any) -> bool:
+        try:
+            return math.isfinite(float(value)) and float(value) > 0
+        except (TypeError, ValueError):
+            return False
+
+    if not (
+        positive(raw.get("last"))
+        or (positive(raw.get("bid")) and positive(raw.get("ask")))
+    ):
+        return False
+    if str(raw.get("dataType") or "").lower() not in {"live", "delayed"}:
+        return False
+    entitlement = str(raw.get("entitlementStatus") or "").lower()
+    if not entitlement or entitlement in {
+        "denied",
+        "not_entitled",
+        "unavailable",
+        "disabled",
+        "offline",
+    }:
+        return False
+    age_sec = _quote_timestamp_age_sec(raw.get("timestamp"))
+    return age_sec is not None and age_sec >= -30 and age_sec <= max_age_sec
+
+
 def ticker_to_raw_quote(ticker: Any, contract: Contract) -> Dict[str, Any]:
     """Return IB-native tick fields; normalization happens in Node."""
-    ts = None
-    if getattr(ticker, "time", None):
-        try:
-            ts = ticker.time.isoformat()
-        except Exception:
-            ts = str(ticker.time)
-
-    market_data_type = getattr(ticker, "marketDataType", None)
-    data_type_map = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed_frozen"}
-    data_type = data_type_map.get(market_data_type, "unknown")
-
     def safe_float(val: Any) -> Optional[float]:
         if val is None:
             return None
@@ -62,10 +105,56 @@ def ticker_to_raw_quote(ticker: Any, contract: Contract) -> Dict[str, Any]:
         except (TypeError, ValueError):
             return None
 
+    if ticker is None:
+        return {
+            "symbol": contract.symbol,
+            "conId": int(contract.conId) if contract.conId else None,
+            "secType": contract.secType,
+            "exchange": contract.exchange,
+            "primaryExchange": getattr(contract, "primaryExchange", None) or None,
+            "currency": contract.currency or "USD",
+            "localSymbol": contract.localSymbol or contract.symbol,
+            "lastTradeDateOrContractMonth": getattr(contract, "lastTradeDateOrContractMonth", None) or None,
+            "strike": safe_float(getattr(contract, "strike", None)),
+            "right": getattr(contract, "right", None) or None,
+            "tradingClass": getattr(contract, "tradingClass", None) or None,
+            "multiplier": getattr(contract, "multiplier", None) or None,
+            "bid": None,
+            "ask": None,
+            "last": None,
+            "close": None,
+            "volume": None,
+            "dataType": "unknown",
+            "priceState": "unavailable",
+            "entitlementStatus": None,
+            "timestamp": None,
+            "fetched_at": now_iso(),
+        }
+    ts = None
+    if getattr(ticker, "time", None):
+        try:
+            ts = ticker.time.isoformat()
+        except Exception:
+            ts = str(ticker.time)
+
+    market_data_type = getattr(ticker, "marketDataType", None)
+    data_type_map = {1: "live", 2: "frozen", 3: "delayed", 4: "delayed_frozen"}
+    data_type = data_type_map.get(market_data_type, "unknown")
+
     bid = safe_float(ticker.bid)
     ask = safe_float(ticker.ask)
     last = safe_float(ticker.last)
     close = safe_float(ticker.close) or safe_float(getattr(ticker, "prevClose", None))
+    has_market_mark = (
+        (last is not None and last > 0)
+        or (bid is not None and bid > 0 and ask is not None and ask > 0)
+    )
+    if has_market_mark:
+        price_state = "market_mark"
+    elif close is not None:
+        price_state = "reference_close"
+    else:
+        price_state = "unavailable"
 
     entitlement = None
     if hasattr(ticker, "tickByTicks"):
@@ -78,16 +167,26 @@ def ticker_to_raw_quote(ticker: Any, contract: Contract) -> Dict[str, Any]:
         "conId": int(contract.conId) if contract.conId else None,
         "secType": contract.secType,
         "exchange": contract.exchange,
+        "primaryExchange": getattr(contract, "primaryExchange", None) or None,
         "currency": contract.currency or "USD",
         "localSymbol": contract.localSymbol or contract.symbol,
+        "lastTradeDateOrContractMonth": getattr(contract, "lastTradeDateOrContractMonth", None) or None,
+        "strike": safe_float(getattr(contract, "strike", None)),
+        "right": getattr(contract, "right", None) or None,
+        "tradingClass": getattr(contract, "tradingClass", None) or None,
+        "multiplier": getattr(contract, "multiplier", None) or None,
         "bid": bid,
         "ask": ask,
         "last": last,
         "close": close,
         "volume": safe_float(ticker.volume),
         "dataType": data_type,
+        "priceState": price_state,
         "entitlementStatus": entitlement,
-        "timestamp": ts or now_iso(),
+        # A close-only tick does not carry the completed session timestamp.
+        # Keep its receipt time separate so callers cannot mistake a prior
+        # close observed now for a current market quote.
+        "timestamp": ts if has_market_mark else None,
         "fetched_at": now_iso(),
     }
 
@@ -102,6 +201,7 @@ class StreamManager:
         client_id: int,
         connect_timeout: float,
         instrument_to_contract: Callable[[Any], Contract],
+        connection_governor: Optional[GatewayConnectionGovernor] = None,
     ) -> None:
         self.ib = ib
         self.host = host
@@ -109,6 +209,18 @@ class StreamManager:
         self.client_id = client_id
         self.connect_timeout = connect_timeout
         self.instrument_to_contract = instrument_to_contract
+        self.connection_governor = connection_governor or GatewayConnectionGovernor(
+            host=host,
+            port=port,
+            connect_timeout=connect_timeout,
+            verify_timeout=connect_timeout,
+        )
+        self.connection_governor.register_session(
+            "primary",
+            ib,
+            client_id=client_id,
+            primary=True,
+        )
 
         self.connected = False
         self.reconnecting = False
@@ -121,6 +233,9 @@ class StreamManager:
         self._tickers: Dict[int, Any] = {}
         self._live_last_ticks: Dict[int, Dict[str, Any]] = {}
         self._connection_generation = 0
+        self._quote_snapshot_semaphore = asyncio.Semaphore(QUOTE_MAX_CONCURRENCY)
+        self._forced_quote_snapshot_semaphore = asyncio.Semaphore(FORCED_QUOTE_MAX_CONCURRENCY)
+        self._quote_snapshot_tasks: Dict[int, asyncio.Task] = {}
 
         self._portfolio_positions: Dict[str, Dict[int, Dict[str, Any]]] = {}
         self._account_summary: Dict[str, Dict[str, Any]] = {}
@@ -145,7 +260,9 @@ class StreamManager:
             "last_error": self.last_error,
             "active_subscriptions": len(self._ref_counts),
             "max_stream_subs": MAX_STREAM_SUBS,
+            "forced_quote_max_concurrency": FORCED_QUOTE_MAX_CONCURRENCY,
             "portfolio_account": self._portfolio_account,
+            "gateway": self.connection_governor.diagnostics(),
         }
 
     @property
@@ -176,7 +293,12 @@ class StreamManager:
 
     async def stop(self) -> None:
         self._started = False
-        for task in (self._reconnect_task, self._summary_task, self._debounce_task):
+        for task in (
+            self._reconnect_task,
+            self._summary_task,
+            self._debounce_task,
+            *self._quote_snapshot_tasks.values(),
+        ):
             if task and not task.done():
                 task.cancel()
         if self.ib.isConnected():
@@ -186,81 +308,36 @@ class StreamManager:
                 pass
         self.connected = False
 
-    async def _try_connect_once(self, client_id: int) -> bool:
-        if self.ib.isConnected():
-            try:
-                self.ib.disconnect()
-            except Exception:
-                pass
-        try:
-            await asyncio.wait_for(
-                self.ib.connectAsync(
-                    self.host, self.port, clientId=client_id, readonly=True
-                ),
-                timeout=self.connect_timeout,
-            )
-            return self.ib.isConnected()
-        except (ConnectionRefusedError, TimeoutError, asyncio.TimeoutError, OSError, asyncio.CancelledError):
-            if self.ib.isConnected():
-                try:
-                    self.ib.disconnect()
-                except Exception:
-                    pass
-            return False
-        except Exception:
-            if self.ib.isConnected():
-                try:
-                    self.ib.disconnect()
-                except Exception:
-                    pass
-            return False
-
     async def connect(self) -> Dict[str, Any]:
         async with self._connect_lock:
-            if self.ib.isConnected():
-                if not self.connected:
-                    self._connection_generation += 1
-                    self._live_last_ticks.clear()
-                self.connected = True
-                self.reconnecting = False
+            was_connected = self.connected
+            health = await self.connection_governor.ensure_session(
+                "primary",
+                self.ib,
+                client_id=self.client_id,
+                primary=True,
+            )
+            if not health.get("ok"):
+                self.connected = False
+                self.last_error = health.get("message")
+                return health
+
+            newly_connected = bool(health.get("new_connection")) or not was_connected
+            if newly_connected:
+                self._connection_generation += 1
+                self._live_last_ticks.clear()
                 await self._resubscribe_all()
-                return {"ok": True, "status": "connected", "client_id": self.client_id}
-
-            base_id = self.client_id
-            last_msg = None
-            for offset in range(CLIENT_ID_MAX_ATTEMPTS):
-                candidate = base_id + offset
-                if await self._try_connect_once(candidate):
-                    self.client_id = candidate
-                    self._connection_generation += 1
-                    self._live_last_ticks.clear()
-                    self.connected = True
-                    self.reconnecting = False
-                    self.last_error = None
-                    await self._resubscribe_all()
-                    return {"ok": True, "status": "connected", "client_id": self.client_id}
-                last_msg = f"clientId {candidate} unavailable (in use or timed out)"
-
-            self.connected = False
-            self.last_error = last_msg
+            self.connected = True
+            self.reconnecting = False
+            self.last_error = None
             return {
-                "ok": False,
-                "status": "tws_offline",
-                "message": (
-                    f"IB Gateway/TWS not reachable at {self.host}:{self.port} "
-                    f"(tried clientIds {base_id}-{base_id + CLIENT_ID_MAX_ATTEMPTS - 1}). "
-                    f"Stop duplicate sidecars: pkill -f 'uvicorn app:app'"
-                ),
+                **health,
+                "client_id": self.client_id,
             }
 
     async def ensure_connected(self) -> Dict[str, Any]:
-        if PERSISTENT_CONNECT:
-            if self.ib.isConnected():
-                self.connected = True
-                return {"ok": True, "status": "connected"}
-            return await self.connect()
-        if self.ib.isConnected():
-            return {"ok": True, "status": "connected"}
+        # A connected TCP object is not readiness evidence. Every caller goes
+        # through the shared, coalesced API heartbeat and account refresh.
         return await self.connect()
 
     def _on_disconnected(self) -> None:
@@ -272,26 +349,21 @@ class StreamManager:
         self._broadcast_status("disconnected", "IB socket disconnected")
 
     async def _reconnect_loop(self) -> None:
-        attempt = 0
         while self._started:
             await asyncio.sleep(1.0)
-            if self.ib.isConnected():
-                attempt = 0
+            if self.ib.isConnected() and self.connected:
                 continue
             self.reconnecting = True
             self.connected = False
-            delay = min(RECONNECT_BASE_MS * (2**attempt) / 1000.0, 60.0)
-            delay += random.uniform(0, 0.5)
-            await asyncio.sleep(delay)
             result = await self.connect()
             if result.get("ok"):
-                attempt = 0
                 self._broadcast_status("connected", None)
                 asyncio.ensure_future(self._pre_warm_portfolio())
             else:
-                attempt += 1
                 self.last_error = result.get("message")
                 self._broadcast_status("reconnecting", result.get("message"))
+                retry_after = max(1.0, float(result.get("retry_after_ms") or 0) / 1000.0)
+                await asyncio.sleep(min(retry_after, 60.0))
 
     async def _pre_warm_portfolio(self) -> None:
         """Pre-warm the portfolio cache for all managed accounts after connect."""
@@ -422,21 +494,27 @@ class StreamManager:
         if not rows:
             return
 
+        qualified_rows = []
+        for row in rows:
+            cid = int(row.get("conId") or 0)
+            if not cid or cid in self._ref_counts:
+                continue
+            qualified_contract, error = await self._qualify_contract(
+                Contract(conId=cid),
+                row.get("localSymbol") or row.get("symbol") or str(cid),
+            )
+            if error:
+                self.last_error = f"portfolio_quote_warmup: {error}"
+                continue
+            qualified_rows.append((cid, qualified_contract))
+
         async with self._lock:
-            for row in rows:
-                cid = int(row.get("conId") or 0)
-                if not cid or cid in self._ref_counts:
+            for cid, contract in qualified_rows:
+                if cid in self._ref_counts:
                     continue
                 if len(self._ref_counts) >= MAX_STREAM_SUBS:
                     self.last_error = f"portfolio_quote_warmup_limited: max {MAX_STREAM_SUBS}"
                     return
-
-                contract = Contract()
-                contract.conId = cid
-                contract.symbol = row.get("symbol") or ""
-                contract.secType = row.get("secType") or "STK"
-                contract.exchange = row.get("exchange") or "SMART"
-                contract.currency = row.get("currency") or "USD"
 
                 try:
                     ticker = self.ib.reqMktData(contract, "", False, False)
@@ -591,11 +669,214 @@ class StreamManager:
     def get_cached_quote_for_instrument(self, inst: Any) -> Optional[Dict[str, Any]]:
         if getattr(inst, "conId", None):
             return self._quote_cache.get(int(inst.conId))
+        sec_type = (getattr(inst, "secType", None) or "STK").upper()
+        exchange = (getattr(inst, "exchange", None) or "SMART").upper()
+        currency = (getattr(inst, "currency", None) or "USD").upper()
+        contract_specific = any(
+            getattr(inst, field, None)
+            for field in (
+                "lastTradeDateOrContractMonth",
+                "tradingClass",
+                "multiplier",
+            )
+        )
+        if (
+            sec_type not in {"STK", "ETF"}
+            or exchange != "SMART"
+            or currency != "USD"
+            or contract_specific
+        ):
+            return None
         symbol = (getattr(inst, "symbol", None) or "").upper()
         for raw in self._quote_cache.values():
             if raw.get("symbol", "").upper() == symbol:
                 return raw
         return None
+
+    async def _qualify_contract(
+        self,
+        contract: Contract,
+        label: Any,
+    ) -> tuple[Optional[Contract], Optional[str]]:
+        """Resolve one exact contract under a bounded broker request."""
+        try:
+            qualified = await asyncio.wait_for(
+                self.ib.qualifyContractsAsync(contract),
+                timeout=QUOTE_QUALIFY_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            return None, f"qualification_timeout for {label}"
+        except Exception as exc:
+            return None, str(exc) or f"qualification_failed for {label}"
+
+        requested_con_id = int(contract.conId) if contract.conId else None
+        if requested_con_id is not None:
+            exact = [
+                candidate
+                for candidate in list(qualified or [])
+                if int(getattr(candidate, "conId", 0) or 0) == requested_con_id
+            ]
+            if len(exact) != 1:
+                return None, f"Could not exactly qualify {label}"
+            return exact[0], None
+
+        if not qualified:
+            return None, f"Could not qualify {label}"
+        return qualified[0], None
+
+    async def _wait_for_persistent_quote(
+        self,
+        cid: int,
+        contract: Contract,
+        timeout_sec: float,
+    ) -> Dict[str, Any]:
+        deadline = asyncio.get_running_loop().time() + timeout_sec
+        last_raw = self._quote_cache.get(cid)
+        while asyncio.get_running_loop().time() < deadline:
+            ticker = self._tickers.get(cid)
+            raw = self._quote_cache.get(cid)
+            if ticker is not None:
+                ticker_raw = ticker_to_raw_quote(ticker, contract)
+                if raw is None or ticker_raw.get("fetched_at", "") >= raw.get("fetched_at", ""):
+                    raw = ticker_raw
+            if raw is not None:
+                last_raw = raw
+                if raw_quote_is_ready(raw):
+                    return raw
+            await asyncio.sleep(QUOTE_POLL_SEC)
+        return last_raw or ticker_to_raw_quote(self._tickers.get(cid), contract)
+
+    async def _capture_temporary_quote(
+        self,
+        cid: int,
+        contract: Contract,
+        timeout_sec: float,
+    ) -> Dict[str, Any]:
+        async with self._quote_snapshot_semaphore:
+            # A persistent subscription may have been established while this
+            # request waited for a snapshot slot. Reuse it and never cancel it.
+            if self._ref_counts.get(cid, 0) > 0:
+                return await self._wait_for_persistent_quote(cid, contract, timeout_sec)
+
+            ticker = self.ib.reqMktData(contract, "", False, False)
+            try:
+                deadline = asyncio.get_running_loop().time() + timeout_sec
+                last_raw = ticker_to_raw_quote(ticker, contract)
+                while asyncio.get_running_loop().time() < deadline:
+                    last_raw = ticker_to_raw_quote(ticker, contract)
+                    if raw_quote_is_ready(last_raw):
+                        return last_raw
+                    await asyncio.sleep(QUOTE_POLL_SEC)
+                return last_raw
+            finally:
+                # Do not cancel a subscription that another request acquired
+                # while this endpoint-owned snapshot was waiting.
+                if self._ref_counts.get(cid, 0) <= 0:
+                    try:
+                        self.ib.cancelMktData(contract)
+                    except Exception as exc:
+                        self.last_error = f"quote_cancel: {exc}"
+
+    async def _capture_broker_snapshot(
+        self,
+        cid: int,
+        contract: Contract,
+        timeout_sec: float,
+    ) -> Dict[str, Any]:
+        """Request a new IBKR snapshot without disturbing a live subscription.
+
+        A persistent portfolio subscription can legitimately retain an old
+        exchange timestamp when an instrument has not traded recently.  A
+        manual Analyst refresh must therefore go back to IBKR instead of
+        repeatedly reading that retained ticker.  The cloned contract gives
+        ib_insync a distinct request/ticker identity, so cancelling this
+        endpoint-owned snapshot cannot cancel the portfolio stream.
+        """
+        async with self._forced_quote_snapshot_semaphore:
+            snapshot_contract = Contract.create(**contract.dict())
+            requested_at = now_iso()
+            ticker = self.ib.reqMktData(snapshot_contract, "", True, False)
+            try:
+                deadline = asyncio.get_running_loop().time() + timeout_sec
+                last_raw = ticker_to_raw_quote(ticker, snapshot_contract)
+                while asyncio.get_running_loop().time() < deadline:
+                    last_raw = ticker_to_raw_quote(ticker, snapshot_contract)
+                    if raw_quote_is_ready(last_raw):
+                        break
+                    await asyncio.sleep(QUOTE_POLL_SEC)
+                return {
+                    **last_raw,
+                    "observationMode": "broker_snapshot",
+                    "snapshotRequestedAt": requested_at,
+                    "from_cache": False,
+                }
+            finally:
+                try:
+                    self.ib.cancelMktData(snapshot_contract)
+                except Exception as exc:
+                    self.last_error = f"forced_quote_cancel: {exc}"
+
+    async def get_quote_for_instrument(
+        self,
+        inst: Any,
+        timeout_sec: float = QUOTE_WAIT_SEC,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Fetch one quote without fabricating a timestamp or cancelling streams."""
+        contract = self.instrument_to_contract(inst)
+        label = getattr(inst, "localSymbol", None) or getattr(inst, "symbol", None) or getattr(inst, "conId", None)
+        requested_cid = int(contract.conId) if contract.conId else None
+        # Stable contract identity is not price data. For a forced snapshot,
+        # reuse the broker-qualified contract already owned by the persistent
+        # portfolio stream, while still requesting every mark anew from IBKR.
+        qualified_contract = (
+            self._contracts.get(requested_cid)
+            if force_refresh and requested_cid is not None
+            else None
+        )
+        qualification_error = None
+        if qualified_contract is None:
+            qualified_contract, qualification_error = await self._qualify_contract(contract, label)
+        if qualification_error:
+            return {"quote": None, "error": qualification_error}
+        cid = int(qualified_contract.conId) if qualified_contract.conId else None
+        if cid is None:
+            return {"quote": None, "error": f"No conId for {qualified_contract.symbol}"}
+
+        cached = self._quote_cache.get(cid)
+        if not force_refresh and raw_quote_is_ready(cached):
+            return {"quote": cached, "error": None, "from_cache": True}
+
+        task_key = (cid, "broker_snapshot" if force_refresh else "current_stream")
+        task = self._quote_snapshot_tasks.get(task_key)
+        if task is None or task.done():
+            task = asyncio.create_task(
+                self._capture_broker_snapshot(cid, qualified_contract, timeout_sec)
+                if force_refresh
+                else (
+                    self._wait_for_persistent_quote(cid, qualified_contract, timeout_sec)
+                    if self._ref_counts.get(cid, 0) > 0
+                    else self._capture_temporary_quote(cid, qualified_contract, timeout_sec)
+                )
+            )
+            self._quote_snapshot_tasks[task_key] = task
+
+            def forget(_completed: asyncio.Task, quote_task_key: tuple[int, str] = task_key) -> None:
+                if self._quote_snapshot_tasks.get(quote_task_key) is _completed:
+                    self._quote_snapshot_tasks.pop(quote_task_key, None)
+
+            task.add_done_callback(forget)
+
+        try:
+            raw = await asyncio.shield(task)
+        except Exception as exc:
+            return {"quote": None, "error": str(exc) or "quote_request_failed"}
+        return {
+            "quote": raw,
+            "error": None if raw_quote_is_ready(raw) else "quote_timeout",
+            "from_cache": False,
+            "refreshMode": "broker_snapshot" if force_refresh else "current_stream",
+        }
 
     async def _resubscribe_all(self) -> None:
         async with self._lock:

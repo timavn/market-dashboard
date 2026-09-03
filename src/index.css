@@ -9,12 +9,23 @@
   --dashboard-positive-soft: #ecfdf5;
   --dashboard-negative: #dc2626;
   --dashboard-negative-soft: #fef2f2;
+  --dashboard-attention: #f97316;
+  --dashboard-attention-soft: #fff7ed;
+  /* Shared neutral label type for dashboard tables and metadata. */
+  --dashboard-muted-text: #667085;
+  --dashboard-muted-text-soft: #8993a2;
+  --dashboard-label-size: clamp(7px, 0.42vw, 8px);
+  --dashboard-label-weight: 760;
+  --dashboard-label-tracking: 0.04em;
+  --dashboard-label-line-height: 1;
 }
 
 /* Use translucent versions of the same benchmark pair on dark surfaces. */
 .dark .dashboard-shell {
   --dashboard-positive-soft: rgba(5, 150, 105, 0.16);
   --dashboard-negative-soft: rgba(220, 38, 38, 0.16);
+  --dashboard-attention: #fb923c;
+  --dashboard-attention-soft: rgba(249, 115, 22, 0.18);
 }
 
 /*

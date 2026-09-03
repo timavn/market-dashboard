@@ -1,4 +1,6 @@
-const { loadLatestCpiSnapshot } = require('./signalAvailabilityProvider');
+const { loadCpiNowcastSnapshots } = require('./signalAvailabilityProvider');
+const { selectCpiForecast } = require('./cpiNowcastSelector.cjs');
+const { CPI_RELEASES } = require('../../utils/cpiNowcastHistory.cjs');
 
 const CPI_SERIES = 'KXCPIYOY';
 const MONTH_CODES = Object.freeze(['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']);
@@ -67,11 +69,17 @@ function extractScenarios(snapshot = {}) {
   const data = snapshotData(snapshot);
   const raw = Array.isArray(data.scenarios)
     ? data.scenarios
-    : [
-        { key: 'upside', label: 'Upside', value: data.upside ?? data.upsideMom ?? data.upsideM_m },
-        { key: 'base', label: 'Base Case', value: data.base ?? data.baseCase ?? data.baseMom ?? data.baseM_m },
-        { key: 'downside', label: 'Downside', value: data.downside ?? data.downsideMom ?? data.downsideM_m },
-      ];
+    : data.scenarios && typeof data.scenarios === 'object'
+      ? [
+          { key: 'upside', label: 'Upside', value: data.scenarios.upper ?? data.scenarios.upside ?? data.scenarios.high },
+          { key: 'base', label: 'Base Case', value: data.scenarios.base ?? data.scenarios.baseCase ?? data.scenarios.central },
+          { key: 'downside', label: 'Downside', value: data.scenarios.lower ?? data.scenarios.downside ?? data.scenarios.low },
+        ]
+      : [
+          { key: 'upside', label: 'Upside', value: data.upside ?? data.upsideMom ?? data.upsideM_m },
+          { key: 'base', label: 'Base Case', value: data.base ?? data.baseCase ?? data.baseMom ?? data.baseM_m },
+          { key: 'downside', label: 'Downside', value: data.downside ?? data.downsideMom ?? data.downsideM_m },
+        ];
   return raw.slice(0, 3).map((scenario, index) => ({
     key: scenario?.key || ['upside', 'base', 'downside'][index],
     label: scenario?.label || scenario?.name || ['Upside', 'Base Case', 'Downside'][index],
@@ -95,44 +103,106 @@ function deriveTargetStrikes(scenarios = [], { increment = 0.1, padding = 2 } = 
   return strikes;
 }
 
+function normalizeReleaseAt(monthId, value) {
+  const supplied = String(value || '').trim();
+  if (supplied) {
+    const parsed = Date.parse(supplied);
+    if (Number.isFinite(parsed)) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(supplied)) {
+        return CPI_RELEASES[monthId] || `${supplied}T12:30:00.000Z`;
+      }
+      return new Date(parsed).toISOString();
+    }
+  }
+  return CPI_RELEASES[monthId] || null;
+}
+
+function candidateSnapshot(candidate, fallbackSnapshot) {
+  if (!candidate) return fallbackSnapshot;
+  const source = candidate.snapshot || fallbackSnapshot || {};
+  const sourceData = snapshotData(source);
+  const scenarioValues = candidate.scenarios || {};
+  return {
+    ...source,
+    publishedAt: candidate.publishedAt || source.publishedAt,
+    data: {
+      ...sourceData,
+      metric: candidate.metric || sourceData.metric || 'Headline CPI YoY',
+      forecastMonth: candidate.forecastMonth || sourceData.forecastMonth,
+      reportMonth: candidate.monthId || sourceData.reportMonth,
+      releaseAt: candidate.releaseAt || sourceData.releaseAt,
+      releaseDate: candidate.releaseAt
+        ? String(candidate.releaseAt).slice(0, 10)
+        : sourceData.releaseDate,
+      scenarios: [
+        { key: 'upside', label: 'Upside', value: scenarioValues.upper },
+        { key: 'base', label: 'Base Case', value: scenarioValues.base },
+        { key: 'downside', label: 'Downside', value: scenarioValues.lower },
+      ],
+    },
+  };
+}
+
 function buildCurrentCpiRelease(snapshot, options = {}) {
   if (!snapshot) {
     const error = new Error('No inflation nowcast snapshot is available for the current CPI release.');
     error.code = 'CPI_RELEASE_UNAVAILABLE';
     throw error;
   }
-  const data = snapshotData(snapshot);
+  const selectedForecast = options.forecast || null;
+  const sourceSnapshot = candidateSnapshot(selectedForecast, snapshot);
+  const data = snapshotData(sourceSnapshot);
   const metric = String(data.metric || data.measure || data.title || data.heading || '');
   if (!/\bYOY\b|\bY\/Y\b|YEAR[\s-]*OVER[\s-]*YEAR/i.test(metric)) {
     const error = new Error('The latest inflation nowcast is not a Headline CPI YoY release.');
     error.code = 'CPI_RELEASE_METRIC_MISMATCH';
     throw error;
   }
-  const identity = monthIdentity(data.forecastMonth || data.reportMonth || data.month || data.period || snapshot.forecastMonth);
+  const identity = monthIdentity(
+    selectedForecast?.monthId
+      || data.forecastMonth
+      || data.reportMonth
+      || data.month
+      || data.period
+      || sourceSnapshot.forecastMonth,
+  );
   if (!identity) {
     const error = new Error('The latest inflation nowcast does not identify its CPI report month.');
     error.code = 'CPI_RELEASE_MONTH_MISSING';
     throw error;
   }
-  const scenarios = extractScenarios(snapshot);
+  const scenarios = extractScenarios(sourceSnapshot);
   if (scenarios.length !== 3) {
     const error = new Error('The current CPI release requires Upside, Base Case, and Downside scenarios.');
     error.code = 'CPI_RELEASE_SCENARIOS_MISSING';
     throw error;
   }
-  const releaseDate = data.releaseDate?.date || data.releaseDate || data.release_date || snapshot.releaseDate || null;
-  if (!releaseDate || Number.isNaN(Date.parse(releaseDate))) {
+  const releaseDateValue = data.releaseDate?.date
+    || data.releaseDate
+    || data.release_date
+    || sourceSnapshot.releaseDate
+    || null;
+  const releaseAt = normalizeReleaseAt(
+    identity.id,
+    selectedForecast?.releaseAt
+      || data.releaseAt
+      || sourceSnapshot.releaseAt
+      || releaseDateValue,
+  );
+  const releaseDate = releaseDateValue && /^\d{4}-\d{2}-\d{2}$/.test(String(releaseDateValue))
+    ? String(releaseDateValue)
+    : releaseAt?.slice(0, 10) || null;
+  if (!releaseDate || !releaseAt || Number.isNaN(Date.parse(releaseAt))) {
     const error = new Error('The current CPI release does not have a valid release date.');
     error.code = 'CPI_RELEASE_DATE_MISSING';
     throw error;
   }
-  const releaseDeadline = Date.parse(
-    /^\d{4}-\d{2}-\d{2}$/.test(String(releaseDate))
-      ? `${releaseDate}T23:59:59Z`
-      : releaseDate,
-  );
-  const now = options.now instanceof Date ? options.now.getTime() : Number(options.now ?? Date.now());
-  if (Number.isFinite(now) && releaseDeadline < now) {
+  const releaseDeadline = Date.parse(releaseAt);
+  const now = options.now instanceof Date
+    ? options.now.getTime()
+    : Number(options.now ?? Date.now());
+  const enforceFresh = options.enforceFresh !== false;
+  if (enforceFresh && Number.isFinite(now) && releaseDeadline <= now) {
     const error = new Error(`The latest inflation nowcast release expired on ${releaseDate}.`);
     error.code = 'CPI_RELEASE_EXPIRED';
     throw error;
@@ -149,6 +219,7 @@ function buildCurrentCpiRelease(snapshot, options = {}) {
     releaseCode: identity.releaseCode,
     releaseDate,
     eventTicker: identity.eventTicker,
+    releaseAt,
     targetStrikes,
   };
   return {
@@ -158,13 +229,15 @@ function buildCurrentCpiRelease(snapshot, options = {}) {
     reportMonth: identity.id,
     forecastMonth: identity.forecastMonth,
     releaseDate,
+    releaseAt,
     eventTicker: identity.eventTicker,
     targetStrikes,
     scenarios,
     source: {
       type: 'hedgeye-inflation-nowcast',
-      asOf: snapshot.publishedAt || snapshot.scrapedAt || data.publishedAt || snapshot.date || null,
-      snapshotDate: snapshot.date || null,
+      asOf: sourceSnapshot.publishedAt || sourceSnapshot.scrapedAt || data.publishedAt || sourceSnapshot.date || null,
+      snapshotDate: sourceSnapshot.date || null,
+      reportMonth: identity.id,
     },
     cpi,
     request: { cpi },
@@ -172,11 +245,24 @@ function buildCurrentCpiRelease(snapshot, options = {}) {
 }
 
 async function getCurrentCpiRelease(options = {}) {
-  const loader = options.loadSnapshot || (async () => loadLatestCpiSnapshot(
+  const loader = options.loadSnapshots || options.loadSnapshot || (async () => loadCpiNowcastSnapshots(
     options.dynamodb,
     { now: options.now, useCache: options.useCache },
   ));
-  return buildCurrentCpiRelease(await loader(), { now: options.now });
+  const now = options.now instanceof Date ? options.now.getTime() : Number(options.now ?? Date.now());
+  const loaded = await loader();
+  const snapshots = Array.isArray(loaded) ? loaded : [loaded];
+  const forecast = selectCpiForecast(snapshots, { now, current: true });
+  if (!forecast) {
+    const error = new Error('No future Headline CPI YoY nowcast is available after the latest official release.');
+    error.code = 'CPI_RELEASE_NO_FUTURE_FORECAST';
+    throw error;
+  }
+  return buildCurrentCpiRelease(forecast.snapshot || snapshots[0], {
+    now,
+    enforceFresh: true,
+    forecast,
+  });
 }
 
 function releaseKeyForEvent(event = {}) {

@@ -70,7 +70,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--rollback-export", required=True, type=Path)
     parser.add_argument("--schedule-name", required=True)
-    parser.add_argument("--admin-profile", default=EXPECTED_PROFILE)
+    parser.add_argument(
+        "--admin-profile",
+        required=True,
+        help=f"Required administrator SSO profile (must be {EXPECTED_PROFILE}).",
+    )
     return parser.parse_args()
 
 

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { formatMarketMonthDay } from '../../utils/timeUtils';
 import { getBucketForSeries } from '../../utils/volatilityRegimes';
+import { isRefreshDelayedVolatilityRow } from '../../utils/volatilitySnapshotRows';
+import DelayedDataMarker, { shouldMarkDataDelayed } from './DelayedDataMarker';
 import { getRowQuoteStatus } from './RadarReferencePanels';
 
 const CHART_WIDTH = 132;
@@ -49,7 +51,7 @@ const FEED_TO_UNIVERSE_TICKER = Object.freeze({
 
 const CORE_CRYPTO_TICKERS = new Set(['BTC', 'ETH', 'SOL']);
 const EXCLUDED_FEED_TICKERS = new Set([
-  // Yahoo ^FVX is a five-year yield proxy, not the two-year yield implied by this label.
+  // UST2Y is a dated FRED observation, not a current pulse row.
   'UST2Y',
 ]);
 
@@ -182,6 +184,7 @@ const getStatusLabel = (status) => {
     case 'live': return 'LIVE';
     case 'delayed': return 'DLY';
     case 'historical': return 'HIST';
+    case 'refresh-delayed': return 'RETRY';
     case 'loading': return 'LOAD';
     default: return 'NO DATA';
   }
@@ -189,6 +192,9 @@ const getStatusLabel = (status) => {
 
 const getVolatilityStatus = (row, loading) => {
   if (loading) return 'loading';
+  if (isRefreshDelayedVolatilityRow(row) && isFiniteNumber(row.lastPx)) {
+    return 'refresh-delayed';
+  }
   if (
     row?.availability === 'historical'
     && row?.freshness === 'historical'
@@ -219,7 +225,6 @@ const PulseSparkline = ({ values, label, available, asOf }) => {
   }
 
   const pointString = points.map(({ x, y }) => `${x},${y}`).join(' ');
-  const last = points[points.length - 1];
   const high = Math.max(...finiteValues);
   const low = Math.min(...finiteValues);
   const xAxisY = CHART_HEIGHT - CHART_AXIS_BOTTOM;
@@ -250,26 +255,37 @@ const PulseSparkline = ({ values, label, available, asOf }) => {
         <text className="efr-pulse-sparkline__x-label" x={CHART_WIDTH - CHART_INSET} y={CHART_HEIGHT - 2} textAnchor="end">CLOSE</text>
       </g>
       <polyline points={pointString} />
-      <circle cx={last.x} cy={last.y} r="2.4" />
     </svg>
   );
 };
 
 const EmbeddedVolatility = ({ metric }) => {
   if (!metric) return null;
-  const available = ['live', 'delayed', 'historical'].includes(metric.status);
+  const available = ['live', 'delayed', 'historical', 'refresh-delayed'].includes(metric.status);
   const loading = metric.status === 'loading';
   const displayValue = loading ? '…' : (available ? formatValue(metric.value, 'number') : '—');
   const regime = available ? getBucketForSeries(metric.seriesKey || metric.label, metric.value) : null;
+  const markedDelayed = shouldMarkDataDelayed(metric.status, metric.updatedAt);
+  const delayEligible = ['delayed', 'historical', 'refresh-delayed'].includes(metric.status);
+  const markerTitle = metric.status === 'historical'
+    ? `${metric.label} historical reference`
+    : metric.status === 'refresh-delayed'
+      ? `${metric.label} refresh delayed; showing the last verified value`
+      : `${metric.label} delayed value`;
 
   return (
     <span
       className={`efr-pulse-vol efr-pulse-vol--${metric.status}`}
-      aria-label={`${metric.label} volatility ${available ? displayValue : 'unavailable'}`}
+      aria-label={`${metric.label} volatility ${available ? displayValue : 'unavailable'}${markedDelayed ? '; delayed or historical reference' : ''}`}
     >
       <b>{metric.label}</b>
-      <strong className={regime ? `efr-pulse-vol__value--${regime}` : ''}>{displayValue}</strong>
-      <small>{metric.statusLabel || getStatusLabel(metric.status)}</small>
+      <strong className={regime ? `efr-pulse-vol__value--${regime}` : ''}>
+        {displayValue}
+        <DelayedDataMarker status={metric.status} title={markerTitle} updatedAt={metric.updatedAt} />
+      </strong>
+      {metric.statusLabel || !delayEligible ? (
+        <small>{metric.statusLabel || getStatusLabel(metric.status)}</small>
+      ) : null}
     </span>
   );
 };
@@ -291,6 +307,13 @@ const PulseMetricContent = ({ category, mover, loading, embeddedVolatility }) =>
   const kind = category.id === 'rates' && mover?.unit === 'yield' ? 'rate' : 'number';
   const displayValue = isLoading ? '…' : (available ? formatValue(mover?.price, kind) : '—');
   const displayChange = isLoading ? '…' : (available ? formatChange(mover?.changePercent) : '—');
+  const markerUpdatedAt = mover?.lastVerifiedAt || mover?.quoteAsOf || mover?.timestamp;
+  const delayEligible = ['delayed', 'historical', 'refresh-delayed'].includes(status);
+  const markerTitle = mover?.displayDelayed
+    ? `Refresh delayed · last verified ${mover?.lastVerifiedAt || mover?.quoteAsOf || mover?.timestamp || 'time unavailable'}`
+    : status === 'historical'
+      ? `Historical reference · as of ${mover?.quoteAsOf || mover?.timestamp || 'time unavailable'}`
+      : `Delayed quote · as of ${mover?.quoteAsOf || mover?.timestamp || 'time unavailable'}`;
 
   return (
     <>
@@ -298,11 +321,20 @@ const PulseMetricContent = ({ category, mover, loading, embeddedVolatility }) =>
         <div className="efr-pulse-metric__ticker">{mover?.ticker || '—'}</div>
         <div className="efr-pulse-metric__heading">
           <h2 title={label}>{label}</h2>
-          <span className={`efr-pulse-metric__status efr-pulse-metric__status--${status}`}>
-            {getStatusLabel(status)}
-          </span>
+          {!delayEligible ? (
+            <span className={`efr-pulse-metric__status efr-pulse-metric__status--${status}`}>
+              {getStatusLabel(status)}
+            </span>
+          ) : null}
         </div>
-        <strong>{displayValue}</strong>
+        <strong>
+          {displayValue}
+          <DelayedDataMarker
+            status={status}
+            title={markerTitle}
+            updatedAt={markerUpdatedAt}
+          />
+        </strong>
         <div className="efr-pulse-metric__footer">
           <span className={`efr-pulse-metric__change ${available ? getTone(mover?.changePercent) : 'is-unavailable'}`}>
             {displayChange}
@@ -330,11 +362,16 @@ const PulseMetric = ({ category, movers, activeIndex, loading, volatilityState }
         const volatilityRow = descriptor
           ? volatilityState?.snapshot?.[descriptor.seriesKey]
           : null;
+        const volatilityStatus = descriptor
+          ? getVolatilityStatus(volatilityRow, volatilityState?.loading)
+          : null;
         const embeddedVolatility = descriptor
           ? {
             ...descriptor,
             value: volatilityRow?.lastPx,
-            status: getVolatilityStatus(volatilityRow, volatilityState?.loading),
+            status: volatilityStatus,
+            statusLabel: descriptor.statusLabel,
+            updatedAt: volatilityRow?.lastVerifiedAt || volatilityRow?.asOf || volatilityRow?.timestamp,
           }
           : null;
         return (

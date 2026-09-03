@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { VOLATILITY_SERIES } from '../../hooks/useVolatilitySnapshot';
 import {
   formatVolatilityRange,
@@ -6,14 +6,20 @@ import {
   VOL_RANGES,
 } from '../../utils/volatilityRegimes';
 import { formatMarketMonthDay } from '../../utils/timeUtils';
-import DataStatusChip from './DataStatusChip';
+import {
+  isCurrentVolatilityRow as isCurrentSnapshotRow,
+  isHistoricalVolatilityRow as isHistoricalSnapshotRow,
+  isRefreshDelayedVolatilityRow,
+} from '../../utils/volatilitySnapshotRows';
 import GlobalMarketDayCycleHeader from './GlobalMarketDayCycleHeader';
+import DelayedDataMarker from './DelayedDataMarker';
 import MarketPulseRibbon from './MarketPulseRibbon';
 import RadarReferencePanels, {
   aggregateQuoteStatus,
   getRowQuoteStatus,
 } from './RadarReferencePanels';
 import USDCorrelationMatrix from './USDCorrelationMatrix';
+import VolatilityExplainerModal from './VolatilityExplainerModal';
 import VolatilityMetricRow, {
   VOLATILITY_METRIC_CHART_POINTS as VOLATILITY_CHART_POINTS,
   buildVolatilityMetricChart,
@@ -27,11 +33,13 @@ const BACKDROP_GROUPS = [
     label: 'US',
     railLabel: 'US',
     rows: [
-      { symbols: ['SPX', 'SPY'], label: 'S&P 500' },
+      { symbols: ['SPX'], label: 'S&P 500' },
+      { symbols: ['RSP'], label: 'S&P Equal Weight' },
       { symbols: ['DJI'], label: 'Dow 30' },
       { symbols: ['IXIC'], label: 'Nasdaq' },
       { symbols: ['RUT'], label: 'Russell' },
       { symbols: ['QQQ'], label: 'QQQ' },
+      { symbols: ['SMH'], label: 'Semiconductors' },
     ],
   },
   {
@@ -39,6 +47,8 @@ const BACKDROP_GROUPS = [
     label: 'Europe',
     railLabel: 'EU',
     rows: [
+      { symbols: ['STOXX600'], label: 'STOXX Europe 600' },
+      { symbols: ['SX5E'], label: 'Euro STOXX 50' },
       { symbols: ['FTSE'], label: 'FTSE 100' },
       { symbols: ['CAC'], label: 'CAC 40' },
       { symbols: ['DAX'], label: 'DAX' },
@@ -52,7 +62,11 @@ const BACKDROP_GROUPS = [
     rows: [
       { symbols: ['N225'], label: 'Nikkei 225' },
       { symbols: ['HSI'], label: 'Hang Seng' },
+      { symbols: ['CSI300'], label: 'CSI 300' },
       { symbols: ['SSEC'], label: 'Shanghai' },
+      { symbols: ['KOSPI'], label: 'KOSPI' },
+      { symbols: ['TAIEX'], label: 'TAIEX' },
+      { symbols: ['NIFTY50'], label: 'Nifty 50' },
       { symbols: ['AXJO'], label: 'ASX 200' },
     ],
   },
@@ -61,11 +75,15 @@ const BACKDROP_GROUPS = [
     label: 'Commodities',
     railLabel: 'CMDTY',
     rows: [
+      { symbols: ['CRB'], label: 'CRB Index' },
       { symbols: ['BZ'], label: 'Brent Oil' },
       { symbols: ['CL'], label: 'WTI Oil' },
+      { symbols: ['NG'], label: 'Natural Gas' },
       { symbols: ['GC'], label: 'Gold' },
-      { symbols: ['HG'], label: 'Copper' },
       { symbols: ['SI'], label: 'Silver' },
+      { symbols: ['HG'], label: 'Copper' },
+      { symbols: ['PL'], label: 'Platinum' },
+      { symbols: ['ZC'], label: 'Corn' },
     ],
   },
   {
@@ -74,9 +92,12 @@ const BACKDROP_GROUPS = [
     railLabel: 'RATES',
     rows: [
       { symbols: ['UST2Y'], label: 'UST 2Y' },
+      { symbols: ['UST5Y'], label: 'UST 5Y' },
       { symbols: ['UST10Y'], label: 'UST 10Y' },
       { symbols: ['UST30Y'], label: 'UST 30Y' },
+      { symbols: ['CURVE_2s10s'], label: '2s10s Curve', unit: 'bps' },
       { symbols: ['BUND10Y'], label: 'Bund 10Y' },
+      { symbols: ['IG_OAS'], label: 'IG OAS', inversePerformance: true },
       { symbols: ['HY_OAS'], label: 'HY OAS', inversePerformance: true },
     ],
   },
@@ -87,6 +108,8 @@ const BACKDROP_GROUPS = [
     rows: [
       { symbols: ['BTC'], label: 'Bitcoin / USD' },
       { symbols: ['ETH'], label: 'Ethereum / USD' },
+      { symbols: ['BNB'], label: 'BNB / USD' },
+      { symbols: ['XRP'], label: 'XRP / USD' },
       { symbols: ['SOL'], label: 'Solana / USD' },
     ],
   },
@@ -100,7 +123,9 @@ const flattenRows = (value) => {
 
 const findMarketRow = (marketData, groupId, symbols) => {
   const rows = flattenRows(marketData?.[groupId]);
-  return rows.find((row) => symbols.includes(String(row?.symbol || '').toUpperCase())) || null;
+  const normalizedSymbols = (Array.isArray(symbols) ? symbols : [])
+    .map((symbol) => String(symbol || '').toUpperCase());
+  return rows.find((row) => normalizedSymbols.includes(String(row?.symbol || '').toUpperCase())) || null;
 };
 
 const isFiniteNumber = (value) => value !== '' && value != null && Number.isFinite(Number(value));
@@ -117,9 +142,10 @@ const formatSnapshotDate = (value, includeTime = false) => {
   }).toUpperCase();
 };
 
-const formatLevel = (value, category = '', symbol = '') => {
+const formatLevel = (value, category = '', symbol = '', unit = '') => {
   if (!isFiniteNumber(value)) return '—';
   const numeric = Number(value);
+  if (String(unit).toLowerCase() === 'bps') return `${numeric.toFixed(1)} bps`;
   if (category === 'CORRELATION') return numeric.toFixed(2);
   if (category === 'FX') return numeric.toFixed(numeric < 10 ? 3 : 2);
   if (symbol.startsWith('UST') || symbol === 'BUND10Y') return numeric.toFixed(3);
@@ -132,11 +158,12 @@ const formatLevel = (value, category = '', symbol = '') => {
 const formatChange = (value, suffix = '%', digits = 2) => {
   if (!isFiniteNumber(value)) return '—';
   const numeric = Number(value);
-  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(digits)}${suffix}`;
+  return `${Math.abs(numeric).toFixed(digits)}${suffix}`;
 };
 
 const getPerformanceTone = (value) => {
-  if (!isFiniteNumber(value) || Number(value) === 0) return '';
+  if (!isFiniteNumber(value)) return '';
+  if (Number(value) === 0) return 'is-neutral';
   return Number(value) > 0 ? 'is-positive' : 'is-negative';
 };
 
@@ -144,6 +171,7 @@ const aggregateDataStatuses = (statuses) => {
   const values = (Array.isArray(statuses) ? statuses : []).filter(Boolean);
   const usable = values.filter((status) => status !== 'unavailable');
   if (usable.length === 0) return 'unavailable';
+  if (usable.includes('refresh-delayed')) return 'mixed';
   if (usable.length !== values.length || new Set(usable).size > 1) return 'mixed';
   return usable[0];
 };
@@ -151,13 +179,10 @@ const aggregateDataStatuses = (statuses) => {
 const getVolatilityRowStatus = (seriesName, row) => {
   const complete = Boolean(formatMarketMonthDay(row?.asOf))
     && VOLATILITY_CHART_POINTS.every(({ key }) => isFiniteNumber(row?.[key]));
-  const historicalMove = seriesName === 'MOVE'
-    && row?.availability === 'historical'
-    && row?.freshness === 'historical'
-    && row?.quoteMode === 'end-of-day'
-    && complete;
+  const historicalMove = isHistoricalSnapshotRow(seriesName, row) && complete;
   if (historicalMove) return 'historical';
-  if (row?.availability !== 'available' || row?.freshness !== 'current' || !complete) {
+  if (isRefreshDelayedVolatilityRow(row) && complete) return 'refresh-delayed';
+  if (!isCurrentSnapshotRow(row) || !complete) {
     return 'unavailable';
   }
   const quoteMode = String(row.quoteMode || row.dataType || '').toLowerCase();
@@ -170,9 +195,38 @@ const getVolatilityRowStatus = (seriesName, row) => {
 const STATUS_COUNT_LABELS = {
   live: 'live',
   delayed: 'delayed',
+  'refresh-delayed': 'refresh delayed',
   mixed: 'mixed',
   historical: 'as-of',
   unavailable: 'missing',
+};
+
+const QUOTE_SOURCE_LABELS = {
+  ibkr: 'IBKR',
+  yahoo: 'Yahoo Finance',
+  fred: 'FRED',
+  stooq: 'Stooq',
+};
+
+const quoteSourceLabel = (row) => {
+  const source = String(row?.source || row?.provider || '').trim();
+  return QUOTE_SOURCE_LABELS[source.toLowerCase()] || source || 'Unknown provider';
+};
+
+const quoteProvenanceLabel = (row, status) => {
+  if (!row || status === 'unavailable') return 'Unavailable — no verified provider quote';
+  const rawAsOf = row.quoteAsOf || row.timestamp || row.asOf;
+  const parsedAsOf = rawAsOf ? new Date(rawAsOf) : null;
+  const asOf = parsedAsOf && !Number.isNaN(parsedAsOf.getTime())
+    ? parsedAsOf.toISOString()
+    : rawAsOf;
+  const warning = String(row.warning || '').trim();
+  return [
+    quoteSourceLabel(row),
+    status,
+    asOf ? `as of ${asOf}` : null,
+    warning || null,
+  ].filter(Boolean).join(' · ');
 };
 
 const formatStatusCounts = (statuses) => Object.entries(
@@ -184,8 +238,34 @@ const formatStatusCounts = (statuses) => Object.entries(
   .map(([status, count]) => `${count} ${STATUS_COUNT_LABELS[status] || status}`)
   .join(' · ');
 
+const formatProviderCounts = (entries) => Object.values(
+  (Array.isArray(entries) ? entries : []).reduce((counts, { row, status }) => {
+    if (!row || status === 'unavailable') return counts;
+    const label = quoteSourceLabel(row);
+    const key = `${label} ${STATUS_COUNT_LABELS[status] || status}`;
+    return { ...counts, [key]: { label: key, count: (counts[key]?.count || 0) + 1 } };
+  }, {}),
+)
+  .map(({ label, count }) => `${count} ${label}`)
+  .join(' · ') || 'No verified providers';
+
 const formatIssue = (value) => {
   if (!value) return null;
+  if (
+    ['LIVE_RESOURCE_FUTURE_TIMESTAMP', 'LIVE_RESOURCE_STALE'].includes(value?.code)
+    && value?.observedAt
+    && Number.isFinite(Number(value?.ageMs))
+    && Number.isFinite(Number(value?.thresholdMs))
+  ) {
+    const ageMs = Number(value.ageMs);
+    const ageLabel = ageMs < 0
+      ? `${Math.ceil(Math.abs(ageMs) / 1000)}s ahead`
+      : `${Math.ceil(ageMs / 1000)}s old`;
+    const thresholdLabel = value.code === 'LIVE_RESOURCE_FUTURE_TIMESTAMP'
+      ? 'future tolerance'
+      : 'freshness limit';
+    return `${value.message} Observed ${value.observedAt} (${ageLabel}; ${thresholdLabel} ${Math.round(Number(value.thresholdMs) / 1000)}s).`;
+  }
   return value?.message || String(value);
 };
 
@@ -206,16 +286,40 @@ const getProviderIssue = (providerStatus) => {
 };
 
 const getVolatilityStatus = (volatilityState) => {
-  if (volatilityState?.loading) return 'loading';
-  if (volatilityState?.error || !volatilityState?.snapshot) return 'unavailable';
+  if (!volatilityState?.snapshot) return volatilityState?.loading ? 'loading' : 'unavailable';
   return aggregateDataStatuses(VOLATILITY_SERIES.map(({ name }) => (
     getVolatilityRowStatus(name, volatilityState.snapshot[name])
   )));
 };
 
+const buildVolatilityStatusInfo = (volatilityState, status) => {
+  const snapshot = volatilityState?.snapshot;
+  const snapshotDate = volatilityState?.lastUpdated
+    ? formatSnapshotDate(volatilityState.lastUpdated)
+    : undefined;
+  const seriesStatuses = VOLATILITY_SERIES.map(({ name }) => getVolatilityRowStatus(name, snapshot?.[name]));
+  const missingSeries = VOLATILITY_SERIES
+    .filter(({ name }) => getVolatilityRowStatus(name, snapshot?.[name]) === 'unavailable')
+    .map(({ symbol }) => symbol);
+  const availableSeriesCount = seriesStatuses.filter((seriesStatus) => seriesStatus !== 'unavailable').length;
+  return {
+    id: 'volatility',
+    status,
+    date: snapshotDate,
+    sourceDate: volatilityState?.lastUpdated || undefined,
+    detail: snapshotDate,
+    diagnostics: [
+      { label: 'Coverage', value: `${availableSeriesCount}/${VOLATILITY_SERIES.length} series` },
+      { label: 'Sources', value: formatStatusCounts(seriesStatuses) },
+    ],
+    issues: [formatIssue(volatilityState?.error), formatMissingIssue(missingSeries)].filter(Boolean),
+  };
+};
+
 const getCorrelationStatus = (correlationState) => {
-  if (correlationState?.loading) return 'loading';
-  if (correlationState?.error || !correlationState?.correlations || !correlationState?.rollingStats) return 'unavailable';
+  if (!correlationState?.correlations || !correlationState?.rollingStats) {
+    return correlationState?.loading ? 'loading' : 'unavailable';
+  }
   if (correlationState?.sourceStatus && correlationState.sourceStatus !== 'current') return 'unavailable';
   return 'historical';
 };
@@ -231,23 +335,27 @@ const combineCardStatuses = (...statuses) => {
 };
 
 const isCurrentVolatilityRow = (row) => (
-  row?.availability === 'available'
-  && row?.freshness === 'current'
+  isCurrentSnapshotRow(row)
   && Boolean(formatMarketMonthDay(row?.asOf))
   && VOLATILITY_CHART_POINTS.every(({ key }) => isFiniteNumber(row?.[key]))
 );
 
 const isHistoricalMoveRow = (seriesName, row) => (
-  seriesName === 'MOVE'
-  && row?.availability === 'historical'
-  && row?.freshness === 'historical'
-  && row?.quoteMode === 'end-of-day'
+  isHistoricalSnapshotRow(seriesName, row)
+  && Boolean(formatMarketMonthDay(row?.asOf))
+  && VOLATILITY_CHART_POINTS.every(({ key }) => isFiniteNumber(row?.[key]))
+);
+
+const isRefreshDelayedMetricRow = (row) => (
+  isRefreshDelayedVolatilityRow(row)
   && Boolean(formatMarketMonthDay(row?.asOf))
   && VOLATILITY_CHART_POINTS.every(({ key }) => isFiniteNumber(row?.[key]))
 );
 
 const isDisplayableVolatilityRow = (seriesName, row) => (
-  isCurrentVolatilityRow(row) || isHistoricalMoveRow(seriesName, row)
+  isCurrentVolatilityRow(row)
+  || isHistoricalMoveRow(seriesName, row)
+  || isRefreshDelayedMetricRow(row)
 );
 
 const formatMoveAsOfDate = (value) => {
@@ -269,60 +377,60 @@ const buildVolatilityChart = (
 ) => buildVolatilityMetricChart(row, width, height, {
   available: isDisplayableVolatilityRow(seriesName, row),
   historical: isHistoricalMoveRow(seriesName, row),
+  regimeRanges: VOL_RANGES[seriesName]?.ranges,
 });
 
 const buildVolatilitySparkline = (row, width, height, seriesName = null) => (
   buildVolatilityMetricSparkline(row, width, height, {
     available: isDisplayableVolatilityRow(seriesName, row),
     historical: isHistoricalMoveRow(seriesName, row),
+    regimeRanges: VOL_RANGES[seriesName]?.ranges,
   })
 );
 
-const VolatilityMapPanel = ({ volatilityState, status }) => {
+const VolatilityMapPanel = ({ volatilityState, vixRiskRangeState = null }) => {
+  const [openIndicator, setOpenIndicator] = React.useState(null);
+  const closeExplainer = React.useCallback(() => setOpenIndicator(null), []);
   const snapshot = volatilityState?.snapshot;
   const loading = Boolean(volatilityState?.loading);
   const error = volatilityState?.error;
   const hasSnapshot = snapshot && typeof snapshot === 'object';
-  const seriesStatuses = VOLATILITY_SERIES.map(({ name }) => getVolatilityRowStatus(name, snapshot?.[name]));
-  const missingSeries = VOLATILITY_SERIES
-    .filter(({ name }) => getVolatilityRowStatus(name, snapshot?.[name]) === 'unavailable')
-    .map(({ symbol }) => symbol);
-  const availableSeriesCount = seriesStatuses.filter((seriesStatus) => seriesStatus !== 'unavailable').length;
 
   return (
     <section
       className="efr-panel efr-exceptions efr-vol-map"
       aria-label="Volatility · 3M Map"
-      data-status={status}
+      data-status={getVolatilityStatus(volatilityState)}
+      data-open-indicator={openIndicator || undefined}
     >
-      <DataStatusChip
-        status={status}
-        detail={volatilityState?.lastUpdated ? formatSnapshotDate(volatilityState.lastUpdated) : undefined}
-        context="Volatility"
-        diagnostics={[
-          { label: 'Coverage', value: `${availableSeriesCount}/${VOLATILITY_SERIES.length} series` },
-          { label: 'Sources', value: formatStatusCounts(seriesStatuses) },
-        ]}
-        issues={[formatIssue(error), formatMissingIssue(missingSeries)]}
-        className="efr-card-status efr-vol-map__status"
-        compact
-        indicatorOnly
+      <VolatilityExplainerModal
+        indicatorKey={openIndicator}
+        onClose={closeExplainer}
       />
-
       {loading && !hasSnapshot ? (
         <div className="efr-vol-map__state">Loading current volatility data…</div>
-      ) : error || !hasSnapshot ? (
+      ) : !hasSnapshot ? (
         <div className="efr-vol-map__state efr-vol-map__state--error" role="alert">
-          <span>Current volatility data unavailable.</span>
+          <span>
+            {error
+              ? `Current volatility data unavailable: ${error}`
+              : 'Current volatility data unavailable.'}
+          </span>
           {volatilityState?.retry ? (
             <button type="button" onClick={volatilityState.retry}>Retry</button>
           ) : null}
         </div>
       ) : (
-        <div className="efr-vol-map__rows">
+        <div
+          className="efr-vol-map__rows"
+          role="group"
+          aria-label={`${VOLATILITY_SERIES.length} volatility series`}
+          style={{ '--efr-vol-row-count': VOLATILITY_SERIES.length }}
+        >
           {VOLATILITY_SERIES.map(({ name, symbol }) => {
             const row = snapshot[name];
             const historical = isHistoricalMoveRow(name, row);
+            const refreshDelayed = isRefreshDelayedMetricRow(row);
             const available = isDisplayableVolatilityRow(name, row);
             const bucket = available ? getBucketForSeries(name, row.lastPx) : null;
             const regime = bucket
@@ -336,16 +444,21 @@ const VolatilityMapPanel = ({ volatilityState, status }) => {
                 symbol={symbol}
                 available={available}
                 historical={historical}
-                asOfLabel={asOfLabel}
+                refreshDelayed={refreshDelayed}
                 bucket={bucket}
                 regimeLabel={regime?.label}
                 regimeRange={formatVolatilityRange(regime)}
                 regimeRanges={VOL_RANGES[name]?.ranges}
+                riskRange={name === 'VIX' ? vixRiskRangeState?.range : null}
+                riskRangeStatus={name === 'VIX' ? vixRiskRangeState?.status : null}
                 resolveLevelBucket={(value) => getBucketForSeries(name, value)}
+                onTickerClick={() => setOpenIndicator(name)}
                 ariaLabel={
                   available
                     ? historical
                       ? `${symbol} end-of-day volatility as of ${asOfLabel}`
+                      : refreshDelayed
+                        ? `${symbol} last verified volatility; refresh delayed`
                       : `${symbol} current volatility`
                     : `${symbol} volatility data unavailable`
                 }
@@ -361,6 +474,18 @@ const VolatilityMapPanel = ({ volatilityState, status }) => {
 const BackdropRow = ({ descriptor, row, providerStatus }) => {
   const status = getRowQuoteStatus(row, providerStatus);
   const available = status !== 'unavailable';
+  const unit = String(row?.unit || descriptor.unit || '').toLowerCase();
+  const isBasisPointRow = unit === 'bps';
+  const price = available
+    ? formatLevel(row?.price, '', row?.symbol || descriptor.symbols[0], unit)
+    : '—';
+  const provenance = quoteProvenanceLabel(row, status);
+  const quoteAsOf = row?.lastVerifiedAt || row?.quoteAsOf || row?.timestamp || row?.asOf;
+  const delayedTitle = row?.displayDelayed
+    ? `Refresh delayed · last verified ${quoteAsOf || 'time unavailable'}`
+    : status === 'historical'
+      ? `Historical reference · as of ${quoteAsOf || 'time unavailable'}`
+      : `Delayed quote · as of ${quoteAsOf || 'time unavailable'}`;
   const dayChange = row?.changePercent;
   const periodAvailable = (
     available
@@ -378,12 +503,18 @@ const BackdropRow = ({ descriptor, row, providerStatus }) => {
 
   const renderReturn = (value, isPeriod = false) => {
     const canRender = isPeriod ? periodAvailable : available;
+    const suffix = isBasisPointRow ? ' bps' : '%';
+    const digits = isBasisPointRow ? 1 : 2;
+    const formattedValue = canRender ? formatChange(value, suffix, digits) : '—';
+    const tone = canRender ? getTone(value) : '';
     return (
       <td
-        className={canRender ? getTone(value) : ''}
+        className={[tone, formattedValue.length >= 8 ? 'is-wide-return' : '']
+          .filter(Boolean)
+          .join(' ')}
         title={isPeriod ? periodTitle : undefined}
       >
-        {canRender ? formatChange(value) : '—'}
+        {formattedValue}
       </td>
     );
   };
@@ -391,17 +522,35 @@ const BackdropRow = ({ descriptor, row, providerStatus }) => {
   return (
     <tr>
       <td>{descriptor.label}</td>
-      <td>{available ? formatLevel(row?.price, '', row?.symbol || descriptor.symbols[0]) : '—'}</td>
+      <td
+        title={provenance}
+        aria-label={`${descriptor.label} price ${price}. ${provenance}`}
+        data-source={row?.source || row?.provider || 'unavailable'}
+        data-availability={row?.availability || 'unavailable'}
+        data-quote-status={status}
+      >
+        <span className="efr-backdrop-price">
+          <span>{price}</span>
+          <DelayedDataMarker status={status} title={delayedTitle} updatedAt={quoteAsOf} />
+        </span>
+      </td>
       {renderReturn(dayChange)}
       {renderReturn(row?.fifteenDayChangePct, true)}
       {renderReturn(row?.monthChangePct, true)}
       {renderReturn(row?.threeMonthChangePct, true)}
       {renderReturn(row?.sixMonthChangePct, true)}
+      {renderReturn(row?.ytdChangePct, true)}
+      {renderReturn(row?.oneYearChangePct, true)}
     </tr>
   );
 };
 
-const MarketBackdrop = ({ marketData, marketDataLoading, marketDataError, providerStatus }) => {
+const buildMarketBackdropStatusInfo = ({
+  marketData,
+  marketDataLoading,
+  marketDataError,
+  providerStatus,
+}) => {
   const displayedEntries = BACKDROP_GROUPS.flatMap((group) => group.rows.map((descriptor) => {
     const row = findMarketRow(marketData, group.id, descriptor.symbols);
     return {
@@ -415,31 +564,46 @@ const MarketBackdrop = ({ marketData, marketDataLoading, marketDataError, provid
   const missingLabels = displayedEntries
     .filter((entry) => entry.status === 'unavailable')
     .map((entry) => entry.label);
-  const overallStatus = marketDataLoading
+  const sourceDates = displayedEntries
+    .map(({ row }) => row?.quoteAsOf || row?.timestamp || row?.asOf)
+    .filter(Boolean)
+    .sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
+  const hasMarketRows = displayedEntries.some(({ row }) => Boolean(row));
+  const overallStatus = marketDataLoading && !hasMarketRows
     ? 'loading'
-    : marketDataError
-      ? 'unavailable'
-      : aggregateQuoteStatus(displayedEntries.map((entry) => entry.row), providerStatus);
+      : marketDataError && !hasMarketRows
+        ? 'unavailable'
+        : aggregateQuoteStatus(displayedEntries.map((entry) => entry.row), providerStatus);
+
+  return {
+    id: 'market-backdrop',
+    status: overallStatus,
+    sourceDate: sourceDates[0] || undefined,
+    diagnostics: [
+      { label: 'Coverage', value: `${availableCount}/${displayedEntries.length} markets` },
+      { label: 'Sources', value: formatStatusCounts(displayedStatuses) },
+      { label: 'Providers', value: formatProviderCounts(displayedEntries) },
+      { label: 'As of', value: sourceDates[0] || 'No verified provider timestamp' },
+    ],
+    issues: [
+      formatIssue(marketDataError),
+      formatMissingIssue(missingLabels),
+      getProviderIssue(providerStatus),
+    ].filter(Boolean),
+  };
+};
+
+const MarketBackdrop = ({ marketData, marketDataLoading, marketDataError, providerStatus }) => {
+  const statusInfo = buildMarketBackdropStatusInfo({
+    marketData,
+    marketDataLoading,
+    marketDataError,
+    providerStatus,
+  });
 
   return (
-    <section className="efr-panel efr-backdrop" aria-label="Market Backdrop" data-status={overallStatus}>
+    <section className="efr-panel efr-backdrop" aria-label="Market Backdrop" data-status={statusInfo.status}>
       <div className="efr-backdrop__body">
-        <DataStatusChip
-          status={overallStatus}
-          context="Market Backdrop"
-          diagnostics={[
-            { label: 'Coverage', value: `${availableCount}/${displayedEntries.length} markets` },
-            { label: 'Sources', value: formatStatusCounts(displayedStatuses) },
-          ]}
-          issues={[
-            formatIssue(marketDataError),
-            formatMissingIssue(missingLabels),
-            getProviderIssue(providerStatus),
-          ]}
-          className="efr-backdrop__status"
-          compact
-          indicatorOnly
-        />
         {BACKDROP_GROUPS.map((group) => (
           <section className="efr-backdrop-group" key={group.id} aria-labelledby={`efr-backdrop-${group.id}`}>
             <h3 id={`efr-backdrop-${group.id}`} aria-label={group.label}>
@@ -448,13 +612,15 @@ const MarketBackdrop = ({ marketData, marketDataLoading, marketDataError, provid
             <table aria-label={`${group.label} market performance`}>
               <thead>
                 <tr>
-                  <th>Index</th>
+                  <th>ASSET</th>
                   <th>Price</th>
                   <th>DAY</th>
                   <th>15D</th>
                   <th>1M</th>
                   <th>3M</th>
                   <th>6M</th>
+                  <th>YTD</th>
+                  <th>1Y</th>
                 </tr>
               </thead>
               <tbody>
@@ -506,6 +672,7 @@ const USD_PERSPECTIVE_RETURN_FIELDS = [
   'mtdChangePct',
   'qtdChangePct',
   'ytdChangePct',
+  'oneYearChangePct',
 ];
 
 const invertPercentageReturn = (value) => {
@@ -566,13 +733,19 @@ const USDCurrencyCells = ({ row, providerStatus }) => {
   if (!row) {
     return (
       <>
-        <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+        <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
       </>
     );
   }
 
   const status = getRowQuoteStatus(row, providerStatus);
   const available = status !== 'unavailable';
+  const quoteAsOf = row?.lastVerifiedAt || row?.quoteAsOf || row?.timestamp || row?.asOf;
+  const delayedTitle = row?.displayDelayed
+    ? `Refresh delayed · last verified ${quoteAsOf || 'time unavailable'}`
+    : status === 'historical'
+      ? `Historical reference · as of ${quoteAsOf || 'time unavailable'}`
+      : `Delayed quote · as of ${quoteAsOf || 'time unavailable'}`;
   const dayChange = row.changePercent;
   const periodAvailable = (
     available
@@ -597,12 +770,21 @@ const USDCurrencyCells = ({ row, providerStatus }) => {
   return (
     <>
       <td title={row.displayNote || undefined}>{row.name || row.symbol}</td>
-      <td>{available ? formatLevel(row.price, 'FX', row.symbol) : '—'}</td>
+      <td>
+        {available ? (
+          <span className="efr-backdrop-price">
+            <span>{formatLevel(row.price, 'FX', row.symbol)}</span>
+            <DelayedDataMarker status={status} title={delayedTitle} updatedAt={quoteAsOf} />
+          </span>
+        ) : '—'}
+      </td>
       {renderReturn(dayChange)}
       {renderReturn(row.fifteenDayChangePct, true)}
       {renderReturn(row.monthChangePct, true)}
       {renderReturn(row.threeMonthChangePct, true)}
       {renderReturn(row.sixMonthChangePct, true)}
+      {renderReturn(row.ytdChangePct, true)}
+      {renderReturn(row.oneYearChangePct, true)}
     </>
   );
 };
@@ -622,15 +804,31 @@ const USDCurrencySpreadsheet = ({ leftRows, rightRows, loading, providerStatus }
       <colgroup>
         <col className="usd-currency-spreadsheet__ticker-col" />
         <col className="usd-currency-spreadsheet__price-col" />
-        <col className="usd-currency-spreadsheet__return-col" span={5} />
+        <col className="usd-currency-spreadsheet__return-col" span={7} />
         <col className="usd-currency-spreadsheet__ticker-col" />
         <col className="usd-currency-spreadsheet__price-col" />
-        <col className="usd-currency-spreadsheet__return-col" span={5} />
+        <col className="usd-currency-spreadsheet__return-col" span={7} />
       </colgroup>
       <thead>
         <tr>
-          <th>Ticker</th><th>Price</th><th>DAY</th><th>15D</th><th>1M</th><th>3M</th><th>6M</th>
-          <th>Ticker</th><th>Price</th><th>DAY</th><th>15D</th><th>1M</th><th>3M</th><th>6M</th>
+          <th className="usd-currency-spreadsheet__header">TICKER</th>
+          <th className="usd-currency-spreadsheet__header">PRICE</th>
+          <th className="usd-currency-spreadsheet__header">DAY</th>
+          <th className="usd-currency-spreadsheet__header">15D</th>
+          <th className="usd-currency-spreadsheet__header">1M</th>
+          <th className="usd-currency-spreadsheet__header">3M</th>
+          <th className="usd-currency-spreadsheet__header">6M</th>
+          <th className="usd-currency-spreadsheet__header">YTD</th>
+          <th className="usd-currency-spreadsheet__header">1Y</th>
+          <th className="usd-currency-spreadsheet__header">TICKER</th>
+          <th className="usd-currency-spreadsheet__header">PRICE</th>
+          <th className="usd-currency-spreadsheet__header">DAY</th>
+          <th className="usd-currency-spreadsheet__header">15D</th>
+          <th className="usd-currency-spreadsheet__header">1M</th>
+          <th className="usd-currency-spreadsheet__header">3M</th>
+          <th className="usd-currency-spreadsheet__header">6M</th>
+          <th className="usd-currency-spreadsheet__header">YTD</th>
+          <th className="usd-currency-spreadsheet__header">1Y</th>
         </tr>
       </thead>
       <tbody>
@@ -680,12 +878,17 @@ const ExceptionFirstRadar = ({
   marketDataError = null,
   providerStatus = null,
   volatilityState = {},
+  vixRiskRangeState = null,
   correlationState = {},
+  onDashboardStatusChange,
 }) => {
   const volatilityStatus = getVolatilityStatus(volatilityState);
   const correlationStatus = getCorrelationStatus(correlationState);
   const correlationAsOf = correlationState?.calculationDate || correlationState?.correlationsCalculationDate;
-  const usdCurrencyRows = buildUsdCurrencyColumns(marketData?.currencies).flat();
+  const usdCurrencyRows = useMemo(
+    () => buildUsdCurrencyColumns(marketData?.currencies).flat(),
+    [marketData?.currencies],
+  );
   const usdCurrencyStatus = marketDataLoading && usdCurrencyRows.length === 0
     ? 'loading'
     : aggregateQuoteStatus(usdCurrencyRows, providerStatus);
@@ -694,10 +897,62 @@ const ExceptionFirstRadar = ({
     ? `AS OF ${formatSnapshotDate(correlationAsOf)}`
     : correlationStatus.toUpperCase();
   const usdCardStatusDetail = `CURRENCIES ${usdCurrencyStatus.toUpperCase()} · CORRELATIONS ${correlationStatusLabel}`;
-  const usdCurrencyStatuses = usdCurrencyRows.map((row) => getRowQuoteStatus(row, providerStatus));
-  const usdMissingLabels = usdCurrencyRows
-    .filter((row) => getRowQuoteStatus(row, providerStatus) === 'unavailable')
-    .map((row) => row?.name || row?.symbol);
+  const usdCurrencyStatuses = useMemo(
+    () => usdCurrencyRows.map((row) => getRowQuoteStatus(row, providerStatus)),
+    [providerStatus, usdCurrencyRows],
+  );
+  const usdMissingLabels = useMemo(
+    () => usdCurrencyRows
+      .filter((row) => getRowQuoteStatus(row, providerStatus) === 'unavailable')
+      .map((row) => row?.name || row?.symbol),
+    [providerStatus, usdCurrencyRows],
+  );
+  const dashboardCardStatuses = useMemo(() => [
+    buildVolatilityStatusInfo(volatilityState, volatilityStatus),
+    {
+      id: 'usd',
+      status: usdCardStatus,
+      date: correlationAsOf ? formatSnapshotDate(correlationAsOf) : undefined,
+      sourceDate: correlationAsOf || undefined,
+      detail: usdCardStatusDetail,
+      diagnostics: [
+        { label: 'Currencies', value: formatStatusCounts(usdCurrencyStatuses) || usdCurrencyStatus },
+        { label: 'Correlations', value: correlationStatusLabel },
+      ],
+      issues: [
+        formatIssue(marketDataError),
+        correlationState?.error ? `Correlations: ${formatIssue(correlationState.error)}` : null,
+        formatMissingIssue(usdMissingLabels),
+        getProviderIssue(providerStatus),
+      ].filter(Boolean),
+    },
+    buildMarketBackdropStatusInfo({
+      marketData,
+      marketDataLoading,
+      marketDataError,
+      providerStatus,
+    }),
+  ], [
+    correlationAsOf,
+    correlationState,
+    correlationStatusLabel,
+    marketData,
+    marketDataError,
+    marketDataLoading,
+    providerStatus,
+    usdCardStatus,
+    usdCardStatusDetail,
+    usdCurrencyStatus,
+    usdCurrencyStatuses,
+    usdMissingLabels,
+    volatilityState,
+    volatilityStatus,
+  ]);
+
+  useEffect(() => {
+    onDashboardStatusChange?.(dashboardCardStatuses);
+  }, [dashboardCardStatuses, onDashboardStatusChange]);
+
   return (
     <main className="exception-first-radar">
       <header className="efr-topbar">
@@ -714,14 +969,11 @@ const ExceptionFirstRadar = ({
         </div>
       </header>
 
-      {marketDataError ? (
-        <div className="efr-system-alert" role="alert">
-          Market quotes unavailable: {String(marketDataError)}
-        </div>
-      ) : null}
-
       <div className="efr-primary-grid">
-        <VolatilityMapPanel volatilityState={volatilityState} status={volatilityStatus} />
+        <VolatilityMapPanel
+          volatilityState={volatilityState}
+          vixRiskRangeState={vixRiskRangeState}
+        />
 
         <div className="efr-analytics-stack">
           <section
@@ -729,25 +981,6 @@ const ExceptionFirstRadar = ({
             aria-label="USD"
             data-status={usdCardStatus}
           >
-            <DataStatusChip
-              status={usdCardStatus}
-              label="USD DATA"
-              detail={usdCardStatusDetail}
-              context="USD Data"
-              diagnostics={[
-                { label: 'Currencies', value: formatStatusCounts(usdCurrencyStatuses) || usdCurrencyStatus },
-                { label: 'Correlations', value: correlationStatusLabel },
-              ]}
-              issues={[
-                formatIssue(marketDataError),
-                correlationState?.error ? `Correlations: ${formatIssue(correlationState.error)}` : null,
-                formatMissingIssue(usdMissingLabels),
-                getProviderIssue(providerStatus),
-              ]}
-              className="efr-card-status efr-usd-card__status"
-              compact
-              indicatorOnly
-            />
             <USDCorrelationMatrix
               state={correlationState}
               correlations={correlationState?.correlations}
@@ -755,6 +988,7 @@ const ExceptionFirstRadar = ({
               correlationsTimestamp={correlationState?.correlationsTimestamp || correlationState?.timestamp}
               calculationDate={correlationAsOf}
               loading={correlationState?.loading}
+              refreshing={correlationState?.refreshing}
               error={correlationState?.error}
               onRetry={correlationState?.retry}
               variant="radar"
@@ -776,9 +1010,9 @@ const ExceptionFirstRadar = ({
           marketDataError={marketDataError}
           providerStatus={providerStatus}
         />
-      </div>
 
-      <RadarReferencePanels />
+        <RadarReferencePanels onDashboardStatusChange={onDashboardStatusChange} />
+      </div>
 
     </main>
   );

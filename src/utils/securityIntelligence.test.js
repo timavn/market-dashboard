@@ -3,6 +3,7 @@ const {
   buildSecurityIntelligence,
   canonicalizeSymbol,
   defaultResearchMarketDate,
+  extractSnapshotReferences,
   isValidMarketDate,
   loadSecurityIntelligenceInputs,
   manifestChecksumForArtifacts,
@@ -54,6 +55,51 @@ function verifiedRiskEnvelope(ranges, marketDate = MARKET_DATE) {
 }
 
 describe('security intelligence projection', () => {
+  test('keeps narrative Momo direction separate from the canonical structured bias', () => {
+    const response = buildSecurityIntelligence({
+      symbols: ['AMZN'],
+      marketDate: MARKET_DATE,
+      historyDays: 0,
+      now: NOW,
+      productManifests: [
+        indexedManifest('momo-tracker', MARKET_DATE, { eventCount: 1 }),
+        indexedManifest('risk-ranges', MARKET_DATE, { eventCount: 1 }),
+      ],
+      entityEvents: [{
+        marketDate: MARKET_DATE,
+        productKey: 'momo-tracker',
+        entityKey: 'ticker#AMZN',
+        eventType: 'trade_signal',
+        direction: 'NEGATIVE',
+        signalValue: 'BULLISH',
+        excerpt: 'AMZN: Trade BULLISH; narrative direction negative.',
+        publishedAt: `${MARKET_DATE}T13:00:00Z`,
+        sourceEventId: 'amzn-momo-structured',
+        matchType: 'direct',
+      }],
+      riskRangeEnvelope: verifiedRiskEnvelope({
+        AMZN: {
+          lrr: 258,
+          hrr: 300,
+          trend: 'BULLISH',
+          timestamp: `${MARKET_DATE}T12:00:00Z`,
+        },
+      }),
+    });
+
+    expect(response.bySymbol.AMZN.decision).toMatchObject({
+      trade: { status: 'available', value: 'BULLISH', sourceId: 'momo-tracker' },
+      trend: { status: 'available', value: 'BULLISH', sourceId: 'risk-ranges' },
+    });
+    expect(response.bySymbol.AMZN.directReferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        productId: 'momo-tracker',
+        direction: 'NEGATIVE',
+        value: 'BULLISH',
+      }),
+    ]));
+  });
+
   test('publishes only authority-approved decision inputs and separates exposure references', () => {
     const response = buildSecurityIntelligence({
       symbols: ['DDOG'],
@@ -148,6 +194,7 @@ describe('security intelligence projection', () => {
         exposureId: 'technology',
         exposureType: 'sector',
         exposureLabel: 'Technology',
+        matchedText: 'Technology',
         excerpt: 'Software and technology leadership improved during the session.',
       }),
     ]));
@@ -156,7 +203,7 @@ describe('security intelligence projection', () => {
       expect.objectContaining({ id: 'technology', type: 'sector', label: 'Technology' }),
     ]);
     expect(row.directReferences.find((ref) => ref.kind === 'primary_risk_range'))
-      .toMatchObject({ decisionEligible: true, qualityStatus: 'indexed' });
+      .toMatchObject({ decisionEligible: true, qualityStatus: 'indexed', matchedText: 'DDOG' });
     expect(response.products.find((product) => product.id === 'the-macro-show'))
       .toMatchObject({ status: 'indexed', publishedAt: '2026-07-23T14:15:00.000Z' });
   });
@@ -881,6 +928,201 @@ describe('security intelligence projection', () => {
     ]));
     expect(response.coverage.state).toBe('partial');
     expect(response.bySymbol.AAPL.directReferences[0].qualityStatus).toBe('failed');
+  });
+
+  test('accepts AM and PM from typed snapshot rows but never from meridiem prose', () => {
+    const narrativeSnapshots = [
+      {
+        date: MARKET_DATE,
+        snapshotType: 'signal-strength',
+        publishedAt: '2026-07-23T16:29:00Z',
+        article: {
+          bodyText: 'View it in your browser 07/23/2026 12:29 PM EDT Signal Strength Stocks.',
+        },
+        data: { added: ['AFRM'], removed: [] },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'real-time-alert',
+        publishedAt: '2026-07-23T12:00:00Z',
+        article: { bodyText: 'The alert was distributed at 08:00 AM EDT.' },
+        data: {},
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'etf-pro',
+        publishedAt: '2026-07-23T18:05:00Z',
+        article: { bodyText: '07/23/2026 02:05 PM EDT ETF Pro Plus.' },
+        data: {},
+      },
+    ];
+    const narrativeReferences = narrativeSnapshots.flatMap((snapshot) => (
+      extractSnapshotReferences(snapshot, ['AM', 'PM'], 'indexed')
+    ));
+    expect(narrativeReferences).toEqual([]);
+
+    const structuredSnapshots = [
+      {
+        date: MARKET_DATE,
+        snapshotType: 'signal-strength',
+        publishedAt: '2026-07-23T14:00:00Z',
+        data: { added: ['PM'], removed: ['AM'] },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'portfolio-solutions',
+        publishedAt: '2026-07-23T15:00:00Z',
+        data: { rankings: [{ ticker: 'PM', rank: 4 }, { ticker: 'AM', rank: 7 }] },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'early-look',
+        publishedAt: '2026-07-23T11:30:00Z',
+        data: {
+          PM: { lrr: 181, hrr: 202, trend: 'BULLISH' },
+          AM: { lrr: 17, hrr: 19, trend: 'NEUTRAL' },
+        },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'investing-ideas',
+        publishedAt: '2026-07-23T16:00:00Z',
+        data: {
+          positions: [
+            { ticker: 'PM', side: 'Long', prevClose: 189.57, lrr: 182, hrr: 201 },
+            { ticker: 'AM', side: 'Short', prevClose: 18.4, lrr: 17, hrr: 19 },
+          ],
+        },
+      },
+    ];
+    const structuredReferences = structuredSnapshots.flatMap((snapshot) => (
+      extractSnapshotReferences(snapshot, ['AM', 'PM'], 'indexed')
+    ));
+    const kindsFor = (symbol) => structuredReferences
+      .filter((entry) => entry.symbol === symbol)
+      .map((entry) => entry.reference.kind);
+
+    expect(kindsFor('PM')).toEqual(expect.arrayContaining([
+      'signal_strength_added',
+      'portfolio_solutions_rank',
+      'supplemental_risk_range',
+      'investing_idea_position',
+    ]));
+    expect(kindsFor('AM')).toEqual(expect.arrayContaining([
+      'signal_strength_removed',
+      'portfolio_solutions_rank',
+      'supplemental_risk_range',
+      'investing_idea_position',
+    ]));
+    expect(structuredReferences.find((entry) => (
+      entry.symbol === 'PM' && entry.reference.kind === 'investing_idea_position'
+    )).reference.value).toMatchObject({
+      side: 'LONG',
+      bias: 'BULLISH',
+      lrr: 182,
+      hrr: 201,
+    });
+    expect(structuredReferences.some((entry) => entry.reference.kind === 'summary_mention')).toBe(false);
+  });
+
+  test('ignores legacy prose events for AM and PM in current and historical rows', () => {
+    const historicalDate = '2026-07-22';
+    const response = buildSecurityIntelligence({
+      symbols: ['AM', 'PM'],
+      marketDate: MARKET_DATE,
+      historyDays: 1,
+      now: NOW,
+      productManifests: [
+        indexedManifest('signal-strength', MARKET_DATE, { eventCount: 4 }),
+        indexedManifest('signal-strength', historicalDate, { eventCount: 2 }),
+      ],
+      entityEvents: [
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#PM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          matchedText: 'PM',
+          fieldPath: 'article.bodyText',
+          excerpt: 'View it in your browser 07/23/2026 12:29 PM EDT.',
+          publishedAt: '2026-07-23T16:29:00Z',
+          sourceEventId: 'pm-time-current',
+        },
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#AM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          matchedText: 'AM',
+          fieldPath: 'article.bodyText',
+          excerpt: 'The morning edition was delivered at 08:00 AM EDT.',
+          publishedAt: '2026-07-23T12:00:00Z',
+          sourceEventId: 'am-time-current',
+        },
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#PM',
+          eventType: 'signal_strength_added',
+          matchType: 'structured_membership',
+          matchedText: 'PM',
+          fieldPath: 'data.added[0]',
+          excerpt: 'PM',
+          publishedAt: '2026-07-23T14:00:00Z',
+          sourceEventId: 'pm-structured-current',
+        },
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#AM',
+          eventType: 'signal_strength_removed',
+          matchType: 'structured_membership',
+          matchedText: 'AM',
+          fieldPath: 'data.removed[0]',
+          excerpt: 'AM',
+          publishedAt: '2026-07-23T14:00:00Z',
+          sourceEventId: 'am-structured-current',
+        },
+        {
+          marketDate: historicalDate,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#PM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          excerpt: '07/22/2026 03:36 PM EDT.',
+          publishedAt: '2026-07-22T19:36:00Z',
+          sourceEventId: 'pm-time-history',
+        },
+        {
+          marketDate: historicalDate,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#AM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          excerpt: '07/22/2026 08:00 AM EDT.',
+          publishedAt: '2026-07-22T12:00:00Z',
+          sourceEventId: 'am-time-history',
+        },
+      ],
+      riskRangeEnvelope: verifiedRiskEnvelope({}),
+    });
+
+    expect(response.bySymbol.PM.directReferences.map((reference) => reference.sourceEventId))
+      .toEqual(['pm-structured-current']);
+    expect(response.bySymbol.AM.directReferences.map((reference) => reference.sourceEventId))
+      .toEqual(['am-structured-current']);
+    expect(response.bySymbol.PM.history[0].directReferences).toEqual([]);
+    expect(response.bySymbol.AM.history[0].directReferences).toEqual([]);
+    expect(response.bySymbol.PM.decision.signalStrength).toMatchObject({
+      status: 'available',
+      value: 'ADDED',
+    });
+    expect(response.bySymbol.AM.decision.signalStrength).toMatchObject({
+      status: 'available',
+      value: 'REMOVED',
+    });
   });
 
   test('matches controlled ticker aliases without creating inferred market data', () => {

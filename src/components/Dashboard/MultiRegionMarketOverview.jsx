@@ -7,6 +7,7 @@ import { US_MARKET_HOLIDAYS, UK_MARKET_HOLIDAYS, JP_MARKET_HOLIDAYS, isMarketHol
 import StatusDot from '../common/StatusDot';
 import { getMinTimestamp, getSourceFreshness, SOURCE_POLL_INTERVALS } from '../../utils/timeUtils';
 import useUsdCorrelations from '../../hooks/useUsdCorrelations';
+import DelayedDataMarker from './DelayedDataMarker';
 import './MultiRegionMarketOverview.css';
 
 // Helper to check if a date is a US market holiday
@@ -119,6 +120,67 @@ function formatPeriodPct(val) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
 }
 
+const QUOTE_SOURCE_LABELS = Object.freeze({
+  ibkr: 'IBKR',
+  yahoo: 'Yahoo',
+  fred: 'FRED',
+  stooq: 'Stooq',
+});
+
+const QUOTE_AVAILABILITY_LABELS = Object.freeze({
+  current: 'live',
+  delayed: 'delayed',
+  historical: 'historical',
+  unavailable: 'unavailable',
+});
+
+export function quoteProvenanceLabel(quote) {
+  if (!quote || quote.price == null || quote.availability === 'unavailable') {
+    return 'Quote unavailable';
+  }
+  const sourceKey = String(quote.source || '').toLowerCase();
+  const sourceLabel = QUOTE_SOURCE_LABELS[sourceKey] || quote.source || 'Unknown provider';
+  const availability = QUOTE_AVAILABILITY_LABELS[quote.availability]
+    || quote.availability
+    || 'unavailable';
+  const rawAsOf = quote.quoteAsOf || quote.timestamp;
+  const parsedAsOf = rawAsOf ? new Date(rawAsOf) : null;
+  const asOf = parsedAsOf && Number.isFinite(parsedAsOf.getTime())
+    ? ` · as of ${parsedAsOf.toLocaleString()}`
+    : '';
+  return `${sourceLabel} ${availability}${asOf}`;
+}
+
+export function quoteStatusSource(quote, pollIntervalMs) {
+  const availability = String(quote?.availability || '').toLowerCase();
+  const updatedAt = quote?.quoteAsOf || quote?.timestamp || null;
+  if (!quote || quote.price == null || availability === 'unavailable') {
+    return { status: 'missing', stateLabel: 'Unavailable', updatedAt: null };
+  }
+  if (availability === 'delayed') {
+    return { status: 'delayed', stateLabel: 'Delayed', updatedAt };
+  }
+  if (availability === 'historical') {
+    return { status: 'historical', stateLabel: 'Historical', updatedAt };
+  }
+  if (
+    availability === 'reference'
+    && quote?.displayDelayed === true
+    && quote?.displayOnly === true
+    && quote?.executable === false
+  ) {
+    return { status: 'refresh-delayed', stateLabel: 'Delayed', updatedAt };
+  }
+  if (availability === 'current') {
+    return {
+      status: getSourceFreshness(updatedAt, pollIntervalMs),
+      stateLabel: 'Live',
+      updatedAt,
+    };
+  }
+  return { status: 'missing', stateLabel: 'Unavailable', updatedAt: null };
+}
+
 /** Currencies compact rail: suffix % on numeric period cells (— unchanged). */
 function formatCurrenciesPeriodCell(val) {
   const s = formatPeriodPct(val);
@@ -143,24 +205,25 @@ const MAIN_MARKET_REGIONS = {
     label: 'US',
     regionKey: 'US',
     indices: [
-      { symbol: 'SPY', name: 'S&P 500' },
+      { symbol: 'SPX', name: 'S&P 500' },
+      { symbol: 'RSP', name: 'EW S&P' },
       { symbol: 'DJI', name: 'Dow 30' },
       { symbol: 'IXIC', name: 'Nasdaq' },
       { symbol: 'RUT', name: 'Russell' },
       { symbol: 'QQQ', name: 'QQQ' },
-      { symbol: 'RSP', name: 'EW S&P' }
+      { symbol: 'SMH', name: 'Semiconductors' }
     ]
   },
   europe: {
     label: 'Europe',
     regionKey: 'Europe',
     indices: [
+      { symbol: 'STOXX600', name: 'STOXX Europe 600' },
+      { symbol: 'SX5E', name: 'Euro STOXX 50' },
       { symbol: 'FTSE', name: 'FTSE 100' },
       { symbol: 'CAC', name: 'CAC 40' },
       { symbol: 'DAX', name: 'DAX' },
-      { symbol: 'N100', name: 'Euronext 100' },
-      { symbol: 'EURUSD', name: 'EUR/USD' },
-      { symbol: 'GBPUSD', name: 'GBP/USD' }
+      { symbol: 'N100', name: 'Euronext 100' }
     ]
   },
   asia: {
@@ -169,22 +232,27 @@ const MAIN_MARKET_REGIONS = {
     indices: [
       { symbol: 'N225', name: 'Nikkei 225' },
       { symbol: 'HSI', name: 'Hang Seng' },
+      { symbol: 'CSI300', name: 'CSI 300' },
       { symbol: 'SSEC', name: 'Shanghai' },
-      { symbol: 'AXJO', name: 'ASX 200' },
-      { symbol: 'USDJPY', name: 'USD/JPY' },
-      { symbol: 'USDCNY', name: 'USD/CNY' }
+      { symbol: 'KOSPI', name: 'KOSPI' },
+      { symbol: 'TAIEX', name: 'TAIEX' },
+      { symbol: 'NIFTY50', name: 'Nifty 50' },
+      { symbol: 'AXJO', name: 'ASX 200' }
     ]
   },
   commodities: {
     label: 'Commodities',
     regionKey: 'Commodities',
     indices: [
+      { symbol: 'CRB', name: 'CRB Index' },
       { symbol: 'BZ', name: 'Brent' },
       { symbol: 'CL', name: 'WTI' },
+      { symbol: 'NG', name: 'Natural Gas' },
       { symbol: 'GC', name: 'Gold' },
       { symbol: 'SI', name: 'Silver' },
       { symbol: 'HG', name: 'Copper' },
-      { symbol: 'PL', name: 'Platinum' }
+      { symbol: 'PL', name: 'Platinum' },
+      { symbol: 'ZC', name: 'Corn' }
     ]
   },
   rates: {
@@ -195,8 +263,10 @@ const MAIN_MARKET_REGIONS = {
       { symbol: 'UST5Y', name: '5-Yr' },
       { symbol: 'UST10Y', name: '10-Yr' },
       { symbol: 'UST30Y', name: '30-Yr' },
-      { symbol: 'UST13W', name: '13-Wk' },
-      { symbol: 'FEDFUNDS', name: 'Fed Funds' }
+      { symbol: 'CURVE_2s10s', name: '2s10s', unit: 'bps' },
+      { symbol: 'BUND10Y', name: 'Bund 10Y' },
+      { symbol: 'IG_OAS', name: 'IG OAS' },
+      { symbol: 'HY_OAS', name: 'HY OAS' }
     ]
   },
   crypto: {
@@ -206,9 +276,8 @@ const MAIN_MARKET_REGIONS = {
       { symbol: 'BTC', name: 'Bitcoin' },
       { symbol: 'ETH', name: 'Ethereum' },
       { symbol: 'BNB', name: 'BNB' },
-      { symbol: 'ADA', name: 'Cardano' },
-      { symbol: 'SOL', name: 'Solana' },
-      { symbol: 'XRP', name: 'XRP' }
+      { symbol: 'XRP', name: 'XRP' },
+      { symbol: 'SOL', name: 'Solana' }
     ]
   }
 };
@@ -374,6 +443,8 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
               {CURRENCIES_CONFIG.indices.map((index) => {
                 const quote = data?.find((d) => d.symbol === index.symbol);
                 const price = loading ? '…' : (quote?.price != null ? String(quote.price) : '—');
+                const quoteStatus = quoteStatusSource(quote, SOURCE_POLL_INTERVALS.multiRegionQuotes);
+                const provenance = quoteProvenanceLabel(quote);
                 const changePercent = quote?.changePercent;
                 const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
                 const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
@@ -393,7 +464,19 @@ export function CurrenciesCompactRail({ data, loading, layout = 'rail' }) {
                 return (
                   <tr key={index.symbol} className="region-mw-tr">
                     <td className="region-mw-td region-mw-td-name">{index.name}</td>
-                    <td className="region-mw-td region-mw-td-num region-mw-td-price">{price}</td>
+                    <td
+                      className="region-mw-td region-mw-td-num region-mw-td-price"
+                      title={loading ? undefined : provenance}
+                    >
+                      {price}
+                      {!loading && price !== '—' ? (
+                        <DelayedDataMarker
+                          status={quoteStatus.status}
+                          title={provenance}
+                          updatedAt={quoteStatus.updatedAt}
+                        />
+                      ) : null}
+                    </td>
                     <td
                       className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}
                       style={heat.style}
@@ -552,6 +635,8 @@ export function SectorsCompactRail({ data, loading, layout = 'rail' }) {
                 const quote = data?.find((d) => d.symbol === index.symbol);
                 const priceVal = parseFloat(quote?.price);
                 const price = loading ? '…' : (!Number.isNaN(priceVal) ? priceVal.toFixed(2) : '—');
+                const quoteStatus = quoteStatusSource(quote, SOURCE_POLL_INTERVALS.multiRegionQuotes);
+                const provenance = quoteProvenanceLabel(quote);
                 const changePercent = quote?.changePercent;
                 const parsedChange = parseFloat(String(changePercent ?? '').replace(/[^0-9.-]/g, ''));
                 const isPositive = Number.isFinite(parsedChange) && parsedChange >= 0;
@@ -572,7 +657,19 @@ export function SectorsCompactRail({ data, loading, layout = 'rail' }) {
                   <tr key={index.symbol} className="region-mw-tr">
                     <td className="region-mw-td region-mw-td-sector truncate max-w-[80px]" title={index.name}>{index.name}</td>
                     <td className="region-mw-td region-mw-td-ticker font-bold">{index.symbol}</td>
-                    <td className="region-mw-td region-mw-td-num region-mw-td-price">{price}</td>
+                    <td
+                      className="region-mw-td region-mw-td-num region-mw-td-price"
+                      title={loading ? undefined : provenance}
+                    >
+                      {price}
+                      {!loading && price !== '—' ? (
+                        <DelayedDataMarker
+                          status={quoteStatus.status}
+                          title={provenance}
+                          updatedAt={quoteStatus.updatedAt}
+                        />
+                      ) : null}
+                    </td>
                     <td
                       className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${hasChange ? (isPositive ? 'positive' : 'negative') : ''}`}
                       style={heat.style}
@@ -827,7 +924,7 @@ function useAutoFitTable(tableRef, deps) {
 
 // Shared quotes-table body used by both `RegionChartPanel` and `RatesCard`.
 // `priceLabel` defaults to PRICE but callers may pass YIELD / OAS / SPREAD.
-function QuotesTable({ indices, data, loading, priceLabel = 'PRICE', indexLabel = 'INDEX' }) {
+export function QuotesTable({ indices, data, loading, priceLabel = 'PRICE', indexLabel = 'INDEX' }) {
   // Append a "(%)" unit hint to the price header only when the column's values
   // are expressed as a percent (YIELD). Plain PRICE and mixed-unit labels like
   // "OAS / PRICE" are left alone since they're not all-percent.
@@ -864,6 +961,8 @@ function QuotesTable({ indices, data, loading, priceLabel = 'PRICE', indexLabel 
             {indices.map((idx) => {
               const quote = data?.find((d) => d.symbol === idx.symbol);
               const m = getRowMetrics(idx, quote);
+              const provenance = quoteProvenanceLabel(quote);
+              const quoteStatus = quoteStatusSource(quote, SOURCE_POLL_INTERVALS.multiRegionQuotes);
               const dirUp = m.isPositive === true;
               const dirDown = m.isPositive === false;
               const pctHeat = loading
@@ -896,8 +995,23 @@ function QuotesTable({ indices, data, loading, priceLabel = 'PRICE', indexLabel 
                   <td className="region-mw-td region-mw-td-name">{idx.name}</td>
                   <td
                     className={`region-mw-td region-mw-td-num region-mw-td-price ${loading ? '' : m.quote?.price != null ? (dirUp ? 'positive' : dirDown ? 'negative' : '') : ''}`}
+                    title={loading ? undefined : provenance}
+                    aria-label={loading ? `${idx.name} price loading` : `${idx.name} price ${m.priceStr}. ${provenance}`}
+                    data-source={quote?.source || 'unavailable'}
+                    data-availability={quote?.availability || 'unavailable'}
                   >
-                    {loading ? '…' : m.priceStr}
+                    {loading ? '…' : (
+                      <>
+                        {m.priceStr}
+                        {m.priceStr !== '—' ? (
+                          <DelayedDataMarker
+                            status={quoteStatus.status}
+                            title={provenance}
+                            updatedAt={quoteStatus.updatedAt}
+                          />
+                        ) : null}
+                      </>
+                    )}
                   </td>
                   <td
                     className={`region-mw-td region-mw-td-num region-mw-td-heat ${pctHeat.className}`}
@@ -998,18 +1112,24 @@ function RegionChartPanel({ region, regionKey, data, loading }) {
   }, [data]);
 
   const regionSources = React.useMemo(() => {
-    if (!Array.isArray(data) || data.length === 0) return [];
     const interval = SOURCE_POLL_INTERVALS.multiRegionQuotes;
     return tableIndices
       .map((idx) => {
-        const idxQuote = data.find(d => d.symbol === idx.symbol);
-        const ts = idxQuote?.lastUpdated || idxQuote?.timestamp || idxQuote?.chartUpdatedAt;
-        if (!ts) return null;
+        const idxQuote = Array.isArray(data)
+          ? data.find(d => d.symbol === idx.symbol)
+          : null;
+        const sourceStatus = quoteStatusSource(idxQuote, interval);
+        const sourceKey = String(idxQuote?.source || '').toLowerCase();
+        const sourceLabel = QUOTE_SOURCE_LABELS[sourceKey] || idxQuote?.source || null;
         return {
           id: idx.symbol,
           label: `${idx.name} (${idx.symbol})`,
-          updatedAt: ts,
-          status: getSourceFreshness(ts, interval)
+          updatedAt: sourceStatus.updatedAt,
+          status: sourceStatus.status,
+          stateLabel: sourceLabel
+            ? `${sourceLabel} ${sourceStatus.stateLabel.toLowerCase()}`
+            : sourceStatus.stateLabel,
+          detail: quoteProvenanceLabel(idxQuote),
         };
       })
       .filter(Boolean);

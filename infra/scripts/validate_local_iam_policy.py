@@ -15,6 +15,28 @@ ALLOWED_GLOBAL_RESOURCES = {
         "s3:GetObject",
         "s3:GetObjectVersion",
     },
+    "arn:aws:s3:::market-dashboard-csv-data/hedgeye-email/assets/market-structure/*": {
+        "s3:GetObject",
+    },
+    (
+        "arn:aws:s3:::market-dashboard-csv-data/hedgeye-email/messages/"
+        "manual-inflation-nowcast/*"
+    ): {"s3:PutObject"},
+    "arn:aws:s3:::market-dashboard-csv-data": {"s3:ListBucket"},
+    "arn:aws:s3:::market-dashboard-csv-data/analyst-staging/*": {
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:PutObject",
+    },
+    "arn:aws:s3:::market-dashboard-csv-data/hedgeye-uploads/manual/*": {
+        "s3:GetObject",
+        "s3:PutObject",
+    },
+}
+REQUIRED_GLOBAL_RESOURCE_CONDITIONS = {
+    "arn:aws:s3:::market-dashboard-csv-data": {
+        "StringEquals": {"s3:prefix": "analyst-staging/"},
+    },
 }
 ALLOWED_WILDCARD_ACTIONS = {"cloudwatch:GetMetricStatistics"}
 
@@ -71,6 +93,12 @@ def validate_policy(path: Path, *, account: str, region: str) -> None:
                     raise PolicyValidationError(
                         f"{path}: global resource {resource} grants "
                         "an unsupported action"
+                    )
+                expected_condition = REQUIRED_GLOBAL_RESOURCE_CONDITIONS.get(resource)
+                if statement.get("Condition") != expected_condition:
+                    requirement = "the exact staging-prefix condition" if expected_condition else "no condition"
+                    raise PolicyValidationError(
+                        f"{path}: global resource {resource} requires {requirement}"
                     )
                 continue
             parts = resource.split(":")

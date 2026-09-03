@@ -84,13 +84,28 @@ class ReliabilityActivationTests(unittest.TestCase):
                 activation.parse_args(["--apply"])
             with self.assertRaises(SystemExit):
                 activation.parse_args(["--apply", "--phase", "gmail"])
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                activation.parse_args(
+                    [
+                        "--apply",
+                        "--phase",
+                        "gmail",
+                        "--admin-profile",
+                        "production-admin",
+                        "--rollback-export",
+                        "/tmp/verified-rollback",
+                        "--release-receipt",
+                        "/tmp/tested-release-receipt.json",
+                    ]
+                )
         parsed = activation.parse_args(
             [
                 "--apply",
                 "--phase",
                 "gmail",
                 "--admin-profile",
-                "production-admin",
+                "market-dashboard-admin",
                 "--rollback-export",
                 "/tmp/verified-rollback",
                 "--release-receipt",
@@ -98,12 +113,81 @@ class ReliabilityActivationTests(unittest.TestCase):
             ]
         )
         self.assertTrue(parsed.apply)
-        self.assertEqual(parsed.admin_profile, "production-admin")
+        self.assertEqual(parsed.admin_profile, "market-dashboard-admin")
 
     def test_region_is_pinned(self):
         with redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 activation.parse_args(["--region", "us-east-1"])
+
+    def test_shadow_acceptance_requires_seven_days_runs_checks_and_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "acceptance.md"
+            rows = "\n".join(
+                f"| 2026-08-{8 + index:02d} | {name} | Pass | Pass | Pass | |"
+                for index, name in enumerate(activation.REQUIRED_SHADOW_RUNS)
+            )
+            checks = "\n".join(
+                f"- [x] Acceptance check {index}"
+                for index in range(1, 12)
+            )
+            path.write_text(
+                "\n".join(
+                    [
+                        "Shadow start: 2026-08-08",
+                        "Earliest eligible cutover date: 2026-08-15",
+                        "Owner: Tim",
+                        "",
+                        "| Date/time | Question | Result | Citation/date accuracy | Degradation handled correctly | Notes |",
+                        "|---|---|---|---|---|---|",
+                        rows,
+                        "",
+                        checks,
+                        "",
+                        "Decision: approved",
+                        "Decision date: 2026-08-15",
+                        "Evidence reviewed by: Tim",
+                        "30-day rollback-retention end date: 2026-09-14",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = activation.verify_analyst_shadow_acceptance(
+                path,
+                now=datetime(2026, 8, 15, 18, tzinfo=timezone.utc),
+            )
+            self.assertTrue(result["passed"])
+            self.assertEqual(result["requiredRunCount"], 8)
+            self.assertEqual(result["acceptanceCheckCount"], 11)
+            self.assertEqual(
+                result["rollbackRetentionEndsAt"],
+                "2026-09-14T00:00:00+00:00",
+            )
+
+            with self.assertRaises(activation.ActivationFailure) as caught:
+                activation.verify_analyst_shadow_acceptance(
+                    path,
+                    now=datetime(2026, 8, 14, 18, tzinfo=timezone.utc),
+                )
+            self.assertEqual(caught.exception.code, "ANALYST_SHADOW_WINDOW_INCOMPLETE")
+
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "2026-09-14",
+                    "2026-09-13",
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(activation.ActivationFailure) as caught:
+                activation.verify_analyst_shadow_acceptance(
+                    path,
+                    now=datetime(2026, 8, 15, 18, tzinfo=timezone.utc),
+                )
+            self.assertEqual(
+                caught.exception.code,
+                "ANALYST_ROLLBACK_RETENTION_INVALID",
+            )
 
     def test_disabled_recovery_phase_is_apply_only(self):
         with redirect_stderr(io.StringIO()):
@@ -124,6 +208,36 @@ class ReliabilityActivationTests(unittest.TestCase):
         )
         self.assertTrue(parsed.apply)
         self.assertEqual(parsed.phase, "disabled")
+
+    def test_rollback_phase_is_apply_only_and_uses_exported_controls(self):
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                activation.parse_args(["--phase", "rollback"])
+        with tempfile.TemporaryDirectory() as directory:
+            rollback = Path(directory)
+            expected = {
+                name: ("ENABLED" if name != "SecurityScheduleState" else "DISABLED")
+                for name in activation.CONTROL_PARAMETERS
+            }
+            (rollback / "cloudformation-stack.json").write_text(
+                json.dumps(
+                    {
+                        "Stacks": [
+                            {
+                                "Parameters": [
+                                    {"ParameterKey": key, "ParameterValue": value}
+                                    for key, value in expected.items()
+                                ]
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                activation.exported_control_state(rollback),
+                expected,
+            )
 
     def test_auth_probe_only_requires_gmail_apply(self):
         invalid = (
@@ -166,6 +280,7 @@ class ReliabilityActivationTests(unittest.TestCase):
             {
                 "CloudWatchdogScheduleState": "ENABLED",
                 "GmailScheduleState": "ENABLED",
+                "CftcScheduleState": "DISABLED",
                 "QuantAnalystScheduleState": "ENABLED",
                 "QuantDeveloperScheduleState": "ENABLED",
                 "SecurityScheduleState": "ENABLED",
@@ -183,6 +298,7 @@ class ReliabilityActivationTests(unittest.TestCase):
             {
                 "CloudWatchdogScheduleState": "ENABLED",
                 "GmailScheduleState": "ENABLED",
+                "CftcScheduleState": "ENABLED",
                 "QuantAnalystScheduleState": "DISABLED",
                 "QuantDeveloperScheduleState": "ENABLED",
                 "SecurityScheduleState": "DISABLED",
@@ -199,6 +315,62 @@ class ReliabilityActivationTests(unittest.TestCase):
             {
                 name: "DISABLED" for name in activation.CONTROL_PARAMETERS
             },
+        )
+
+    def test_consolidated_phase_retains_only_ingestion_watchdog_and_alarms(self):
+        current = {
+            name: "ENABLED" for name in activation.CONTROL_PARAMETERS
+        }
+        self.assertEqual(
+            activation.target_control_state("consolidated", current),
+            {
+                "CloudWatchdogScheduleState": "ENABLED",
+                "GmailScheduleState": "ENABLED",
+                "CftcScheduleState": "ENABLED",
+                "QuantAnalystScheduleState": "DISABLED",
+                "QuantDeveloperScheduleState": "DISABLED",
+                "SecurityScheduleState": "DISABLED",
+                "OperationalAlarmsState": "ENABLED",
+            },
+        )
+
+    def test_event_rule_heartbeat_requires_fresh_healthy_exact_provenance(self):
+        result = activation.event_rule_heartbeat(
+            [
+                {
+                    "serviceId": "hermes:cloud-watchdog",
+                    "observedAt": datetime.now(timezone.utc).isoformat(),
+                    "status": "success",
+                    "source": "aws-lambda",
+                    "triggerSource": "aws-events",
+                    "ruleId": "market-dashboard-hermes-cloud-watchdog-v1",
+                    "scheduled": True,
+                }
+            ],
+            service_id="hermes:cloud-watchdog",
+            rule_id="market-dashboard-hermes-cloud-watchdog-v1",
+        )
+        self.assertTrue(result["passed"])
+
+        bad = activation.event_rule_heartbeat(
+            [
+                {
+                    "serviceId": "hermes:cloud-watchdog",
+                    "observedAt": datetime.now(timezone.utc).isoformat(),
+                    "status": "warning",
+                    "source": "aws-lambda",
+                    "triggerSource": "manual",
+                    "ruleId": "wrong",
+                    "scheduled": False,
+                }
+            ],
+            service_id="hermes:cloud-watchdog",
+            rule_id="market-dashboard-hermes-cloud-watchdog-v1",
+        )
+        self.assertFalse(bad["passed"])
+        self.assertEqual(
+            {failure["code"] for failure in bad["failures"]},
+            {"HEARTBEAT_STATUS_UNHEALTHY", "HEARTBEAT_PROVENANCE_INVALID"},
         )
 
     def test_operations_bridge_canary_does_not_require_portfolio(self):
@@ -276,6 +448,44 @@ class ReliabilityActivationTests(unittest.TestCase):
                 ),
             )
         self.assertEqual(controller.require_rollout_prerequisites(), [])
+
+    def test_consolidated_gate_requires_enabled_healthy_gmail_and_watchdog(self):
+        controller = object.__new__(activation.ActivationController)
+        controller.phase = "consolidated"
+        controller.parameters = {
+            name: "DISABLED" for name in activation.CONTROL_PARAMETERS
+        }
+        with self.assertRaises(activation.ActivationFailure) as caught:
+            controller.require_rollout_prerequisites()
+        self.assertEqual(caught.exception.code, "CONSOLIDATED_PREREQUISITE_DISABLED")
+
+        controller.parameters.update(
+            {
+                "CloudWatchdogScheduleState": "ENABLED",
+                "GmailScheduleState": "ENABLED",
+            }
+        )
+        controller.schedule_specifications = lambda _controls: [{"name": "gmail"}]
+        controller.schedule_check = lambda _spec: {"passed": True, "name": "gmail"}
+        controller.watchdog_rule_check = lambda _controls: {
+            "passed": True,
+            "name": "watchdog",
+        }
+        controller.secret_check = lambda: {"passed": True, "name": "secret"}
+        controller.function_check = lambda _kind: {"passed": True, "name": "gmail-function"}
+        controller.gmail_heartbeat = lambda: {
+            "passed": True,
+            "serviceId": "gmail:test",
+        }
+        controller.cloud_watchdog_heartbeat = lambda: {
+            "passed": True,
+            "serviceId": "hermes:cloud-watchdog",
+        }
+        controller.subscription_check = lambda: {"passed": True, "name": "subscription"}
+
+        checks = controller.require_rollout_prerequisites()
+        self.assertEqual(len(checks), 7)
+        self.assertTrue(all(check["passed"] for check in checks))
 
     def test_heartbeat_pending_accepts_only_incomplete_observation_windows(self):
         self.assertTrue(
@@ -1760,7 +1970,7 @@ class ReliabilityActivationTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "GMAIL_AUTH_REQUIRED")
 
-    def test_alarm_verification_requires_failure_and_recovery_actions(self):
+    def test_alarm_verification_requires_only_intentional_failure_actions(self):
         topic = (
             "arn:aws:sns:us-west-1:915328198276:"
             "market-dashboard-operations-v2"
@@ -1780,9 +1990,9 @@ class ReliabilityActivationTests(unittest.TestCase):
                 "TreatMissingData": contract.get(
                     "missingData", contract.get("missingDataWhenEnabled")
                 ),
-                "ActionsEnabled": True,
-                "AlarmActions": [topic],
-                "OKActions": [topic],
+                "ActionsEnabled": True if contract.get("notify") else False,
+                "AlarmActions": [topic] if contract.get("notify") else [],
+                "OKActions": [],
             }
             if contract.get("serviceId"):
                 alarm["Dimensions"] = [
@@ -1794,14 +2004,119 @@ class ReliabilityActivationTests(unittest.TestCase):
                 alarms, actions_enabled=True, topic_arn=topic
             )["passed"]
         )
-        alarms[0]["OKActions"] = []
+        alarms[0]["AlarmActions"] = [topic]
         result = activation.verify_alarms(
             alarms, actions_enabled=True, topic_arn=topic
         )
         self.assertFalse(result["passed"])
         self.assertEqual(
-            result["failures"][0]["code"], "ALARM_OK_ACTION_TARGET_MISMATCH"
+            result["failures"][0]["code"], "ALARM_ACTION_TARGET_MISMATCH"
         )
+
+    def test_operations_topic_verification_rejects_all_email_protocols(self):
+        for protocol, subscription_arn in (
+            ("email", "arn:aws:sns:us-west-1:915328198276:topic:confirmed"),
+            ("email-json", "PendingConfirmation"),
+        ):
+            with self.subTest(protocol=protocol):
+                with self.assertRaises(activation.ActivationFailure) as caught:
+                    activation.internal_only_operations_subscription(
+                        [
+                            {
+                                "Protocol": protocol,
+                                "SubscriptionArn": subscription_arn,
+                                "Endpoint": "operator@example.com",
+                            }
+                        ]
+                    )
+                self.assertEqual(
+                    caught.exception.code,
+                    "SNS_OPERATIONAL_EMAIL_ROUTE_PRESENT",
+                )
+
+    def test_worker_missing_heartbeat_alarms_follow_individual_schedule_state(self):
+        topic = (
+            "arn:aws:sns:us-west-1:915328198276:"
+            "market-dashboard-operations-v2"
+        )
+        controls = {
+            name: "ENABLED" for name in activation.CONTROL_PARAMETERS
+        }
+        controls.update(
+            {
+                "QuantAnalystScheduleState": "DISABLED",
+                "QuantDeveloperScheduleState": "DISABLED",
+                "SecurityScheduleState": "DISABLED",
+            }
+        )
+        alarms = []
+        for name in activation.ALARM_NAMES:
+            contract = activation.ALARM_CONTRACTS[name]
+            schedule_parameter = contract.get("scheduleParameter")
+            enabled = bool(contract.get("notify")) and (
+                not schedule_parameter
+                or controls[schedule_parameter] == "ENABLED"
+            )
+            alarm = {
+                "AlarmName": name,
+                "Namespace": contract["namespace"],
+                "MetricName": contract["metric"],
+                "Statistic": contract["statistic"],
+                "ComparisonOperator": contract["comparison"],
+                "Period": contract["period"],
+                "EvaluationPeriods": 1,
+                "Threshold": 1,
+                "TreatMissingData": contract.get(
+                    "missingData",
+                    contract.get(
+                        "missingDataWhenEnabled"
+                        if enabled
+                        else "missingDataWhenDisabled"
+                    ),
+                ),
+                "ActionsEnabled": enabled,
+                "AlarmActions": [topic] if contract.get("notify") else [],
+                "OKActions": [],
+            }
+            if contract.get("serviceId"):
+                alarm["Dimensions"] = [
+                    {"Name": "ServiceId", "Value": contract["serviceId"]}
+                ]
+            alarms.append(alarm)
+
+        result = activation.verify_alarms(
+            alarms,
+            actions_enabled=True,
+            topic_arn=topic,
+            controls=controls,
+        )
+        self.assertTrue(result["passed"])
+        worker_missing = [
+            alarm
+            for alarm in alarms
+            if activation.ALARM_CONTRACTS[alarm["AlarmName"]].get(
+                "scheduleParameter"
+            )
+        ]
+        self.assertTrue(
+            all(
+                alarm["ActionsEnabled"] is False
+                and alarm["TreatMissingData"] == "notBreaching"
+                for alarm in worker_missing
+            )
+        )
+
+    def test_operations_topic_verification_allows_internal_consumers(self):
+        result = activation.internal_only_operations_subscription(
+            [
+                {"Protocol": "lambda", "SubscriptionArn": "lambda-subscription"},
+                {"Protocol": "sqs", "SubscriptionArn": "queue-subscription"},
+            ]
+        )
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["emailSubscriptionCount"], 0)
+        self.assertEqual(result["protocolCounts"], {"lambda": 1, "sqs": 1})
 
     def test_script_has_no_secret_read_or_access_key_creation_call(self):
         source = (

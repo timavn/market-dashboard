@@ -165,27 +165,48 @@ async function getJson(url) {
     if (!response.ok) {
       const path = new URL(url).pathname;
       const upstreamStatus = String(payload?.status || '').trim().toLowerCase();
+      const upstreamErrorCode = String(payload?.error_code || payload?.errorCode || '').trim();
       const portfolioCodes = {
         disconnected: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
         gateway_unavailable: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
+        gateway_not_authenticated: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
+        gateway_api_unresponsive: 'IBKR_GATEWAY_API_UNRESPONSIVE',
+        client_id_in_use: 'IBKR_CLIENT_ID_IN_USE',
         not_connected: 'IBKR_GATEWAY_NOT_AUTHENTICATED',
         positions_request_busy: 'IBKR_POSITIONS_REQUEST_BUSY',
         positions_request_timeout: 'IBKR_POSITIONS_REQUEST_TIMEOUT',
         socket_verification_timeout: 'IBKR_SOCKET_VERIFICATION_TIMEOUT',
         live_session_unverified: 'IBKR_LIVE_SESSION_UNVERIFIED',
+        tws_offline: 'IBKR_POSITIONS_CLIENT_UNAVAILABLE',
+        positions_client_unavailable: 'IBKR_POSITIONS_CLIENT_UNAVAILABLE',
       };
       const error = new Error(
         boundedDetail(payload?.message || `${path} returned HTTP ${response.status}`),
       );
       error.code = path === '/portfolio/live-positions'
-        ? (portfolioCodes[upstreamStatus] || 'IBKR_LIVE_PORTFOLIO_UNAVAILABLE')
+        ? (upstreamErrorCode || portfolioCodes[upstreamStatus] || 'IBKR_LIVE_PORTFOLIO_UNAVAILABLE')
         : 'HERMES_BRIDGE_INPUT_UNAVAILABLE';
       error.blockedBy = path === '/portfolio/live-positions' ? 'portfolio.live' : null;
       error.upstreamStatus = upstreamStatus || null;
+      error.upstreamErrorCode = upstreamErrorCode || null;
       error.httpStatus = response.status;
       throw error;
     }
     return payload;
+  } catch (error) {
+    if (error?.name !== 'AbortError' && Number(error?.code) !== 20) throw error;
+    const path = new URL(url).pathname;
+    const timeoutError = new Error(
+      `${path} did not respond within the bridge input budget.`,
+    );
+    timeoutError.code = path === '/api/system-readiness'
+      ? 'SYSTEM_READINESS_REQUEST_TIMEOUT'
+      : path === '/portfolio/live-positions'
+        ? 'IBKR_POSITIONS_REQUEST_TIMEOUT'
+        : 'HERMES_BRIDGE_INPUT_TIMEOUT';
+    timeoutError.blockedBy = path === '/portfolio/live-positions' ? 'portfolio.live' : null;
+    timeoutError.upstreamStatus = 'timeout';
+    throw timeoutError;
   } finally {
     clearTimeout(timer);
   }

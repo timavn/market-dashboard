@@ -20,6 +20,9 @@ const cloudFormationSchema = yaml.DEFAULT_SCHEMA.extend([
   new yaml.Type('!Sub', { kind: 'sequence', construct: (value) => value }),
   new yaml.Type('!Equals', { kind: 'sequence', construct: (value) => value }),
   new yaml.Type('!If', { kind: 'sequence', construct: (value) => value }),
+  new yaml.Type('!Condition', { kind: 'scalar', construct: (value) => value }),
+  new yaml.Type('!And', { kind: 'sequence', construct: (value) => value }),
+  new yaml.Type('!Not', { kind: 'sequence', construct: (value) => value }),
 ]);
 
 describe('release-keyed prediction catalog schema', () => {

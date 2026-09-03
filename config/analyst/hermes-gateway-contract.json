@@ -1,0 +1,40 @@
+{
+  "contractVersion": 1,
+  "websocketPath": "/api/ws",
+  "authentication": "query-token",
+  "requiredRpcMethods": [
+    "session.create",
+    "session.list",
+    "session.most_recent",
+    "session.resume",
+    "session.history",
+    "session.title",
+    "prompt.submit",
+    "session.interrupt"
+  ],
+  "requiredEvents": [
+    "session.info",
+    "message.start",
+    "message.delta",
+    "message.complete",
+    "status.update",
+    "tool.start",
+    "tool.complete",
+    "error"
+  ],
+  "dashboardActions": [
+    "open",
+    "prompt",
+    "interrupt",
+    "new_chat",
+    "gm",
+    "start_review",
+    "retry_review",
+    "list_sessions",
+    "resume",
+    "cancel_resume",
+    "retry_gm_review",
+    "rename_session",
+    "delete_session"
+  ]
+}

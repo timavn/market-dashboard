@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { ENDPOINTS, EXTERNAL_APIS } from '../../constants/apiEndpoints';
 import { PortfolioAnalytics } from '../portfolioAnalytics';
+import { resolveSystemStatusEndpoint } from './systemStatusEndpoint';
 
 // Create axios instance with default config
 // Use full URL to bypass proxy issues in development
@@ -26,14 +27,57 @@ apiClient.interceptors.response.use(
 );
 
 const inFlightGetRequests = new Map();
-const FUNDING_UNAVAILABLE_REASON_ALLOWLIST = new Set([
-  'non_settlement_day',
-  'unsettled_securities_activity',
-  'settlement_unverified',
-]);
+const PORTFOLIO_BALANCE_MAX_AGE_MS = 45_000;
 
-const sanitizeFundingUnavailableReason = (value) =>
-  FUNDING_UNAVAILABLE_REASON_ALLOWLIST.has(value) ? value : null;
+const isFreshPortfolioBalanceTimestamp = (value) => {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const age = Date.now() - timestamp;
+  return age >= -5_000 && age <= PORTFOLIO_BALANCE_MAX_AGE_MS;
+};
+
+const verifiedPortfolioBalance = (data, account) => Boolean(
+  data?.available === true
+  && data?.status === 'live'
+  && data?.source === 'ibkr_live_session'
+  && data?.fromCache === false
+  && data?.exposure?.available === true
+  && data?.exposure?.status === 'live'
+  && Number.isFinite(Number(data?.exposure?.netLiquidation))
+  && Number.isFinite(Number(data?.exposure?.longMarketValue))
+  && Number.isFinite(Number(data?.exposure?.shortMarketValue))
+  && data?.margin?.available === true
+  && data?.margin?.status === 'live'
+  && data?.margin?.source === 'ibkr_live_session'
+  && Number.isFinite(Number(data?.margin?.availableFunds))
+  && Number.isFinite(Number(data?.margin?.excessLiquidity))
+  && Number.isFinite(Number(data?.margin?.buyingPower))
+  && (
+    data?.capacity?.available !== true
+    || (
+      data?.interestExposure?.available === true
+      && data?.interestExposure?.status === 'live'
+      && data?.interestExposure?.source === 'ibkr_live_session'
+      && data?.interestExposure?.actionable === false
+      && Number.isFinite(Number(
+        data?.interestExposure?.current?.estimatedDebitPrincipal,
+      ))
+      && Number.isFinite(Number(
+        data?.interestExposure?.projected?.estimatedDebitPrincipal,
+      ))
+      && Number.isFinite(Number(
+        data?.interestExposure?.policy?.estimatedDebitPrincipalAfterReserve,
+      ))
+      && Number.isFinite(Number(
+        data?.interestExposure?.policy?.totalReserve,
+      ))
+    )
+  )
+  && (!account || data?.accountId === account)
+  && isFreshPortfolioBalanceTimestamp(data?.observedAt)
+  && isFreshPortfolioBalanceTimestamp(data?.socketVerifiedAt)
+  && isFreshPortfolioBalanceTimestamp(data?.accountValuesObservedAt)
+);
 
 const normalizeParamsForKey = (params = {}) => Object.keys(params)
   .sort()
@@ -104,12 +148,44 @@ const attachReferenceCacheMetadata = (response) => {
 
 // Market Data Service
 export class MarketDataService {
-  static async getSystemStatus() {
+  static async getLoginStatus({ refresh = false } = {}) {
+    try {
+      const params = refresh === 'fast' || refresh === 'slow'
+        ? { refresh }
+        : refresh ? { refresh: 1 } : {};
+      const response = await dedupedGet(ENDPOINTS.LOGIN_STATUS, {
+        params,
+        timeout: 15_000,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching login status:', error);
+      throw error;
+    }
+  }
+
+  static async runLoginAction(actionId) {
+    if (!actionId || typeof actionId !== 'string') {
+      throw new Error('A login action ID is required.');
+    }
+    const response = await apiClient.post(
+      `${ENDPOINTS.LOGIN_STATUS}/actions/${encodeURIComponent(actionId)}`,
+      {},
+      { headers: { 'X-Login-Action': '1' }, timeout: 15_000 },
+    );
+    return response.data;
+  }
+
+  static async getSystemStatus({ marketId = null } = {}) {
     try {
       // The probes themselves remain tightly bounded server-side. Allow a
-      // little extra client time for the request to enter a busy local API
-      // event loop while the rest of the dashboard is loading.
-      const response = await dedupedGet(ENDPOINTS.SYSTEM_STATUS, { timeout: 4000 });
+      // loopback UI proxy to keep this control-plane request out of the busy
+      // browser connection pool used by long-running dashboard data calls.
+      // The existing fail-closed timeout remains unchanged.
+      const response = await dedupedGet(resolveSystemStatusEndpoint({ backendUrl }), {
+        timeout: 4000,
+        params: marketId ? { marketId } : undefined,
+      });
       return response.data;
     } catch (error) {
       console.error('Error fetching system status:', error);
@@ -196,7 +272,10 @@ export class MarketDataService {
             marketValue: holding.marketValue,
             accountPercent: ((holding.marketValue / snapshot.summary.totalValue) * 100).toFixed(2)
           })),
-          lastUpdated: new Date(snapshot.timestamp).toLocaleString(),
+          // Preserve the provider timestamp verbatim. Browser receipt/render
+          // time is never evidence that an actionable portfolio is current.
+          lastUpdated: snapshot.timestamp || null,
+          fetchedAt: snapshot.timestamp || null,
 
           // Enhanced analytics
           riskMetrics: {
@@ -254,20 +333,16 @@ export class MarketDataService {
           assetAllocation: data.assetAllocation || {},
           holdings: data.holdings || [],
           topHoldings: data.topHoldings || [],
-          lastUpdated: data.lastUpdated || new Date().toLocaleString(),
+          lastUpdated: data.lastUpdated || data.fetchedAt || null,
+          fetchedAt: data.fetchedAt || data.lastUpdated || null,
           dataSource: data.dataSource || null,
           accountSummary: data.accountSummary || null,
-          funding: data.funding || null,
-          fundingReference: data.fundingReference || null,
-          fundingUnavailableReason: sanitizeFundingUnavailableReason(
-            data.fundingUnavailableReason,
-          ),
           accountId: data.accountId || null,
           pnl: data.pnl || null,
           empty: Boolean(data.empty),
           liveSessionVerified: data.liveSessionVerified === true,
           socketVerifiedAt: data.socketVerifiedAt || data.accountSummary?.socketVerifiedAt || null,
-          fromCache: data.fromCache === true,
+          fromCache: data.fromCache === false ? false : data.fromCache === true ? true : null,
           reconciliationWarnings: data.reconciliationWarnings || [],
           dataQuality: data.dataQuality || null,
 
@@ -289,6 +364,54 @@ export class MarketDataService {
       console.error('Error fetching portfolio:', error);
       throw error;
     }
+  }
+
+  static async getPortfolioBalance({ account, signal } = {}) {
+    if (!account || typeof account !== 'string') {
+      throw new Error('An exact account is required for portfolio balance.');
+    }
+    const response = await dedupedGet(ENDPOINTS.PORTFOLIO_BALANCE, {
+      params: { account },
+      signal,
+      timeout: 25_000,
+    });
+    if (!verifiedPortfolioBalance(response.data, account)) {
+      const error = new Error(
+        response.data?.message
+        || 'The portfolio balance response was not verified live data.',
+      );
+      error.code = response.data?.errorCode || 'BALANCE_RESPONSE_UNVERIFIED';
+      throw error;
+    }
+    return response.data;
+  }
+
+  static async previewPortfolioBalance(request = {}) {
+    const accountId = String(request.accountId || request.account || '').trim();
+    if (!accountId) {
+      throw new Error('An exact account is required for a portfolio balance preview.');
+    }
+    const response = await apiClient.post(
+      ENDPOINTS.PORTFOLIO_BALANCE_PREVIEW,
+      { ...request, accountId },
+      { timeout: 30_000 },
+    );
+    const data = response.data;
+    if (
+      data?.available !== true
+      || data?.status !== 'preview'
+      || data?.source !== 'ibkr_live_session'
+      || data?.fromCache !== false
+      || data?.accountId !== accountId
+      || !isFreshPortfolioBalanceTimestamp(data?.observedAt)
+    ) {
+      const error = new Error(
+        data?.message || 'The trade preview was not based on verified live data.',
+      );
+      error.code = data?.errorCode || 'BALANCE_PREVIEW_UNVERIFIED';
+      throw error;
+    }
+    return data;
   }
 
   /**
@@ -337,6 +460,111 @@ export class MarketDataService {
     }
   }
 
+  static async getLeveragedProductOverlap({
+    baseSymbol,
+    referenceSymbol,
+    signal = undefined,
+  } = {}) {
+    const base = String(baseSymbol || '').trim().toUpperCase();
+    const reference = String(referenceSymbol || '').trim().toUpperCase();
+    if (!base || !reference) {
+      return {
+        available: false,
+        status: 'unavailable',
+        weightedOverlapPct: null,
+        fromCache: false,
+        reason: 'Both base and reference symbols are required.',
+      };
+    }
+
+    const response = await dedupedGet('/api/leveraged-products/overlap', {
+      params: { base, reference },
+      ...(signal ? { signal } : {}),
+    });
+    return response.data;
+  }
+
+  /**
+   * Fetch the canonical v2 security projection. This is intentionally a
+   * separate method while the dashboard migrates so v1 consumers remain
+   * readable and rollback does not silently mix response shapes.
+   */
+  static async getSecurityIntelligenceV2({
+    symbols = [],
+    date = null,
+    historyDays = 5,
+    signal = undefined,
+  } = {}) {
+    const normalizedSymbols = [...new Set(
+      (Array.isArray(symbols) ? symbols : [])
+        .map((symbol) => String(symbol || '').trim().toUpperCase())
+        .filter(Boolean),
+    )];
+    if (normalizedSymbols.length === 0) {
+      return {
+        schemaVersion: 2,
+        scope: 'symbols',
+        marketDate: date,
+        status: 'no_references',
+        bySymbol: {},
+        products: [],
+        sourceCoverage: [],
+      };
+    }
+
+    try {
+      const response = await dedupedGet('/api/research/security-intelligence/v2', {
+        params: {
+          symbols: normalizedSymbols.join(','),
+          ...(date ? { date } : {}),
+          historyDays,
+        },
+        ...(signal ? { signal } : {}),
+      });
+      return response.data;
+    } catch (error) {
+      if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+        console.error('Error fetching canonical security intelligence:', error);
+      }
+      throw error;
+    }
+  }
+
+  /** Fetch one page of the current canonical security universe. */
+  static async getSecurityIntelligenceUniverseV2({
+    date = null,
+    limit = 200,
+    cursor = null,
+  } = {}) {
+    try {
+      const response = await dedupedGet('/api/research/security-intelligence/v2', {
+        params: {
+          scope: 'universe',
+          limit,
+          ...(cursor !== null && cursor !== undefined ? { cursor } : {}),
+          ...(date ? { date } : {}),
+          historyDays: 0,
+        },
+      });
+      return response.data;
+    } catch (error) {
+      if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+        console.error('Error fetching canonical security universe:', error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Feature-gated reader used during migration. There is deliberately no
+   * v1 fallback after the v2 request has been selected and fails.
+   */
+  static async getCanonicalSecurityIntelligence(options = {}) {
+    return process.env.REACT_APP_SECURITY_INTELLIGENCE_V2_ENABLED === 'true'
+      ? this.getSecurityIntelligenceV2(options)
+      : this.getSecurityIntelligence(options);
+  }
+
   static async getPortfolioAccounts() {
     try {
       const response = await dedupedGet(ENDPOINTS.PORTFOLIO_ACCOUNTS);
@@ -381,10 +609,16 @@ export class MarketDataService {
     }
   }
 
-  static async getIbkrInterestValidationStatus({ account = null } = {}) {
+  static async getIbkrInterestValidationStatus({
+    account = null,
+    refreshLive = false,
+  } = {}) {
     try {
       const response = await dedupedGet(ENDPOINTS.IBKR_INTEREST_VALIDATION_STATUS, {
-        params: account ? { account } : {},
+        params: {
+          ...(account ? { account } : {}),
+          ...(refreshLive ? { refreshLive: 1 } : {}),
+        },
       });
       return response.data;
     } catch (error) {
@@ -401,6 +635,25 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching IBKR interest validation history:', error);
+      throw error;
+    }
+  }
+
+  static async getIbkrInterestValidationLedger({ account, signal } = {}) {
+    if (!account || typeof account !== 'string') {
+      throw new Error('An IBKR account is required for the interest ledger.');
+    }
+    try {
+      const response = await dedupedGet(ENDPOINTS.IBKR_INTEREST_VALIDATION_LEDGER, {
+        params: { account },
+        signal,
+        timeout: 30_000,
+      });
+      return response.data;
+    } catch (error) {
+      if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+        console.error('Error fetching IBKR interest ledger:', error);
+      }
       throw error;
     }
   }
@@ -430,25 +683,125 @@ export class MarketDataService {
     }
   }
 
-  static async getPortfolioCorrelationConcentration({
-    holdings = [],
-    totalValue = null,
-    windows = [30, 90, 180],
-    primaryWindow = 90,
-    signal = null,
-    forceRefresh = false,
+  static async getPredictionMarketPerformance({
+    scope = null,
+    account = null,
+    venue = 'all',
+    market = 'all',
+    sort = 'date',
+    direction = 'desc',
   } = {}) {
     try {
-      const response = await apiClient.post('/api/portfolio/correlation-concentration', {
-        holdings,
-        totalValue,
-        windows,
-        primaryWindow,
-        forceRefresh,
-      }, { signal });
+      const response = await dedupedGet(ENDPOINTS.PREDICTION_MARKET_PERFORMANCE, {
+        params: {
+          ...(account ? { account } : {}),
+          scope: scope || (account ? 'account' : 'all'),
+          venue,
+          market,
+          sort,
+          direction,
+        },
+      });
       return response.data;
     } catch (error) {
-      console.error('Error calculating portfolio correlation concentration:', error);
+      console.error('Error fetching prediction market performance:', error);
+      throw error;
+    }
+  }
+
+  static async getPredictionMarketPerformanceExecutions(id, { account = null } = {}) {
+    try {
+      const response = await dedupedGet(
+        `${ENDPOINTS.PREDICTION_MARKET_PERFORMANCE}/${encodeURIComponent(id)}/executions`,
+        { params: account ? { account } : {} },
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching prediction market execution details:', error);
+      throw error;
+    }
+  }
+
+  static async getPredictionMarketSp500Research({ account = null, window = 'all' } = {}) {
+    try {
+      const response = await dedupedGet(`${ENDPOINTS.PREDICTION_MARKET_PERFORMANCE}/research/sp500`, {
+        params: {
+          ...(account ? { account } : {}),
+          window,
+        },
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching ForecastEx FES SP500 research:', error);
+      throw error;
+    }
+  }
+
+  static async getExposureLabUniverse({ forceRefresh = false, signal = null } = {}) {
+    try {
+      const response = await dedupedGet(ENDPOINTS.EXPOSURE_LAB_UNIVERSE, {
+        params: { forceRefresh: forceRefresh ? 'true' : undefined },
+        signal,
+        timeout: 120000,
+      });
+      return response.data;
+    } catch (error) {
+      if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+        console.error('Error loading the Exposure Lab security universe:', error);
+      }
+      throw error;
+    }
+  }
+
+  static async getExposureLabSnapshot({
+    account = null,
+    forceRefresh = false,
+    signal = null,
+  } = {}) {
+    try {
+      const response = await dedupedGet(ENDPOINTS.EXPOSURE_LAB_SNAPSHOT, {
+        params: {
+          account: account || undefined,
+          forceRefresh: forceRefresh ? 'true' : undefined,
+        },
+        signal,
+        timeout: 120000,
+      });
+      return response.data;
+    } catch (error) {
+      if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+        console.error('Error loading the Exposure Lab snapshot:', error);
+      }
+      throw error;
+    }
+  }
+
+  static async saveExposureLabSecurityReview(ticker, review = {}) {
+    try {
+      const symbol = encodeURIComponent(String(ticker || '').trim().toUpperCase());
+      const response = await apiClient.put(
+        `${ENDPOINTS.EXPOSURE_LAB_SECURITY_MASTER}/${symbol}`,
+        review,
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error saving the Exposure Lab security review:', error);
+      throw error;
+    }
+  }
+
+  static async getExposureLabSecurityAudit(ticker, { limit = 100, signal = null } = {}) {
+    try {
+      const symbol = encodeURIComponent(String(ticker || '').trim().toUpperCase());
+      const response = await dedupedGet(
+        `${ENDPOINTS.EXPOSURE_LAB_SECURITY_MASTER}/${symbol}/audit`,
+        { params: { limit }, signal },
+      );
+      return response.data;
+    } catch (error) {
+      if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+        console.error('Error loading the Exposure Lab security audit:', error);
+      }
       throw error;
     }
   }
@@ -624,10 +977,13 @@ export class MarketDataService {
   }
 
   // Get risk ranges (LRR/HRR) for securities
-  static async getRiskRanges(tickers = null) {
+  static async getRiskRanges(tickers = null, { envelope = false, signal } = {}) {
     try {
-      const params = tickers ? { tickers: tickers.join(',') } : {};
-      const response = await dedupedGet(ENDPOINTS.RISK_RANGES, { params });
+      const params = {
+        ...(tickers ? { tickers: tickers.join(',') } : {}),
+        ...(envelope ? { envelope: 1 } : {}),
+      };
+      const response = await dedupedGet(ENDPOINTS.RISK_RANGES, { params, signal });
       return response.data;
     } catch (error) {
       console.error('Error fetching risk ranges:', error);
@@ -730,6 +1086,23 @@ export class MarketDataService {
     }
   }
 
+  static async getHedgeyeInflationNowcastHistory({ from = null, to = null } = {}) {
+    try {
+      const params = {
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+      };
+      const response = await dedupedGet(
+        '/api/hedgeye/inflation-nowcast/history',
+        { params },
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Hedgeye inflation nowcast history:', error);
+      throw error;
+    }
+  }
+
   // Get Hedgeye freshness status for all 6 data types
   static async getHedgeyeFreshness() {
     try {
@@ -747,6 +1120,44 @@ export class MarketDataService {
       return attachReferenceCacheMetadata(response);
     } catch (error) {
       console.error('Error fetching Hedgeye changelog:', error);
+      throw error;
+    }
+  }
+
+  // Saved Morning TL;DR editions. These endpoints are exact-date research
+  // reads: callers receive an explicit missing edition rather than a carried
+  // forward snapshot.
+  static async getMorningTldrArchive({ force = false } = {}) {
+    try {
+      const response = force
+        ? await apiClient.get('/api/hedgeye/tldr/archive')
+        : await dedupedGet('/api/hedgeye/tldr/archive');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Morning TL;DR archive:', error);
+      throw error;
+    }
+  }
+
+  static async getMorningTldrDay(date, { force = false } = {}) {
+    try {
+      const url = `/api/hedgeye/tldr/archive/${encodeURIComponent(date)}`;
+      const response = force ? await apiClient.get(url) : await dedupedGet(url);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) return null;
+      console.error(`Error fetching Morning TL;DR edition ${date}:`, error);
+      throw error;
+    }
+  }
+
+  static async getMorningTldrStatus(date, { force = false } = {}) {
+    try {
+      const url = `/api/hedgeye/tldr/archive/${encodeURIComponent(date)}/status`;
+      const response = force ? await apiClient.get(url) : await dedupedGet(url);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching Morning TL;DR publication status ${date}:`, error);
       throw error;
     }
   }
@@ -836,6 +1247,19 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching USD correlations:', error);
+      throw error;
+    }
+  }
+
+  static async getGoldCorrelations({ signal } = {}) {
+    try {
+      const response = await dedupedGet('/api/gold/correlations', {
+        signal,
+        timeout: 20_000,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Gold correlations:', error);
       throw error;
     }
   }

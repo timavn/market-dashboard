@@ -17,7 +17,9 @@ import urllib.request
 import zlib
 from datetime import datetime, timezone
 from decimal import Decimal
+from html.parser import HTMLParser
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
@@ -46,6 +48,27 @@ DYNAMODB_ITEM_MAX_BYTES = 400 * 1024
 DYNAMODB_TRANSACTION_MAX_BYTES = 4 * 1024 * 1024
 MARKET_SITUATION_IMAGE_HOST = "d1yhils6iwh5l5.cloudfront.net"
 MARKET_SITUATION_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+MARKET_SITUATION_CHART_MAX_COUNT = 12
+MARKET_SITUATION_SCHEMA_VERSION = "market-structure-v4"
+MARKET_SITUATION_CHART_METRICS_PARSER_VERSION = (
+    "market-structure-chart-metrics-v2"
+)
+INFLATION_NOWCAST_PARSER_VERSION = "inflation-nowcast-chart-v1"
+INFLATION_NOWCAST_METRIC = "Headline CPI YoY"
+INFLATION_NOWCAST_MONTH_NAMES = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 MARKET_SITUATION_SIGNAL_ROWS = (
     (
         "spxGammaExposure",
@@ -70,8 +93,12 @@ MARKET_SITUATION_SIGNAL_ROWS = (
 )
 MARKET_SITUATION_SIGNAL_COLORS = {
     (0, 128, 0): (0, "positive"),
+    # Hedgeye's current rendered template uses a darker brand green.
+    (55, 126, 34): (0, "positive"),
     (255, 165, 0): (1, "neutral"),
     (255, 0, 0): (2, "negative"),
+    # The current rendered template uses Hedgeye red instead of pure red.
+    (233, 51, 35): (2, "negative"),
 }
 
 
@@ -293,6 +320,835 @@ def _fetch_market_situation_image(url: str) -> bytes:
     return payload
 
 
+def _market_situation_image_type(payload: bytes) -> Tuple[str, str]:
+    """Return the verified MIME type and safe extension for a chart payload."""
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png", "png"
+    if payload.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg", "jpg"
+    if len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    raise ValueError("Market Situation chart has an unsupported or invalid image signature")
+
+
+def _market_situation_chart_ocr_response(
+    textract_client: Any,
+    payload: bytes,
+) -> Dict[str, Any]:
+    """Read one approved chart without treating unlabeled numbers as metrics."""
+    if hasattr(textract_client, "detect_document_text"):
+        return textract_client.detect_document_text(Document={"Bytes": payload})
+    return textract_client.analyze_document(
+        Document={"Bytes": payload},
+        FeatureTypes=["TABLES"],
+    )
+
+
+def _market_situation_ocr_text(response: Dict[str, Any]) -> str:
+    lines = [
+        str(block.get("Text") or "").strip()
+        for block in response.get("Blocks") or []
+        if block.get("BlockType") == "LINE"
+        and str(block.get("Text") or "").strip()
+    ]
+    return "\n".join(lines)
+
+
+def _market_situation_decimal_metric(
+    text: str,
+    pattern: str,
+    *,
+    minimum: Decimal,
+    maximum: Decimal,
+) -> Optional[Decimal]:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        value = Decimal(match.group(1).replace(",", ""))
+    except Exception:
+        return None
+    if not value.is_finite() or not minimum <= value <= maximum:
+        return None
+    return value
+
+
+def _market_situation_chart_date(text: str) -> Optional[str]:
+    match = re.search(
+        r"\bDate\s*[:=]?\s*(20\d{2}[/-]\d{1,2}[/-]\d{1,2})\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    raw_date = match.group(1).replace("-", "/")
+    try:
+        return datetime.strptime(raw_date, "%Y/%m/%d").strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _extract_spx_gamma_volatility_throttle_metric(
+    response: Dict[str, Any],
+    *,
+    chart_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Extract only the chart's explicitly labeled, source-dated callout."""
+    text = _market_situation_ocr_text(response)
+    if not re.search(
+        r"\bSPX\s+Gamma\s+Volatility\s+Throttle\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return None
+    gamma_throttle = _market_situation_decimal_metric(
+        text,
+        r"\bGamma\s+Throttle\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)\b",
+        minimum=Decimal("-250"),
+        maximum=Decimal("250"),
+    )
+    ten_day_realized_volatility = _market_situation_decimal_metric(
+        text,
+        r"\b10\s*[-–—]?\s*Day\s+rVol\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)\b",
+        minimum=Decimal("0"),
+        maximum=Decimal("250"),
+    )
+    chart_date = _market_situation_chart_date(text)
+    if (
+        gamma_throttle is None
+        or ten_day_realized_volatility is None
+        or chart_date is None
+    ):
+        return None
+    source_match = re.search(
+        r"\bSource\s*[:=]?\s*([A-Za-z0-9.-]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return {
+        "id": "spxGammaVolatilityThrottle",
+        "label": "SPX Gamma Volatility Throttle",
+        "gammaThrottle": gamma_throttle,
+        "tenDayRealizedVolatility": ten_day_realized_volatility,
+        "chartDate": chart_date,
+        "chartId": chart_id,
+        "extractionBasis": "labeled-chart-ocr",
+        "parserVersion": MARKET_SITUATION_CHART_METRICS_PARSER_VERSION,
+        **({"source": source_match.group(1)} if source_match else {}),
+    }
+
+
+def _extract_spx_probable_volatility_gamma_metric(
+    response: Dict[str, Any],
+    *,
+    chart_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Extract only explicitly labeled SPX strike-map levels."""
+    text = _market_situation_ocr_text(response)
+    if not (
+        re.search(r"\bSPX\b", text, flags=re.IGNORECASE)
+        and re.search(r"\bGamma\b", text, flags=re.IGNORECASE)
+        and re.search(r"\bStrike", text, flags=re.IGNORECASE)
+    ):
+        return None
+    zero_gamma = _market_situation_decimal_metric(
+        text,
+        r"\bZero\s+Gamma\s*[:=]?\s*([-+]?\d[\d,]*(?:\.\d+)?)\b",
+        minimum=Decimal("100"),
+        maximum=Decimal("100000"),
+    )
+    upper_pv_band = _market_situation_decimal_metric(
+        text,
+        r"\bUpper\s+PV\s+Band\s*[:=]?\s*([-+]?\d[\d,]*(?:\.\d+)?)\b",
+        minimum=Decimal("100"),
+        maximum=Decimal("100000"),
+    )
+    lower_pv_band = _market_situation_decimal_metric(
+        text,
+        r"\bLower\s+PV\s+Band\s*[:=]?\s*([-+]?\d[\d,]*(?:\.\d+)?)\b",
+        minimum=Decimal("100"),
+        maximum=Decimal("100000"),
+    )
+    strikes_match = re.search(
+        r"\bStrikes?\s+In\s+Play\s*[:=]?\s*([^\n]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    strikes_in_play: List[Decimal] = []
+    if strikes_match:
+        for raw_value in re.findall(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)(?!\d)", strikes_match.group(1)):
+            try:
+                value = Decimal(raw_value.replace(",", ""))
+            except Exception:
+                continue
+            if value.is_finite() and Decimal("100") <= value <= Decimal("100000"):
+                strikes_in_play.append(value)
+    chart_date = _market_situation_chart_date(text)
+    if (
+        zero_gamma is None
+        or upper_pv_band is None
+        or lower_pv_band is None
+        or not strikes_in_play
+        or len(strikes_in_play) > 20
+        or chart_date is None
+    ):
+        return None
+    source_match = re.search(
+        r"\bSource\s*[:=]?\s*([A-Za-z0-9.-]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return {
+        "id": "spxProbableVolatilityGamma",
+        "label": "SPX Probable Volatility / Gamma By Strike",
+        "zeroGamma": zero_gamma,
+        "upperPvBand": upper_pv_band,
+        "lowerPvBand": lower_pv_band,
+        "strikesInPlay": strikes_in_play,
+        "chartDate": chart_date,
+        "chartId": chart_id,
+        "extractionBasis": "labeled-chart-ocr",
+        "parserVersion": MARKET_SITUATION_CHART_METRICS_PARSER_VERSION,
+        **({"source": source_match.group(1)} if source_match else {}),
+    }
+
+
+_MARKET_SITUATION_EMAIL_PATTERN = re.compile(
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+    re.IGNORECASE,
+)
+_MARKET_SITUATION_IGNORED_TEXT = (
+    "prepared exclusively for",
+    "having trouble viewing this email",
+    "view larger image",
+    "view this email in your browser",
+    "view it in your browser",
+    "the research note below was written by",
+    "presented by hedgeye",
+    "manage preferences",
+    "unsubscribe",
+    "to access the full market situation report",
+    "to access the full report",
+    "click here",
+    "all rights reserved",
+)
+_MARKET_SITUATION_DISCLAIMER_PREFIXES = (
+    "disclaimer",
+    "legal disclaimer",
+    "important disclosures",
+    "the information contained in this report",
+    "hedgeye risk management, llc",
+)
+
+
+def _clean_market_situation_text(value: str) -> Optional[str]:
+    text = html.unescape(str(value or "")).replace("\xa0", " ")
+    text = _MARKET_SITUATION_EMAIL_PATTERN.sub("", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\s*\n\s*", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip(" \n-|·")
+    if not text:
+        return None
+    normalized = text.casefold()
+    if any(phrase in normalized for phrase in _MARKET_SITUATION_IGNORED_TEXT):
+        return None
+    if re.fullmatch(
+        r"\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s+[ap]m(?:\s+[a-z]{2,5})?",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return None
+    if re.match(r"^market situation report\s*:", normalized, re.IGNORECASE):
+        return None
+    if normalized in {"click here", "read more", "source", "view online"}:
+        return None
+    return text
+
+
+def _is_market_situation_disclaimer(text: str) -> bool:
+    normalized = str(text or "").strip().casefold()
+    return any(normalized.startswith(prefix) for prefix in _MARKET_SITUATION_DISCLAIMER_PREFIXES)
+
+
+def _market_situation_text_block_type(tag: str, text: str, attributes: Dict[str, str]) -> str:
+    normalized = text.strip()
+    class_name = attributes.get("class", "").casefold()
+    if re.fullmatch(
+        r"\d{1,2}/\d{1,2}/\d{4}(?:\s+\d{1,2}:\d{2}\s+[AP]M(?:\s+[A-Z]{2,5})?)?",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return "paragraph"
+    if re.match(r"^by\s+\S", normalized, re.IGNORECASE) or re.fullmatch(
+        r"(?:craig\s+peterson)(?:\s*[|·,-].*)?",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return "byline"
+    if "important note" in normalized.casefold() or "callout" in class_name or "note" in class_name:
+        return "callout"
+    if tag in {"h1", "h2", "h3", "h4", "h5", "h6"} or "headline" in class_name or "title" in class_name:
+        return "heading"
+    if (
+        len(normalized) <= 140
+        and normalized == normalized.upper()
+        and re.search(r"[A-Z]", normalized)
+        and not normalized.endswith(".")
+    ):
+        return "heading"
+    return "paragraph"
+
+
+class _MarketSituationContentParser(HTMLParser):
+    """Extract source-ordered narrative blocks and approved chart placeholders."""
+
+    _TEXT_TAGS = {
+        "blockquote",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "p",
+        "td",
+    }
+    _IGNORED_TAGS = {"head", "script", "style"}
+
+    def __init__(self, chart_urls: List[str]) -> None:
+        super().__init__(convert_charrefs=True)
+        self.blocks: List[Dict[str, Any]] = []
+        self.disclaimer_parts: List[str] = []
+        self._chart_urls = set(chart_urls)
+        self._seen_charts = set()
+        self._seen_text = set()
+        self._text_stack: List[Dict[str, Any]] = []
+        self._ignored_depth = 0
+        self._in_disclaimer = False
+
+    @staticmethod
+    def _attributes(attrs: List[Tuple[str, Optional[str]]]) -> Dict[str, str]:
+        return {
+            str(name or "").casefold(): str(value or "")
+            for name, value in attrs
+            if name
+        }
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        tag = tag.casefold()
+        if tag in self._IGNORED_TAGS:
+            self._ignored_depth += 1
+            return
+        if self._ignored_depth:
+            return
+
+        attributes = self._attributes(attrs)
+        if tag == "img":
+            source_url = _sanitize_research_image_url(attributes.get("src", ""))
+            if source_url in self._chart_urls and source_url not in self._seen_charts:
+                self._seen_charts.add(source_url)
+                self.blocks.append(
+                    {
+                        "type": "chart-source",
+                        "sourceUrl": source_url,
+                        "name": _chart_name_from_url(source_url),
+                        "caption": _clean_market_situation_text(
+                            attributes.get("alt", "")
+                        ),
+                    }
+                )
+            return
+
+        if tag == "br":
+            for candidate in self._text_stack:
+                candidate["parts"].append("\n")
+            return
+
+        if tag not in self._TEXT_TAGS:
+            return
+        inherited_disclaimer = any(
+            candidate.get("isDisclaimer") for candidate in self._text_stack
+        )
+        for candidate in self._text_stack:
+            candidate["hasTextChild"] = True
+        self._text_stack.append(
+            {
+                "tag": tag,
+                "attributes": attributes,
+                "parts": [],
+                "hasTextChild": False,
+                "isDisclaimer": inherited_disclaimer or any(
+                    "disclaimer" in attributes.get(name, "").casefold()
+                    for name in ("id", "class")
+                ),
+            }
+        )
+
+    def handle_startendtag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_depth:
+            return
+        for candidate in self._text_stack:
+            candidate["parts"].append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.casefold()
+        if tag in self._IGNORED_TAGS:
+            if self._ignored_depth:
+                self._ignored_depth -= 1
+            return
+        if self._ignored_depth or tag not in self._TEXT_TAGS:
+            return
+
+        candidate_index = next(
+            (
+                index
+                for index in range(len(self._text_stack) - 1, -1, -1)
+                if self._text_stack[index]["tag"] == tag
+            ),
+            None,
+        )
+        if candidate_index is None:
+            return
+        candidate = self._text_stack.pop(candidate_index)
+        if candidate["hasTextChild"]:
+            return
+        text = _clean_market_situation_text("".join(candidate["parts"]))
+        if not text:
+            return
+        if (
+            candidate.get("isDisclaimer")
+            or self._in_disclaimer
+            or _is_market_situation_disclaimer(text)
+        ):
+            self._in_disclaimer = True
+            self.disclaimer_parts.append(text)
+            return
+        dedupe_key = re.sub(r"\s+", " ", text).casefold()
+        if dedupe_key in self._seen_text:
+            return
+        self._seen_text.add(dedupe_key)
+        self.blocks.append(
+            {
+                "type": _market_situation_text_block_type(
+                    candidate["tag"],
+                    text,
+                    candidate["attributes"],
+                ),
+                "text": text,
+            }
+        )
+
+
+def _extract_market_situation_content(
+    html_body: str,
+    charts: List[Dict[str, str]],
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    parser = _MarketSituationContentParser([chart["url"] for chart in charts])
+    parser.feed(html_body)
+    parser.close()
+    disclaimer = "\n\n".join(parser.disclaimer_parts).strip() or None
+    return parser.blocks, disclaimer
+
+
+def _textract_tables(textract_response: Dict[str, Any]) -> List[List[List[str]]]:
+    """Return each Textract TABLE as its own ordered row collection."""
+    blocks = textract_response.get("Blocks") or []
+    blocks_by_id = {block.get("Id"): block for block in blocks if block.get("Id")}
+    tables: List[List[List[str]]] = []
+    for table in (block for block in blocks if block.get("BlockType") == "TABLE"):
+        cells_by_row: Dict[int, Dict[int, str]] = {}
+        for relationship in table.get("Relationships") or []:
+            if relationship.get("Type") != "CHILD":
+                continue
+            for cell_id in relationship.get("Ids") or []:
+                cell = blocks_by_id.get(cell_id)
+                if not cell or cell.get("BlockType") != "CELL":
+                    continue
+                value_parts: List[str] = []
+                for cell_relationship in cell.get("Relationships") or []:
+                    if cell_relationship.get("Type") != "CHILD":
+                        continue
+                    for word_id in cell_relationship.get("Ids") or []:
+                        word = blocks_by_id.get(word_id)
+                        if word and word.get("BlockType") == "WORD":
+                            value_parts.append(str(word.get("Text") or ""))
+                row_index = int(cell.get("RowIndex") or 0)
+                column_index = int(cell.get("ColumnIndex") or 0)
+                cells_by_row.setdefault(row_index, {})[column_index] = " ".join(value_parts).strip()
+        rows: List[List[str]] = []
+        for row_index in sorted(cells_by_row):
+            row_cells = cells_by_row[row_index]
+            rows.append([row_cells[column] for column in sorted(row_cells)])
+        if rows:
+            tables.append(rows)
+    return tables
+
+
+def _textract_table_rows(textract_response: Dict[str, Any]) -> List[List[str]]:
+    """Flatten all Textract tables for parsers that intentionally use one feed."""
+    return [
+        row
+        for table_rows in _textract_tables(textract_response)
+        for row in table_rows
+    ]
+
+
+def _signal_strength_header_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9%]+", " ", str(value or "").lower()).strip()
+
+
+def _signal_strength_column_map(rows: List[List[str]]) -> Dict[str, int]:
+    for row in rows[:4]:
+        columns: Dict[str, int] = {}
+        for index, value in enumerate(row):
+            header = _signal_strength_header_key(value)
+            if "days on" in header:
+                columns["daysOn"] = index
+            elif header == "ticker" or header.startswith("ticker "):
+                columns["ticker"] = index
+            elif "since initial signal" in header or ("since" in header and "signal" in header):
+                columns["percentChangeSinceSignal"] = index
+        if "ticker" in columns and ("daysOn" in columns or "percentChangeSinceSignal" in columns):
+            return columns
+    return {"daysOn": 0, "ticker": 1, "percentChangeSinceSignal": 5}
+
+
+def _signal_strength_source_rows(
+    *,
+    html_body: str,
+    textract_client: Any,
+    image_fetcher: Optional[Callable[[str], bytes]],
+) -> List[Dict[str, Any]]:
+    """Extract the reader's three Signal Strength fields from the source chart."""
+    chart = next(
+        (
+            item
+            for item in _extract_chart_items(html_body)
+            if re.search(r"(?:^|[_-])sss(?:[_-]|\.)|signal.?strength", item["name"], re.IGNORECASE)
+        ),
+        None,
+    )
+    if not chart or textract_client is None:
+        return []
+    source_url = _sanitize_research_image_url(chart["url"])
+    if not source_url:
+        return []
+    payload = (image_fetcher or _fetch_market_situation_image)(source_url)
+    response = textract_client.analyze_document(
+        Document={"Bytes": payload},
+        FeatureTypes=["TABLES"],
+    )
+    rows = _textract_table_rows(response)
+    columns = _signal_strength_column_map(rows)
+    parsed: List[Dict[str, Any]] = []
+    seen = set()
+    for row in rows:
+        ticker_index = columns.get("ticker")
+        ticker = str(row[ticker_index] if ticker_index is not None and ticker_index < len(row) else "").strip().upper()
+        if ticker in {"TICKER", "SIGNAL", "STOCK", "STOCKS", "SYMBOL"} or not re.fullmatch(r"[A-Z]{1,6}(?:\.[A-Z])?", ticker):
+            continue
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        stock: Dict[str, Any] = {"ticker": ticker}
+        days_index = columns.get("daysOn")
+        if days_index is not None and days_index < len(row):
+            days_match = re.search(r"-?\d+", str(row[days_index]).replace(",", ""))
+            if days_match:
+                stock["daysOn"] = int(days_match.group(0))
+        percent_index = columns.get("percentChangeSinceSignal")
+        if percent_index is not None and percent_index < len(row):
+            percent_match = re.search(r"[-+]?\d+(?:\.\d+)?", str(row[percent_index]).replace(",", ""))
+            if percent_match:
+                stock["percentChangeSinceSignal"] = Decimal(percent_match.group(0))
+        parsed.append(stock)
+    return parsed
+
+
+TRACKER_TRENDS = frozenset({"BULLISH", "BEARISH", "NEUTRAL"})
+TRACKER_TICKER_PATTERN = re.compile(r"[A-Z][A-Z0-9]{0,9}(?:[./-][A-Z0-9]{1,6})?")
+TRACKER_OUTBUCKET_PATTERN = re.compile(
+    r"#?OUT\s*BUCKET(?:\s*\(\s*(\d{1,2})\s*/\s*(\d{1,2})\s*\))?",
+    re.IGNORECASE,
+)
+TRACKER_UNAVAILABLE_PATTERN = re.compile(
+    r"(?:N\.?/?A\.?|NOT\s+AVAILABLE|UNAVAILABLE|[-\u2013\u2014]+)",
+    re.IGNORECASE,
+)
+
+
+class TrackerTableHeaderError(ValueError):
+    """A Textract table is not one of the approved tracker table shapes."""
+
+
+def _sanitized_chart_items(html_body: str) -> List[Dict[str, str]]:
+    charts: List[Dict[str, str]] = []
+    for item in _extract_chart_items(html_body):
+        source_url = _sanitize_research_image_url(item["url"])
+        if source_url:
+            charts.append({**item, "url": source_url})
+    return charts
+
+
+def _select_tracker_chart(
+    charts: List[Dict[str, str]],
+    *,
+    preferred_name: str,
+    fallback_index: int,
+) -> Dict[str, str]:
+    preferred = next(
+        (
+            item
+            for item in charts
+            if str(item.get("name") or "").strip().lower() == preferred_name.lower()
+        ),
+        None,
+    )
+    selected = preferred or (
+        charts[fallback_index] if 0 <= fallback_index < len(charts) else None
+    )
+    if not selected:
+        raise ValueError(f"Required tracker chart {preferred_name} is missing")
+    source_url = _sanitize_research_image_url(selected.get("url") or "")
+    if not source_url:
+        raise ValueError(f"Required tracker chart {preferred_name} has an unsafe URL")
+    return {**selected, "url": source_url}
+
+
+def _tracker_header_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _tracker_column_map(
+    rows: List[List[str]],
+    *,
+    required_fields: Tuple[str, ...],
+) -> Tuple[int, Dict[str, int]]:
+    for row_index, row in enumerate(rows[:6]):
+        columns: Dict[str, int] = {}
+        for index, value in enumerate(row):
+            header = _tracker_header_key(value)
+            if header in {"ticker", "symbol", "crypto", "cryptocurrency"}:
+                columns["ticker"] = index
+            elif header in {"price", "current price", "last price"}:
+                columns["price"] = index
+            elif header == "buy trade" or header.startswith("buy trade "):
+                columns["buyTrade"] = index
+            elif header == "sell trade" or header.startswith("sell trade "):
+                columns["sellTrade"] = index
+            elif header == "upside" or header.startswith("upside "):
+                columns["upside"] = index
+            elif header == "downside" or header.startswith("downside "):
+                columns["downside"] = index
+            elif header == "trend" or header.startswith("trend "):
+                columns["trend"] = index
+
+        # MOMO's source table intentionally leaves the first header cell blank.
+        # Only infer that exact position after the other named columns prove the
+        # expected table shape; never infer a ticker column from an arbitrary chart.
+        if "ticker" not in columns and columns.get("buyTrade", 0) > 0:
+            columns["ticker"] = 0
+        if all(field in columns for field in required_fields):
+            return row_index, columns
+    raise TrackerTableHeaderError(
+        "Tracker table does not contain the recognized required headers"
+    )
+
+
+def _parse_tracker_number(value: Any, *, field: str, ticker: str) -> Decimal:
+    normalized = str(value or "").strip().replace(",", "")
+    normalized = re.sub(r"^[+$]\s*", "", normalized)
+    normalized = re.sub(r"%$", "", normalized).strip()
+    if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", normalized):
+        raise ValueError(f"Tracker row {ticker} has invalid {field}")
+    parsed = Decimal(normalized)
+    if not parsed.is_finite():
+        raise ValueError(f"Tracker row {ticker} has invalid {field}")
+    return parsed
+
+
+def _parse_tracker_outbucket_marker(
+    value: Any,
+    *,
+    field: str,
+    ticker: str,
+) -> Tuple[bool, Optional[str]]:
+    normalized = str(value or "").strip()
+    match = TRACKER_OUTBUCKET_PATTERN.fullmatch(normalized)
+    if not match:
+        return False, None
+    if not match.group(1):
+        return True, None
+
+    month = int(match.group(1))
+    day = int(match.group(2))
+    try:
+        # Validate the published partial date without inventing its year.
+        datetime(2000, month, day)
+    except ValueError as error:
+        raise ValueError(
+            f"Tracker row {ticker} has invalid {field} outbucket date"
+        ) from error
+    return True, f"{month:02d}/{day:02d}"
+
+
+def _tracker_value_is_unavailable(value: Any) -> bool:
+    normalized = str(value or "").strip()
+    return not normalized or bool(TRACKER_UNAVAILABLE_PATTERN.fullmatch(normalized))
+
+
+def _parse_tracker_table(
+    rows: List[List[str]],
+    *,
+    required_fields: Tuple[str, ...],
+    allow_outbucket_rows: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    header_index, columns = _tracker_column_map(
+        rows,
+        required_fields=required_fields,
+    )
+    parsed: Dict[str, Dict[str, Any]] = {}
+    for row in rows[header_index + 1:]:
+        if not any(str(value or "").strip() for value in row):
+            continue
+        ticker_index = columns["ticker"]
+        ticker = str(
+            row[ticker_index] if ticker_index < len(row) else ""
+        ).strip().upper()
+        if not TRACKER_TICKER_PATTERN.fullmatch(ticker):
+            raise ValueError("Tracker table contains an incomplete or invalid ticker row")
+        if ticker in parsed:
+            raise ValueError(f"Tracker table contains duplicate ticker {ticker}")
+
+        raw_values = {
+            field: row[columns[field]] if columns[field] < len(row) else ""
+            for field in required_fields
+            if field != "ticker"
+        }
+        trend = str(raw_values.get("trend") or "").strip().upper()
+        if "trend" in required_fields and trend not in TRACKER_TRENDS:
+            raise ValueError(f"Tracker row {ticker} has invalid trend")
+
+        buy_is_outbucket, buy_status_date = _parse_tracker_outbucket_marker(
+            raw_values.get("buyTrade"),
+            field="buyTrade",
+            ticker=ticker,
+        )
+        sell_is_outbucket, sell_status_date = _parse_tracker_outbucket_marker(
+            raw_values.get("sellTrade"),
+            field="sellTrade",
+            ticker=ticker,
+        )
+        is_outbucket_row = buy_is_outbucket or sell_is_outbucket
+        if is_outbucket_row:
+            if not allow_outbucket_rows:
+                raise ValueError(
+                    f"Tracker row {ticker} has an unsupported outbucket range"
+                )
+            if not (buy_is_outbucket and sell_is_outbucket):
+                raise ValueError(f"Tracker row {ticker} has a partial outbucket range")
+            if buy_status_date != sell_status_date:
+                raise ValueError(f"Tracker row {ticker} has mismatched outbucket dates")
+            for field in ("upside", "downside"):
+                if field in required_fields and not _tracker_value_is_unavailable(
+                    raw_values.get(field)
+                ):
+                    raise ValueError(
+                        f"Tracker row {ticker} has {field} for an outbucket range"
+                    )
+
+            record = {
+                field: None
+                for field in required_fields
+                if field not in {"ticker", "trend"}
+            }
+            if "trend" in required_fields:
+                record["trend"] = trend
+            record["rangeStatus"] = "outbucket"
+            if buy_status_date:
+                record["rangeStatusDate"] = buy_status_date
+            record["trade"] = record.get("trend")
+            record["lrr"] = None
+            record["hrr"] = None
+            record["index"] = len(parsed)
+            parsed[ticker] = record
+            continue
+
+        record: Dict[str, Any] = {}
+        for field in required_fields:
+            if field == "ticker":
+                continue
+            if field == "trend":
+                record[field] = trend
+            else:
+                record[field] = _parse_tracker_number(
+                    raw_values.get(field),
+                    field=field,
+                    ticker=ticker,
+                )
+
+        if allow_outbucket_rows:
+            record["rangeStatus"] = "available"
+
+        for price_field in ("price", "buyTrade", "sellTrade"):
+            if price_field in record and record[price_field] <= 0:
+                raise ValueError(f"Tracker row {ticker} has non-positive {price_field}")
+        if record.get("buyTrade") is not None and record.get("sellTrade") is not None:
+            if record["buyTrade"] >= record["sellTrade"]:
+                raise ValueError(f"Tracker row {ticker} has an unordered trade range")
+        # Keep one canonical typed row for every validated tracker security.
+        # ``trend`` is the explicit published trade signal; Buy/Sell are the
+        # lower/upper tracker range and must never be interpreted as a
+        # directional hint.  The legacy names remain in the record for
+        # readers that still consume the original snapshot shape.
+        record["trade"] = record.get("trend")
+        record["lrr"] = record.get("buyTrade")
+        record["hrr"] = record.get("sellTrade")
+        record["index"] = len(parsed)
+        parsed[ticker] = record
+
+    if not parsed:
+        raise ValueError("Tracker table contains no complete security rows")
+    return parsed
+
+
+def _extract_tracker_chart_table(
+    *,
+    chart: Dict[str, str],
+    textract_client: Any,
+    image_fetcher: Optional[Callable[[str], bytes]],
+    required_fields: Tuple[str, ...],
+    allow_outbucket_rows: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    payload = (image_fetcher or _fetch_market_situation_image)(chart["url"])
+    response = textract_client.analyze_document(
+        Document={"Bytes": payload},
+        FeatureTypes=["TABLES"],
+    )
+    parsed_tables: List[Dict[str, Dict[str, Any]]] = []
+    for table_rows in _textract_tables(response):
+        try:
+            parsed_tables.append(_parse_tracker_table(
+                table_rows,
+                required_fields=required_fields,
+                allow_outbucket_rows=allow_outbucket_rows,
+            ))
+        except TrackerTableHeaderError:
+            # BTC_2.png also contains a volume table. Ignore only tables whose
+            # headers prove they are not the approved risk-range/trend table.
+            continue
+    if len(parsed_tables) != 1:
+        raise ValueError(
+            "Tracker chart must contain exactly one recognized complete table"
+        )
+    return parsed_tables[0]
+
+
 def _paeth_predictor(left: int, above: int, upper_left: int) -> int:
     estimate = left + above - upper_left
     left_distance = abs(estimate - left)
@@ -442,7 +1298,14 @@ def _extract_market_situation_signals(payload: bytes) -> List[Dict[str, str]]:
         )
 
     signals = []
-    expected_centers = (0.412, 0.585, 0.758)
+    # The email template has two known raster layouts. The compact layout is
+    # used by the focused fixture tests; current production emails render a
+    # wider matrix with a wider left label column.
+    expected_centers = (
+        (0.432, 0.658, 0.884)
+        if width >= 1000
+        else (0.412, 0.585, 0.758)
+    )
     for row_definition, band in zip(MARKET_SITUATION_SIGNAL_ROWS, signal_bands):
         signal_id, label, choices = row_definition
         x_center = (band["xSum"] / band["count"]) / width
@@ -562,6 +1425,239 @@ def _extract_symbols(raw_text: str) -> List[str]:
     return list(dict.fromkeys(items))
 
 
+def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
+    """Extract the long/short table used by Investing Ideas newsletters.
+
+    Hedgeye has published this product in two materially different HTML
+    layouts: the older template marks rows with ``class=long|short`` and the
+    newer template uses a normal table with named headers.  Keep the output
+    shape stable, but make the row mapping explicit so a template change
+    cannot silently turn a publication into an empty snapshot.
+    """
+
+    def normalize_side(value: Any) -> Optional[str]:
+        normalized = re.sub(r"[^a-z]", "", _strip_tags(str(value or "")).lower())
+        if normalized in {"long", "buy", "bullish"}:
+            return "Long"
+        if normalized in {"short", "sell", "bearish"}:
+            return "Short"
+        return None
+
+    def normalized_header(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", _strip_tags(str(value or "")).lower())
+
+    def header_index(headers: List[str], patterns: Tuple[str, ...]) -> Optional[int]:
+        for index, header in enumerate(headers):
+            if any(pattern in header for pattern in patterns):
+                return index
+        return None
+
+    def parse_row(
+        cells: List[str],
+        side: Optional[str],
+        *,
+        ticker_index: int = 0,
+        side_index: Optional[int] = None,
+        previous_close_index: int = 1,
+        low_index: int = 2,
+        high_index: int = 3,
+    ) -> Optional[Dict[str, Any]]:
+        if side is None and side_index is not None and side_index < len(cells):
+            side = normalize_side(cells[side_index])
+        if side is None or ticker_index >= len(cells):
+            return None
+
+        ticker = _normalize_ticker(_strip_tags(cells[ticker_index]))
+        # A header row can contain a side-like label but is not a position.
+        if not ticker:
+            return None
+        required_indexes = (
+            previous_close_index,
+            low_index,
+            high_index,
+        )
+        if any(index >= len(cells) for index in required_indexes):
+            raise ValueError(
+                f"Investing Ideas row for {ticker} is missing required risk-range cells"
+            )
+
+        previous_close = _parse_etf_money(_strip_tags(cells[previous_close_index]))
+        low_end = _parse_etf_money(_strip_tags(cells[low_index]))
+        high_end = _parse_etf_money(_strip_tags(cells[high_index]))
+        if previous_close is None or low_end is None or high_end is None:
+            raise ValueError(f"Investing Ideas row for {ticker} has invalid numeric fields")
+        if low_end >= high_end:
+            raise ValueError(f"Investing Ideas row for {ticker} has an invalid LRR/HRR range")
+
+        return {
+            "ticker": ticker,
+            "side": side,
+            "position": side.lower(),
+            "prevClose": previous_close,
+            "lrr": low_end,
+            "hrr": high_end,
+            "originalName": ticker,
+        }
+
+    rows: List[Dict[str, Any]] = []
+    seen: Dict[str, Dict[str, Any]] = {}
+    def direct_cells(row_body: str) -> List[str]:
+        token_pattern = re.compile(
+            r"<(?P<closing>/)?(?P<tag>td|th)\b[^>]*>",
+            re.IGNORECASE,
+        )
+        cells: List[str] = []
+        depth = 0
+        start: Optional[int] = None
+        for token in token_pattern.finditer(row_body):
+            if token.group("closing"):
+                if depth <= 0:
+                    continue
+                depth -= 1
+                if depth == 0 and start is not None:
+                    cells.append(row_body[start:token.start()])
+                    start = None
+            else:
+                if depth == 0:
+                    start = token.end()
+                depth += 1
+        return cells
+
+    def class_rows(source: str) -> List[Tuple[str, str, List[str]]]:
+        token_pattern = re.compile(
+            r"<(?P<closing>/)?tr\b(?P<attrs>[^>]*)>",
+            re.IGNORECASE,
+        )
+        class_open_pattern = re.compile(
+            r"<tr(?P<attrs>[^>]*\bclass\s*=\s*[\"'][^\"']*(?:long|short)[^\"']*[\"'][^>]*)>",
+            re.IGNORECASE,
+        )
+        parsed: List[Tuple[str, str, List[str]]] = []
+        for opening in class_open_pattern.finditer(source):
+            depth = 0
+            end: Optional[int] = None
+            for token in token_pattern.finditer(source, opening.start()):
+                if token.group("closing"):
+                    depth -= 1
+                    if depth == 0:
+                        end = token.end()
+                        break
+                else:
+                    depth += 1
+            if end is None:
+                continue
+            row_body = source[opening.end():token.start()]
+            cells = direct_cells(row_body)
+            if cells:
+                parsed.append((opening.group("attrs") or "", row_body, cells))
+        return parsed
+
+    def simple_rows(source: str) -> List[Tuple[str, str, List[str]]]:
+        table_blocks = re.findall(
+            r"<table\b[^>]*>(.*?)</table>",
+            source,
+            re.IGNORECASE | re.DOTALL,
+        ) or [source]
+        row_pattern = re.compile(
+            r"<tr(?P<attrs>[^>]*)>(?P<body>.*?)</tr>",
+            re.IGNORECASE | re.DOTALL,
+        )
+        cell_pattern = re.compile(
+            r"<(?:td|th)\b[^>]*>(.*?)</(?:td|th)>",
+            re.IGNORECASE | re.DOTALL,
+        )
+        parsed: List[Tuple[str, str, List[str]]] = []
+        for table in table_blocks:
+            for match in row_pattern.finditer(table):
+                row_body = match.group("body")
+                cells = cell_pattern.findall(row_body)
+                if cells:
+                    parsed.append((match.group("attrs"), row_body, cells))
+        return parsed
+
+    parsed_rows = class_rows(html_body) or simple_rows(html_body)
+    if not parsed_rows:
+        return rows
+
+    header_row = next(
+        (
+            cells
+            for attrs, row_body, cells in parsed_rows
+            if "<th" in row_body.lower()
+            or any(
+                header in {
+                    "ticker",
+                    "symbol",
+                    "security",
+                    "side",
+                    "position",
+                    "direction",
+                    "prevclose",
+                    "previousclose",
+                    "lrr",
+                    "hrr",
+                }
+                for header in [normalized_header(cell) for cell in cells]
+            )
+        ),
+        None,
+    )
+    headers = [normalized_header(cell) for cell in header_row] if header_row else []
+    ticker_index = header_index(headers, ("ticker", "symbol", "security", "stock"))
+    side_index = header_index(headers, ("side", "position", "direction", "bias", "call"))
+    previous_close_index = header_index(headers, ("prevclose", "previousclose", "close"))
+    low_index = header_index(headers, ("lrr", "low", "lower"))
+    high_index = header_index(headers, ("hrr", "high", "upper"))
+    header_indexes_complete = all(
+        index is not None
+        for index in (
+            ticker_index,
+            side_index,
+            previous_close_index,
+            low_index,
+            high_index,
+        )
+    )
+
+    for attrs, row_body, cells in parsed_rows:
+        attrs_lower = attrs.lower()
+        class_side = None
+        if re.search(r"\bclass\s*=\s*[\"'][^\"']*\blong\b", attrs_lower):
+            class_side = "Long"
+        elif re.search(r"\bclass\s*=\s*[\"'][^\"']*\bshort\b", attrs_lower):
+            class_side = "Short"
+
+        if class_side:
+            parsed = parse_row(cells, class_side)
+        elif header_indexes_complete and not (
+            header_row is not None and cells == header_row
+        ):
+            parsed = parse_row(
+                cells,
+                None,
+                ticker_index=int(ticker_index),
+                side_index=int(side_index),
+                previous_close_index=int(previous_close_index),
+                low_index=int(low_index),
+                high_index=int(high_index),
+            )
+        else:
+            parsed = None
+
+        if parsed is None:
+            continue
+        ticker = parsed["ticker"]
+        existing = seen.get(ticker)
+        if existing is not None and existing != parsed:
+            raise ValueError(
+                f"Investing Ideas table contains conflicting duplicate row for {ticker}"
+            )
+        if existing is None:
+            seen[ticker] = parsed
+            rows.append(parsed)
+    return rows
+
+
 def _split_exact_items(raw_text: str) -> List[str]:
     if not raw_text:
         return []
@@ -631,6 +1727,102 @@ def _has_positive_article_evidence(snapshot: Dict[str, Any]) -> bool:
         len(re.sub(r"\s+", " ", str(article.get(field) or "")).strip()) >= 5
         for field in ("headline", "teaser", "summary")
     )
+
+
+TOP_THREE_MARKER_PATTERN = re.compile(
+    r"(?:hedgeye(?:'|’)?s\s+)?top\s+(?:3|three)\s+things(?:\s+today)?\s*:?\s*",
+    re.IGNORECASE,
+)
+TOP_THREE_FOOTER_PATTERN = re.compile(
+    r"\n\s*(?:VIEW LINK|CLICK HERE|Please visit|©|If you believe)\b",
+    re.IGNORECASE,
+)
+
+
+def _clean_top_three_item(value: str) -> str:
+    source = _strip_tags(value) if "<" in value else html.unescape(value)
+    source = re.sub(r"^\s*[1-3]\s*[).]\s*", "", source)
+    return re.sub(r"\s+", " ", source).strip(" \t\r\n•")
+
+
+def _parse_top_three_item(value: str, rank: int) -> Optional[Dict[str, Any]]:
+    cleaned = _clean_top_three_item(value)
+    if not cleaned:
+        return None
+    match = re.match(r"^(.{1,80}?)\s+(?:[–—]|-)\s+(.+)$", cleaned, re.DOTALL)
+    if not match:
+        match = re.match(r"^([^:]{1,80}):\s+(.+)$", cleaned, re.DOTALL)
+    if not match:
+        return None
+    title = re.sub(r"\s+", " ", match.group(1)).strip(" .:;–—-")
+    body = re.sub(r"\s+", " ", match.group(2)).strip()
+    if not title or not body:
+        return None
+    return {"rank": rank, "title": title, "body": body}
+
+
+def _top_three_intro(value: str) -> Optional[str]:
+    lines = [
+        line.strip()
+        for line in value.splitlines()
+        if line.strip()
+        and not re.search(r"(?:VIEW LINK|CLICK HERE|ACCESS TODAY)", line, re.IGNORECASE)
+    ]
+    intro = re.sub(r"\s+", " ", " ".join(lines)).strip(" :")
+    return intro[:1200] or None
+
+
+def _extract_top_three_items(
+    html_body: str,
+    text: str,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    markers = list(TOP_THREE_MARKER_PATTERN.finditer(text))
+    if not markers:
+        return [], None
+
+    marker = markers[-1]
+    section = text[marker.end():]
+    numbered_markers = list(
+        re.finditer(r"(?m)^\s*([1-3])\s*[).]\s+", section)
+    )
+    if [int(match.group(1)) for match in numbered_markers[:3]] == [1, 2, 3]:
+        items: List[Dict[str, Any]] = []
+        for index, item_marker in enumerate(numbered_markers[:3]):
+            end = (
+                numbered_markers[index + 1].start()
+                if index + 1 < 3
+                else len(section)
+            )
+            raw_item = section[item_marker.start():end]
+            footer = TOP_THREE_FOOTER_PATTERN.search(raw_item)
+            if footer:
+                raw_item = raw_item[:footer.start()]
+            parsed = _parse_top_three_item(raw_item, index + 1)
+            if parsed:
+                items.append(parsed)
+        if len(items) == 3:
+            return items, _top_three_intro(section[:numbered_markers[0].start()])
+
+    for ordered_list in re.findall(
+        r"<ol\b[^>]*>(.*?)</ol>",
+        html_body,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        raw_items = re.findall(
+            r"<li\b[^>]*>(.*?)</li>",
+            ordered_list,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if len(raw_items) < 3:
+            continue
+        parsed_items = [
+            _parse_top_three_item(raw_item, index + 1)
+            for index, raw_item in enumerate(raw_items[:3])
+        ]
+        if all(parsed_items):
+            return [item for item in parsed_items if item], None
+
+    return [], None
 
 
 def _extract_symbol_list(raw_text: str) -> List[str]:
@@ -991,6 +2183,42 @@ def _extract_etf_pro_full_book(text: str) -> Optional[Dict[str, Any]]:
     }
 
 
+def _extract_refreshed_spx_risk_range(text: str) -> Optional[Dict[str, Any]]:
+    if not text or not re.search(
+        r"(?:SPX\s+refreshed\s+risk\s+range|refreshed\s+SPX\s+risk\s+range)",
+        text,
+        re.IGNORECASE,
+    ):
+        return None
+
+    match = re.search(
+        r"(?:SPX\s+refreshed\s+risk\s+range|refreshed\s+SPX\s+risk\s+range)"
+        r"\s*(?:=|:|is|of)?\s*\$?([\d,]+(?:\.\d+)?)\s*[-–—]\s*\$?([\d,]+(?:\.\d+)?)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    low = float(match.group(1).replace(",", ""))
+    high = float(match.group(2).replace(",", ""))
+    if low <= 0 or high <= 0 or low >= high:
+        return None
+    return {
+        "ticker": "SPX",
+        "lrr": low,
+        "hrr": high,
+        "label": "SPX Refreshed Risk Range",
+    }
+
+
+def _with_refreshed_spx_risk_range(alert: Dict[str, Any], text: str) -> Dict[str, Any]:
+    refreshed_range = _extract_refreshed_spx_risk_range(text)
+    if refreshed_range:
+        alert["refreshedRiskRange"] = refreshed_range
+    return alert
+
+
 def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -> Optional[Dict[str, Any]]:
     if not headline:
         headline = _extract_headline(html_body, text)
@@ -1007,7 +2235,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
         action = inline_match.group(1).upper()
         modifier = (inline_match.group(2) or "").upper()
         ticker = inline_match.group(3).upper()
-        return {
+        return _with_refreshed_spx_risk_range({
             "headline": normalized,
             "signalFamily": "Real-Time",
             "signalPhrase": inline_match.group(0),
@@ -1018,7 +2246,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
             "ticker": ticker,
             "name": _extract_first_image_alt(html_body) or ticker,
             "analyst": None,
-        }
+        }, text)
 
     match = re.search(
         r"Real-Time Alert:\s*(.+?)\s+Signal(?:\s*\(([^)]*)\))?\s*:\s*(.+?)(?:\s*-\s*([A-Z]{1,4}))?\s*$",
@@ -1059,7 +2287,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
                 ticker = ticker_match.group(1).upper()
                 name = ticker
 
-        return {
+        return _with_refreshed_spx_risk_range({
             "headline": normalized,
             "signalFamily": family or signal_phrase,
             "signalPhrase": signal_phrase,
@@ -1068,7 +2296,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
             "ticker": ticker,
             "name": name,
             "analyst": analyst,
-        }
+        }, text)
 
     simple_match = re.search(r"^(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL\s+([A-Z][A-Z0-9./-]{1,9})$", normalized, re.IGNORECASE)
     if simple_match:
@@ -1076,7 +2304,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
         ticker = simple_match.group(2).upper()
         analyst_match = re.search(r"\n\s*([A-Z]{2,4})\s*\n", text)
         analyst = analyst_match.group(1).upper() if analyst_match else None
-        return {
+        return _with_refreshed_spx_risk_range({
             "headline": normalized,
             "signalFamily": "Real-Time",
             "signalPhrase": normalized,
@@ -1085,7 +2313,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
             "ticker": ticker,
             "name": _extract_first_image_alt(html_body) or ticker,
             "analyst": analyst,
-        }
+        }, text)
 
     return None
 
@@ -1246,6 +2474,230 @@ def _extract_trend_changes_from_html(text: str) -> List[Dict[str, str]]:
     return changes
 
 
+def _inflation_month_id(value: str) -> Optional[str]:
+    match = re.search(
+        r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+        r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
+        r"Dec(?:ember)?)[-\s/]*(\d{2}|20\d{2})\b",
+        str(value or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    month_token = match.group(1)[:3].lower()
+    month_index = next(
+        (
+            index
+            for index, name in enumerate(INFLATION_NOWCAST_MONTH_NAMES)
+            if name[:3].lower() == month_token
+        ),
+        None,
+    )
+    if month_index is None:
+        return None
+    year = int(match.group(2))
+    if year < 100:
+        year += 2000
+    return f"{year:04d}-{month_index + 1:02d}"
+
+
+def _inflation_month_label(month_id: str) -> str:
+    year_text, month_text = month_id.split("-", 1)
+    return f"{INFLATION_NOWCAST_MONTH_NAMES[int(month_text) - 1]} {year_text}"
+
+
+def _inflation_release_at(text: str, report_month: str) -> Optional[str]:
+    report_year, report_month_number = map(int, report_month.split("-"))
+    month_pattern = "|".join(INFLATION_NOWCAST_MONTH_NAMES)
+    release_pattern = re.compile(
+        rf"\b({month_pattern})\s+CPI\s+Release\s+Date\s*:\s*"
+        rf"({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?"
+        rf"(?:,?\s+(20\d{{2}}))?\b",
+        re.IGNORECASE,
+    )
+    for match in release_pattern.finditer(text):
+        report_name, release_name, day_text, explicit_year = match.groups()
+        report_index = next(
+            (
+                index
+                for index, name in enumerate(INFLATION_NOWCAST_MONTH_NAMES)
+                if name.lower() == report_name.lower()
+            ),
+            None,
+        )
+        if report_index is None or report_index + 1 != report_month_number:
+            continue
+        release_index = next(
+            (
+                index
+                for index, name in enumerate(INFLATION_NOWCAST_MONTH_NAMES)
+                if name.lower() == release_name.lower()
+            ),
+            None,
+        )
+        if release_index is None:
+            continue
+        release_month_number = release_index + 1
+        release_year = int(explicit_year) if explicit_year else report_year
+        if not explicit_year and release_month_number <= report_month_number:
+            release_year += 1
+        try:
+            eastern_release = datetime(
+                release_year,
+                release_month_number,
+                int(day_text),
+                8,
+                30,
+                tzinfo=ZoneInfo("America/New_York"),
+            )
+        except ValueError:
+            return None
+        return eastern_release.astimezone(timezone.utc).isoformat().replace(
+            "+00:00",
+            "Z",
+        )
+    return None
+
+
+def _inflation_ocr_lines(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    lines: List[Dict[str, Any]] = []
+    for block in response.get("Blocks") or []:
+        if block.get("BlockType") != "LINE" or not str(block.get("Text") or "").strip():
+            continue
+        box = (block.get("Geometry") or {}).get("BoundingBox") or {}
+        lines.append(
+            {
+                "text": str(block.get("Text") or "").strip(),
+                "left": float(box.get("Left") or 0),
+                "top": float(box.get("Top") or 0),
+            }
+        )
+    return sorted(lines, key=lambda line: (line["top"], line["left"]))
+
+
+def _inflation_report_month(lines: List[Dict[str, Any]]) -> Optional[str]:
+    month_ids = [
+        month_id
+        for line in lines
+        for month_id in [_inflation_month_id(line.get("text") or "")]
+        if month_id
+    ]
+    return max(month_ids) if month_ids else None
+
+
+def _inflation_scenarios(lines: List[Dict[str, Any]]) -> Optional[Dict[str, Decimal]]:
+    candidates: List[Dict[str, Any]] = []
+    for line in lines:
+        for raw_value in re.findall(
+            r"(?<![\d.])([-+]?\d+(?:\.\d{1,3})?)\s*%",
+            line.get("text") or "",
+        ):
+            value = Decimal(raw_value)
+            if value.is_finite() and Decimal("-5") <= value <= Decimal("15"):
+                candidates.append({**line, "value": value})
+    if len(candidates) < 3:
+        return None
+    # The forecast branches are the three right-most percentage labels in the
+    # chart. Historical point labels and y-axis ticks sit materially left of
+    # them. Geometry is required so OCR text alone can never invent a mapping.
+    rightmost = sorted(candidates, key=lambda item: item["left"], reverse=True)[:3]
+    if min(item["left"] for item in rightmost) < 0.55:
+        return None
+    ordered = sorted(rightmost, key=lambda item: item["top"])
+    upper, base, lower = (item["value"] for item in ordered)
+    if not lower < base < upper:
+        return None
+    return {"upper": upper, "base": base, "lower": lower}
+
+
+def _inflation_source(sender: Optional[str], message_id: str) -> Dict[str, Any]:
+    normalized_sender = str(sender or "").lower()
+    is_macro_pro = "sectorpro@hedgeye.com" in normalized_sender
+    return {
+        "kind": "gmail",
+        "messageId": message_id,
+        "product": "macro-pro" if is_macro_pro else "hedgeye-general",
+        "priority": 20 if is_macro_pro else 10,
+    }
+
+
+def _extract_inflation_forecast(
+    *,
+    chart: Dict[str, str],
+    email_text: str,
+    published_at: str,
+    message_id: str,
+    sender: Optional[str],
+    textract_client: Any,
+    image_fetcher: Optional[Callable[[str], bytes]],
+) -> Optional[Dict[str, Any]]:
+    payload = (image_fetcher or _fetch_market_situation_image)(chart["url"])
+    if hasattr(textract_client, "detect_document_text"):
+        response = textract_client.detect_document_text(Document={"Bytes": payload})
+    else:
+        response = textract_client.analyze_document(
+            Document={"Bytes": payload},
+            FeatureTypes=["TABLES"],
+        )
+    lines = _inflation_ocr_lines(response)
+    report_month = _inflation_report_month(lines)
+    scenarios = _inflation_scenarios(lines)
+    if not report_month or not scenarios:
+        return None
+    release_at = _inflation_release_at(email_text, report_month)
+    if not release_at:
+        return None
+    source = {
+        **_inflation_source(sender, message_id),
+        "chartUrl": chart["url"],
+        "chartSha256": hashlib.sha256(payload).hexdigest(),
+    }
+    return {
+        "reportMonth": report_month,
+        "forecastMonth": _inflation_month_label(report_month),
+        "metric": INFLATION_NOWCAST_METRIC,
+        "releaseAt": release_at,
+        "releaseDate": release_at[:10],
+        "publishedAt": published_at,
+        "scenarios": scenarios,
+        "source": source,
+        "selectionBasis": "publication_candidate",
+        "parserVersion": INFLATION_NOWCAST_PARSER_VERSION,
+    }
+
+
+def _select_operational_inflation_forecast(
+    forecasts: List[Dict[str, Any]],
+    published_at: str,
+) -> Optional[Dict[str, Any]]:
+    try:
+        publication_time = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    eligible: List[Tuple[datetime, Dict[str, Any]]] = []
+    for forecast in forecasts:
+        try:
+            release_time = datetime.fromisoformat(
+                str(forecast.get("releaseAt") or "").replace("Z", "+00:00")
+            )
+        except ValueError:
+            continue
+        if publication_time < release_time:
+            eligible.append((release_time, forecast))
+    if not eligible:
+        return None
+    return min(eligible, key=lambda pair: pair[0])[1]
+
+
+def _inflation_legacy_scenarios(forecast: Dict[str, Any]) -> List[Dict[str, Any]]:
+    scenarios = forecast["scenarios"]
+    return [
+        {"key": "upside", "label": "Upside", "value": scenarios["upper"]},
+        {"key": "base", "label": "Base Case", "value": scenarios["base"]},
+        {"key": "downside", "label": "Downside", "value": scenarios["lower"]},
+    ]
+
+
 def _base_snapshot(
     *,
     snapshot_type: str,
@@ -1284,24 +2736,257 @@ def parse_html_snapshot(
     s3_key: str,
     message_id: str,
     subject: Optional[str] = None,
+    sender: Optional[str] = None,
     image_fetcher: Optional[Callable[[str], bytes]] = None,
+    chart_archiver: Optional[Callable[..., Dict[str, Any]]] = None,
+    textract_client: Any = None,
 ) -> Optional[Dict[str, Any]]:
     text = _strip_tags(html_body)
 
+    if report_type == "inflation-nowcast":
+        charts = _sanitized_chart_items(html_body)
+        if not charts or textract_client is None:
+            return None
+        snapshot = _base_snapshot(
+            snapshot_type="inflation-nowcast",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        # Gmail's immutable internal timestamp is the cutoff authority. The
+        # newsletter body timestamp is minute-granular and older generic
+        # parsing intentionally discarded its time component, which could
+        # misclassify a post-8:30 release email as pre-release.
+        snapshot["date"] = received_at.astimezone(
+            ZoneInfo("America/New_York")
+        ).strftime("%Y-%m-%d")
+        snapshot["publishedAt"] = received_at.astimezone(timezone.utc).isoformat()
+        forecasts: List[Dict[str, Any]] = []
+        warnings: List[str] = []
+        for chart in charts:
+            try:
+                forecast = _extract_inflation_forecast(
+                    chart=chart,
+                    email_text=text,
+                    published_at=snapshot["publishedAt"],
+                    message_id=message_id,
+                    sender=sender,
+                    textract_client=textract_client,
+                    image_fetcher=image_fetcher,
+                )
+            except Exception as error:
+                warnings.append(f"{chart['name']}: {error}")
+                continue
+            if forecast:
+                forecasts.append(forecast)
+        deduped_forecasts: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+        for forecast in forecasts:
+            scenarios = forecast["scenarios"]
+            identity = (
+                forecast["reportMonth"],
+                forecast["releaseAt"],
+                scenarios["upper"],
+                scenarios["base"],
+                scenarios["lower"],
+            )
+            deduped_forecasts[identity] = forecast
+        forecasts = sorted(
+            deduped_forecasts.values(),
+            key=lambda forecast: forecast["reportMonth"],
+        )
+        operational = _select_operational_inflation_forecast(
+            forecasts,
+            snapshot["publishedAt"],
+        )
+        if not forecasts or not operational:
+            return None
+        source = _inflation_source(sender, message_id)
+        snapshot["sourceProduct"] = source["product"]
+        snapshot["sourcePriority"] = source["priority"]
+        snapshot["itemCount"] = 3
+        snapshot["forecastCount"] = len(forecasts)
+        snapshot["chartCount"] = len(forecasts)
+        snapshot["parserVersion"] = INFLATION_NOWCAST_PARSER_VERSION
+        snapshot["data"] = {
+            "metric": INFLATION_NOWCAST_METRIC,
+            "forecastMonth": operational["forecastMonth"],
+            "reportMonth": operational["reportMonth"],
+            "releaseDate": operational["releaseDate"],
+            "releaseAt": operational["releaseAt"],
+            "scenarios": _inflation_legacy_scenarios(operational),
+            "forecasts": forecasts,
+        }
+        snapshot["article"]["headline"] = (
+            snapshot["article"].get("headline") or subject
+        )
+        snapshot["article"]["imageUrls"] = [
+            forecast["source"]["chartUrl"] for forecast in forecasts
+        ]
+        snapshot["article"]["charts"] = [
+            {
+                "name": _chart_name_from_url(forecast["source"]["chartUrl"]),
+                "url": forecast["source"]["chartUrl"],
+                "reportMonth": forecast["reportMonth"],
+                "sha256": forecast["source"]["chartSha256"],
+            }
+            for forecast in forecasts
+        ]
+        snapshot["article"].pop("bodyText", None)
+        snapshot["article"].pop("teaser", None)
+        if warnings:
+            snapshot["warnings"] = warnings[:10]
+        return snapshot
+
     if report_type == "market-structure":
-        charts = []
+        source_charts = []
         for item in _extract_chart_items(html_body):
             sanitized_url = _sanitize_research_image_url(item["url"])
             if sanitized_url:
-                charts.append({**item, "url": sanitized_url})
-        if not charts:
+                source_charts.append({**item, "url": sanitized_url})
+        if not source_charts:
             return None
+        if len(source_charts) > MARKET_SITUATION_CHART_MAX_COUNT:
+            raise ValueError(
+                "Market Situation report exceeds the approved chart-count limit"
+            )
+        if chart_archiver is None:
+            raise ValueError(
+                "Market Situation reports require a private chart archiver"
+            )
 
-        signal_matrix = charts[0]
-        signal_image = (image_fetcher or _fetch_market_situation_image)(
-            signal_matrix["url"]
+        ordered_source_blocks, _disclaimer = _extract_market_situation_content(
+            html_body,
+            source_charts,
         )
-        signals = _extract_market_situation_signals(signal_image)
+        source_urls_in_order = [
+            block["sourceUrl"]
+            for block in ordered_source_blocks
+            if block.get("type") == "chart-source"
+        ]
+        if source_urls_in_order != [chart["url"] for chart in source_charts]:
+            raise ValueError(
+                "Market Situation chart ordering could not be verified from the source HTML"
+            )
+
+        archived_charts: List[Dict[str, Any]] = []
+        archived_by_source: Dict[str, Dict[str, Any]] = {}
+        signal_image: Optional[bytes] = None
+        chart_metrics: Dict[str, Dict[str, Any]] = {}
+        chart_ocr_errors: List[str] = []
+        for index, chart in enumerate(source_charts):
+            payload = (image_fetcher or _fetch_market_situation_image)(chart["url"])
+            if len(payload) > MARKET_SITUATION_IMAGE_MAX_BYTES:
+                raise ValueError("Market Situation image exceeds the ingestion size limit")
+            content_type, extension = _market_situation_image_type(payload)
+            content_sha256 = hashlib.sha256(payload).hexdigest()
+            archived = chart_archiver(
+                chart=chart,
+                payload=payload,
+                content_type=content_type,
+                extension=extension,
+                content_sha256=content_sha256,
+            )
+            s3_key = str((archived or {}).get("s3Key") or "").strip()
+            if not s3_key:
+                raise ValueError("Market Situation chart archive did not return an S3 key")
+            chart_id = str((archived or {}).get("id") or content_sha256).strip()
+            archived_chart = {
+                "id": chart_id,
+                "name": chart["name"],
+                "sha256": content_sha256,
+                "contentType": content_type,
+                "s3Key": s3_key,
+            }
+            archived_charts.append(archived_chart)
+            archived_by_source[chart["url"]] = archived_chart
+            if index == 0:
+                signal_image = payload
+            if textract_client is not None and content_type in {"image/png", "image/jpeg"}:
+                try:
+                    ocr_response = _market_situation_chart_ocr_response(
+                        textract_client,
+                        payload,
+                    )
+                    extractors = (
+                        _extract_spx_gamma_volatility_throttle_metric,
+                        _extract_spx_probable_volatility_gamma_metric,
+                    )
+                    for extractor in extractors:
+                        metric = extractor(ocr_response, chart_id=chart_id)
+                        if metric and metric["id"] not in chart_metrics:
+                            chart_metrics[metric["id"]] = metric
+                except Exception as error:
+                    chart_ocr_errors.append(f"{chart['name']}: {error}")
+
+        signals: List[Dict[str, str]] = []
+        warnings: List[str] = []
+        try:
+            signals = _extract_market_situation_signals(signal_image or b"")
+        except Exception as error:
+            warnings.append(f"Signal summary unavailable: {error}")
+        if textract_client is not None:
+            missing_chart_metrics = [
+                label
+                for metric_id, label in (
+                    ("spxGammaVolatilityThrottle", "SPX Gamma Volatility Throttle"),
+                    ("spxProbableVolatilityGamma", "SPX probable-volatility gamma map"),
+                )
+                if metric_id not in chart_metrics
+            ]
+            if missing_chart_metrics:
+                warnings.append(
+                    "Market Situation labeled chart metrics unavailable: "
+                    + ", ".join(missing_chart_metrics)
+                )
+        warnings.extend(
+            f"Market Situation chart OCR unavailable: {detail}"
+            for detail in chart_ocr_errors[:3]
+        )
+
+        ordered_blocks: List[Dict[str, Any]] = []
+        body_text_parts: List[str] = []
+        report_heading: Optional[str] = None
+        for index, source_block in enumerate(ordered_source_blocks, start=1):
+            block_type = source_block.get("type")
+            if block_type == "chart-source":
+                chart = archived_by_source[source_block["sourceUrl"]]
+                ordered_blocks.append(
+                    {
+                        "id": f"block-{index}",
+                        "type": "chart",
+                        "chartId": chart["id"],
+                        **(
+                            {"caption": source_block["caption"]}
+                            if source_block.get("caption")
+                            else {}
+                        ),
+                    }
+                )
+                continue
+            block_text = str(source_block.get("text") or "").strip()
+            if not block_text or block_type == "byline":
+                continue
+            ordered_blocks.append(
+                {
+                    "id": f"block-{index}",
+                    "type": block_type,
+                    "text": block_text,
+                }
+            )
+            body_text_parts.append(block_text)
+            if (
+                block_type == "heading"
+                and not report_heading
+                and "market situation report" not in block_text.casefold()
+            ):
+                report_heading = block_text
+
+        body_text = "\n\n".join(body_text_parts).strip()
+        if not body_text:
+            raise ValueError("Market Situation report contains no substantive narrative text")
         snapshot = _base_snapshot(
             snapshot_type="market-structure",
             report_type=report_type,
@@ -1311,21 +2996,74 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
-        snapshot["article"]["headline"] = (
-            snapshot["article"].get("headline") or subject
-        )
-        snapshot["article"]["summary"] = _extract_market_situation_summary(text)
-        snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
-        snapshot["article"]["charts"] = charts
-        snapshot["article"].pop("bodyText", None)
+        snapshot["article"]["reportHeading"] = report_heading
+        snapshot["article"]["bodyText"] = body_text[:40_000]
+        snapshot["article"]["charts"] = archived_charts
+        snapshot["article"].pop("headline", None)
+        snapshot["article"].pop("summary", None)
+        snapshot["article"].pop("byline", None)
+        snapshot["article"].pop("disclaimer", None)
+        snapshot["article"].pop("publisher", None)
+        snapshot["article"].pop("imageUrls", None)
         snapshot["article"].pop("teaser", None)
         snapshot["signalCount"] = len(signals)
-        snapshot["chartCount"] = len(charts)
+        snapshot["chartCount"] = len(archived_charts)
+        snapshot["schemaVersion"] = MARKET_SITUATION_SCHEMA_VERSION
+        snapshot["contentComplete"] = True
         snapshot["data"] = {
             "signals": signals,
-            "signalMatrixImageUrl": signal_matrix["url"],
-            "charts": charts,
-            "sourceAttribution": "Tier 1 Alpha · presented by Hedgeye",
+            "chartMetrics": chart_metrics,
+            "signalMatrixChartId": archived_charts[0]["id"],
+            "blocks": ordered_blocks,
+            "charts": archived_charts,
+        }
+        if warnings:
+            snapshot["warnings"] = warnings
+        return snapshot
+
+    if report_type == "investing-ideas":
+        positions = _extract_investing_ideas_table(html_body)
+        headline_longs = _extract_symbols(
+            _extract_section_text(text, "Long", ["Short", "LEVELS"])
+        )
+        headline_shorts = _extract_symbols(
+            _extract_section_text(text, "Short", ["LEVELS"])
+        )
+        if not positions and not headline_longs and not headline_shorts:
+            return None
+        if not positions:
+            # Headline-only Long/Short lists do not contain the required
+            # previous close and LRR/HRR evidence. Do not index them as a
+            # partial Investing Ideas position book.
+            raise ValueError(
+                "Investing Ideas publication is missing a complete ticker/side/previous-close/LRR/HRR table"
+            )
+
+        position_tickers = {row["ticker"] for row in positions}
+        headline_tickers = set(headline_longs) | set(headline_shorts)
+        if headline_tickers - position_tickers:
+            missing = ", ".join(sorted(headline_tickers - position_tickers))
+            raise ValueError(
+                f"Investing Ideas table is missing headline position row(s): {missing}"
+            )
+        longs = [row["ticker"] for row in positions if row.get("side") == "Long"]
+        shorts = [row["ticker"] for row in positions if row.get("side") == "Short"]
+        snapshot = _base_snapshot(
+            snapshot_type="investing-ideas",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        snapshot["positionCount"] = len(longs) + len(shorts)
+        snapshot["longCount"] = len(longs)
+        snapshot["shortCount"] = len(shorts)
+        snapshot["data"] = {
+            "longs": longs,
+            "shorts": shorts,
+            "positions": positions,
         }
         return snapshot
 
@@ -1364,6 +3102,26 @@ def parse_html_snapshot(
         snapshot["riskRangeCount"] = len(levels)
         snapshot["data"] = levels
         snapshot["trendChanges"] = _extract_trend_changes_from_html(text)
+        return snapshot
+
+    if report_type == "top-3-things":
+        items, intro = _extract_top_three_items(html_body, text)
+        if len(items) != 3:
+            return None
+        snapshot = _base_snapshot(
+            snapshot_type="top-3-things",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        snapshot["itemCount"] = len(items)
+        snapshot["data"] = {"items": items}
+        if intro:
+            snapshot["data"]["intro"] = intro
+            snapshot["article"]["summary"] = intro
         return snapshot
 
     if report_type == "the-call":
@@ -1459,11 +3217,26 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
+        source_rows: List[Dict[str, Any]] = []
+        if textract_client is not None:
+            try:
+                source_rows = _signal_strength_source_rows(
+                    html_body=html_body,
+                    textract_client=textract_client,
+                    image_fetcher=image_fetcher,
+                )
+            except Exception as error:
+                # The explicit additions/removals remain useful if the chart
+                # OCR service is temporarily unavailable. Never turn a failed
+                # extraction into an inferred full membership list.
+                print(f"Signal Strength chart extraction unavailable: {error}")
+        membership_complete = bool(stock_count and len(source_rows) == stock_count)
         snapshot["stockCount"] = stock_count
         snapshot["data"] = {
             "added": added,
             "removed": removed,
-            "stocks": [{"ticker": ticker} for ticker in added],
+            "stocks": source_rows or [{"ticker": ticker} for ticker in added],
+            "membershipComplete": membership_complete,
         }
         return snapshot
 
@@ -1497,8 +3270,9 @@ def parse_html_snapshot(
         return snapshot
 
     if report_type == "momo-tracker":
-        charts = _extract_chart_items(html_body)
-        if not charts:
+        raw_charts = _extract_chart_items(html_body)
+        charts = _sanitized_chart_items(html_body)
+        if not raw_charts or not charts:
             return None
         snapshot = _base_snapshot(
             snapshot_type="momo-tracker",
@@ -1509,19 +3283,50 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
+        tracker_rows: Dict[str, Dict[str, Any]] = {}
+        if textract_client is not None:
+            table_chart = _select_tracker_chart(
+                raw_charts,
+                preferred_name="6.png",
+                fallback_index=5,
+            )
+            tracker_rows = _extract_tracker_chart_table(
+                chart=table_chart,
+                textract_client=textract_client,
+                image_fetcher=image_fetcher,
+                required_fields=(
+                    "ticker",
+                    "buyTrade",
+                    "sellTrade",
+                    "upside",
+                    "downside",
+                    "trend",
+                ),
+                allow_outbucket_rows=True,
+            )
         snapshot["chartCount"] = len(charts)
-        snapshot["data"] = {
-            item["name"]: {"chartUrl": item["url"]}
-            for item in charts
+        snapshot["stockCount"] = len(tracker_rows)
+        snapshot["rangeAvailableCount"] = sum(
+            row.get("rangeStatus") == "available"
+            for row in tracker_rows.values()
+        )
+        snapshot["outbucketCount"] = sum(
+            row.get("rangeStatus") == "outbucket"
+            for row in tracker_rows.values()
+        )
+        snapshot["data"] = tracker_rows or {
+            item["name"]: {"chartUrl": item["url"]} for item in charts
         }
+        snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
         snapshot["article"]["charts"] = charts
         return snapshot
 
     if report_type in {"crypto-quant", "bitcoin-trend-tracker"}:
-        charts = _extract_chart_items(html_body)
+        raw_charts = _extract_chart_items(html_body)
+        charts = _sanitized_chart_items(html_body)
         headline = _extract_headline(html_body, text)
-        cryptos = _extract_crypto_title_data(headline)
-        if not charts and not cryptos:
+        headline_cryptos = _extract_crypto_title_data(headline)
+        if not raw_charts and not headline_cryptos:
             return None
         snapshot = _base_snapshot(
             snapshot_type="bitcoin-trend-tracker",
@@ -1532,12 +3337,58 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
-        snapshot["cryptoCount"] = len(cryptos) or len(charts)
+        cryptos: Dict[str, Dict[str, Any]] = headline_cryptos
+        stocks: Dict[str, Dict[str, Any]] = {}
+        if textract_client is not None:
+            crypto_chart = _select_tracker_chart(
+                raw_charts,
+                preferred_name="BTC_2.png",
+                fallback_index=2,
+            )
+            equity_chart = _select_tracker_chart(
+                raw_charts,
+                preferred_name="BTC_9.png",
+                fallback_index=9,
+            )
+            cryptos = _extract_tracker_chart_table(
+                chart=crypto_chart,
+                textract_client=textract_client,
+                image_fetcher=image_fetcher,
+                required_fields=(
+                    "ticker",
+                    "price",
+                    "buyTrade",
+                    "sellTrade",
+                    "trend",
+                ),
+            )
+            stocks = _extract_tracker_chart_table(
+                chart=equity_chart,
+                textract_client=textract_client,
+                image_fetcher=image_fetcher,
+                required_fields=(
+                    "ticker",
+                    "price",
+                    "buyTrade",
+                    "sellTrade",
+                    "upside",
+                    "downside",
+                    "trend",
+                ),
+            )
+            for ticker, title_values in headline_cryptos.items():
+                if ticker in cryptos:
+                    cryptos[ticker].update(title_values)
+
+        snapshot["cryptoCount"] = len(cryptos)
+        snapshot["stockCount"] = len(stocks)
+        snapshot["chartCount"] = len(charts)
         snapshot["data"] = {
             "cryptos": cryptos,
-            "stocks": {},
+            "stocks": stocks,
             "charts": charts,
         }
+        snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
         snapshot["article"]["charts"] = charts
         return snapshot
 
@@ -1942,6 +3793,21 @@ def _verify_risk_range_projections(
 
 
 def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
+    if snapshot.get("snapshotType") == "cftc-positioning":
+        # Hedgeye email content is retained for audit only. The official CFTC
+        # Lambda is the sole writer of the canonical positioning key.
+        snapshot = {
+            **snapshot,
+            "reportType": "cftc-positioning",
+            "snapshotType": "cftc-positioning-hedgeye-audit",
+            "source": "hedgeye-email-html-audit",
+            "contentComplete": False,
+            "decisionEligible": False,
+            "warnings": [
+                *list(snapshot.get("warnings") or []),
+                "AUDIT_ONLY_NOT_FOR_TRADING_DECISIONS",
+            ],
+        }
     snap_table = db.Table(HEDGEYE_DAILY_SNAPSHOT_TABLE)
     item = _decimalize(snapshot)
     item["ttl"] = int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))

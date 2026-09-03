@@ -55,6 +55,9 @@ MAX_SNAPSHOT_AGE_SECONDS = int(os.environ.get("HERMES_MAX_SNAPSHOT_AGE_SECONDS",
 MAX_CLOCK_SKEW_SECONDS = int(os.environ.get("HERMES_MAX_CLOCK_SKEW_SECONDS", "30"))
 HEARTBEAT_TTL_DAYS = int(os.environ.get("SERVICE_HEARTBEAT_TTL_DAYS", "90"))
 RUN_TTL_DAYS = int(os.environ.get("HERMES_RUN_TTL_DAYS", "365"))
+WORKER_MODE = str(os.environ.get("HERMES_WORKER_MODE", "active")).strip().lower()
+if WORKER_MODE not in {"active", "retired"}:
+    raise RuntimeError("HERMES_WORKER_MODE must be active or retired.")
 ALERT_ESCALATION_OBSERVATIONS = max(
     2, int(os.environ.get("HERMES_ALERT_ESCALATION_OBSERVATIONS", "3"))
 )
@@ -701,16 +704,8 @@ def reconcile_alert_lifecycle(
                 transition=event_type,
                 observed_at=observed_at,
             )
-            notification_failure = try_publish_lifecycle_notification(
-                service=job_type,
-                error_code=error_code,
-                event_type=event_type,
-                message=detail,
-                source_run_id=source_run_id,
-                observed_at=observed_at,
-            )
-            if notification_failure:
-                notification_failures.append(notification_failure)
+            # Opening is dashboard-only. Email begins only after the root has
+            # survived the bounded escalation observation count.
             transitions.append({"eventType": event_type, "errorCode": error_code})
             next_active[error_code] = {
                 "openedAt": observed_at,
@@ -797,16 +792,21 @@ def reconcile_alert_lifecycle(
             opened_at=str(root_item.get("createdAt") or observed_at),
             observation_count=int(root_details.get("observationCount") or 1),
         )
-        notification_failure = try_publish_lifecycle_notification(
-            service=job_type,
-            error_code=error_code,
-            event_type="incident_recovered",
-            message=message,
-            source_run_id=source_run_id,
-            observed_at=observed_at,
+        was_escalated = bool(
+            root_item.get("escalatedAt")
+            or root_details.get("transition") == "incident_escalated"
         )
-        if notification_failure:
-            notification_failures.append(notification_failure)
+        if was_escalated:
+            notification_failure = try_publish_lifecycle_notification(
+                service=job_type,
+                error_code=error_code,
+                event_type="incident_recovered",
+                message=message,
+                source_run_id=source_run_id,
+                observed_at=observed_at,
+            )
+            if notification_failure:
+                notification_failures.append(notification_failure)
         transitions.append(
             {"eventType": "incident_recovered", "errorCode": error_code}
         )
@@ -956,6 +956,16 @@ def build_result(
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
     event = event or {}
+    if WORKER_MODE == "retired":
+        return {
+            "status": "RETIRED",
+            "errorCode": "LEGACY_HERMES_RETIRED",
+            "message": (
+                "Legacy Hermes workers are retained for rollback but all "
+                "worker-owned writes are disabled."
+            ),
+            "writesPerformed": False,
+        }
     job_type = str(event.get("jobType") or event.get("worker") or "").strip()
     if job_type not in ALLOWED_JOBS:
         raise ValueError(f"Unsupported Hermes jobType: {job_type or '<missing>'}")

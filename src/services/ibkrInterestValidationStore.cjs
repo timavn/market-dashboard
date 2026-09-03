@@ -286,6 +286,7 @@ function createInterestValidationStore({
   function history({ limit = 90 } = {}) {
     const normalizedLimit = Math.max(1, Math.min(366, Number(limit) || 90));
     return {
+      observations: readRecords('observations', { limit: normalizedLimit * 20 }),
       predictions: readRecords('predictions', { limit: normalizedLimit }),
       actuals: readRecords('actuals', { limit: normalizedLimit * 4 }),
       misses: readRecords('misses', { limit: normalizedLimit }),

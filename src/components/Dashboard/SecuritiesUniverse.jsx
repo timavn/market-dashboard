@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, Title, Text, Badge } from '@tremor/react';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import { canonicalProductState, getCanonicalRiskRange } from '../../utils/securityIntelligenceV2';
 import { filterSecurities } from '../../utils/securitiesUniverseUtils';
 import {
   enrichSecuritiesList,
@@ -11,6 +13,7 @@ import {
 import SecuritiesUniverseMetricsRow from './securitiesUniverse/SecuritiesUniverseMetricsRow';
 import { METRIC_DEFINITIONS } from '../../constants/metricDefinitions';
 import MetricDefinitionPopover from '../common/MetricDefinitionPopover';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 import {
   FileText,
   Activity,
@@ -75,6 +78,7 @@ const DayLabelWithTooltip = ({ label, date, isLast = false }) => {
 };
 
 const SecuritiesUniverse = () => {
+  const active = useSurfaceActivity();
   const [searchQuery, setSearchQuery] = useState('');
   const [prices, setPrices] = useState({});
   const [priceHistory, setPriceHistory] = useState({});
@@ -89,25 +93,78 @@ const SecuritiesUniverse = () => {
   const [shortsMode, setShortsMode] = useState(false); // false = longs (best quads), true = shorts (worst quads)
   const [openPopover, setOpenPopover] = useState(null); // { metricKey, position: { top, left } }
   const [riskRanges, setRiskRanges] = useState({});
+  const [securityIntelligence, setSecurityIntelligence] = useState({});
 
   // Fetch Risk Ranges
   useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
     const fetchRiskRanges = async () => {
       try {
+        if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+          // Clear the prior current-day projection before a new verification
+          // attempt so a failed refresh cannot retain stale ranges.
+          setRiskRanges({});
+          setSecurityIntelligence({});
+          const bySymbol = {};
+          let cursor = null;
+          do {
+            const payload = await MarketDataService.getSecurityIntelligenceUniverseV2({
+              limit: 200,
+              cursor,
+            });
+            if (payload?.schemaVersion !== 2) {
+              throw new Error('Canonical security universe returned an unsupported schema.');
+            }
+            Object.assign(bySymbol, payload.bySymbol || {});
+            cursor = payload.page?.nextCursor || null;
+          } while (cursor && !cancelled);
+          const nextRanges = {};
+          const nextIntelligence = {};
+          SECURITIES_LIST.forEach((security) => {
+            const ticker = security.ticker.toUpperCase();
+            const entry = bySymbol[ticker] || null;
+            const product = entry?.products?.['risk-ranges'] || null;
+            const range = getCanonicalRiskRange(entry, { primaryOnly: true });
+            const status = product ? canonicalProductState(product) : 'not_listed';
+            nextRanges[ticker] = range
+              ? [{ ...range, date: range.date, status }]
+              : [];
+            nextIntelligence[ticker] = {
+              health: entry?.health?.status || 'attention',
+              status,
+            };
+          });
+          if (!cancelled) {
+            setRiskRanges(nextRanges);
+            setSecurityIntelligence(nextIntelligence);
+          }
+          return;
+        }
         // Fetch full history from bulk endpoint
         const historyData = await MarketDataService.getAllRiskRangeHistory();
-        if (historyData) {
+        if (!cancelled && historyData) {
           setRiskRanges(historyData); // Stores { ticker: [history array] }
+          setSecurityIntelligence({});
         }
       } catch (error) {
         console.error('Error fetching risk ranges:', error);
+        if (!cancelled && SECURITY_INTELLIGENCE_V2_ENABLED) {
+          setRiskRanges(Object.fromEntries(SECURITIES_LIST.map((security) => [security.ticker.toUpperCase(), []])));
+          setSecurityIntelligence(Object.fromEntries(SECURITIES_LIST.map((security) => [security.ticker.toUpperCase(), {
+            health: 'unavailable', status: 'unavailable',
+          }])));
+        }
       }
     };
     fetchRiskRanges();
-  }, []);
+    return () => { cancelled = true; };
+  }, [active]);
 
   // Fetch prices for all securities (non-blocking - show table even if prices fail)
   useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
     const fetchPrices = async () => {
       try {
         // Set loading to false immediately so table shows, then load prices in background
@@ -118,8 +175,10 @@ const SecuritiesUniverse = () => {
         // Fetch quotes in smaller batches to avoid rate limiting
         const batchSize = 20; // Smaller batches
         const allQuotes = {};
+        let failed = false;
 
         for (let i = 0; i < tickers.length; i += batchSize) {
+          if (cancelled) return;
           const batch = tickers.slice(i, i + batchSize);
           try {
             const quotes = await MarketDataService.getQuotes(batch);
@@ -132,11 +191,14 @@ const SecuritiesUniverse = () => {
             }
           } catch (error) {
             console.error(`Error fetching batch ${i}-${i + batchSize}:`, error);
-            // Continue with other batches even if one fails
+            failed = true;
           }
         }
 
-        setPrices(allQuotes);
+        if (cancelled) return;
+        // Quotes are live evidence. A partial provider failure cannot leave a
+        // mixture of old and new executable-looking values on screen.
+        setPrices(failed ? {} : allQuotes);
         console.log(`Loaded prices for ${Object.keys(allQuotes).length} securities`);
       } catch (error) {
         console.error('Error fetching prices:', error);
@@ -145,10 +207,13 @@ const SecuritiesUniverse = () => {
     };
 
     fetchPrices();
-  }, []);
+    return () => { cancelled = true; };
+  }, [active]);
 
   // Fetch price history for Z-score calculation (for a sample, can be enhanced to fetch all)
   useEffect(() => {
+    if (!active || loading) return undefined;
+    let cancelled = false;
     const fetchPriceHistory = async () => {
       try {
         // Fetch history for all securities
@@ -158,6 +223,7 @@ const SecuritiesUniverse = () => {
         // Fetch in parallel with delay to avoid rate limiting
         const fetchWithDelay = async (ticker, delay) => {
           await new Promise(resolve => setTimeout(resolve, delay));
+          if (cancelled) return;
           try {
             // Fetch 30 days to give ATR(14) enough valid data points
             const history = await MarketDataService.getHistoricalData(ticker, 30);
@@ -173,6 +239,7 @@ const SecuritiesUniverse = () => {
         // Fetch in batches of 10 to act as a rolling window
         const batchSize = 10;
         for (let i = 0; i < allTickers.length; i += batchSize) {
+          if (cancelled) return;
           const batch = allTickers.slice(i, i + batchSize);
           const promises = batch.map((ticker, index) =>
             fetchWithDelay(ticker, index * 50) // 50ms stagger within batch
@@ -181,7 +248,7 @@ const SecuritiesUniverse = () => {
           await Promise.all(promises);
 
           // Update state incrementally so results stream in
-          setPriceHistory(prev => ({ ...prev, ...historyData }));
+          if (!cancelled) setPriceHistory(prev => ({ ...prev, ...historyData }));
 
           // Wait a bit between batches
           await new Promise(resolve => setTimeout(resolve, 200));
@@ -191,23 +258,36 @@ const SecuritiesUniverse = () => {
       }
     };
 
-    if (!loading) {
-      fetchPriceHistory();
-    }
-  }, [loading]);
+    fetchPriceHistory();
+    return () => { cancelled = true; };
+  }, [active, loading]);
 
   const tradingDays = useMemo(() => buildTradingDays(), []);
   const tradingDayKeys = useMemo(() => getTradingDayKeys(tradingDays), [tradingDays]);
 
   const enrichedSecurities = useMemo(
-    () =>
-      enrichSecuritiesList(SECURITIES_LIST, {
+    () => enrichSecuritiesList(SECURITIES_LIST, {
         prices,
         priceHistory,
         riskRanges,
         tradingDayKeys,
+      }).map((security) => {
+        const intelligence = securityIntelligence[security.ticker.toUpperCase()] || null;
+        const currentRange = security.riskRangeHistory?.current;
+        const canonicalTrend = currentRange?.trend || null;
+        return {
+          ...security,
+          riskRangeHistory: {
+            ...security.riskRangeHistory,
+            status: intelligence?.status || security.riskRangeHistory?.status || null,
+          },
+          bias: canonicalTrend || (SECURITY_INTELLIGENCE_V2_ENABLED ? null : security.signal),
+          signal: canonicalTrend || (SECURITY_INTELLIGENCE_V2_ENABLED ? null : security.signal),
+          researchHealth: intelligence?.health || null,
+          researchStatus: intelligence?.status || null,
+        };
       }),
-    [prices, priceHistory, riskRanges, tradingDayKeys],
+    [prices, priceHistory, riskRanges, securityIntelligence, tradingDayKeys],
   );
 
   // Filter securities based on search query and active filters
@@ -813,4 +893,3 @@ const SecuritiesUniverse = () => {
 };
 
 export default SecuritiesUniverse;
-

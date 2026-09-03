@@ -9,9 +9,13 @@ const REGION_GROUPS = [
   { id: 'asia', label: 'Asia', codes: ['HK', 'TYO'] },
 ];
 
+const HOME_TIMEZONE_CODE = 'LA';
+
 const isActiveStatus = (status) => ['open', 'pre-market', 'post-market'].includes(status);
 
 const formatLocalTime = (now, timezone) => format(utcToZonedTime(now, timezone), 'HH:mm');
+
+const formatLocalDate = (now, timezone) => format(utcToZonedTime(now, timezone), 'MMM d');
 
 const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
   const [now, setNow] = useState(() => new Date());
@@ -32,6 +36,8 @@ const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
           ...market,
           status,
           time: formatLocalTime(now, market.timezone),
+          date: formatLocalDate(now, market.timezone),
+          isHome: market.code === HOME_TIMEZONE_CODE,
         };
       });
     return {
@@ -63,12 +69,13 @@ const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
               {group.markets.map((market) => (
                 <div
                   key={market.id}
-                  className={`global-session-city global-session-city--${market.status}`}
-                  aria-label={`${market.code} ${market.time}, ${market.status}`}
-                  title={`${market.name} · ${market.status.replace('-', ' ')}`}
+                  className={`global-session-city global-session-city--${market.status}${market.isHome ? ' global-session-city--home' : ''}`}
+                  aria-label={`${market.code} ${market.time} ${market.date}, ${market.status}${market.isHome ? ', home timezone' : ''}`}
+                  title={`${market.name} · ${market.status.replace('-', ' ')}${market.isHome ? ' · home timezone' : ''}`}
                 >
-                  <span>{market.code}</span>
-                  <strong>{market.time}</strong>
+                  <span className="global-session-city__code">{market.code}</span>
+                  <strong className="global-session-city__time">{market.time}</strong>
+                  <span className="global-session-city__date">{market.date}</span>
                 </div>
               ))}
             </div>
@@ -79,5 +86,5 @@ const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
   );
 };
 
-export { REGION_GROUPS, formatLocalTime, isActiveStatus };
+export { REGION_GROUPS, HOME_TIMEZONE_CODE, formatLocalTime, formatLocalDate, isActiveStatus };
 export default GlobalMarketDayCycleHeader;

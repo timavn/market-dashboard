@@ -13,6 +13,10 @@ jest.mock('../../../services/api/marketDataService', () => ({
   },
 }));
 
+jest.mock('../portfolio/PortfolioBalanceCard', () => ({ accountId }) => (
+  <section data-testid="portfolio-balance" data-account={accountId} />
+));
+
 const portfolioData = {
   dataSource: 'ibkr_api',
   liveSessionVerified: true,
@@ -31,162 +35,6 @@ const portfolioData = {
     currency: 'USD',
   },
 };
-
-let fundingSequence = 0;
-
-function makeFunding(overrides = {}) {
-  const observedAt = new Date(Date.now() + fundingSequence).toISOString();
-  fundingSequence += 1;
-  const shortPositions = (overrides.shortPositions || [
-    {
-      conId: 756733,
-      symbol: 'MACRO',
-      quantity: -1000,
-      priorClose: 100,
-      currentPrice: 100,
-      directBid: 100,
-      directAsk: 100,
-      directLast: 100,
-      currentPriceSource: 'ibkr_ticker_direct_max',
-      priorCloseSource: 'ibkr_live_tick_close',
-      currency: 'USD',
-      snapshotTimestamp: observedAt,
-      marketDataType: 1,
-    },
-  ]).map((position) => ({
-    directBid: position.currentPrice,
-    directAsk: position.currentPrice,
-    directLast: position.currentPrice,
-    priorCloseSource: 'ibkr_live_tick_close',
-    ...position,
-  }));
-
-  return {
-    accountId: 'U25779973',
-    status: 'live',
-    source: 'ibkr_live_session',
-    observedAt,
-    socketVerifiedAt: observedAt,
-    accountValuesObservedAt: observedAt,
-    fromCache: false,
-    currency: 'USD',
-    baseCurrency: 'USD',
-    positionScope: 'stocks_only',
-    netLiquidation: 195000,
-    totalCashValueSecurities: 115000,
-    totalCashValueCommodities: 0,
-    commodityMaintenanceMargin: 0,
-    grossPositionValue: 295000,
-    stockMarketValue: 95000,
-    accruedCashSecurities: 0,
-    settledCashByDateSecurities: {
-      20260723: 115000,
-      20260724: 114000,
-    },
-    settledCashByDateCommodities: {
-      20260723: 0,
-      20260724: 0,
-    },
-    accountReady: true,
-    settledShortPositionsVerified: true,
-    settlementStatus: 'settled',
-    noSameDayExecutionsVerified: true,
-    sameDayExecutionCount: 0,
-    openOrderCount: 0,
-    ...overrides,
-    shortPositions,
-    shortPositionCount: Object.prototype.hasOwnProperty.call(
-      overrides,
-      'shortPositionCount',
-    )
-      ? overrides.shortPositionCount
-      : shortPositions.length,
-  };
-}
-
-function makeFundingReference(overrides = {}) {
-  const observedAt = new Date().toISOString();
-  const reference = {
-    schemaVersion: 1,
-    referenceOnly: true,
-    actionable: false,
-    referenceKind:
-      'completed_market_session_with_current_settlement_ladder',
-    accountId: 'U25779973',
-    status: 'reference',
-    source: 'ibkr_completed_session_reference',
-    observedAt,
-    socketVerifiedAt: observedAt,
-    accountValuesObservedAt: observedAt,
-    fromCache: false,
-    currency: 'USD',
-    baseCurrency: 'USD',
-    positionScope: 'stocks_only',
-    netLiquidation: 195000,
-    totalCashValueSecurities: 114000,
-    totalCashValueCommodities: 0,
-    commodityMaintenanceMargin: 0,
-    grossPositionValue: 295000,
-    stockMarketValue: 95000,
-    accruedCashSecurities: 0,
-    settledCashByDateSecurities:
-      '20260725:115000;20260727:114000',
-    settledCashByDateCommodities: '20260725:0;20260727:0',
-    shortPositionReferences: [{
-      conId: 756733,
-      symbol: 'MACRO',
-      quantity: -1000,
-      referenceClose: 100,
-      referenceCloseSource: 'ibkr_historical_daily_close',
-      referenceCloseSessionDate: '2026-07-24',
-      referenceCloseObservedAt: observedAt,
-      currency: 'USD',
-    }],
-    shortStockReferenceCloseValue: 100000,
-    accountReady: true,
-    openPositionCount: 2,
-    shortPositionCount: 1,
-    openOrderCount: 0,
-    executionCountObserved: 0,
-    referenceSessionDate: '2026-07-24',
-    cashLedgerObservedDate: '2026-07-25',
-    settlementHorizonDate: '2026-07-27',
-    settlementVerification: 'reference_segment_ladders_double_snapshot',
-    ...overrides,
-  };
-  return reference;
-}
-
-function makeLiveFundingPortfolio(fundingOverrides = {}, portfolioOverrides = {}) {
-  return {
-    ...portfolioData,
-    accountId: 'U25779973',
-    liveSessionVerified: true,
-    fromCache: false,
-    funding: makeFunding(fundingOverrides),
-    accountSummary: {
-      ...portfolioData.accountSummary,
-      netLiquidation: 195000,
-      lastUpdated: new Date().toISOString(),
-      source: 'ibkr_live_session',
-    },
-    ...portfolioOverrides,
-  };
-}
-
-function makeFundingReferencePortfolio(
-  referenceOverrides = {},
-  portfolioOverrides = {},
-) {
-  return {
-    ...makeLiveFundingPortfolio({}, {
-      funding: null,
-      fundingUnavailableReason: 'non_settlement_day',
-    }),
-    fundingReference: makeFundingReference(referenceOverrides),
-    ...portfolioOverrides,
-  };
-}
 
 function currentNyDate() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -268,22 +116,10 @@ function sidebarElement(componentProps = {}) {
 }
 
 function renderSidebar(props = {}) {
-  const {
-    autoLockEstimate = true,
-    ...componentProps
-  } = props;
-  const view = render(sidebarElement(componentProps));
+  const view = render(sidebarElement(props));
   view.rerenderSidebar = (nextProps = {}) => {
     view.rerender(sidebarElement(nextProps));
   };
-  if (autoLockEstimate) {
-    const lockButton = screen.queryByRole('button', {
-      name: 'Lock one-use estimate',
-    });
-    if (lockButton) {
-      fireEvent.click(lockButton);
-    }
-  }
   return view;
 }
 
@@ -333,13 +169,15 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(screen.getByTestId('etf-pro-long-count')).toHaveTextContent('24');
     expect(within(positionTable).getAllByText('—').length).toBeGreaterThan(0);
     expect(screen.queryByText('Gross Exposure')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('cash-debit-guard')).not.toBeInTheDocument();
+    expect(screen.getByTestId('portfolio-balance')).toBeInTheDocument();
   });
 
   test('labels and retains a current verified snapshot only while its refresh is pending', () => {
-    const freshPortfolio = makeLiveFundingPortfolio({}, {
+    const freshPortfolio = {
+      ...portfolioData,
+      accountId: 'U25779973',
       socketVerifiedAt: new Date().toISOString(),
-    });
+    };
     const view = renderSidebar({
       portfolioData: freshPortfolio,
       refreshing: true,
@@ -514,473 +352,9 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     });
   });
 
-  test('shows guarded long capacity and broker-native exposure for a fresh verified funding snapshot', () => {
+  test('uses SYS for status details without a duplicate portfolio status button', () => {
     renderSidebar({
-      portfolioData: makeLiveFundingPortfolio({
-        accruedCashSecurities: -750,
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'live');
-    expect(within(guard).getByTestId('cash-debit-guard-hero')).toHaveTextContent(
-      'BUFFERED MAX ESTIMATE $3,250 LONGS AFTER SETTLEMENT',
-    );
-    expect(within(guard).getByText('One use only')).toBeInTheDocument();
-    expect(within(guard).getByText('Securities settled cash · Jul 24')).toBeInTheDocument();
-    expect(within(guard).getByText('IBKR adjusted cash')).toBeInTheDocument();
-    expect(within(guard).getByText('Policy buffer')).toBeInTheDocument();
-    expect(within(guard).getByText('$2,000 base + $6,000 short shock')).toBeInTheDocument();
-    expect(within(guard).getByText('Current long')).toBeInTheDocument();
-    expect(within(guard).getByText('Short collateral')).toBeInTheDocument();
-    expect(within(guard).getByText('Negative accrued cash')).toBeInTheDocument();
-    expect(within(guard).getByText('-$750')).toBeInTheDocument();
-
-    const grossBar = screen.getByRole('group', { name: 'Gross Exposure' });
-    const netBar = screen.getByRole('group', { name: 'Net Exposure' });
-    expect(within(grossBar).getByText('151%')).toBeInTheDocument();
-    expect(within(grossBar).getByText('($295,000)')).toBeInTheDocument();
-    expect(within(netBar).getByText('49%')).toBeInTheDocument();
-    expect(within(netBar).getByText('(+95,000)')).toBeInTheDocument();
-  });
-
-  test('never applies an interest reserve fetched for another account', () => {
-    renderSidebar({
-      portfolioData: makeLiveFundingPortfolio(),
-      interestValidation: {
-        available: true,
-        status: 'learning',
-        source: 'ibkr_interest_validation',
-        accountMatched: true,
-        requestedAccount: 'U00000000',
-        generatedAt: new Date().toISOString(),
-        guard: {
-          available: true,
-          mode: 'graduated',
-          appliedReserve: 12000,
-        },
-      },
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(within(guard).getByTestId('cash-debit-guard-hero')).toHaveTextContent(
-      'BUFFERED MAX ESTIMATE $4,000 LONGS AFTER SETTLEMENT',
-    );
-  });
-
-  test('shows the exact post-settlement trim when guarded headroom is negative', () => {
-    renderSidebar({
-      portfolioData: makeLiveFundingPortfolio({
-        totalCashValueSecurities: 99000,
-        settledCashByDateSecurities: '20260723:99000;20260724:98000',
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(within(guard).getByTestId('cash-debit-guard-hero')).toHaveTextContent(
-      'BUFFERED TRIM ESTIMATE $12,000 LONGS AFTER SETTLEMENT',
-    );
-    expect(within(guard).getByText(/Selling longs may not stop today/)).toBeInTheDocument();
-  });
-
-  test('hides actionable sizing until one snapshot is locked and consumed', () => {
-    const onRefresh = jest.fn();
-    renderSidebar({
-      autoLockEstimate: false,
-      portfolioData: makeLiveFundingPortfolio(),
-      onRefresh,
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(within(guard).queryByTestId('cash-debit-guard-hero'))
-      .not.toBeInTheDocument();
-    fireEvent.click(within(guard).getByRole('button', {
-      name: 'Lock one-use estimate',
-    }));
-
-    expect(within(guard).getByTestId('cash-debit-guard-hero'))
-      .toBeInTheDocument();
-    expect(within(guard).getByText('One use only')).toBeInTheDocument();
-    expect(within(guard).getByLabelText('Planned trade action')).toBeDisabled();
-
-    fireEvent.click(within(guard).getByRole('button', {
-      name: 'Refresh for another estimate',
-    }));
-
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    expect(within(guard).queryByTestId('cash-debit-guard-hero'))
-      .not.toBeInTheDocument();
-    expect(within(guard).getByText('Snapshot consumed')).toBeInTheDocument();
-    expect(within(guard).queryByRole('button', {
-      name: 'Lock one-use estimate',
-    })).not.toBeInTheDocument();
-  });
-
-  test('synchronously hides a locked estimate when the live snapshot changes', () => {
-    const view = renderSidebar({
-      autoLockEstimate: false,
-      portfolioData: makeLiveFundingPortfolio(),
-    });
-    const guard = screen.getByTestId('cash-debit-guard');
-    fireEvent.click(within(guard).getByRole('button', {
-      name: 'Lock one-use estimate',
-    }));
-    expect(within(guard).getByTestId('cash-debit-guard-hero')).toBeInTheDocument();
-
-    view.rerenderSidebar({
-      portfolioData: makeLiveFundingPortfolio({
-        totalCashValueSecurities: 110000,
-        settledCashByDateSecurities: {
-          20260723: 110000,
-          20260724: 109000,
-        },
-      }),
-    });
-
-    expect(within(guard).queryByTestId('cash-debit-guard-hero'))
-      .not.toBeInTheDocument();
-    expect(within(guard).getByRole('button', {
-      name: 'Lock one-use estimate',
-    })).toBeInTheDocument();
-  });
-
-  test('lets the user raise the adverse-short buffer before locking', () => {
-    renderSidebar({
-      autoLockEstimate: false,
-      portfolioData: makeLiveFundingPortfolio(),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    fireEvent.change(
-      within(guard).getByLabelText('Adverse short move buffer percent'),
-      { target: { value: '20' } },
-    );
-    fireEvent.click(within(guard).getByRole('button', {
-      name: 'Lock one-use estimate',
-    }));
-
-    expect(within(guard).getByTestId('cash-debit-guard-hero')).toHaveTextContent(
-      'BUFFERED TRIM ESTIMATE $11,000 LONGS AFTER SETTLEMENT',
-    );
-    expect(within(guard).getByText('$2,000 base + $21,000 short shock'))
-      .toBeInTheDocument();
-  });
-
-  test.each([
-    [
-      'stale funding',
-      () => {
-        const staleAt = new Date(Date.now() - 61_000).toISOString();
-        return {
-          portfolioData: makeLiveFundingPortfolio({
-            observedAt: staleAt,
-            socketVerifiedAt: staleAt,
-            accountValuesObservedAt: staleAt,
-          }),
-        };
-      },
-    ],
-    [
-      'offline portfolio',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({}, {
-          dataSource: 'ibkr_offline',
-          liveSessionVerified: false,
-          funding: null,
-        }),
-        connection: { connected: false, kind: 'gateway_offline' },
-      }),
-    ],
-    [
-      'delayed provider status',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio(),
-        connection: {
-          connected: true,
-          statusRefreshDelayed: true,
-        },
-      }),
-    ],
-    [
-      'account mismatch',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          accountId: 'U00000000',
-        }),
-      }),
-    ],
-    [
-      'cached funding',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          fromCache: true,
-        }),
-      }),
-    ],
-    [
-      'invalid funding decision',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          openOrderCount: 1,
-        }),
-      }),
-    ],
-    [
-      'unverified settlement',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          settledShortPositionsVerified: undefined,
-        }),
-      }),
-    ],
-    [
-      'unsettled securities activity',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          settlementStatus: 'pending',
-        }),
-      }),
-    ],
-    [
-      'unverified same-day executions',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          noSameDayExecutionsVerified: undefined,
-        }),
-      }),
-    ],
-    [
-      'same-day executions present',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          sameDayExecutionCount: 1,
-        }),
-      }),
-    ],
-    [
-      'unverified short evidence',
-      () => {
-        const observedAt = new Date().toISOString();
-        return {
-          portfolioData: makeLiveFundingPortfolio({
-            shortPositions: [{
-              quantity: -1000,
-              priorClose: 100,
-              currentPrice: 100,
-              currentPriceSource: 'ibkr_ticker_direct_max',
-              currency: 'USD',
-              snapshotTimestamp: observedAt,
-              marketDataType: 3,
-            }],
-          }),
-        };
-      },
-    ],
-    [
-      'unverified current-price source',
-      () => {
-        const observedAt = new Date().toISOString();
-        return {
-          portfolioData: makeLiveFundingPortfolio({
-            shortPositions: [{
-              quantity: -1000,
-              priorClose: 100,
-              currentPrice: 100,
-              currentPriceSource: 'ibkr_ticker_market_price',
-              currency: 'USD',
-              snapshotTimestamp: observedAt,
-              marketDataType: 1,
-            }],
-          }),
-        };
-      },
-    ],
-    [
-      'unverified prior-close source',
-      () => {
-        const observedAt = new Date().toISOString();
-        return {
-          portfolioData: makeLiveFundingPortfolio({
-            shortPositions: [{
-              conId: 756733,
-              symbol: 'MACRO',
-              quantity: -1000,
-              priorClose: 100,
-              priorCloseSource: 'unknown',
-              currentPrice: 100,
-              currentPriceSource: 'ibkr_ticker_direct_max',
-              currency: 'USD',
-              snapshotTimestamp: observedAt,
-              marketDataType: 1,
-            }],
-          }),
-        };
-      },
-    ],
-    [
-      'short evidence count mismatch',
-      () => ({
-        portfolioData: makeLiveFundingPortfolio({
-          shortPositionCount: 2,
-        }),
-      }),
-    ],
-    [
-      'short exposure evidence mismatch',
-      () => {
-        const observedAt = new Date().toISOString();
-        return {
-          portfolioData: makeLiveFundingPortfolio({
-            shortPositions: [{
-              conId: 756733,
-              symbol: 'MACRO',
-              quantity: -900,
-              priorClose: 100,
-              currentPrice: 100,
-              currentPriceSource: 'ibkr_ticker_direct_max',
-              currency: 'USD',
-              snapshotTimestamp: observedAt,
-              marketDataType: 1,
-            }],
-          }),
-        };
-      },
-    ],
-  ])('fails closed without numeric guard output for %s', (_label, buildProps) => {
-    renderSidebar(buildProps());
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'unavailable');
-    expect(within(guard).getAllByText('Unavailable').length).toBeGreaterThan(0);
-    expect(within(guard).queryByTestId('cash-debit-guard-hero')).not.toBeInTheDocument();
-    expect(within(guard).queryByTestId('cash-debit-projection')).not.toBeInTheDocument();
-  });
-
-  test('keeps the verified numeric guard mounted while a fresh portfolio refresh is pending', () => {
-    renderSidebar({
-      portfolioData: makeLiveFundingPortfolio(),
-      refreshing: true,
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'live');
-    expect(within(guard).getByTestId('cash-debit-guard-hero'))
-      .toBeInTheDocument();
-  });
-
-  test('shows the sanitized unsettled reason when live funding is intentionally unavailable', () => {
-    renderSidebar({
-      portfolioData: makeLiveFundingPortfolio({}, {
-        funding: null,
-        fundingUnavailableReason: 'unsettled_securities_activity',
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'unavailable');
-    expect(within(guard).getByText(
-      'Unsettled securities activity prevents safe cash sizing.',
-    )).toBeInTheDocument();
-    expect(within(guard).queryByTestId('cash-debit-guard-hero')).not.toBeInTheDocument();
-  });
-
-  test('shows the non-settlement-day reason without numeric sizing', () => {
-    renderSidebar({
-      portfolioData: makeLiveFundingPortfolio({}, {
-        funding: null,
-        fundingUnavailableReason: 'non_settlement_day',
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'unavailable');
-    expect(within(guard).getByText(
-      'Cash sizing is unavailable outside a U.S. securities settlement day.',
-    )).toBeInTheDocument();
-    expect(within(guard).queryByTestId('cash-debit-guard-hero')).not.toBeInTheDocument();
-  });
-
-  test('shows a clearly labeled Friday-close reference with no trade controls', () => {
-    renderSidebar({
-      portfolioData: makeFundingReferencePortfolio(),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'reference');
-    expect(within(guard).getByText('Historical · Fri, Jul 24'))
-      .toBeInTheDocument();
-    expect(within(guard).queryByText('Historical only.'))
-      .not.toBeInTheDocument();
-    expect(within(guard).queryByText(
-      'Refresh on a settlement day before sizing an order.',
-    )).not.toBeInTheDocument();
-    const hero = within(guard).getByTestId('cash-debit-guard-hero');
-    expect(within(hero).getByText('Estimated long headroom'))
-      .toBeInTheDocument();
-    expect(within(hero).getByText('$4,000')).toBeInTheDocument();
-    expect(within(hero).queryByText(
-      'Remaining after short collateral and safety reserves',
-    )).not.toBeInTheDocument();
-    expect(within(guard).getByText('Securities cash floor · Jul 27'))
-      .toBeInTheDocument();
-    expect(within(guard).getByText('Less: required short collateral'))
-      .toBeInTheDocument();
-    expect(within(guard).getByText('Less: 5% safety buffer'))
-      .toBeInTheDocument();
-    expect(within(guard).queryByText(
-      /IBKR cash Sat, Jul 25 · prices Fri, Jul 24 close · settlements included through Mon, Jul 27/,
-    )).not.toBeInTheDocument();
-    expect(within(guard).queryByLabelText('Planned trade action'))
-      .not.toBeInTheDocument();
-    expect(within(guard).queryByLabelText(
-      'Adverse short move buffer percent',
-    )).not.toBeInTheDocument();
-    expect(within(guard).queryByRole('button')).not.toBeInTheDocument();
-    expect(within(guard).queryByTestId('cash-debit-projection'))
-      .not.toBeInTheDocument();
-  });
-
-  test('uses non-actionable trim wording for a negative Friday-close reference', () => {
-    renderSidebar({
-      portfolioData: makeFundingReferencePortfolio({
-        totalCashValueSecurities: 98000,
-        settledCashByDateSecurities:
-          '20260725:99000;20260727:98000',
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    const hero = within(guard).getByTestId('cash-debit-guard-hero');
-    expect(within(hero).getByText('Estimated long reduction'))
-      .toBeInTheDocument();
-    expect(within(hero).getByText('$12,000')).toBeInTheDocument();
-    expect(within(hero).queryByText(
-      'Needed to restore the no-borrow cash buffer',
-    )).not.toBeInTheDocument();
-    expect(within(guard).queryByRole('button')).not.toBeInTheDocument();
-  });
-
-  test('keeps the verified historical reference mounted during refresh and a delayed status check', () => {
-    renderSidebar({
-      portfolioData: makeFundingReferencePortfolio(),
-      refreshing: true,
-      connection: {
-        connected: false,
-        statusRefreshDelayed: true,
-      },
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'reference');
-    expect(within(guard).getByTestId('cash-debit-guard-hero'))
-      .toBeInTheDocument();
-    expect(within(guard).queryByText('Unavailable'))
-      .not.toBeInTheDocument();
-  });
-
-  test('moves interest validation to the portfolio status button without a standalone card', () => {
-    renderSidebar({
-      portfolioData: makeLiveFundingPortfolio(),
+      portfolioData: { ...portfolioData, accountId: 'U25779973' },
       interestValidationLoading: true,
       interestValidation: {
         available: true,
@@ -1012,23 +386,12 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     });
 
     expect(screen.queryByTestId('interest-validation')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/show status details for ibkr/i));
-
-    const statusCard = screen.getByTestId('status-source-card-interest-validation');
-    expect(statusCard).toHaveAttribute('data-status-tone', 'learning');
-    expect(within(statusCard).getByText('Interest validation')).toBeInTheDocument();
-    expect(within(statusCard).getByText('Learning')).toBeInTheDocument();
-    expect(within(statusCard).queryByText('Stale')).not.toBeInTheDocument();
-    expect(within(statusCard).queryByText(/MTD debit/i)).not.toBeInTheDocument();
-    expect(within(statusCard).queryByText(/\$/)).not.toBeInTheDocument();
-    expect(statusCard).not.toHaveTextContent(
-      /\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}/,
-    );
+    expect(screen.queryByLabelText(/show status details for ibkr/i)).not.toBeInTheDocument();
   });
 
-  test('shows only unavailable status for invalid interest validation data', () => {
+  test('does not render a duplicate portfolio status control for invalid validation data', () => {
     renderSidebar({
-      portfolioData: makeLiveFundingPortfolio(),
+      portfolioData: { ...portfolioData, accountId: 'U25779973' },
       interestValidation: {
         available: false,
         status: 'unavailable',
@@ -1045,68 +408,14 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     });
 
     expect(screen.queryByTestId('interest-validation')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/show status details for ibkr/i));
-
-    const statusCard = screen.getByTestId('status-source-card-interest-validation');
-    expect(statusCard).toHaveAttribute('data-status-tone', 'unavailable');
-    expect(within(statusCard).getByText('Unavailable')).toBeInTheDocument();
-    expect(within(statusCard).queryByText(/\$999/)).not.toBeInTheDocument();
-    expect(within(statusCard).queryByText(/Latest forecast/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/show status details for ibkr/i)).not.toBeInTheDocument();
   });
 
-  test('shows the broker-derived Thursday close after a Friday holiday', () => {
-    renderSidebar({
-      portfolioData: makeFundingReferencePortfolio({
-        grossPositionValue: 95000,
-        stockMarketValue: 95000,
-        settledCashByDateSecurities:
-          '20260704:115000;20260706:114000',
-        settledCashByDateCommodities:
-          '20260704:0;20260706:0',
-        shortPositionReferences: [],
-        shortStockReferenceCloseValue: 0,
-        openPositionCount: 1,
-        shortPositionCount: 0,
-        referenceSessionDate: '2026-07-02',
-        cashLedgerObservedDate: '2026-07-04',
-        settlementHorizonDate: '2026-07-06',
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'reference');
-    expect(within(guard).getByText('Historical · Thu, Jul 2'))
-      .toBeInTheDocument();
-    expect(within(guard).queryByText(
-      /IBKR cash Sat, Jul 4 · prices Thu, Jul 2 close · settlements included through Mon, Jul 6/,
-    )).not.toBeInTheDocument();
-    expect(within(guard).queryByRole('button')).not.toBeInTheDocument();
-    expect(within(guard).queryByLabelText('Planned trade action'))
-      .not.toBeInTheDocument();
-  });
-
-  test('hides a malformed weekend reference instead of treating it as live', () => {
-    const fundingReference = makeFundingReference();
-    fundingReference.shortPositionReferences[0].currentPrice = 100;
-    renderSidebar({
-      portfolioData: makeFundingReferencePortfolio({}, {
-        fundingReference,
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    expect(guard).toHaveAttribute('data-status', 'unavailable');
-    expect(within(guard).queryByTestId('cash-debit-guard-hero'))
-      .not.toBeInTheDocument();
-    expect(within(guard).queryByRole('button')).not.toBeInTheDocument();
-  });
-
-  test('fails closed on exposure when direct market values are missing and funding is unavailable', () => {
+  test('fails closed on exposure when direct market values are missing', () => {
     renderSidebar({
       portfolioData: {
         ...portfolioData,
         liveSessionVerified: true,
-        funding: null,
         holdings: [
           {
             symbol: 'UNMARKED',
@@ -1131,139 +440,6 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(within(longBar).queryByText(/\$/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('exposure-segment-gross-exposure')).not.toBeInTheDocument();
     expect(screen.queryByTestId('exposure-segment-long-exposure')).not.toBeInTheDocument();
-  });
-
-  test('projects adding to a verified low-priced short with a required limit and no editable broker evidence', () => {
-    const observedAt = new Date().toISOString();
-    renderSidebar({
-      autoLockEstimate: false,
-      portfolioData: makeLiveFundingPortfolio({
-        grossPositionValue: 196010,
-        stockMarketValue: 193990,
-        shortPositions: [{
-          conId: 10101,
-          symbol: 'PENNY',
-          quantity: -1000,
-          priorClose: 1.01,
-          currentPrice: 1.01,
-          currentPriceSource: 'ibkr_ticker_direct_max',
-          currency: 'USD',
-          snapshotTimestamp: observedAt,
-          marketDataType: 1,
-        }],
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    fireEvent.change(within(guard).getByLabelText('Planned trade action'), {
-      target: { value: 'add_short' },
-    });
-    expect(within(guard).getByRole('option', { name: 'Add to short' })).toBeInTheDocument();
-    expect(within(guard).queryByLabelText('Planned short prior close')).not.toBeInTheDocument();
-    expect(within(guard).queryByLabelText('Planned short price')).not.toBeInTheDocument();
-    expect(within(guard).getByLabelText('Limit price')).toBeRequired();
-    fireEvent.change(within(guard).getByLabelText('Verified short position'), {
-      target: { value: '10101' },
-    });
-    fireEvent.change(within(guard).getByLabelText('Planned add-to-short shares'), {
-      target: { value: '1000' },
-    });
-    expect(within(guard).queryByTestId('cash-debit-projection')).not.toBeInTheDocument();
-    expect(within(guard).getByText('Enter a positive limit price.')).toBeInTheDocument();
-    fireEvent.change(within(guard).getByLabelText('Limit price'), {
-      target: { value: '1.02' },
-    });
-    expect(within(guard).queryByTestId('cash-debit-projection')).not.toBeInTheDocument();
-    expect(within(guard).getByText(/must be at or below the verified live bid/i))
-      .toBeInTheDocument();
-    fireEvent.change(within(guard).getByLabelText('Limit price'), {
-      target: { value: '1.01' },
-    });
-    fireEvent.click(within(guard).getByRole('button', {
-      name: 'Lock one-use estimate',
-    }));
-
-    const projection = within(guard).getByTestId('cash-debit-projection');
-    expect(within(projection).getByText('+$109,010')).toBeInTheDocument();
-    expect(within(projection).getByText(/\$197,020/)).toBeInTheDocument();
-    expect(within(guard).queryByText(/short capacity/i)).not.toBeInTheDocument();
-    expect(within(guard).getByText(/Stock-borrow fees/)).toBeInTheDocument();
-    expect(within(guard).getByText(/only to a limit order at the entered price or better/i))
-      .toBeInTheDocument();
-    expect(within(guard).getByText(/submitted immediately against this live snapshot/i))
-      .toBeInTheDocument();
-    expect(within(guard).getByText(/market-order short sizing is unsupported/i))
-      .toBeInTheDocument();
-  });
-
-  test('covers only the selected verified short and rejects excess shares', () => {
-    renderSidebar({
-      autoLockEstimate: false,
-      portfolioData: makeLiveFundingPortfolio(),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    fireEvent.change(within(guard).getByLabelText('Planned trade action'), {
-      target: { value: 'cover_short' },
-    });
-    expect(within(guard).queryByLabelText('Planned short prior close')).not.toBeInTheDocument();
-    expect(within(guard).queryByLabelText('Planned short price')).not.toBeInTheDocument();
-    expect(within(guard).getByLabelText('Limit price')).toBeRequired();
-    fireEvent.change(within(guard).getByLabelText('Verified short position'), {
-      target: { value: '756733' },
-    });
-    fireEvent.change(within(guard).getByLabelText('Planned cover shares'), {
-      target: { value: '1001' },
-    });
-    fireEvent.change(within(guard).getByLabelText('Limit price'), {
-      target: { value: '100' },
-    });
-
-    expect(within(guard).queryByTestId('cash-debit-projection')).not.toBeInTheDocument();
-    expect(within(guard).getByText('Cover shares exceed that exact verified short.')).toBeInTheDocument();
-
-    fireEvent.change(within(guard).getByLabelText('Planned cover shares'), {
-      target: { value: '100' },
-    });
-    fireEvent.click(within(guard).getByRole('button', {
-      name: 'Lock one-use estimate',
-    }));
-
-    const projection = within(guard).getByTestId('cash-debit-projection');
-    expect(within(projection).getByText('+$4,800')).toBeInTheDocument();
-    expect(within(projection).getByText(/\$285,000/)).toBeInTheDocument();
-    expect(within(guard).getByLabelText('Planned cover shares')).toBeDisabled();
-  });
-
-  test('does not enable short sizing when baseline conId identity is missing', () => {
-    const observedAt = new Date().toISOString();
-    renderSidebar({
-      autoLockEstimate: false,
-      portfolioData: makeLiveFundingPortfolio({
-        shortPositions: [{
-          conId: null,
-          symbol: 'NO-ID',
-          quantity: -1000,
-          priorClose: 100,
-          currentPrice: 100,
-          currentPriceSource: 'ibkr_ticker_direct_max',
-          currency: 'USD',
-          snapshotTimestamp: observedAt,
-          marketDataType: 1,
-        }],
-      }),
-    });
-
-    const guard = screen.getByTestId('cash-debit-guard');
-    fireEvent.change(within(guard).getByLabelText('Planned trade action'), {
-      target: { value: 'add_short' },
-    });
-
-    expect(within(guard).getByLabelText('Verified short position')).toBeDisabled();
-    expect(within(guard).getByText(
-      'No uniquely identified live short is available for sizing.',
-    )).toBeInTheDocument();
-    expect(within(guard).queryByTestId('cash-debit-projection')).not.toBeInTheDocument();
   });
 
   test('keeps live Gateway exposure visible when Flex baseline is unavailable', () => {
@@ -1378,7 +554,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     expect(screen.getByText('NEUTRAL')).toBeInTheDocument();
   });
 
-  test('marks portfolio status yellow when ETF Pro has data-quality warnings', () => {
+  test('does not expose ETF Pro warnings through a duplicate portfolio status button', () => {
     const today = currentLocalDate();
     renderSidebar({
       portfolioData: {
@@ -1404,41 +580,11 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
       },
     });
 
-    const ibkrStatusButton = screen.getByLabelText(/show status details for ibkr/i);
-    expect(ibkrStatusButton).toHaveTextContent('🟡');
-
-    fireEvent.click(ibkrStatusButton);
-
-    const sourceCards = screen.getAllByTestId(
-      /^status-source-card-(portfolio|rta|etf-pro|prediction-markets)$/
-    );
-    expect(sourceCards).toHaveLength(4);
-    expect(sourceCards.map((card) => within(card).getByRole('heading').textContent)).toEqual([
-      'Portfolio',
-      'RTA',
-      'ETF Pro',
-      'Prediction markets',
-    ]);
-    expect(screen.queryByTestId('status-source-card-ibkr')).not.toBeInTheDocument();
-    expect(screen.queryByText('Connection')).not.toBeInTheDocument();
-    expect(screen.queryByText('Connected')).not.toBeInTheDocument();
-
-    const portfolioCard = screen.getByTestId('status-source-card-portfolio');
-    expect(portfolioCard).toHaveAttribute('data-status-tone', 'live');
-    expect(within(portfolioCard).getAllByText('Live').length).toBeGreaterThan(0);
-
-    const etfProCard = screen.getByTestId('status-source-card-etf-pro');
-    expect(etfProCard).toHaveAttribute('data-status-tone', 'stale');
-    expect(within(etfProCard).getByText('ETF Pro')).toBeInTheDocument();
-    expect(within(etfProCard).getByText('Stale')).toBeInTheDocument();
-    expect(screen.getAllByText('Portfolio').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Live').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('ETF Pro').length).toBeGreaterThan(0);
-    expect(screen.getByText('ETF Pro data quality: warning')).toBeInTheDocument();
-    expect(screen.getByText('ETF Pro Gmail ingestion is stale; latest stored ETF Pro email is 2026-06-18.')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/show status details for ibkr/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('ETF Pro data quality: warning')).not.toBeInTheDocument();
   });
 
-  test('marks portfolio status yellow for RTA, ETF Pro, and CPI provider mismatches', () => {
+  test('does not expose cross-provider mismatches through a duplicate portfolio status button', () => {
     const today = currentLocalDate();
     renderSidebar({
       portfolioData: {
@@ -1471,24 +617,10 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
       },
     });
 
-    const ibkrStatusButton = screen.getByLabelText(/show status details for ibkr/i);
-    expect(ibkrStatusButton).toHaveTextContent('🟡');
-
-    fireEvent.click(ibkrStatusButton);
-
-    expect(screen.queryByTestId('status-source-card-ibkr')).not.toBeInTheDocument();
-    expect(screen.getByTestId('status-source-card-portfolio')).toHaveAttribute('data-status-tone', 'live');
-    expect(screen.getByTestId('status-source-card-rta')).toHaveAttribute('data-status-tone', 'live');
-    expect(screen.getByTestId('status-source-card-etf-pro')).toHaveAttribute('data-status-tone', 'live');
-    expect(screen.getByTestId('status-source-card-prediction-markets')).toHaveAttribute('data-status-tone', 'stale');
-    expect(screen.queryByText('Portfolio differs')).not.toBeInTheDocument();
-    expect(screen.queryByText(/RTA count mismatch/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/ETF Pro count mismatch/)).not.toBeInTheDocument();
-    expect(within(screen.getByTestId('status-source-card-prediction-markets')).getByText('Stale')).toBeInTheDocument();
-    expect(screen.getByText('Prediction markets: IBKR connected; CPI positions loaded from portfolio, contract catalog missing')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/show status details for ibkr/i)).not.toBeInTheDocument();
   });
 
-  test('marks portfolio status green when portfolio, RTA, ETF Pro, and CPI contracts are current', () => {
+  test('does not expose a green portfolio status button when providers are current', () => {
     const today = currentLocalDate();
     renderSidebar({
       portfolioData: {
@@ -1521,21 +653,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
       },
     });
 
-    const ibkrStatusButton = screen.getByLabelText(/show status details for ibkr/i);
-    expect(ibkrStatusButton).toHaveTextContent('🟢');
-
-    fireEvent.click(ibkrStatusButton);
-
-    expect(screen.getAllByTestId(
-      /^status-source-card-(portfolio|rta|etf-pro|prediction-markets)$/
-    )).toHaveLength(4);
-    expect(screen.queryByTestId('status-source-card-ibkr')).not.toBeInTheDocument();
-    expect(screen.getByTestId('status-source-card-portfolio')).toHaveAttribute('data-status-tone', 'live');
-    expect(screen.getByTestId('status-source-card-rta')).toHaveAttribute('data-status-tone', 'live');
-    expect(screen.getByTestId('status-source-card-etf-pro')).toHaveAttribute('data-status-tone', 'live');
-    const predictionMarketsCard = screen.getByTestId('status-source-card-prediction-markets');
-    expect(predictionMarketsCard).toHaveAttribute('data-status-tone', 'live');
-    expect(within(predictionMarketsCard).getAllByText('Live').length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/show status details for ibkr/i)).not.toBeInTheDocument();
   });
 });
 
@@ -1549,8 +667,8 @@ describe('PortfolioBreakdown correlation cleanup', () => {
     expect(screen.getByRole('button', {
       name: 'Show research intelligence for GLD',
     })).toBeInTheDocument();
-    expect(screen.getByText('Longs')).toBeInTheDocument();
-    expect(screen.getByText('Shorts')).toBeInTheDocument();
+    expect(screen.getByText(/^LONG \(2\)$/)).toBeInTheDocument();
+    expect(screen.getByText(/^SHORT \(0\)$/)).toBeInTheDocument();
     expect(screen.getByText('No short positions')).toBeInTheDocument();
     expect(screen.queryByText('Side:')).not.toBeInTheDocument();
   });

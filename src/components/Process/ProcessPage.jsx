@@ -11,8 +11,11 @@ import {
 } from '../../utils/processDocumentDrafts';
 import ProcessPaper, { PROCESS_SECTIONS } from './ProcessPaper';
 import PositionSizingNote, { POSITION_SIZING_SECTIONS } from './PositionSizingNote';
+import ExposureLabGuide, { EXPOSURE_LAB_GUIDE_SECTIONS } from './ExposureLabGuide';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 import {
   METHOD_DOCUMENT_IDS,
+  getMethodSectionId,
   PROCESS_LIBRARY_RENDERERS,
 } from './ProcessLibraryArticles';
 import './ProcessWiki.css';
@@ -74,6 +77,20 @@ const BASE_DOCUMENT_RENDERERS = {
       </EditableWholeDocument>
     ),
   },
+  'exposure-lab-guide': {
+    sections: EXPOSURE_LAB_GUIDE_SECTIONS,
+    editableRegions: [['document-body', 'Exposure Lab guide']],
+    render: (_document, editor) => (
+      <EditableWholeDocument
+        id="document-body"
+        label="Exposure Lab guide"
+        editor={editor}
+        className="wp-paper process-library-article exposure-lab-guide"
+      >
+        <ExposureLabGuide />
+      </EditableWholeDocument>
+    ),
+  },
 };
 
 const DOCUMENT_RENDERERS = {
@@ -110,6 +127,7 @@ const getRequestedSection = () => {
 };
 
 const ProcessPage = ({ documentId = 'the-process', onNavigate }) => {
+  const surfaceActive = useSurfaceActivity();
   const {
     theme,
     toggleTheme,
@@ -142,6 +160,7 @@ const ProcessPage = ({ documentId = 'the-process', onNavigate }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showTools, setShowTools] = useState(false);
   const [showContents, setShowContents] = useState(false);
+  const articleScrollRef = useRef(null);
 
   // Preserve any existing local note text in a draft without presenting a separate notes view.
   const notesValueRef = useRef(initialDraft?.notes || '');
@@ -282,20 +301,59 @@ const ProcessPage = ({ documentId = 'the-process', onNavigate }) => {
   }, []);
 
   useEffect(() => {
-    const previousTitle = window.document.title;
-    window.document.title = `${document.title} | Portfolio Management Framework`;
     setActiveSection(renderer.sections[0]?.[0] || 'abstract');
     setActiveView('read');
     const requestedSection = getRequestedSection();
     if (requestedSection) {
       window.requestAnimationFrame?.(() => goToSection(requestedSection, { smooth: false }));
     }
-    return () => {
-      window.document.title = previousTitle;
-    };
   }, [document.id, document.title, goToSection, renderer.sections]);
 
   useEffect(() => {
+    if (!surfaceActive) return undefined;
+    const previousTitle = window.document.title;
+    window.document.title = `${document.title} | Portfolio Management Framework`;
+    return () => {
+      window.document.title = previousTitle;
+    };
+  }, [document.title, surfaceActive]);
+
+  useEffect(() => {
+    if (!surfaceActive) return undefined;
+    const scrollContainer = articleScrollRef.current;
+    if (!scrollContainer) return undefined;
+
+    const sections = renderer.sections
+      .map(([id]) => window.document.getElementById(id))
+      .filter(Boolean);
+    if (sections.length === 0) return undefined;
+
+    const syncActiveSection = () => {
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const activationLine = containerRect.top + (containerRect.height * 0.35);
+      let nextSection = sections[0].id;
+
+      sections.forEach((section) => {
+        if (section.getBoundingClientRect().top <= activationLine) {
+          nextSection = section.id;
+        }
+      });
+
+      setActiveSection((current) => (current === nextSection ? current : nextSection));
+    };
+
+    syncActiveSection();
+    scrollContainer.addEventListener('scroll', syncActiveSection, { passive: true });
+    window.addEventListener('resize', syncActiveSection);
+
+    return () => {
+      scrollContainer.removeEventListener('scroll', syncActiveSection);
+      window.removeEventListener('resize', syncActiveSection);
+    };
+  }, [document.id, renderer.sections, surfaceActive]);
+
+  useEffect(() => {
+    if (!surfaceActive) return undefined;
     const flushBeforeDismissal = () => {
       if (!dirtyRef.current) return;
       try {
@@ -310,7 +368,7 @@ const ProcessPage = ({ documentId = 'the-process', onNavigate }) => {
       window.clearTimeout(saveTimerRef.current);
       flushBeforeDismissal();
     };
-  }, [writeCurrentDraft]);
+  }, [surfaceActive, writeCurrentDraft]);
 
   const flushPendingDraft = () => {
     window.clearTimeout(saveTimerRef.current);
@@ -382,6 +440,20 @@ const ProcessPage = ({ documentId = 'the-process', onNavigate }) => {
     publishedDocuments.flatMap((item) => {
       const itemRenderer = DOCUMENT_RENDERERS[item.id];
       if (!itemRenderer) return [];
+
+      if (METHOD_DOCUMENT_IDS.includes(item.id)) {
+        const methodsDocument = getProcessDocument('methods-index');
+        return itemRenderer.sections.map(([sectionId, label]) => ({
+          key: `${methodsDocument.id}:${item.id}:${sectionId}`,
+          documentId: methodsDocument.id,
+          documentTitle: `${methodsDocument.title} · ${item.title}`,
+          sectionId: getMethodSectionId(item.id, sectionId),
+          label,
+          kind: 'Section',
+          route: methodsDocument.route,
+        }));
+      }
+
       return [
         {
           key: `${item.id}:document`,
@@ -431,8 +503,21 @@ const ProcessPage = ({ documentId = 'the-process', onNavigate }) => {
   const handleLibraryLinkClick = (event) => {
     const link = event.target.closest?.('a[href^="#/process"]');
     if (!link || !onNavigate) return;
+    const href = link.getAttribute('href');
+    const [targetRoute, queryString] = String(href || '').split('?');
+    const requestedSection = new URLSearchParams(queryString || '').get('section');
+    if (targetRoute === document.route && requestedSection) {
+      event.preventDefault();
+      window.history.replaceState(
+        { ...(window.history.state || {}), processOverlayEntry: true },
+        '',
+        href,
+      );
+      goToSection(requestedSection);
+      return;
+    }
     event.preventDefault();
-    onNavigate(link.getAttribute('href'));
+    onNavigate(href);
   };
 
   const articleSection = document.section || (METHOD_DOCUMENT_IDS.includes(document.id) ? 'methods' : 'process');
@@ -543,14 +628,18 @@ const ProcessPage = ({ documentId = 'the-process', onNavigate }) => {
                   onClick={() => goToSection(id)}
                 >
                   <small>{index === 0 ? 'A' : index}</small>
-                  <span>{label}</span>
+                  <span>{label.replace(/^\d+\.\s*/, '')}</span>
                 </button>
               </li>
             ))}
           </ol>
         </aside>
 
-        <div className="process-wiki__article-scroll">
+        <div
+          className="process-wiki__article-scroll"
+          data-testid="process-article-scroll"
+          ref={articleScrollRef}
+        >
           <header className="process-wiki__document-header" data-print-hidden="true">
             <h1 id="process-overlay-title" data-testid="process-document-title">{document.title}</h1>
             <div className="process-wiki__tabs">

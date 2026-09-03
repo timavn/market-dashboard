@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import struct
@@ -36,10 +37,12 @@ def market_situation_signal_png(
     *,
     width=600,
     height=240,
+    centers=None,
+    colors=None,
 ) -> bytes:
     pixels = [bytearray([255, 255, 255] * width) for _ in range(height)]
-    colors = ((0, 128, 0), (255, 165, 0), (255, 0, 0))
-    centers = (0.412, 0.585, 0.758)
+    colors = colors or ((0, 128, 0), (255, 165, 0), (255, 0, 0))
+    centers = centers or (0.412, 0.585, 0.758)
     box_width = 108
     for row_index, selection_index in enumerate(selections):
         center_x = round(width * centers[selection_index])
@@ -67,6 +70,100 @@ def market_situation_signal_png(
         + chunk(b"IDAT", zlib.compress(raw))
         + chunk(b"IEND", b"")
     )
+
+
+def archive_market_situation_chart(
+    *,
+    chart,
+    payload,
+    content_type,
+    extension,
+    content_sha256,
+):
+    del chart, payload, content_type
+    return {
+        "id": content_sha256,
+        "s3Key": (
+            "hedgeye-email/assets/market-structure/"
+            f"{content_sha256}.{extension}"
+        ),
+    }
+
+
+def textract_tables_response(*tables):
+    blocks = []
+    for table_index, rows in enumerate(tables, start=1):
+        table_blocks = []
+        cell_ids = []
+        for row_index, row in enumerate(rows, start=1):
+            for column_index, value in enumerate(row, start=1):
+                cell_id = f"table-{table_index}-cell-{row_index}-{column_index}"
+                cell_ids.append(cell_id)
+                cell = {
+                    "BlockType": "CELL",
+                    "Id": cell_id,
+                    "RowIndex": row_index,
+                    "ColumnIndex": column_index,
+                }
+                if str(value or ""):
+                    word_id = f"table-{table_index}-word-{row_index}-{column_index}"
+                    cell["Relationships"] = [{"Type": "CHILD", "Ids": [word_id]}]
+                    table_blocks.append({
+                        "BlockType": "WORD",
+                        "Id": word_id,
+                        "Text": str(value),
+                    })
+                table_blocks.append(cell)
+        blocks.append({
+            "BlockType": "TABLE",
+            "Id": f"table-{table_index}",
+            "Relationships": [{"Type": "CHILD", "Ids": cell_ids}],
+        })
+        blocks.extend(table_blocks)
+    return {"Blocks": blocks}
+
+
+def textract_table_response(rows):
+    return textract_tables_response(rows)
+
+
+def textract_line_response(*lines):
+    return {
+        "Blocks": [
+            {"BlockType": "LINE", "Id": f"line-{index}", "Text": text}
+            for index, text in enumerate(lines, start=1)
+        ],
+    }
+
+
+class FakeTextract:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def analyze_document(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self.responses:
+            raise AssertionError("unexpected Textract request")
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class FakeDetectTextract:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def detect_document_text(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self.responses:
+            raise AssertionError("unexpected Textract request")
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def conditional_failure() -> ClientError:
@@ -578,6 +675,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(database.heartbeat.writes[-1]["status"], "success")
         self.assertEqual(database.heartbeat.writes[-1]["serviceId"], ingestor.GMAIL_SERVICE_ID)
         self.assertEqual(database.heartbeat.writes[-1]["triggerSource"], "aws-scheduler")
+        self.assertIn("authVerifiedAt", database.heartbeat.writes[-1])
 
     def test_scheduled_first_run_seeds_cursor_without_historical_query(self):
         ledger = FakeLedgerTable()
@@ -772,6 +870,8 @@ class HermesGmailIngestorTests(unittest.TestCase):
             f"{ingestor.GMAIL_SERVICE_ID}:manual",
         )
         self.assertFalse(heartbeat["scheduled"])
+        self.assertIn("authVerifiedAt", heartbeat)
+        self.assertIsNotNone(datetime.fromisoformat(heartbeat["authVerifiedAt"]))
 
     def test_auth_probe_success_and_failure_never_hide_heartbeat_store_failure(self):
         secret = {
@@ -912,6 +1012,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             database.heartbeat.writes[-1]["secretVersion"],
             "new-awscurrent-version",
         )
+        self.assertIn("authVerifiedAt", database.heartbeat.writes[-1])
 
     def test_auth_probe_reports_insufficient_readonly_scope_with_typed_failure(self):
         ledger = FakeLedgerTable()
@@ -958,6 +1059,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             database.heartbeat.writes[-1]["errorCode"],
             "GMAIL_SCOPE_INSUFFICIENT",
         )
+        self.assertNotIn("authVerifiedAt", database.heartbeat.writes[-1])
 
     def test_auth_probe_rejects_wrong_or_missing_profile_account_without_success(self):
         secret = {
@@ -1006,6 +1108,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
                 self.assertTrue(all(
                     heartbeat["status"] == "error"
                     and heartbeat["errorCode"] == "GMAIL_ACCOUNT_MISMATCH"
+                    and "authVerifiedAt" not in heartbeat
                     for heartbeat in database.heartbeat.writes
                 ))
 
@@ -2195,6 +2298,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             database.heartbeat.writes[-1]["errorCode"],
             "GMAIL_MESSAGE_RETRY_PENDING",
         )
+        self.assertIn("authVerifiedAt", database.heartbeat.writes[-1])
 
     def test_invalid_grant_persists_auth_required_and_stops_retry_storm(self):
         ledger = FakeLedgerTable()
@@ -2224,6 +2328,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(state["status"], "AUTH_REQUIRED")
         self.assertEqual(state["blockedSecretVersion"], "oauth-version-7")
         self.assertEqual(database.heartbeat.writes[-1]["status"], "auth_required")
+        self.assertNotIn("authVerifiedAt", database.heartbeat.writes[-1])
 
     def test_auth_circuit_breaker_does_not_call_google_until_secret_rotates(self):
         ledger = FakeLedgerTable()
@@ -2306,11 +2411,176 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertFalse(snapshot["data"]["checkpointAvailable"])
         self.assertEqual([row["ticker"] for row in snapshot["data"]["alerts"]], ["SXT", "SJM", "GTLB"])
 
+    def test_investing_ideas_newsletter_materializes_its_long_short_table(self):
+        html_body = """
+            <h1>Investing Ideas Newsletter: August 03, 2026</h1>
+            <p>Long: DDOG, BRKR</p>
+            <p>Short: OLLI, HCA</p>
+            <table class="investing-ideas-table">
+              <tr class="long">
+                <td>DDOG</td><td>$267.97</td><td>$244.00</td><td>$275.00</td>
+              </tr>
+              <tr class="long">
+                <td>BRKR</td><td>$62.84</td><td>$58.27</td><td>$65.48</td>
+              </tr>
+              <tr class="short">
+                <td>OLLI</td><td>$73.47</td><td>$61.90</td><td>$74.98</td>
+              </tr>
+              <tr class="short">
+                <td>HCA</td><td>$402.59</td><td>$363.00</td><td>$418.00</td>
+              </tr>
+            </table>
+        """
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="investing-ideas",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 3, 12, 45, tzinfo=timezone.utc),
+            s3_key="investing-ideas/newsletter.html",
+            message_id="investing-ideas-2026-08-03",
+            subject="Investing Ideas Newsletter: August 03, 2026",
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["positionCount"], 4)
+        self.assertEqual(snapshot["data"]["longs"], ["DDOG", "BRKR"])
+        self.assertEqual(snapshot["data"]["shorts"], ["OLLI", "HCA"])
+        self.assertEqual(
+            snapshot["data"]["positions"][0],
+            {
+                "ticker": "DDOG",
+                "side": "Long",
+                "position": "long",
+                "prevClose": 267.97,
+                "lrr": 244.0,
+                "hrr": 275.0,
+                "originalName": "DDOG",
+            },
+        )
+
+    def test_investing_ideas_supports_named_header_table_layout(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="investing-ideas",
+            html_body="""
+                <table>
+                  <tr>
+                    <th>Ticker</th><th>Position</th><th>Previous Close</th>
+                    <th>LRR</th><th>HRR</th>
+                  </tr>
+                  <tr>
+                    <td>DDOG</td><td>Long</td><td>$267.97</td>
+                    <td>$244.00</td><td>$275.00</td>
+                  </tr>
+                  <tr>
+                    <td>HCA</td><td>Short</td><td>$402.59</td>
+                    <td>$363.00</td><td>$418.00</td>
+                  </tr>
+                </table>
+            """,
+            received_at=datetime(2026, 8, 3, 12, 45, tzinfo=timezone.utc),
+            s3_key="investing-ideas/header-layout.html",
+            message_id="header-investing-ideas",
+            subject="Investing Ideas Newsletter",
+        )
+
+        self.assertEqual(
+            snapshot["data"]["positions"],
+            [
+                {
+                    "ticker": "DDOG",
+                    "side": "Long",
+                    "position": "long",
+                    "prevClose": 267.97,
+                    "lrr": 244.0,
+                    "hrr": 275.0,
+                    "originalName": "DDOG",
+                },
+                {
+                    "ticker": "HCA",
+                    "side": "Short",
+                    "position": "short",
+                    "prevClose": 402.59,
+                    "lrr": 363.0,
+                    "hrr": 418.0,
+                    "originalName": "HCA",
+                },
+            ],
+        )
+
+    def test_investing_ideas_returns_no_snapshot_for_incomplete_rows(self):
+        with self.assertRaisesRegex(ValueError, "missing required risk-range cells"):
+            ingestor.parse_html_snapshot(
+                report_type="investing-ideas",
+                html_body="""
+                    <h1>Investing Ideas Newsletter: August 03, 2026</h1>
+                    <table>
+                      <tr class="long">
+                        <td>DDOG</td><td>$267.97</td><td>$244.00</td>
+                      </tr>
+                    </table>
+                """,
+                received_at=datetime(2026, 8, 3, 12, 45, tzinfo=timezone.utc),
+                s3_key="investing-ideas/incomplete.html",
+                message_id="incomplete-investing-ideas",
+                subject="Investing Ideas Newsletter: August 03, 2026",
+            )
+
+    def test_investing_ideas_rejects_conflicting_duplicate_rows(self):
+        with self.assertRaisesRegex(ValueError, "conflicting duplicate row"):
+            ingestor.parse_html_snapshot(
+                report_type="investing-ideas",
+                html_body="""
+                    <table>
+                      <tr class="long">
+                        <td>DDOG</td><td>$267.97</td><td>$244.00</td><td>$275.00</td>
+                      </tr>
+                      <tr class="long">
+                        <td>DDOG</td><td>$268.97</td><td>$244.00</td><td>$275.00</td>
+                      </tr>
+                    </table>
+                """,
+                received_at=datetime(2026, 8, 3, 12, 45, tzinfo=timezone.utc),
+                s3_key="investing-ideas/conflicting.html",
+                message_id="conflicting-investing-ideas",
+                subject="Investing Ideas Newsletter: August 03, 2026",
+            )
+
+    def test_real_time_alert_persists_refreshed_spx_risk_range(self):
+        subject = "Real-Time Alert: Sell-SOME Signal (refreshed SPX Risk Range): APLE - KM"
+        self.assertEqual(
+            ingestor.infer_report_type("message-body.html", subject),
+            "real-time-alert",
+        )
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="real-time-alert",
+            html_body="""
+                <div class="headline">Real-Time Alert: Sell-SOME Signal (refreshed SPX Risk Range): APLE - KM</div>
+                <p>08/03/2026 10:23 AM EDT</p>
+                <p>SPX Refreshed Risk Range = 7,344-7,585</p>
+            """,
+            received_at=datetime(2026, 8, 3, 14, 23, tzinfo=timezone.utc),
+            s3_key="gmail/real-time-alert/refreshed-spx.html",
+            message_id="rta-refreshed-spx",
+            subject=subject,
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(
+            snapshot["data"]["alert"]["refreshedRiskRange"],
+            {
+                "ticker": "SPX",
+                "lrr": 7344.0,
+                "hrr": 7585.0,
+                "label": "SPX Refreshed Risk Range",
+            },
+        )
+
     def test_market_situation_report_is_classified_and_materialized_as_structured_signals(self):
         subject = (
             "MARKET SITUATION REPORT: July 30th 2026 | "
             "Structurally Vulnerable Setup"
         )
+        self.assertIn("market-structure", ingestor.HTML_TEXTRACT_REPORT_TYPES)
         self.assertEqual(
             ingestor.infer_report_type("message-body.html", subject),
             "market-structure",
@@ -2342,6 +2612,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             message_id="market-situation-2026-07-30",
             subject=subject,
             image_fetcher=lambda _url: market_situation_signal_png(),
+            chart_archiver=archive_market_situation_chart,
         )
 
         self.assertIsNotNone(snapshot)
@@ -2359,33 +2630,837 @@ class HermesGmailIngestorTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            snapshot["data"]["signalMatrixImageUrl"],
-            f"{source_root}/signals.png",
+            snapshot["data"]["signalMatrixChartId"],
+            snapshot["data"]["charts"][0]["sha256"],
+        )
+        self.assertEqual(snapshot["schemaVersion"], "market-structure-v4")
+        self.assertTrue(snapshot["contentComplete"])
+        self.assertEqual(
+            [block["type"] for block in snapshot["data"]["blocks"]],
+            ["chart", "chart", "paragraph"],
         )
         self.assertNotIn("subscriber@example.com", json.dumps(snapshot))
+        self.assertNotIn("cloudfront.net", json.dumps(snapshot))
         self.assertIn(
             "structurally vulnerable",
-            snapshot["article"]["summary"].lower(),
+            snapshot["article"]["bodyText"].lower(),
         )
 
-    def test_market_situation_report_fails_closed_when_signal_matrix_is_incomplete(self):
+    def test_market_situation_report_extracts_labeled_gamma_throttle_chart_metrics(self):
+        root = "https://d1yhils6iwh5l5.cloudfront.net/charts/gamma"
+        html_body = f"""
+            <div>08/25/2026 06:30 AM EDT</div>
+            <p>Neutral gamma limits current dealer influence.</p>
+            <img class="chart" src="{root}/signals.png">
+            <img class="chart" src="{root}/gamma-throttle.png">
+        """
+        signal_payload = market_situation_signal_png(selections=(1, 1, 1, 0))
+        throttle_payload = signal_payload + b"\x00"
+        textract_client = FakeDetectTextract(
+            textract_line_response("Market Situation Signal Matrix"),
+            textract_line_response(
+                "SPX Gamma Volatility Throttle Vs. 10-Day Realized Volatility",
+                "Gamma Throttle: 0.56",
+                "10-Day rVol: 9.37",
+                "Date: 2026/08/24",
+                "Source: Tier1Alpha.com",
+            ),
+        )
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 25, 13, 30, tzinfo=timezone.utc),
+            s3_key="market-structure/2026-08-25.html",
+            message_id="market-situation-gamma-throttle",
+            image_fetcher=lambda url: (
+                signal_payload if url.endswith("signals.png") else throttle_payload
+            ),
+            chart_archiver=archive_market_situation_chart,
+            textract_client=textract_client,
+        )
+
+        self.assertEqual(len(textract_client.calls), 2)
+        self.assertEqual(
+            snapshot["data"]["chartMetrics"]["spxGammaVolatilityThrottle"],
+            {
+                "id": "spxGammaVolatilityThrottle",
+                "label": "SPX Gamma Volatility Throttle",
+                "gammaThrottle": Decimal("0.56"),
+                "tenDayRealizedVolatility": Decimal("9.37"),
+                "chartDate": "2026-08-24",
+                "chartId": hashlib.sha256(throttle_payload).hexdigest(),
+                "extractionBasis": "labeled-chart-ocr",
+                "parserVersion": "market-structure-chart-metrics-v2",
+                "source": "Tier1Alpha.com",
+            },
+        )
+        self.assertIn("SPX probable-volatility gamma map", snapshot["warnings"][0])
+
+    def test_market_situation_report_extracts_labeled_spx_gamma_strike_map(self):
+        root = "https://d1yhils6iwh5l5.cloudfront.net/charts/gamma-map"
+        html_body = f"""
+            <div>08/25/2026 06:30 AM EDT</div>
+            <p>Neutral gamma leaves the index in no man's land.</p>
+            <img class="chart" src="{root}/signals.png">
+            <img class="chart" src="{root}/gamma-throttle.png">
+            <img class="chart" src="{root}/gamma-by-strike.png">
+        """
+        signal_payload = market_situation_signal_png(selections=(1, 1, 1, 0))
+        throttle_payload = signal_payload + b"\x00"
+        strike_payload = signal_payload + b"\x00\x00"
+        textract_client = FakeDetectTextract(
+            textract_line_response("Market Situation Signal Matrix"),
+            textract_line_response(
+                "SPX Gamma Volatility Throttle Vs. 10-Day Realized Volatility",
+                "Gamma Throttle: 0.56",
+                "10-Day rVol: 9.37",
+                "Date: 2026/08/24",
+                "Source: Tier1Alpha.com",
+            ),
+            textract_line_response(
+                "SPX Probable Volatility / Gamma By Strike",
+                "Strikes In Play: 7600, 7650, 7675, 7700, 7750",
+                "Zero Gamma: 7646",
+                "Upper PV Band: 7798",
+                "Lower PV Band: 7573",
+                "Date: 2026/08/24",
+                "Source: Tier1Alpha.com",
+            ),
+        )
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 25, 13, 30, tzinfo=timezone.utc),
+            s3_key="market-structure/2026-08-25.html",
+            message_id="market-situation-gamma-map",
+            image_fetcher=lambda url: (
+                signal_payload if url.endswith("signals.png")
+                else throttle_payload if url.endswith("gamma-throttle.png")
+                else strike_payload
+            ),
+            chart_archiver=archive_market_situation_chart,
+            textract_client=textract_client,
+        )
+
+        self.assertEqual(
+            snapshot["data"]["chartMetrics"]["spxProbableVolatilityGamma"],
+            {
+                "id": "spxProbableVolatilityGamma",
+                "label": "SPX Probable Volatility / Gamma By Strike",
+                "zeroGamma": Decimal("7646"),
+                "upperPvBand": Decimal("7798"),
+                "lowerPvBand": Decimal("7573"),
+                "strikesInPlay": [
+                    Decimal("7600"), Decimal("7650"), Decimal("7675"),
+                    Decimal("7700"), Decimal("7750"),
+                ],
+                "chartDate": "2026-08-24",
+                "chartId": hashlib.sha256(strike_payload).hexdigest(),
+                "extractionBasis": "labeled-chart-ocr",
+                "parserVersion": "market-structure-chart-metrics-v2",
+                "source": "Tier1Alpha.com",
+            },
+        )
+        self.assertNotIn("warnings", snapshot)
+
+    def test_gamma_throttle_chart_metrics_reject_unlabeled_numbers(self):
+        metric = email_parser._extract_spx_gamma_volatility_throttle_metric(
+            textract_line_response(
+                "SPX Gamma Volatility Throttle Vs. 10-Day Realized Volatility",
+                "0.56",
+                "9.37",
+                "Date: 2026/08/24",
+            ),
+            chart_id="chart-1",
+        )
+
+        self.assertIsNone(metric)
+
+    def test_market_situation_report_keeps_complete_source_when_signal_matrix_is_incomplete(self):
         html_body = """
             <div>07/30/2026 06:30 AM EDT</div>
+            <p>Substantive market structure research remains available.</p>
             <img class="chart"
                  src="https://d1yhils6iwh5l5.cloudfront.net/charts/signals.png">
         """
 
-        with self.assertRaisesRegex(ValueError, "four verified selections"):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 7, 30, 13, 30, tzinfo=timezone.utc),
+            s3_key="market-structure/message.html",
+            message_id="incomplete-market-situation",
+            image_fetcher=lambda _url: market_situation_signal_png(
+                selections=(2, 2, 1),
+            ),
+            chart_archiver=archive_market_situation_chart,
+        )
+
+        self.assertTrue(snapshot["contentComplete"])
+        self.assertEqual(snapshot["data"]["signals"], [])
+        self.assertEqual(snapshot["signalCount"], 0)
+        self.assertIn("Signal summary unavailable", snapshot["warnings"][0])
+
+    def test_market_situation_report_accepts_current_wide_brand_signal_matrix(self):
+        html_body = """
+            <div>08/05/2026 04:00 AM EDT</div>
+            <div class="headline">MARKET SITUATION REPORT: August 5th 2026</div>
+            <p>To access the full Market Situation Report -&gt; Click Here!</p>
+            <p>Positive gamma continues to suppress realized volatility.</p>
+            <img class="chart" src="https://d1yhils6iwh5l5.cloudfront.net/charts/signals.png">
+        """
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 5, 11, 0, tzinfo=timezone.utc),
+            s3_key="market-structure/current.html",
+            message_id="current-market-situation",
+            image_fetcher=lambda _url: market_situation_signal_png(
+                selections=(0, 2, 2, 2),
+                width=1910,
+                height=438,
+                centers=(0.432, 0.658, 0.884),
+                colors=((55, 126, 34), (255, 165, 0), (233, 51, 35)),
+            ),
+            chart_archiver=archive_market_situation_chart,
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(
+            [signal["value"] for signal in snapshot["data"]["signals"]],
+            ["Positive", "Bearish", "Short", "Risk Off"],
+        )
+
+    def test_market_situation_report_preserves_seven_charts_and_text_in_source_order(self):
+        root = "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/weekly"
+        chart_tags = [
+            f'<img class="chart" alt="Chart {index}" '
+            f'src="{root}/chart-{index}.png?email=subscriber@example.com">'
+            for index in range(1, 8)
+        ]
+        html_body = f"""
+            <html><body>
+              <div>This research was prepared exclusively for subscriber@example.com.</div>
+              <div>Having trouble viewing this email?<br>View it in your browser</div>
+              <div>08/10/2026 06:30 AM EDT</div>
+              <h1>MARKET SITUATION REPORT: August 10th, 2026</h1>
+              <p>The research note below was written by Tier 1 Alpha and Presented by Hedgeye®.</p>
+              {chart_tags[0]}
+              <h2>WEEKLY GAME PLAN</h2>
+              <p>To access the full report, please Click Here!</p>
+              <p>Important Note: This report is dated research, not an executable quote.</p>
+              <p>On 08/10/2026 06:30 AM EDT, SPX remained in positive gamma. First complete narrative paragraph.</p>
+              {chart_tags[1]}
+              <p>Second complete narrative paragraph.</p>
+              {chart_tags[2]}
+              <p>Third complete narrative paragraph.</p>
+              {chart_tags[3]}
+              <p>Fourth complete narrative paragraph.</p>
+              {chart_tags[4]}
+              <p>Fifth complete narrative paragraph.</p>
+              {chart_tags[5]}
+              <p>Sixth complete narrative paragraph.</p>
+              {chart_tags[6]}
+              <p>By Craig Peterson</p>
+              <div id="disclaimer">
+                <div>Legal Disclaimer: subscriber-only research.</div>
+                <div>All rights reserved.</div>
+              </div>
+              <img src="https://tracking.example.com/pixel.gif">
+            </body></html>
+        """
+        signal_payload = market_situation_signal_png()
+        payloads = {
+            f"{root}/chart-{index}.png": signal_payload + (b"" if index == 1 else bytes([index]))
+            for index in range(1, 8)
+        }
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="market-structure",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 10, 10, 30, tzinfo=timezone.utc),
+            s3_key="hedgeye-email/messages/2026-08-10/market-structure/message.html",
+            message_id="market-situation-2026-08-10",
+            subject="MARKET SITUATION REPORT: August 10th, 2026 | WEEKLY GAME PLAN",
+            image_fetcher=lambda url: payloads[url],
+            chart_archiver=archive_market_situation_chart,
+        )
+
+        blocks = snapshot["data"]["blocks"]
+        self.assertEqual(snapshot["chartCount"], 7)
+        self.assertEqual(len(snapshot["data"]["charts"]), 7)
+        self.assertEqual(
+            [block["type"] for block in blocks],
+            [
+                "chart", "heading", "callout", "paragraph",
+                "chart", "paragraph", "chart", "paragraph", "chart",
+                "paragraph", "chart", "paragraph", "chart", "paragraph",
+                "chart",
+            ],
+        )
+        self.assertEqual(snapshot["article"]["reportHeading"], "WEEKLY GAME PLAN")
+        self.assertNotIn("byline", snapshot["article"])
+        self.assertNotIn("disclaimer", snapshot["article"])
+        self.assertNotIn("publisher", snapshot["article"])
+        self.assertNotIn("headline", snapshot["article"])
+        self.assertNotIn("sourceAttribution", snapshot["data"])
+        self.assertIn("On 08/10/2026 06:30 AM EDT, SPX", snapshot["article"]["bodyText"])
+        serialized = json.dumps(snapshot)
+        self.assertNotIn("subscriber@example.com", serialized)
+        self.assertNotIn("tracking.example.com", serialized)
+        self.assertNotIn("?email=", serialized)
+        self.assertNotIn("Having trouble viewing", serialized)
+        self.assertNotIn("Tier 1 Alpha", serialized)
+        self.assertNotIn("Click Here", serialized)
+        self.assertNotIn("By Craig Peterson", serialized)
+        self.assertNotIn("Legal Disclaimer", serialized)
+
+    def test_market_situation_report_rejects_invalid_chart_bytes_before_archival(self):
+        archive_chart = MagicMock()
+
+        with self.assertRaisesRegex(ValueError, "invalid image signature"):
             ingestor.parse_html_snapshot(
                 report_type="market-structure",
-                html_body=html_body,
-                received_at=datetime(2026, 7, 30, 13, 30, tzinfo=timezone.utc),
-                s3_key="market-structure/message.html",
-                message_id="incomplete-market-situation",
-                image_fetcher=lambda _url: market_situation_signal_png(
-                    selections=(2, 2, 1),
-                ),
+                html_body="""
+                    <h1>MARKET SITUATION REPORT: August 10th, 2026</h1>
+                    <p>Substantive dated market structure research.</p>
+                    <img class="chart" src="https://d1yhils6iwh5l5.cloudfront.net/charts/invalid.png">
+                """,
+                received_at=datetime(2026, 8, 10, 10, 30, tzinfo=timezone.utc),
+                s3_key="hedgeye-email/messages/2026-08-10/market-structure/message.html",
+                message_id="market-situation-invalid-image",
+                image_fetcher=lambda _url: b"this is not an image",
+                chart_archiver=archive_chart,
             )
+
+        archive_chart.assert_not_called()
+
+    def test_market_situation_report_rejects_more_than_twelve_charts_before_fetching(self):
+        chart_tags = "".join(
+            f'<img class="chart" src="https://d1yhils6iwh5l5.cloudfront.net/charts/chart-{index}.png">'
+            for index in range(13)
+        )
+        fetch_chart = MagicMock(return_value=market_situation_signal_png())
+        archive_chart = MagicMock()
+
+        with self.assertRaisesRegex(ValueError, "chart-count limit"):
+            ingestor.parse_html_snapshot(
+                report_type="market-structure",
+                html_body=(
+                    "<h1>MARKET SITUATION REPORT: August 10th, 2026</h1>"
+                    "<p>Substantive dated market structure research.</p>"
+                    f"{chart_tags}"
+                ),
+                received_at=datetime(2026, 8, 10, 10, 30, tzinfo=timezone.utc),
+                s3_key="hedgeye-email/messages/2026-08-10/market-structure/message.html",
+                message_id="market-situation-too-many-charts",
+                image_fetcher=fetch_chart,
+                chart_archiver=archive_chart,
+            )
+
+        fetch_chart.assert_not_called()
+        archive_chart.assert_not_called()
+
+    def test_signal_strength_html_chart_materializes_the_full_reader_row_set(self):
+        def cell(block_id, row_index, column_index, text):
+            word_id = f"{block_id}-word"
+            return [
+                {
+                    "BlockType": "CELL",
+                    "Id": block_id,
+                    "RowIndex": row_index,
+                    "ColumnIndex": column_index,
+                    "Relationships": [{"Type": "CHILD", "Ids": [word_id]}],
+                },
+                {"BlockType": "WORD", "Id": word_id, "Text": text},
+            ]
+
+        blocks = [
+            {"BlockType": "TABLE", "Id": "table", "Relationships": [{"Type": "CHILD", "Ids": [
+                "h-days", "h-ticker", "h-percent", "r1-days", "r1-ticker", "r1-percent",
+            ]}]},
+        ]
+        for block_id, row_index, column_index, text in (
+            ("h-days", 1, 1, "Days On"),
+            ("h-ticker", 1, 2, "Ticker"),
+            ("h-percent", 1, 3, "% Since Initial Signal"),
+            ("r1-days", 2, 1, "12"),
+            ("r1-ticker", 2, 2, "AAPL"),
+            ("r1-percent", 2, 3, "+4.5%"),
+        ):
+            blocks.extend(cell(block_id, row_index, column_index, text))
+
+        class FakeTextract:
+            def analyze_document(self, **_kwargs):
+                return {"Blocks": blocks}
+
+        snapshot = email_parser.parse_html_snapshot(
+            report_type="signal-strength",
+            html_body="""
+                <div>08/06/2026 12:54 PM EDT</div>
+                <p>Signal Strength Stocks: 1 Stocks (1 Added, 0 Removed)</p>
+                <p>Added: AAPL</p>
+                <img src="https://d1yhils6iwh5l5.cloudfront.net/charts/SSS_8_6.png?src=email&amp;email=subscriber@example.com">
+            """,
+            received_at=datetime(2026, 8, 6, 16, 54, tzinfo=timezone.utc),
+            s3_key="signal-strength/message.html",
+            message_id="signal-strength-chart",
+            image_fetcher=lambda _url: b"source-chart",
+            textract_client=FakeTextract(),
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertTrue(snapshot["data"]["membershipComplete"])
+        self.assertEqual(
+            snapshot["data"]["stocks"],
+            [{"ticker": "AAPL", "daysOn": 12, "percentChangeSinceSignal": Decimal("4.5")}],
+        )
+
+    def test_momo_tracker_extracts_the_approved_range_and_trend_table(self):
+        source_root = "https://d1yhils6iwh5l5.cloudfront.net/charts/momo"
+        html_body = """
+            <div>08/07/2026 08:15 AM EDT</div>
+            <div class="headline">MOMO Tracker</div>
+        """ + "".join(
+            f'<img src="{source_root}/{index}.png?src=email&amp;subscriber=private">'
+            for index in (6, 1, 2, 3, 4, 5)
+        )
+        textract_client = FakeTextract(textract_table_response([
+            ["", "Buy Trade", "Sell Trade", "Upside", "Downside", "Trend"],
+            ["NVDA", "$171.50", "$183.25", "+6.8%", "-4.1%", "BULLISH"],
+            ["META", "$744.00", "$781.00", "+5.0%", "-3.2%", "NEUTRAL"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/13)", "", "", "BULLISH"],
+        ]))
+        fetched_urls = []
+
+        snapshot = email_parser.parse_html_snapshot(
+            report_type="momo-tracker",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 7, 12, 15, tzinfo=timezone.utc),
+            s3_key="momo-tracker/message.html",
+            message_id="momo-2026-08-07",
+            image_fetcher=lambda url: fetched_urls.append(url) or b"momo-table",
+            textract_client=textract_client,
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["stockCount"], 3)
+        self.assertEqual(snapshot["rangeAvailableCount"], 2)
+        self.assertEqual(snapshot["outbucketCount"], 1)
+        self.assertEqual(snapshot["chartCount"], 6)
+        self.assertEqual(snapshot["data"], {
+            "NVDA": {
+                "buyTrade": Decimal("171.50"),
+                "sellTrade": Decimal("183.25"),
+                "upside": Decimal("6.8"),
+                "downside": Decimal("-4.1"),
+                "trend": "BULLISH",
+                "rangeStatus": "available",
+                "trade": "BULLISH",
+                "lrr": Decimal("171.50"),
+                "hrr": Decimal("183.25"),
+                "index": 0,
+            },
+            "META": {
+                "buyTrade": Decimal("744.00"),
+                "sellTrade": Decimal("781.00"),
+                "upside": Decimal("5.0"),
+                "downside": Decimal("-3.2"),
+                "trend": "NEUTRAL",
+                "rangeStatus": "available",
+                "trade": "NEUTRAL",
+                "lrr": Decimal("744.00"),
+                "hrr": Decimal("781.00"),
+                "index": 1,
+            },
+            "ORCL": {
+                "buyTrade": None,
+                "sellTrade": None,
+                "upside": None,
+                "downside": None,
+                "trend": "BULLISH",
+                "rangeStatus": "outbucket",
+                "rangeStatusDate": "08/13",
+                "trade": "BULLISH",
+                "lrr": None,
+                "hrr": None,
+                "index": 2,
+            },
+        })
+        self.assertEqual(fetched_urls, [f"{source_root}/6.png"])
+        self.assertEqual(len(textract_client.calls), 1)
+        self.assertEqual(textract_client.calls[0]["FeatureTypes"], ["TABLES"])
+        self.assertNotIn("subscriber", json.dumps(snapshot, default=str))
+        self.assertNotIn("src=email", json.dumps(snapshot, default=str))
+
+        snapshot_table = FakeSnapshotTable()
+        email_parser.save_snapshot_to_dynamodb(
+            snapshot,
+            FakeDynamoDb(snapshot_table),
+        )
+        stored = snapshot_table.items[("2026-08-07", "momo-tracker")]
+        self.assertIsNone(stored["data"]["ORCL"]["buyTrade"])
+        self.assertIsNone(stored["data"]["ORCL"]["sellTrade"])
+        self.assertEqual(stored["data"]["ORCL"]["trade"], "BULLISH")
+        self.assertEqual(stored["data"]["ORCL"]["rangeStatus"], "outbucket")
+
+    def test_bitcoin_tracker_extracts_approved_crypto_and_equity_tables(self):
+        source_root = "https://d1yhils6iwh5l5.cloudfront.net/charts/bitcoin"
+        chart_names = [
+            "TREND_Latest_TTM.png",
+            "BTC_9.png",
+            "BTC_1.png",
+            "BTC_3.png",
+            "BTC_4.png",
+            "BTC_5.png",
+            "BTC_6.png",
+            "BTC_7.png",
+            "BTC_8.png",
+            "BTC_2.png",
+        ]
+        html_body = """
+            <div>08/07/2026 09:05 AM EDT</div>
+            <div class="headline">Bitcoin Tracker: BTC (+2.5%), ETH (-1.2%)</div>
+        """ + "".join(
+            f'<img src="{source_root}/{name}?email=private&amp;src=newsletter">'
+            for name in chart_names
+        )
+        textract_client = FakeTextract(
+            textract_tables_response(
+                [
+                    ["", "COIN VOLUME", "", "$USD VOLUME"],
+                    ["BTC", "4.6%", "-15.1%", "5.4%"],
+                    ["ETH", "21.8%", "-17.3%", "23.0%"],
+                ],
+                [
+                    ["Crypto", "Price", "Buy Trade", "Sell Trade", "Trend"],
+                    ["BTC", "$114,000", "$108,000", "$121,000", "BULLISH"],
+                    ["ETH", "$3,610", "$3,350", "$3,900", "NEUTRAL"],
+                ],
+            ),
+            textract_table_response([
+                ["Ticker", "Price", "Buy Trade", "Sell Trade", "Upside", "Downside", "Trend"],
+                ["NVDA", "$180.25", "$171.50", "$192.00", "+6.5%", "-4.9%", "BULLISH"],
+                ["MSTR", "$412.00", "$380.00", "$450.00", "+9.2%", "-7.8%", "BEARISH"],
+            ]),
+        )
+        fetched_urls = []
+
+        snapshot = email_parser.parse_html_snapshot(
+            report_type="crypto-quant",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 7, 13, 5, tzinfo=timezone.utc),
+            s3_key="crypto-quant/message.html",
+            message_id="bitcoin-2026-08-07",
+            image_fetcher=lambda url: fetched_urls.append(url) or b"tracker-table",
+            textract_client=textract_client,
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["snapshotType"], "bitcoin-trend-tracker")
+        self.assertEqual(snapshot["cryptoCount"], 2)
+        self.assertEqual(snapshot["stockCount"], 2)
+        self.assertEqual(snapshot["data"]["cryptos"], {
+            "BTC": {
+                "price": Decimal("114000"),
+                "buyTrade": Decimal("108000"),
+                "sellTrade": Decimal("121000"),
+                "trend": "BULLISH",
+                "trade": "BULLISH",
+                "lrr": Decimal("108000"),
+                "hrr": Decimal("121000"),
+                "index": 0,
+                "performancePercent": 2.5,
+            },
+            "ETH": {
+                "price": Decimal("3610"),
+                "buyTrade": Decimal("3350"),
+                "sellTrade": Decimal("3900"),
+                "trend": "NEUTRAL",
+                "trade": "NEUTRAL",
+                "lrr": Decimal("3350"),
+                "hrr": Decimal("3900"),
+                "index": 1,
+                "performancePercent": -1.2,
+            },
+        })
+        self.assertEqual(snapshot["data"]["stocks"]["NVDA"], {
+            "price": Decimal("180.25"),
+            "buyTrade": Decimal("171.50"),
+            "sellTrade": Decimal("192.00"),
+            "upside": Decimal("6.5"),
+            "downside": Decimal("-4.9"),
+            "trend": "BULLISH",
+            "trade": "BULLISH",
+            "lrr": Decimal("171.50"),
+            "hrr": Decimal("192.00"),
+            "index": 0,
+        })
+        self.assertEqual(fetched_urls, [
+            f"{source_root}/BTC_2.png",
+            f"{source_root}/BTC_9.png",
+        ])
+        self.assertEqual(len(textract_client.calls), 2)
+        self.assertNotIn("private", json.dumps(snapshot, default=str))
+
+    def test_tracker_chart_selection_uses_verified_ordinals_as_filename_fallback(self):
+        source_root = "https://d1yhils6iwh5l5.cloudfront.net/charts/fallback"
+        textract_client = FakeTextract(textract_table_response([
+            ["Ticker", "Buy Trade", "Sell Trade", "Upside", "Downside", "Trend"],
+            ["NVDA", "171", "183", "7", "-4", "BULLISH"],
+        ]))
+        fetched_urls = []
+        snapshot = email_parser.parse_html_snapshot(
+            report_type="momo-tracker",
+            html_body="".join(
+                f'<img src="{source_root}/chart-{index}.png">' for index in range(6)
+            ),
+            received_at=datetime(2026, 8, 7, 12, 15, tzinfo=timezone.utc),
+            s3_key="momo-tracker/fallback.html",
+            message_id="momo-fallback",
+            image_fetcher=lambda url: fetched_urls.append(url) or b"momo-table",
+            textract_client=textract_client,
+        )
+
+        self.assertEqual(snapshot["data"]["NVDA"]["trend"], "BULLISH")
+        self.assertEqual(fetched_urls, [f"{source_root}/chart-5.png"])
+
+    def test_tracker_tables_fail_closed_for_malformed_required_data(self):
+        valid_header = [
+            "Ticker", "Price", "Buy Trade", "Sell Trade", "Upside", "Downside", "Trend",
+        ]
+        cases = (
+            ("headers", [["Ticker", "Price", "Trend"], ["NVDA", "180", "BULLISH"]]),
+            ("incomplete", [valid_header, ["NVDA", "180", "171", "", "6", "-4", "BULLISH"]]),
+            ("range", [valid_header, ["NVDA", "180", "190", "171", "6", "-4", "BULLISH"]]),
+            ("trend", [valid_header, ["NVDA", "180", "171", "190", "6", "-4", "STRONG"]]),
+            ("number", [valid_header, ["NVDA", "about 180", "171", "190", "6", "-4", "BULLISH"]]),
+        )
+        for label, rows in cases:
+            with self.subTest(label=label):
+                with self.assertRaises(ValueError):
+                    email_parser._parse_tracker_table(
+                        rows,
+                        required_fields=(
+                            "ticker",
+                            "price",
+                            "buyTrade",
+                            "sellTrade",
+                            "upside",
+                            "downside",
+                            "trend",
+                        ),
+                    )
+
+    def test_momo_outbucket_rows_fail_closed_unless_the_contract_is_complete(self):
+        required = (
+            "ticker", "buyTrade", "sellTrade", "upside", "downside", "trend",
+        )
+        header = ["Ticker", "Buy Trade", "Sell Trade", "Upside", "Downside", "Trend"]
+        invalid_rows = (
+            ["ORCL", "Outbucket (08/13)", "130", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/14)", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/13)", "1.2%", "", "BULLISH"],
+            ["ORCL", "Outbuckat (08/13)", "Outbuckat (08/13)", "", "", "BULLISH"],
+            ["ORCL", "Outbucket (08/13)", "Outbucket (08/13)", "", "", "UNKNOWN"],
+        )
+
+        for row in invalid_rows:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                email_parser._parse_tracker_table(
+                    [header, row],
+                    required_fields=required,
+                    allow_outbucket_rows=True,
+                )
+
+    def test_bitcoin_tracker_rejects_outbucket_rows(self):
+        rows = [
+            ["Crypto", "Price", "Buy Trade", "Sell Trade", "Trend"],
+            ["BTC", "64517", "Outbucket (08/13)", "Outbucket (08/13)", "BULLISH"],
+        ]
+
+        with self.assertRaises(ValueError):
+            email_parser._parse_tracker_table(
+                rows,
+                required_fields=("ticker", "price", "buyTrade", "sellTrade", "trend"),
+            )
+
+    def test_tracker_unsafe_url_oversize_and_textract_failures_never_index(self):
+        unsafe_textract = FakeTextract(textract_table_response([]))
+        unsafe = email_parser.parse_html_snapshot(
+            report_type="momo-tracker",
+            html_body='<img src="https://example.com/6.png?subscriber=private">',
+            received_at=datetime(2026, 8, 7, 12, 15, tzinfo=timezone.utc),
+            s3_key="momo-tracker/unsafe.html",
+            message_id="momo-unsafe",
+            textract_client=unsafe_textract,
+        )
+        self.assertIsNone(unsafe)
+        self.assertEqual(unsafe_textract.calls, [])
+
+        safe_html = (
+            '<img src="https://d1yhils6iwh5l5.cloudfront.net/charts/6.png">'
+        )
+        for label, image_fetcher, textract_client in (
+            (
+                "oversized",
+                lambda _url: (_ for _ in ()).throw(ValueError("image exceeds size limit")),
+                FakeTextract(textract_table_response([])),
+            ),
+            (
+                "textract",
+                lambda _url: b"source-table",
+                FakeTextract(RuntimeError("Textract unavailable")),
+            ),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaises(Exception):
+                    email_parser.parse_html_snapshot(
+                        report_type="momo-tracker",
+                        html_body=safe_html,
+                        received_at=datetime(2026, 8, 7, 12, 15, tzinfo=timezone.utc),
+                        s3_key=f"momo-tracker/{label}.html",
+                        message_id=f"momo-{label}",
+                        image_fetcher=image_fetcher,
+                        textract_client=textract_client,
+                    )
+
+    def test_fresh_tracker_html_passes_textract_and_indexes_valid_events(self):
+        tracker_snapshot = {
+            "date": "2026-08-07",
+            "snapshotType": "momo-tracker",
+            "reportType": "momo-tracker",
+            "source": "gmail-html",
+            "scrapedAt": "2026-08-07T12:15:00+00:00",
+            "publishedAt": "2026-08-07T12:15:00+00:00",
+            "gmailMessageId": "momo-fresh",
+            "data": {
+                "NVDA": {
+                    "buyTrade": Decimal("171"),
+                    "sellTrade": Decimal("183"),
+                    "trend": "BULLISH",
+                },
+            },
+        }
+        table = FakeLedgerTable()
+        parser = MagicMock(return_value=tracker_snapshot)
+        textract_client = object()
+        with patch.object(ingestor, "textract", textract_client), patch.object(
+            ingestor, "put_immutable_s3_object", return_value=True
+        ), patch.object(
+            ingestor, "parse_html_snapshot", parser
+        ), patch.object(
+            ingestor, "persist_research_event_ledger", return_value=1
+        ), patch.object(
+            ingestor, "persist_snapshot_intelligence", return_value=1
+        ), patch.object(
+            ingestor, "materialize_email_snapshot", return_value=({}, True)
+        ), patch.object(
+            ingestor, "finalize_snapshot_intelligence"
+        ) as finalize:
+            result = ingestor.upload_attachment(
+                access_token="token",
+                user_id="me",
+                message_id="momo-fresh",
+                attachment={
+                    "attachmentId": "message-body-html-0",
+                    "filename": "message-body.html",
+                    "mimeType": "text/html",
+                    "inlineData": base64.urlsafe_b64encode(
+                        b"<html><body>MOMO Tracker</body></html>"
+                    ).decode("ascii"),
+                },
+                headers={"subject": "MOMO Tracker", "from": "research@hedgeye.com"},
+                received_at=datetime(2026, 8, 7, 12, 15, tzinfo=timezone.utc),
+                table=table,
+            )
+
+        self.assertEqual(result[0], "stored")
+        self.assertIs(parser.call_args.kwargs["textract_client"], textract_client)
+        self.assertEqual(
+            table.items[("momo-fresh", "message-body-html-0")]["materializationStatus"],
+            "INDEXED",
+        )
+        finalize.assert_called_once()
+
+    def test_forced_tracker_html_backfill_passes_textract_and_indexes_valid_events(self):
+        legacy_item = {
+            "messageId": "bitcoin-backfill",
+            "attachmentId": "message-body-html-0",
+            "status": "INDEXED",
+            "filename": "message-body.html",
+            "mimeType": "text/html",
+            "reportType": "crypto-quant",
+            "subject": "Bitcoin Trend Tracker",
+            "s3Bucket": "research",
+            "s3Key": "crypto-quant/message.html",
+            "contentSha256": "a" * 64,
+            "materializationAttemptVersion": "gmail-materialized-v4-canonical-verification",
+            "materializationStatus": "PARSED",
+        }
+        self.assertTrue(ingestor._should_backfill_materialized_snapshot(
+            legacy_item,
+            allow_version_upgrade=True,
+        ))
+        table = FakeLedgerTable([legacy_item])
+        body = MagicMock()
+        body.read.return_value = b"<html><body>Bitcoin Trend Tracker</body></html>"
+        s3_client = MagicMock()
+        s3_client.get_object.return_value = {"Body": body}
+        tracker_snapshot = {
+            "date": "2026-08-07",
+            "snapshotType": "bitcoin-trend-tracker",
+            "reportType": "crypto-quant",
+            "source": "gmail-html",
+            "scrapedAt": "2026-08-07T13:05:00+00:00",
+            "publishedAt": "2026-08-07T13:05:00+00:00",
+            "gmailMessageId": "bitcoin-backfill",
+            "data": {
+                "cryptos": {
+                    "BTC": {
+                        "buyTrade": Decimal("108000"),
+                        "sellTrade": Decimal("121000"),
+                        "trend": "BULLISH",
+                    },
+                },
+            },
+        }
+        parser = MagicMock(return_value=tracker_snapshot)
+        textract_client = object()
+        with patch.object(ingestor, "textract", textract_client), patch.object(
+            ingestor, "s3", s3_client
+        ), patch.object(
+            ingestor, "parse_html_snapshot", parser
+        ), patch.object(
+            ingestor, "persist_research_event_ledger", return_value=1
+        ), patch.object(
+            ingestor, "persist_snapshot_intelligence", return_value=1
+        ), patch.object(
+            ingestor, "materialize_email_snapshot", return_value=({}, True)
+        ), patch.object(
+            ingestor, "finalize_snapshot_intelligence"
+        ) as finalize:
+            materialized = ingestor.backfill_html_snapshot(
+                table=table,
+                message_id="bitcoin-backfill",
+                attachment_id="message-body-html-0",
+                report_type="crypto-quant",
+                mime_type="text/html",
+                received_at=datetime(2026, 8, 7, 13, 5, tzinfo=timezone.utc),
+                ledger_item=legacy_item,
+            )
+
+        self.assertTrue(materialized)
+        self.assertIs(parser.call_args.kwargs["textract_client"], textract_client)
+        self.assertEqual(
+            table.items[("bitcoin-backfill", "message-body-html-0")]["materializationStatus"],
+            "INDEXED",
+        )
+        finalize.assert_called_once()
 
     def test_explicit_version_backfill_reclassifies_previously_unknown_market_situation_email(self):
         legacy_item = {
@@ -2414,6 +3489,107 @@ class HermesGmailIngestorTests(unittest.TestCase):
                 legacy_item,
                 allow_version_upgrade=True,
             )
+        )
+
+    def test_top_three_things_classification_wins_over_macro_show_materials_subject(self):
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+            ),
+            "top-3-things",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "THE MACRO SHOW: Summary Notes & Replay | Monday, August 17th, 2026",
+            ),
+            "the-macro-show",
+        )
+
+    def test_top_three_things_parser_preserves_macro_show_numbering(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html>
+                  <head>
+                    <meta type="hedgeye-headline"
+                          content="August 17th - Access Show, Slide Deck &amp; Top 3 Things">
+                  </head>
+                  <body>
+                    <div>08/17/2026 08:41 AM EDT</div>
+                    <div class="headline">THE MACRO SHOW: August 17th - Access Show, Slide Deck &amp; Top 3 Things</div>
+                    <p>Hedgeye's top 3 things</p>
+                    <p>SPY was down small on decelerating volume Friday.</p>
+                    <p>1) USD – Dollar Index is making fresh two-month lows.</p>
+                    <p>2) GOLD – Gold has the cleanest inverse correlation to USD.</p>
+                    <p>3) ATHs (all-time highs) – RSP and IWM printed new highs.</p>
+                    <p>VIEW LINK</p>
+                  </body>
+                </html>
+            """,
+            received_at=datetime(2026, 8, 17, 12, 42, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-macro.html",
+            message_id="top-three-macro",
+            subject="THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["snapshotType"], "top-3-things")
+        self.assertEqual(snapshot["itemCount"], 3)
+        self.assertEqual(
+            snapshot["data"]["items"],
+            [
+                {
+                    "rank": 1,
+                    "title": "USD",
+                    "body": "Dollar Index is making fresh two-month lows.",
+                },
+                {
+                    "rank": 2,
+                    "title": "GOLD",
+                    "body": "Gold has the cleanest inverse correlation to USD.",
+                },
+                {
+                    "rank": 3,
+                    "title": "ATHs (all-time highs)",
+                    "body": "RSP and IWM printed new highs.",
+                },
+            ],
+        )
+        self.assertEqual(
+            snapshot["data"]["intro"],
+            "SPY was down small on decelerating volume Friday.",
+        )
+
+    def test_top_three_things_parser_supports_standalone_km_ordered_list(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html><body>
+                  <div>08/13/2026 07:05 AM EDT</div>
+                  <div class="headline">KM's Top 3 Things (Rates/KOSPI/Volatility)</div>
+                  <p><b>Takeaway:</b> <i>Top 3 Things today: Rates, KOSPI, Volatility</i></p>
+                  <ol>
+                    <li><b>RATES –</b> The yield curve steepened.</li>
+                    <li><b>KOSPI –</b> The signal improved.</li>
+                    <li><b>VOLATILITY –</b> VIX signaled lower lows.</li>
+                  </ol>
+                </body></html>
+            """,
+            received_at=datetime(2026, 8, 13, 11, 5, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-km.html",
+            message_id="top-three-km",
+            subject="KM's Top 3 Things (Rates/KOSPI/Volatility)",
+        )
+
+        self.assertEqual(
+            snapshot["data"]["items"],
+            [
+                {"rank": 1, "title": "RATES", "body": "The yield curve steepened."},
+                {"rank": 2, "title": "KOSPI", "body": "The signal improved."},
+                {"rank": 3, "title": "VOLATILITY", "body": "VIX signaled lower lows."},
+            ],
         )
 
     def test_article_only_call_and_macro_show_emails_materialize_without_inventing_positions(self):
@@ -2624,6 +3800,50 @@ class HermesGmailIngestorTests(unittest.TestCase):
         corrected = rta_snapshot("gmail-rta", "2026-07-15T16:00:00+00:00", "SELL")
         with self.assertRaisesRegex(RuntimeError, "RESEARCH_EVENT_CONFLICT"):
             ingestor.persist_research_event_ledger(corrected, database, content_sha256="b" * 64)
+
+    def test_investing_ideas_materializes_one_typed_event_per_position(self):
+        database = FakeEventDynamoDb()
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="investing-ideas",
+            html_body="""
+                <table>
+                  <tr><th>Ticker</th><th>Position</th><th>Previous Close</th><th>LRR</th><th>HRR</th></tr>
+                  <tr><td>DDOG</td><td>Long</td><td>267.97</td><td>244</td><td>275</td></tr>
+                  <tr><td>HCA</td><td>Short</td><td>402.59</td><td>363</td><td>418</td></tr>
+                </table>
+            """,
+            received_at=datetime(2026, 8, 10, 12, 45, tzinfo=timezone.utc),
+            s3_key="investing-ideas/2026-08-10.html",
+            message_id="investing-ideas-2026-08-10",
+            subject="Investing Ideas Newsletter",
+        )
+
+        written = ingestor.persist_research_event_ledger(
+            snapshot,
+            database,
+            content_sha256="d" * 64,
+        )
+
+        self.assertEqual(written, 2)
+        events = sorted(database.table.items.values(), key=lambda item: item["payload"]["ticker"])
+        self.assertEqual([event["eventType"] for event in events], [
+            "INVESTING_IDEA_POSITION",
+            "INVESTING_IDEA_POSITION",
+        ])
+        self.assertEqual([event["payload"]["ticker"] for event in events], ["DDOG", "HCA"])
+        self.assertTrue(all(event["sourceKind"] == "investing-idea-position" for event in events))
+        self.assertEqual(events[0]["payload"]["side"], "Long")
+        self.assertEqual(events[0]["payload"]["bias"], "BULLISH")
+        self.assertEqual(events[0]["payload"]["prevClose"], Decimal("267.97"))
+        self.assertEqual(events[0]["payload"]["lrr"], Decimal("244"))
+        self.assertEqual(events[0]["payload"]["hrr"], Decimal("275"))
+        self.assertFalse(events[0]["decisionEligible"])
+
+        verification = ingestor.verify_research_event_ledger(database)
+        self.assertEqual(
+            verification["products"]["investing-ideas"],
+            {"eventCount": 2, "unverifiedEventCount": 0},
+        )
 
     def test_force_backfill_verification_requires_both_products_and_matching_hashes(self):
         database = FakeEventDynamoDb()
@@ -3357,6 +4577,91 @@ class HermesGmailIngestorTests(unittest.TestCase):
             "MESSAGE_PROCESSED",
         )
 
+    def test_market_situation_webcast_is_ignored_from_metadata_without_fetching_body(self):
+        table = FakeLedgerTable()
+        subject = (
+            "MARKET SITUATION REPORT: VIDEO | Market Situation Report Webcast | "
+            "August 10, 2026"
+        )
+        metadata = {
+            "internalDate": "1786357800000",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": subject},
+                    {"name": "From", "value": "Hedgeye <research@hedgeye.com>"},
+                    {"name": "Date", "value": "Mon, 10 Aug 2026 03:30:00 -0400"},
+                ]
+            },
+        }
+
+        with patch.object(
+            ingestor, "get_message_metadata", return_value=metadata
+        ) as get_metadata, patch.object(
+            ingestor, "get_message"
+        ) as get_message, patch.object(
+            ingestor, "s3"
+        ) as s3_client:
+            result = ingestor.process_message(
+                "token", "me", "gmail-market-webcast", table
+            )
+
+        get_metadata.assert_called_once()
+        get_message.assert_not_called()
+        s3_client.put_object.assert_not_called()
+        s3_client.get_object.assert_not_called()
+        self.assertTrue(result["ignored"])
+        self.assertEqual(result["skipped"][0]["detail"], "market-structure-webcast")
+        sentinel = table.items[
+            ("gmail-market-webcast", ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)
+        ]
+        self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
+        self.assertEqual(sentinel["ignoredReason"], "market-structure-webcast")
+        self.assertFalse(sentinel["bodyFetched"])
+        self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown")
+
+        table.items[("gmail-market-webcast", "legacy-message-body")] = {
+            "messageId": "gmail-market-webcast",
+            "attachmentId": "legacy-message-body",
+            "status": "ERROR",
+            "retryable": True,
+            "mimeType": "text/html",
+            "filename": "message-body.html",
+            "subject": subject,
+        }
+        with patch.object(ingestor, "get_message_metadata") as repeated_metadata, patch.object(
+            ingestor, "get_message"
+        ) as repeated_message:
+            repeated = ingestor.process_message(
+                "token", "me", "gmail-market-webcast", table
+            )
+        repeated_metadata.assert_not_called()
+        repeated_message.assert_not_called()
+        self.assertTrue(repeated["ignored"])
+        self.assertEqual(
+            repeated["skipped"][0]["detail"],
+            "market-structure-webcast",
+        )
+
+        old_webcast = {
+            "messageId": "old-webcast",
+            "attachmentId": "message-body-html-0",
+            "status": "INDEXED",
+            "mimeType": "text/html",
+            "filename": "message-body.html",
+            "reportType": "market-structure",
+            "snapshotType": "market-structure",
+            "subject": subject,
+            "s3Bucket": "private-bucket",
+            "s3Key": "hedgeye-email/messages/private-webcast.html",
+            "materializationAttemptVersion": "old-parser",
+        }
+        self.assertFalse(
+            ingestor._should_backfill_materialized_snapshot(
+                old_webcast,
+                allow_version_upgrade=True,
+            )
+        )
+
     def test_terminal_row_without_sentinel_refetches_and_finishes_missing_attachment(self):
         table = FakeLedgerTable(
             [
@@ -3400,7 +4705,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
         }
         s3_client = MagicMock()
 
-        with patch.object(ingestor, "get_message", return_value=message) as get_message, patch.object(
+        with patch.object(ingestor, "get_message_metadata", return_value=message), patch.object(
+            ingestor, "get_message", return_value=message
+        ) as get_message, patch.object(
             ingestor, "s3", s3_client
         ):
             result = ingestor.process_message("token", "me", "gmail-partial", table)
@@ -3454,7 +4761,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
         now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
         s3_client = MagicMock()
 
-        with patch.object(ingestor, "get_message", return_value=message), patch.object(
+        with patch.object(ingestor, "get_message_metadata", return_value=message), patch.object(
+            ingestor, "get_message", return_value=message
+        ), patch.object(
             ingestor, "utc_now", return_value=now
         ), patch.object(ingestor, "s3", s3_client):
             result = ingestor.process_message("token", "me", "gmail-crash", table)
@@ -3503,7 +4812,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
         now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
         s3_client = MagicMock()
 
-        with patch.object(ingestor, "get_message", return_value=message), patch.object(
+        with patch.object(ingestor, "get_message_metadata", return_value=message), patch.object(
+            ingestor, "get_message", return_value=message
+        ), patch.object(
             ingestor, "utc_now", return_value=now
         ), patch.object(ingestor, "s3", s3_client):
             result = ingestor.process_message("token", "me", "gmail-active", table)
@@ -3742,7 +5053,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
         }
         s3_client = MagicMock()
 
-        with patch.object(ingestor, "get_message", return_value=message), patch.object(
+        with patch.object(ingestor, "get_message_metadata", return_value=message), patch.object(
+            ingestor, "get_message", return_value=message
+        ), patch.object(
             ingestor, "s3", s3_client
         ), patch.object(ingestor, "parse_html_snapshot", return_value=None), patch.object(
             ingestor, "persist_snapshot_failure"
@@ -3802,7 +5115,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
                     failure if failure_stage == "materialize" else MagicMock()
                 )
 
-                with patch.object(ingestor, "get_message", return_value=message), patch.object(
+                with patch.object(ingestor, "get_message_metadata", return_value=message), patch.object(
+                    ingestor, "get_message", return_value=message
+                ), patch.object(
                     ingestor, "s3", s3_client
                 ), patch.object(
                     ingestor,
@@ -3884,6 +5199,16 @@ class HermesGmailIngestorTests(unittest.TestCase):
 
         with patch.object(ingestor, "s3", s3_client), patch.object(
             ingestor, "parse_html_snapshot", side_effect=RuntimeError("parse failed")
+        ), patch.object(
+            ingestor,
+            "get_message_metadata",
+            return_value={
+                "payload": {
+                    "headers": [
+                        {"name": "Subject", "value": "Real-Time Alert: BUY Signal: SPY"}
+                    ]
+                }
+            },
         ), patch.object(
             ingestor,
             "get_message",
@@ -4093,10 +5418,40 @@ class HermesGmailIngestorTests(unittest.TestCase):
         )
         s3_client.get_object.assert_not_called()
 
+    def test_market_structure_chart_archive_is_content_addressed_and_private(self):
+        payload = market_situation_signal_png()
+        digest = hashlib.sha256(payload).hexdigest()
+
+        with patch.object(
+            ingestor, "put_immutable_s3_object", return_value=True
+        ) as put_immutable:
+            archived = ingestor.archive_market_structure_chart(
+                chart={"name": "signals.png", "url": "https://approved.example/chart.png"},
+                payload=payload,
+                content_type="image/png",
+                extension="png",
+                content_sha256=digest,
+            )
+
+        expected_key = f"{ingestor.MARKET_STRUCTURE_ASSET_PREFIX}{digest}.png"
+        self.assertEqual(archived, {"id": digest, "s3Key": expected_key})
+        put_immutable.assert_called_once_with(
+            bucket=ingestor.S3_BUCKET,
+            key=expected_key,
+            body=payload,
+            content_type="image/png",
+            metadata={
+                "source": "gmail-market-structure",
+                "report-type": "market-structure",
+                "content-sha256": digest,
+            },
+            content_sha256=digest,
+        )
+
     def test_message_budget_is_checked_before_each_attachment(self):
         table = FakeLedgerTable()
         budget_check = MagicMock(
-            side_effect=[None, None, "GMAIL_INVOCATION_NEAR_TIMEOUT"]
+            side_effect=[None, None, None, "GMAIL_INVOCATION_NEAR_TIMEOUT"]
         )
         message = {
             "internalDate": "1784120400000",
@@ -4117,6 +5472,8 @@ class HermesGmailIngestorTests(unittest.TestCase):
         }
 
         with patch.object(
+            ingestor, "get_message_metadata", return_value=message
+        ), patch.object(
             ingestor, "get_message", return_value=message
         ) as get_message, patch.object(
             ingestor, "upload_attachment"
@@ -4138,7 +5495,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         )
         get_message.assert_called_once()
         upload_attachment.assert_not_called()
-        self.assertEqual(budget_check.call_count, 3)
+        self.assertEqual(budget_check.call_count, 4)
 
 
 if __name__ == "__main__":

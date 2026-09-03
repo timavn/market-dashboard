@@ -10,11 +10,13 @@ export const DATA_SOURCES = {
   CRYPTO: 'crypto'
 };
 
-// Treasury Yield FRED Series IDs
-// Note: UST2Y, UST10Y, and UST30Y now use Yahoo Finance rate indices
-// for intraday/1D/5D chart support, so they are intentionally NOT
-// included here anymore.
+// Treasury Yield FRED Series IDs. Treasury observations are dated daily
+// references; they do not advertise intraday chart ranges.
 const FRED_SERIES = {
+  UST2Y: 'DGS2',
+  UST5Y: 'DGS5',
+  IG_OAS: 'BAMLC0A0CM',
+  HY_OAS: 'BAMLH0A0HYM2',
 };
 
 // Yahoo Finance ticker format mappings
@@ -23,13 +25,30 @@ const FRED_SERIES = {
 const YAHOO_TICKER_MAP = {
   // Indices (need ^ prefix)
   'SPX': '^GSPC',
+  'DJI': '^DJI',
   'COMPQ': '^IXIC',
+  'IXIC': '^IXIC',
   'RUT': '^RUT',
   'NDX': '^NDX',
   'VIX': '^VIX',
+  'RSP': 'RSP',
+  'QQQ': 'QQQ',
+  'SMH': 'SMH',
   'DAX': '^GDAXI',
+  'FTSE': '^FTSE',
+  'CAC': '^FCHI',
+  'N100': '^N100',
+  'STOXX600': '^STOXX',
+  'SX5E': '^STOXX50E',
   'NIKK': '^N225',
+  'N225': '^N225',
+  'HSI': '^HSI',
+  'CSI300': '000300.SS',
   'SSEC': '000001.SS',  // Shanghai Composite
+  'KOSPI': '^KS11',
+  'TAIEX': '^TWII',
+  'NIFTY50': '^NSEI',
+  'AXJO': '^AXJO',
   
   // Currency pairs (Yahoo format)
   'EUR/USD': 'EURUSD=X',
@@ -50,15 +69,25 @@ const YAHOO_TICKER_MAP = {
   'WTIC': 'CL=F',      // WTI Crude Oil
   'WTI': 'CL=F',       // WTI Crude Oil (alias)
   'BRENT': 'BZ=F',     // Brent Crude Oil
+  'BZ': 'BZ=F',
   'NATGAS': 'NG=F',    // Natural Gas
+  'NG': 'NG=F',
   'GOLD': 'GC=F',      // Gold Futures
+  'GC': 'GC=F',
   'SILVER': 'SI=F',    // Silver Futures
+  'SI': 'SI=F',
   'COPPER': 'HG=F',    // Copper Futures
+  'HG': 'HG=F',
+  'PLATINUM': 'PL=F',  // Platinum Futures
+  'PL': 'PL=F',
+  'CORN': 'ZC=F',      // Corn Futures
+  'ZC': 'ZC=F',
   
   // Crypto (Yahoo Finance format)
   'BTC': 'BTC-USD',
   'BITCOIN': 'BTC-USD',
   'ETH': 'ETH-USD',
+  'BNB': 'BNB-USD',
   'SOL': 'SOL-USD',
   'AVAX': 'AVAX-USD',
   'XRP': 'XRP-USD',
@@ -69,9 +98,6 @@ const YAHOO_TICKER_MAP = {
   // Yahoo may quote percent directly (~4.58) or legacy yield×10 (~45.8); see treasuryYieldScale.cjs
   'UST10Y': '^TNX',    // 10-Year Treasury Yield Index
   'UST30Y': '^TYX',    // 30-Year Treasury Yield Index
-  // For 2-year, we currently proxy with the 5-year index due to
-  // Yahoo symbol limitations; adjust if a dedicated 2Y index is added.
-  'UST2Y': '^FVX',
 };
 
 /**
@@ -164,8 +190,5 @@ export const getApiTicker = (ticker) => {
   const config = getSecurityConfig(ticker);
   return config.apiTicker;
 };
-
-
-
 
 

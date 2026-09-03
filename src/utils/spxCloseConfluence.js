@@ -63,6 +63,94 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null) ?? null;
 }
 
+const MONTH_NUMBER = Object.freeze({
+  JANUARY: 1,
+  FEBRUARY: 2,
+  MARCH: 3,
+  APRIL: 4,
+  MAY: 5,
+  JUNE: 6,
+  JULY: 7,
+  AUGUST: 8,
+  SEPTEMBER: 9,
+  OCTOBER: 10,
+  NOVEMBER: 11,
+  DECEMBER: 12,
+});
+
+function marketStructureSignalValue(data, id, label) {
+  const normalizedId = String(id || '').trim().toLowerCase();
+  const normalizedLabel = String(label || '').trim().toLowerCase();
+  const signal = (Array.isArray(data?.signals) ? data.signals : []).find((candidate) => (
+    String(candidate?.id || '').trim().toLowerCase() === normalizedId
+    || String(candidate?.label || '').trim().toLowerCase() === normalizedLabel
+  ));
+  const value = signal?.value;
+  return value == null || String(value).trim() === '' ? null : value;
+}
+
+function marketStructureNarrative(snapshot) {
+  const blocks = Array.isArray(snapshot?.data?.blocks) ? snapshot.data.blocks : [];
+  return [
+    snapshot?.article?.reportHeading,
+    snapshot?.article?.bodyText,
+    ...blocks.map((block) => block?.text),
+  ].filter((value) => typeof value === 'string' && value.trim()).join('\n');
+}
+
+function explicitMarketStructureNumber(snapshot, patterns) {
+  const narrative = marketStructureNarrative(snapshot);
+  for (const pattern of patterns) {
+    const match = narrative.match(pattern);
+    const value = finiteNumber(match?.[1]);
+    if (value != null) return value;
+  }
+  return null;
+}
+
+function isoCalendarDate(year, month, day) {
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (
+    !Number.isInteger(Number(year))
+    || !Number.isInteger(Number(month))
+    || !Number.isInteger(Number(day))
+    || date.getUTCFullYear() !== Number(year)
+    || date.getUTCMonth() + 1 !== Number(month)
+    || date.getUTCDate() !== Number(day)
+  ) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function marketStructureCoverage(snapshot, sourceDate) {
+  if (snapshot?.contentComplete !== true || !sourceDate) return null;
+  const match = marketStructureNarrative(snapshot).match(
+    /\bWEEKLY\s+GAME\s+PLAN\b\s*:?\s*(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+(\d{1,2})(?:ST|ND|RD|TH)?\s*(?:-|–|—|TO)\s*(?:(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+)?(\d{1,2})(?:ST|ND|RD|TH)?(?:\s*,?\s*(\d{4}))?/i,
+  );
+  if (!match) return null;
+
+  const sourceYear = Number(String(sourceDate).slice(0, 4));
+  const startMonth = MONTH_NUMBER[String(match[1]).toUpperCase()];
+  const endMonth = MONTH_NUMBER[String(match[3] || match[1]).toUpperCase()];
+  const startYear = Number(match[5] || sourceYear);
+  const endYear = endMonth < startMonth ? startYear + 1 : startYear;
+  const validFrom = isoCalendarDate(startYear, startMonth, Number(match[2]));
+  const validThrough = isoCalendarDate(endYear, endMonth, Number(match[4]));
+  if (!validFrom || !validThrough) return null;
+
+  const sourceMs = Date.parse(`${sourceDate}T12:00:00.000Z`);
+  const startMs = Date.parse(`${validFrom}T12:00:00.000Z`);
+  const endMs = Date.parse(`${validThrough}T12:00:00.000Z`);
+  if (
+    !Number.isFinite(sourceMs)
+    || !Number.isFinite(startMs)
+    || !Number.isFinite(endMs)
+    || endMs < startMs
+    || sourceMs < startMs - 24 * 60 * 60_000
+    || sourceMs > endMs
+  ) return null;
+  return { validFrom, validThrough };
+}
+
 function findTickerSlot(data, ticker) {
   if (!data || typeof data !== 'object') return null;
   const upper = String(ticker || '').toUpperCase();
@@ -125,33 +213,45 @@ export function extractSpxTradeSignal(snapshot, riskRange = null) {
 export function normalizeMarketStructureSnapshot(snapshot) {
   const data = snapshot?.data && typeof snapshot.data === 'object' ? snapshot.data : {};
   const spx = data.SPX || data.spx || data.marketStructure || data.market_structure || {};
+  const completeReport = snapshot?.snapshotType === 'market-structure' && snapshot?.contentComplete === true;
+  const reportSignals = completeReport ? data : null;
   const gammaExposureRaw = firstDefined(
     spx.gammaExposure,
     spx.spxGammaExposure,
     data.gammaExposure,
     data.spxGammaExposure,
+    marketStructureSignalValue(reportSignals, 'spxGammaExposure', 'SPX Gamma Exposure'),
   );
   const systematicRaw = firstDefined(
     spx.systematicFlowRisk,
     spx.systematicFlow,
     data.systematicFlowRisk,
     data.systematicFlow,
+    marketStructureSignalValue(reportSignals, 'systematicFlowRisk', 'Systematic Flow Risk'),
   );
   const pvRaw = firstDefined(
     spx.pvBandRiskReward,
     spx.pvBand,
     data.pvBandRiskReward,
     data.pvBand,
+    marketStructureSignalValue(reportSignals, 'pvBandRiskReward', 'PV Band Risk/Reward'),
   );
   const allocationRaw = firstDefined(
     spx.strategicAllocation,
     data.strategicAllocation,
+    marketStructureSignalValue(reportSignals, 'strategicAllocation', 'Strategic Allocation'),
   );
+  const sourceDate = spx.date || data.date || snapshot?.date || null;
+  const coverage = marketStructureCoverage(snapshot, sourceDate);
 
   return {
-    date: spx.date || data.date || snapshot?.date || null,
+    date: sourceDate,
+    validFrom: coverage?.validFrom || null,
+    validThrough: coverage?.validThrough || null,
     scrapedAt: snapshot?.scrapedAt || snapshot?.updatedAt || null,
-    source: snapshot ? (snapshot.snapshotType || 'market-structure') : null,
+    source: snapshot
+      ? (snapshot.snapshotType === 'market-structure' ? 'Market Situation Report' : snapshot.snapshotType)
+      : null,
     gammaExposure: normalizeGammaExposure(gammaExposureRaw),
     gammaExposureRaw,
     gammaThrottle: finiteNumber(firstDefined(
@@ -159,6 +259,10 @@ export function normalizeMarketStructureSnapshot(snapshot) {
       spx.gammaVolatilityThrottle,
       data.gammaThrottle,
       data.gammaVolatilityThrottle,
+      completeReport ? explicitMarketStructureNumber(snapshot, [
+        /\b(?:SPX\s+)?GAMMA(?:\s+VOLATILITY)?\s+THROTTLE\b\s*(?::|=|AT|IS|OF)\s*([+-]?\d+(?:\.\d+)?)/i,
+        /\bGVT(?:\s+INDEX)?\b\s*(?::|=|AT|IS|OF)\s*([+-]?\d+(?:\.\d+)?)/i,
+      ]) : null,
     )),
     realizedVol10d: finiteNumber(firstDefined(
       spx.realizedVol10d,
@@ -216,6 +320,21 @@ function dateOnly(value) {
 
 export function isExactSessionInput(value, targetDate) {
   return Boolean(dateOnly(value) && dateOnly(value) === dateOnly(targetDate));
+}
+
+export function isCoveredSessionInput(value, targetDate) {
+  if (isExactSessionInput(value?.date, targetDate)) return true;
+  const target = dateOnly(targetDate);
+  const validFrom = dateOnly(value?.validFrom);
+  const validThrough = dateOnly(value?.validThrough);
+  return Boolean(
+    target
+    && validFrom
+    && validThrough
+    && validFrom <= validThrough
+    && target >= validFrom
+    && target <= validThrough
+  );
 }
 
 export function isRecentReferenceInput(value, targetDate, maxCalendarDays = 3) {
@@ -302,12 +421,13 @@ function structureDirection(value, kind) {
 
 function structureScore(structure, direction, targetDate) {
   const exactDate = isExactSessionInput(structure?.date, targetDate);
+  const currentForSession = isCoveredSessionInput(structure, targetDate);
   const fieldsPresent = Boolean(
     structure?.systematicFlow &&
     structure?.pvBand &&
     structure?.strategicAllocation
   );
-  const inputAvailable = Boolean(exactDate && fieldsPresent);
+  const inputAvailable = Boolean(currentForSession && fieldsPresent);
   const available = Boolean(direction && inputAvailable);
   const directions = available ? [
     structureDirection(structure.systematicFlow, 'flow'),
@@ -317,7 +437,7 @@ function structureScore(structure, direction, targetDate) {
   const alignedCount = directions.filter((value) => value === direction).length;
   const conflictCount = directions.filter((value) => value && value !== direction).length;
   const points = available ? (alignedCount === 3 ? 2 : alignedCount >= 2 ? 1 : 0) : null;
-  return { inputAvailable, exactDate, available, points, alignedCount, conflictCount };
+  return { inputAvailable, exactDate, currentForSession, available, points, alignedCount, conflictCount };
 }
 
 export function buildSpxCloseConfluence({
@@ -361,7 +481,7 @@ export function buildSpxCloseConfluence({
   const eligibilityPassed = blockers.length === 0;
   const correlation = correlationScore(usd, targetDate, historical);
   const structure = structureScore(marketStructure, direction, targetDate);
-  const gammaCurrent = isExactSessionInput(marketStructure?.date, targetDate);
+  const gammaCurrent = isCoveredSessionInput(marketStructure, targetDate);
   const gamma = gammaCurrent
     ? gammaScore(marketStructure?.gammaExposure, geometry.coverage, geometry.available)
     : { inputAvailable: false, available: false, points: null };

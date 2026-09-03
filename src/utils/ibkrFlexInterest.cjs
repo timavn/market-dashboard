@@ -3,6 +3,34 @@ const { XMLParser, XMLValidator } = require('fast-xml-parser');
 const BASE_SUMMARY_CURRENCY = 'BASE_SUMMARY';
 const BROKER_INTEREST_PAID = 'Broker Interest Paid';
 const BROKER_INTEREST_RECEIVED = 'Broker Interest Received';
+const STOCK_BORROW_FEE_DESCRIPTION = /\bBORROW\s+FEES?\b/i;
+const SECURITIES_LENDING_INCOME_DESCRIPTION = /\b(?:IBKR\s+MANAGED\s+SECURITIES|SYEP)\b/i;
+const MONTH_NAMES = Object.freeze({
+  JAN: '01',
+  JANUARY: '01',
+  FEB: '02',
+  FEBRUARY: '02',
+  MAR: '03',
+  MARCH: '03',
+  APR: '04',
+  APRIL: '04',
+  MAY: '05',
+  JUN: '06',
+  JUNE: '06',
+  JUL: '07',
+  JULY: '07',
+  AUG: '08',
+  AUGUST: '08',
+  SEP: '09',
+  SEPT: '09',
+  SEPTEMBER: '09',
+  OCT: '10',
+  OCTOBER: '10',
+  NOV: '11',
+  NOVEMBER: '11',
+  DEC: '12',
+  DECEMBER: '12',
+});
 
 function createInterestError(message, code = 'flex_interest_parse_error') {
   const error = new Error(message);
@@ -197,6 +225,32 @@ function canonicalCashInterestType(value) {
   return null;
 }
 
+function isStockBorrowFeeTransaction(row) {
+  return row?.type === BROKER_INTEREST_PAID
+    && STOCK_BORROW_FEE_DESCRIPTION.test(String(row?.description || ''));
+}
+
+function isSecuritiesLendingIncomeTransaction(row) {
+  return row?.type === BROKER_INTEREST_RECEIVED
+    && SECURITIES_LENDING_INCOME_DESCRIPTION.test(
+      String(row?.description || ''),
+    );
+}
+
+function coveredMonthFromDescription(description) {
+  const text = String(description || '').toUpperCase();
+  const namedMonth = text.match(/\bFOR\s+([A-Z]+)[-\s]+(\d{4})\b/);
+  if (namedMonth) {
+    const month = MONTH_NAMES[namedMonth[1]];
+    if (month) return `${namedMonth[2]}-${month}`;
+  }
+  const numericMonth = text.match(/\bFOR\s+(\d{4})[-/]([01]\d)\b/);
+  if (numericMonth && Number(numericMonth[2]) >= 1 && Number(numericMonth[2]) <= 12) {
+    return `${numericMonth[1]}-${numericMonth[2]}`;
+  }
+  return null;
+}
+
 function normalizeCashTransaction(rawRow) {
   const row = normalizeObjectKeys(rawRow);
   const type = canonicalCashInterestType(pick(row, ['type']));
@@ -326,6 +380,10 @@ function deriveMonthlyPaid(cashTransactions) {
 
   for (const row of cashTransactions) {
     if (!row.date || !row.currency || row.amount == null) continue;
+    if (
+      isStockBorrowFeeTransaction(row)
+      || isSecuritiesLendingIncomeTransaction(row)
+    ) continue;
     const month = row.date.slice(0, 7);
     const key = `${month}\u0000${row.currency}`;
     const current = byMonth.get(key) || {
@@ -356,6 +414,99 @@ function deriveMonthlyPaid(cashTransactions) {
     .sort((a, b) => a.month.localeCompare(b.month) || a.currency.localeCompare(b.currency));
 }
 
+function deriveStockBorrowFeePayments(cashTransactions) {
+  const byMonth = new Map();
+
+  for (const row of cashTransactions) {
+    if (
+      !isStockBorrowFeeTransaction(row)
+      || !row.currency
+      || row.amount == null
+    ) continue;
+    const month = coveredMonthFromDescription(row.description);
+    if (!month) continue;
+    const key = `${month}\u0000${row.currency}`;
+    const current = byMonth.get(key) || {
+      month,
+      currency: row.currency,
+      amount: 0,
+      transactionCount: 0,
+      postedDates: [],
+      transactionIds: [],
+    };
+    current.amount += Math.abs(row.amount);
+    current.transactionCount += 1;
+    if (row.date && !current.postedDates.includes(row.date)) {
+      current.postedDates.push(row.date);
+    }
+    if (row.transactionId && !current.transactionIds.includes(row.transactionId)) {
+      current.transactionIds.push(row.transactionId);
+    }
+    byMonth.set(key, current);
+  }
+
+  return [...byMonth.values()]
+    .map((row) => ({
+      ...row,
+      amount: stableNumber(row.amount),
+      postedDates: [...row.postedDates].sort(),
+      transactionIds: [...row.transactionIds].sort(),
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month) || a.currency.localeCompare(b.currency));
+}
+
+function normalizeBorrowFeeDetail(rawRow) {
+  const row = normalizeObjectKeys(rawRow);
+  return {
+    transactionId: toStringOrNull(pick(row, ['transactionID', 'transactionId'])),
+    currency: normalizeCurrency(pick(row, ['currency'])),
+    symbol: toStringOrNull(pick(row, ['symbol'])),
+    valueDate: normalizeFlexDate(pick(row, ['valueDate', 'date', 'reportDate'])),
+    startDate: normalizeFlexDate(pick(row, ['startDate'])),
+    endDate: normalizeFlexDate(pick(row, ['endDate'])),
+    quantity: pickNumber(row, ['quantity']),
+    collateralAmount: pickNumber(row, ['collateralAmount']),
+    feeRatePercent: pickNumber(row, ['feeRatePercent', 'feeRate', 'fee rate %', 'fee rate%']),
+    borrowFee: pickNumber(row, ['borrowFee']),
+    ibCarryCharge: pickNumber(row, ['ibCarryCharge']),
+    ibTicketCharge: pickNumber(row, ['ibTicketCharge']),
+    totalCharges: pickNumber(row, ['totalCharges', 'totalCharge']),
+    type: toStringOrNull(pick(row, ['type'])),
+    code: toStringOrNull(pick(row, ['code'])),
+  };
+}
+
+function deriveDailyStockBorrowFees(details) {
+  const byDate = new Map();
+
+  for (const row of details) {
+    if (
+      row.currency !== 'USD'
+      || !row.valueDate
+      || row.totalCharges == null
+      || !Number.isFinite(row.totalCharges)
+      || row.totalCharges < 0
+    ) continue;
+    const current = byDate.get(row.valueDate) || {
+      date: row.valueDate,
+      amount: 0,
+      positionCount: 0,
+      rowCount: 0,
+    };
+    current.amount += row.totalCharges;
+    current.positionCount += 1;
+    current.rowCount += 1;
+    byDate.set(row.valueDate, current);
+  }
+
+  return [...byDate.values()]
+    .map((row) => ({
+      ...row,
+      amount: stableNumber(row.amount),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function parseFlexInterestStatement(xmlText, { expectedAccountId } = {}) {
   const parsed = parseFlexXml(xmlText);
   const statementRows = collectNodes(parsed, ['FlexStatement']);
@@ -373,9 +524,23 @@ function parseFlexInterestStatement(xmlText, { expectedAccountId } = {}) {
   }
 
   const tierRows = collectNodes(parsed, ['TierInterestDetail']);
+  const tierSections = collectNodes(parsed, ['TierInterestDetails']);
   const accrualRows = collectNodes(parsed, ['InterestAccrualsCurrency']);
+  const accrualSections = collectNodes(parsed, ['InterestAccruals']);
   const cashTransactionRows = collectNodes(parsed, ['CashTransaction']);
+  const cashTransactionSections = collectNodes(parsed, ['CashTransactions']);
   const cashReportRows = collectNodes(parsed, ['CashReportCurrency', 'CashReport']);
+  const cashReportSections = collectNodes(parsed, ['CashReport']);
+  const borrowFeeDetailRows = collectNodes(parsed, [
+    'SecuritiesBorrowedLentFeeDetail',
+    'DirectSecuritiesBorrowedFeeDetail',
+    'SecuritiesPreBorrowedFeeDetail',
+  ]);
+  const borrowFeeDetailSections = collectNodes(parsed, [
+    'SecuritiesBorrowedLentFeeDetails',
+    'DirectSecuritiesBorrowedFeeDetails',
+    'SecuritiesPreBorrowedFeeDetails',
+  ]);
   validateExpectedAccount({
     expectedAccountId,
     statementRows,
@@ -383,7 +548,10 @@ function parseFlexInterestStatement(xmlText, { expectedAccountId } = {}) {
       ...tierRows,
       ...accrualRows,
       ...cashTransactionRows,
+      ...cashTransactionSections,
       ...cashReportRows,
+      ...borrowFeeDetailRows,
+      ...borrowFeeDetailSections,
     ],
   });
 
@@ -405,6 +573,12 @@ function parseFlexInterestStatement(xmlText, { expectedAccountId } = {}) {
     .map(normalizeObjectKeys)
     .filter((row) => normalizeCurrency(pick(row, ['currency'])) && !isBaseSummary(row))
     .map(normalizeCashReport);
+  const borrowFeeDetails = borrowFeeDetailRows
+    .map(normalizeObjectKeys)
+    .filter((row) => !isBaseSummary(row))
+    .map(normalizeBorrowFeeDetail);
+  const borrowFeeDetailsSectionPresent = borrowFeeDetailSections.length > 0
+    || borrowFeeDetails.length > 0;
 
   return {
     accountId: expectedAccountId,
@@ -412,12 +586,21 @@ function parseFlexInterestStatement(xmlText, { expectedAccountId } = {}) {
     toDate: normalizeFlexDate(pick(normalizedStatement, ['toDate'])),
     whenGenerated: toStringOrNull(pick(normalizedStatement, ['whenGenerated'])),
     tierDetails,
+    tierDetailSectionPresent: tierSections.length > 0 || tierDetails.length > 0,
     accruals,
+    accrualSectionPresent: accrualSections.length > 0 || accruals.length > 0,
     cashTransactions,
+    cashTransactionSectionPresent: cashTransactionSections.length > 0
+      || cashTransactions.length > 0,
     cashReports,
+    cashReportSectionPresent: cashReportSections.length > 0 || cashReports.length > 0,
+    borrowFeeDetails,
+    borrowFeeDetailsSectionPresent,
     derived: {
       dailyDebitActuals: deriveDailyDebitActuals(tierDetails),
       monthlyPaid: deriveMonthlyPaid(cashTransactions),
+      stockBorrowFeePayments: deriveStockBorrowFeePayments(cashTransactions),
+      dailyStockBorrowFees: deriveDailyStockBorrowFees(borrowFeeDetails),
     },
   };
 }
@@ -427,8 +610,14 @@ module.exports = {
   BROKER_INTEREST_PAID,
   BROKER_INTEREST_RECEIVED,
   canonicalCashInterestType,
+  coveredMonthFromDescription,
   deriveDailyDebitActuals,
+  deriveDailyStockBorrowFees,
   deriveMonthlyPaid,
+  deriveStockBorrowFeePayments,
+  isStockBorrowFeeTransaction,
+  isSecuritiesLendingIncomeTransaction,
+  normalizeBorrowFeeDetail,
   normalizeFlexDate,
   parseFlexInterestResponse,
   parseFlexInterestStatement,

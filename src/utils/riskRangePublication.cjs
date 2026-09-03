@@ -107,6 +107,7 @@ function normalizeRiskRangeItem(item = {}) {
   const ticker = normalizeTicker(item.ticker);
   const lrr = strictFiniteNumber(item.lrr);
   const hrr = strictFiniteNumber(item.hrr);
+  const previousClose = strictFiniteNumber(item.prevClose ?? item.previousClose);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || '')) ? item.date : null;
   const sourceClass = classifyRiskRangeSource(item);
   const reasons = [];
@@ -134,6 +135,7 @@ function normalizeRiskRangeItem(item = {}) {
       lrr,
       hrr,
       trend: item.trend || 'N/A',
+      ...(previousClose !== null ? { previousClose } : {}),
       timestamp: item.updatedAt || item.scrapedAt || null,
       date,
       source: item.source || null,

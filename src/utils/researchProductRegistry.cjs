@@ -8,6 +8,12 @@ const REQUIRED_STAGES = Object.freeze(
     ? [...registryDocument.stages]
     : ['received', 'parsed', 'validated', 'indexed'],
 );
+const STRUCTURED_ONLY_TICKERS = Object.freeze(
+  (entityCatalogDocument.structuredOnlyTickers || [])
+    .map((value) => String(value || '').trim().toUpperCase())
+    .filter((value, index, values) => value && values.indexOf(value) === index),
+);
+const STRUCTURED_ONLY_TICKER_SET = new Set(STRUCTURED_ONLY_TICKERS);
 
 const RESEARCH_PRODUCTS = Object.freeze(
   (registryDocument.products || []).map((product) => Object.freeze({
@@ -223,6 +229,10 @@ function getResearchProduct(value) {
   return RESEARCH_PRODUCTS.find((product) => product.snapshotTypes.includes(normalized)) || null;
 }
 
+function isStructuredOnlyTicker(value) {
+  return STRUCTURED_ONLY_TICKER_SET.has(String(value || '').trim().toUpperCase());
+}
+
 module.exports = {
   CONTROLLED_EXPOSURES,
   CONTROLLED_EXPOSURE_TYPES,
@@ -231,10 +241,12 @@ module.exports = {
   REQUIRED_STAGES,
   RESEARCH_PRODUCTS,
   RESEARCH_PRODUCT_BY_ID,
+  STRUCTURED_ONLY_TICKERS,
   getControlledExposure,
   getResearchProduct,
   getSecurityExposureTags,
   isResearchProductDue,
+  isStructuredOnlyTicker,
   latestResearchMarketDate,
   newYorkParts,
 };

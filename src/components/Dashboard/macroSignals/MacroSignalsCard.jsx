@@ -153,7 +153,7 @@ function MacroSignalsCard({
         <div className="info-note" role="note">
           <Info className="info-note-icon" aria-hidden />
           <span className="info-note-body">
-            Click a security to populate the signal card with Securities Universe data for bet sizing.
+            Click a security to populate the signal card with configured security data for bet sizing.
           </span>
         </div>
       )}

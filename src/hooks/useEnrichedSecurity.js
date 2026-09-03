@@ -1,11 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MarketDataService } from '../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from './useSecurityIntelligence';
 import {
   enrichSecurity,
   resolveSecuritiesListEntry,
   buildTradingDays,
   getTradingDayKeys,
 } from '../utils/enrichSecurity';
+import {
+  getCanonicalProduct,
+  getCanonicalRiskRange,
+  isCanonicalSecurityIntelligence,
+} from '../utils/securityIntelligenceV2';
 
 export function useEnrichedSecurity(symbol) {
   const [security, setSecurity] = useState(null);
@@ -31,12 +37,20 @@ export function useEnrichedSecurity(symbol) {
     const ticker = listEntry.ticker;
     setLoading(true);
     setError(null);
+    if (SECURITY_INTELLIGENCE_V2_ENABLED) setSecurity(null);
 
     try {
-      const [quotes, historyResult, riskHistory] = await Promise.all([
+      const canonicalRequest = SECURITY_INTELLIGENCE_V2_ENABLED
+        ? MarketDataService.getSecurityIntelligenceV2({
+          symbols: [ticker],
+          historyDays: 5,
+        })
+        : Promise.resolve(null);
+      const [quotes, historyResult, riskHistory, canonical] = await Promise.all([
         MarketDataService.getQuotes([ticker]).catch(() => ({})),
         MarketDataService.getHistoricalData(ticker, 30).catch(() => null),
         MarketDataService.getRiskRangeHistory(ticker, 30).catch(() => []),
+        canonicalRequest,
       ]);
 
       const tickerUpper = ticker.toUpperCase();
@@ -51,6 +65,23 @@ export function useEnrichedSecurity(symbol) {
             : [];
 
       const riskItems = Array.isArray(riskHistory) ? riskHistory : [];
+      const canonicalSecurity = isCanonicalSecurityIntelligence(canonical)
+        ? canonical.bySymbol?.[tickerUpper]
+        : null;
+      const canonicalRange = getCanonicalRiskRange(canonicalSecurity, { primaryOnly: true });
+      if (canonicalRange) {
+        const existingIndex = riskItems.findIndex((item) => item?.date === canonicalRange.date);
+        const currentRiskItem = {
+          ...(existingIndex >= 0 ? riskItems[existingIndex] : {}),
+          date: canonicalRange.date,
+          lrr: canonicalRange.lrr,
+          hrr: canonicalRange.hrr,
+          trend: canonicalRange.trend,
+          timestamp: canonicalRange.timestamp,
+        };
+        if (existingIndex >= 0) riskItems[existingIndex] = currentRiskItem;
+        else riskItems.push(currentRiskItem);
+      }
 
       const enriched = enrichSecurity(listEntry, {
         quote,
@@ -59,7 +90,12 @@ export function useEnrichedSecurity(symbol) {
         tradingDayKeys,
       });
 
-      setSecurity(enriched);
+      setSecurity({
+        ...enriched,
+        securityIntelligence: canonicalSecurity,
+        securityIntelligenceHealth: canonicalSecurity?.health || null,
+        securityIntelligenceStatus: getCanonicalProduct(canonicalSecurity, 'risk-ranges')?.status || null,
+      });
     } catch (err) {
       console.error(`[useEnrichedSecurity] ${ticker}:`, err);
       setError(err.message || 'Failed to load security metrics');

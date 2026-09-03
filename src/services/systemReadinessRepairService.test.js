@@ -124,6 +124,24 @@ describe('system readiness repair service', () => {
     expect(spawnProcess.mock.calls[0][2]).toMatchObject({ shell: false, detached: true });
   });
 
+  test('uses the fixed ownership-checked sidecar-only restart command', async () => {
+    const spawnProcess = jest.fn(() => spawnedChild());
+    const service = createSystemReadinessRepairService({ spawnProcess });
+
+    await service.run('restart-ibkr-sidecar', { remoteAddress: '127.0.0.1' });
+
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    expect(spawnProcess.mock.calls[0][0]).toBe(process.execPath);
+    expect(spawnProcess.mock.calls[0][1]).toEqual([
+      expect.stringMatching(/scripts\/dev-stack\/cli\.js$/),
+      'restart-sidecar',
+    ]);
+    expect(spawnProcess.mock.calls[0][2]).toMatchObject({
+      shell: false,
+      detached: true,
+    });
+  });
+
   test('uses a fixed delayed helper for the workspace sidecar runtime rebuild', async () => {
     const spawnProcess = jest.fn(() => spawnedChild());
     const service = createSystemReadinessRepairService({ spawnProcess });

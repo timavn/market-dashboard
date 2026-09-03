@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
 import {
   calculateVolumeMetrics,
   getVolumeCardHeaderDate
 } from '../../utils/volumeCardUtils';
 import { getMarketDayFreshness } from '../../utils/timeUtils';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 import './MarketVolumeTable.css';
 
 export { calculateVolumeMetrics, getVolumeCardHeaderDate };
@@ -21,6 +23,20 @@ const EMPTY_VOLUME_METRICS = {
 };
 
 const HEAT_CAP_PCT = 50;
+const MARKET_VOLUME_REFRESH_MS = 15 * 60 * 1000;
+
+const getVolumeSourceTimestamp = (response) => {
+  const metadata = response?.meta || {};
+  return metadata.uploadDate
+    || metadata.slideDate
+    || metadata.fetchedAt
+    || metadata.generatedAt
+    || metadata.asOfTradingDate
+    || response?.asOf
+    || response?.totalMarket?.[0]?.date
+    || response?.totalExchange?.[0]?.date
+    || null;
+};
 
 const pctHeatProps = (val) => {
   if (val == null || Number.isNaN(val)) return { className: 'region-mw-heat--na', style: {} };
@@ -37,6 +53,7 @@ const MarketVolumeTable = ({
   onHeaderNoteChange,
   onMetadataChange,
 }) => {
+  const surfaceActive = useSurfaceActivity();
   const onLastUpdatedRef = useRef(onLastUpdatedChange);
   const onSourcesRef = useRef(onSourcesChange);
   const onHeaderNoteRef = useRef(onHeaderNoteChange);
@@ -62,12 +79,28 @@ const MarketVolumeTable = ({
     footnotes: []
   });
   const [errorMessage, setErrorMessage] = useState('');
+  const fetchVolume = useCallback(
+    () => MarketDataService.getMarketShareVolume(365),
+    [],
+  );
+  const volumeResource = useDashboardResource('market-volume', {}, {
+    fetcher: fetchVolume,
+    validate: (response) => (
+      response && typeof response === 'object' ? response : null
+    ),
+    getObservedAt: getVolumeSourceTimestamp,
+    pollIntervalMs: MARKET_VOLUME_REFRESH_MS,
+    active: surfaceActive,
+    // The preview and full detail share this key. Opening the detail should
+    // consume the existing dated snapshot, not trigger a second request.
+    refreshOnActivate: false,
+  });
 
-  useEffect(() => {
-    const fetchData = async () => {
+  useLayoutEffect(() => {
+    const applyData = () => {
+      const response = volumeResource.data;
+      if (!response) return;
       try {
-        const daysToFetch = 365; // Need 1 year of data
-        const response = await MarketDataService.getMarketShareVolume(daysToFetch);
         const totalMarketSeries = Array.isArray(response.totalMarket) ? [...response.totalMarket] : [];
         const totalExchangeSeries = Array.isArray(response.totalExchange)
           ? [...response.totalExchange]
@@ -81,7 +114,9 @@ const MarketVolumeTable = ({
           responseMeta.fetchedAt ||
           responseMeta.generatedAt ||
           asOf ||
-          new Date().toISOString();
+          totalMarketSeries[0]?.date ||
+          totalExchangeSeries[0]?.date ||
+          null;
         const sourceBreakdown = Array.isArray(responseMeta.sourceBreakdown)
           ? responseMeta.sourceBreakdown
           : [];
@@ -99,7 +134,7 @@ const MarketVolumeTable = ({
         if (onMetadataRef.current) {
           onMetadataRef.current(nextDatasetMeta);
         }
-        setErrorMessage('');
+        if (!volumeResource.error) setErrorMessage('');
 
         if (slideMetrics?.totalMarket && slideMetrics?.exchange) {
           const nextMetrics = {
@@ -243,44 +278,31 @@ const MarketVolumeTable = ({
 
         setLoading(false);
       } catch (error) {
-        console.error('Failed to fetch volume data', error);
-        setErrorMessage('Failed to load the market structure dataset for this card.');
-        setMetrics({
-          date: '',
-          totalMarket: EMPTY_VOLUME_METRICS,
-          exchange: EMPTY_VOLUME_METRICS
-        });
-        setDatasetMeta((current) => ({
-          ...current,
-          status: 'missing'
-        }));
-        if (onMetadataRef.current) {
-          onMetadataRef.current({
-            methodologyVersion: null,
-            sourceBreakdown: [],
-            status: 'missing',
-            asOfTradingDate: null,
-            fetchedAt: null,
-            calibration: null,
-            footnotes: []
-          });
-        }
-        if (onSourcesRef.current) {
-          onSourcesRef.current([
-            {
-              id: 'marketStructureDaily',
-              label: 'Market Structure Daily',
-              updatedAt: new Date().toISOString(),
-              status: 'defective'
-            }
-          ]);
-        }
+        console.error('Failed to process volume data', error);
+        setErrorMessage('The market structure dataset could not be processed.');
         setLoading(false);
       }
     };
 
-    fetchData();
-  }, []);
+    applyData();
+  }, [volumeResource.data, volumeResource.error]);
+
+  useEffect(() => {
+    if (volumeResource.initialLoading) return;
+    setLoading(false);
+    if (!volumeResource.error) return;
+    setErrorMessage(volumeResource.data
+      ? 'Refresh delayed. Showing the last dated market structure snapshot.'
+      : 'Failed to load the market structure dataset for this card.');
+    if (!volumeResource.data && onSourcesRef.current) {
+      onSourcesRef.current([{
+        id: 'marketStructureDaily',
+        label: 'Market Structure Daily',
+        updatedAt: null,
+        status: 'defective',
+      }]);
+    }
+  }, [volumeResource.data, volumeResource.error, volumeResource.initialLoading]);
 
   const formatPct = (val) => {
     if (val === null || Number.isNaN(val)) return '--';

@@ -220,13 +220,40 @@ describe('MarketPulseRibbon', () => {
     const commodities = screen.getByLabelText('Commodities market pulse');
     const crypto = screen.getByLabelText('Crypto market pulse');
 
-    expect(within(equities).getByLabelText('VXN volatility 22.20')).toHaveTextContent('VXN22.20DLY');
+    expect(within(equities).getByLabelText(/VXN volatility 22\.20/)).toHaveTextContent('VXN22.20D');
     expect(within(equities).queryByText('VIX')).not.toBeInTheDocument();
-    expect(within(rates).getByLabelText('MOVE volatility 92.40'))
+    expect(within(rates).getByLabelText(/MOVE volatility 92\.40/))
       .toHaveClass('efr-pulse-vol--historical');
-    expect(within(rates).getByLabelText('MOVE volatility 92.40')).toHaveTextContent('MOVE92.40CLOSE');
-    expect(within(commodities).getByLabelText('OVX volatility 61.15')).toBeInTheDocument();
+    expect(within(rates).getByLabelText(/MOVE volatility 92\.40/)).toHaveTextContent('MOVE92.40DCLOSE');
+    expect(within(commodities).getByLabelText(/OVX volatility 61\.15/)).toBeInTheDocument();
     expect(within(crypto).queryByLabelText(/volatility/)).not.toBeInTheDocument();
+  });
+
+  test('keeps a one-minute-old retained volatility callout visible without D yet', () => {
+    const now = Date.now();
+    render(
+      <MarketPulseRibbon
+        marketData={{ us: [quote('QQQ', 711.74, 3)] }}
+        volatilityState={{
+          snapshot: {
+            NazVol: currentVol(22.2, {
+              availability: 'reference',
+              freshness: 'refresh-delayed',
+              refreshDelayed: true,
+              lastVerifiedAt: new Date(now - 60 * 1000).toISOString(),
+              retainedUntil: new Date(now + 29 * 60 * 1000).toISOString(),
+            }),
+          },
+        }}
+      />,
+    );
+
+    const metric = screen.getByLabelText(/VXN volatility 22\.20/);
+    expect(metric).toHaveClass('efr-pulse-vol--refresh-delayed');
+    expect(metric).toHaveTextContent('VXN22.20');
+    expect(metric).not.toHaveTextContent('D');
+    expect(within(metric).queryByRole('button', { name: /refresh delayed/i }))
+      .not.toBeInTheDocument();
   });
 
   test('never promotes stale or unavailable volatility values', () => {
@@ -261,7 +288,9 @@ describe('MarketPulseRibbon', () => {
 
     const equities = screen.getByLabelText('Equities market pulse');
     expect(equities).toHaveTextContent('7,543.59');
-    expect(equities).toHaveTextContent('DLY');
+    expect(within(equities).getByRole('button', { name: /Delayed quote · as of/i }))
+      .toHaveTextContent('D');
+    expect(equities).not.toHaveTextContent('DLY');
     expect(equities).not.toHaveTextContent('LOAD');
   });
 });

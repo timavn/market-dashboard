@@ -45,9 +45,19 @@ STATIC_CREDENTIAL_ENVIRONMENT_VARIABLES = (
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
     "AWS_SECURITY_TOKEN",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
     "AWS_WEB_IDENTITY_TOKEN_FILE",
     "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
     "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+)
+PROFILE_ENVIRONMENT_VARIABLES = (
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_CONFIG_FILE",
 )
 
 
@@ -112,6 +122,19 @@ def default_output_path(now: datetime) -> Path:
 
 def reject_ambient_credentials(environment: Mapping[str, str] | None = None) -> None:
     source = environment if environment is not None else os.environ
+    profile_overrides = sorted(
+        name for name in PROFILE_ENVIRONMENT_VARIABLES[2:] if source.get(name)
+    )
+    configured_profiles = sorted(
+        str(source.get(name) or "").strip()
+        for name in PROFILE_ENVIRONMENT_VARIABLES[:2]
+        if str(source.get(name) or "").strip()
+    )
+    if profile_overrides or any(value != EXPECTED_PROFILE for value in configured_profiles):
+        raise AuditError(
+            "Refusing an ambient AWS profile/configuration override; use the explicit "
+            f"{EXPECTED_PROFILE} IAM Identity Center/SSO profile."
+        )
     present = sorted(name for name in STATIC_CREDENTIAL_ENVIRONMENT_VARIABLES if source.get(name))
     if present:
         raise AuditError(

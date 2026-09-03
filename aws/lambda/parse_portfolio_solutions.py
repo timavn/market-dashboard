@@ -32,7 +32,7 @@ def extract_specific_pages_as_pdf(pdf_path, page_numbers):
     return pdf_bytes.getvalue()
 
 
-def extract_portfolio_solutions(pdf_path, s3_key=None):
+def extract_portfolio_solutions(pdf_path, s3_key=None, session=None):
     """Extract ETF ranking data from Portfolio Solutions PDF using AWS Textract"""
     print(f"\n📄 Reading Portfolio Solutions PDF: {pdf_path}")
 
@@ -112,7 +112,7 @@ def extract_portfolio_solutions(pdf_path, s3_key=None):
                     print(f"   1-Month Bottom: {', '.join([f'{t} (-{c})' for t, c in items])}")
 
     # Use Textract for table extraction (rankings on page 2)
-    textract = boto3.client('textract', region_name='us-west-1')
+    textract = session.client('textract', region_name='us-west-1') if session else boto3.client('textract', region_name='us-west-1')
 
     # Extract only page 2 (ranking table)
     print("   📑 Extracting page 2 from PDF...")
@@ -231,7 +231,7 @@ def extract_portfolio_solutions(pdf_path, s3_key=None):
     return data
 
 
-def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
+def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, session=None):
     """Save Portfolio Solutions data to DynamoDB"""
     if not data or not data.get('rankings'):
         print("\n❌ No data to save")
@@ -244,7 +244,7 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
         return
 
     print(f"\n💾 Saving to DynamoDB...")
-    db = boto3.resource('dynamodb', region_name='us-west-1')
+    db = session.resource('dynamodb', region_name='us-west-1') if session else boto3.resource('dynamodb', region_name='us-west-1')
     date = pdf_date
     ts = datetime.now(timezone.utc).isoformat()
 

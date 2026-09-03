@@ -103,9 +103,18 @@ GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
-MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro"}
+MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "inflation-nowcast"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
-MATERIALIZED_DATA_VERSION = "gmail-materialized-v4-canonical-verification"
+MATERIALIZED_DATA_VERSION = "gmail-materialized-v10-top-three-things"
+MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
+HTML_TEXTRACT_REPORT_TYPES = frozenset({
+    "market-structure",
+    "signal-strength",
+    "momo-tracker",
+    "crypto-quant",
+    "bitcoin-trend-tracker",
+    "inflation-nowcast",
+})
 RESEARCH_PARSER_VERSION = "research-event-ledger-v2"
 MATERIALIZATION_WRITE_RETRIES = 3
 MATERIALIZATION_MAX_ATTEMPTS = 3
@@ -148,6 +157,20 @@ RISK_RANGE_BUILD_RECOVERY_ERROR_CODES = frozenset(
         "RISK_RANGE_PUBLICATION_ORDER_UNVERIFIED",
     }
 )
+# The inflation-nowcast parser is deliberately versioned. Older deployments
+# quarantined the same Gmail messages as unsupported research products before
+# the report classifier knew about "Monthly Inflation Nowcast". Let the next
+# tested build replay one such artifact through the new classifier/materializer
+# without requiring an unbounded mailbox scan.
+INFLATION_NOWCAST_BUILD_RECOVERY_ERROR_CODES = frozenset(
+    {
+        "RESEARCH_PRODUCT_UNSUPPORTED",
+    }
+)
+BUILD_RECOVERY_ERROR_CODES = frozenset({
+    *RISK_RANGE_BUILD_RECOVERY_ERROR_CODES,
+    *INFLATION_NOWCAST_BUILD_RECOVERY_ERROR_CODES,
+})
 PDF_PROCESSOR_FUNCTION_NAME = os.environ.get(
     "PDF_PROCESSOR_FUNCTION_NAME",
     "market-dashboard-hedgeye-pdf-processor-v1",
@@ -171,6 +194,7 @@ dynamodb = boto3.resource(
     config=AWS_CLIENT_CONFIG,
 )
 s3 = boto3.client("s3", region_name=AWS_REGION, config=AWS_CLIENT_CONFIG)
+textract = boto3.client("textract", region_name=AWS_REGION, config=AWS_CLIENT_CONFIG)
 cloudwatch = boto3.client(
     "cloudwatch",
     region_name=AWS_REGION,
@@ -849,6 +873,7 @@ def write_service_heartbeat(
     error_code: Optional[str] = None,
     detail: Optional[str] = None,
     secret_version: Optional[str] = None,
+    auth_verified_at: Optional[str] = None,
     counts: Optional[Dict[str, int]] = None,
 ) -> bool:
     finished = utc_now()
@@ -874,6 +899,8 @@ def write_service_heartbeat(
         item["errorCode"] = error_code
     if detail:
         item["detail"] = detail
+    if auth_verified_at:
+        item["authVerifiedAt"] = auth_verified_at
     heartbeat_written = True
     try:
         dynamodb.Table(HEARTBEAT_TABLE).put_item(Item=item)
@@ -927,6 +954,19 @@ def get_message(access_token: str, user_id: str, message_id: str) -> Dict[str, A
         gmail_path(user_id, f"messages/{urllib.parse.quote(message_id, safe='')}"),
         access_token=access_token,
         params={"format": "full"},
+    )
+
+
+def get_message_metadata(access_token: str, user_id: str, message_id: str) -> Dict[str, Any]:
+    """Fetch only immutable routing headers before any message body is requested."""
+    return http_json(
+        "GET",
+        gmail_path(user_id, f"messages/{urllib.parse.quote(message_id, safe='')}"),
+        access_token=access_token,
+        params={
+            "format": "metadata",
+            "metadataHeaders": ["Subject", "From", "Date"],
+        },
     )
 
 
@@ -1047,8 +1087,28 @@ def sanitize_filename(filename: str) -> str:
     return base[:180] or "attachment.bin"
 
 
+def is_market_structure_webcast_subject(subject: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(subject or "")).strip().casefold()
+    return (
+        "market situation report" in normalized
+        and bool(re.search(r"\b(?:video|webcast)\b", normalized))
+    )
+
+
 def infer_report_type(filename: str, subject: str) -> str:
+    # A Market Situation webcast is not a text research artifact. Keep this
+    # defensive classification even though new messages are rejected from
+    # metadata before Gmail's full MIME body is fetched.
+    if is_market_structure_webcast_subject(subject):
+        return "unknown"
+    # Real-Time Alerts can mention a refreshed SPX Risk Range in the subject.
+    # Classify the alert before the broader Risk Range matcher so the RTA
+    # parser persists the alert and its refreshed range together.
+    if re.search(r"real[- ]time alert", str(subject or ""), re.IGNORECASE):
+        return "real-time-alert"
     haystack = f"{filename} {subject}".lower().replace("_", " ")
+    if "monthly inflation nowcast" in haystack:
+        return "inflation-nowcast"
     for report_type, needles in REPORT_RULES:
         if any(needle in haystack for needle in needles):
             return report_type
@@ -1133,7 +1193,7 @@ def attachment_records_are_terminal(items: Iterable[Dict[str, Any]]) -> bool:
             return False
         report_type = str(item.get("reportType") or "")
         if (
-            report_type in RESEARCH_EVENT_SNAPSHOT_TYPES
+            report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}
             and str(item.get("attachmentId") or "").startswith("message-body-")
             and item.get("materializationStatus") not in {
                 "INDEXED",
@@ -1151,6 +1211,14 @@ def attachment_records_are_terminal(items: Iterable[Dict[str, Any]]) -> bool:
 def message_is_fully_processed(items: Iterable[Dict[str, Any]]) -> bool:
     """Return true when an immutable Gmail message has no unfinished ledger work."""
     records = list(items)
+    if any(
+        item.get("attachmentId") == MESSAGE_LEDGER_ATTACHMENT_ID
+        and item.get("status") == "MESSAGE_IGNORED"
+        for item in records
+    ):
+        # A metadata-only ignore decision is terminal even if a pre-upgrade
+        # deployment previously left body-derived artifacts in the ledger.
+        return True
     has_message_sentinel = any(
         item.get("attachmentId") == MESSAGE_LEDGER_ATTACHMENT_ID
         and item.get("status") == "MESSAGE_PROCESSED"
@@ -1183,6 +1251,32 @@ def mark_message_processed(
             "subject": headers.get("subject", ""),
             "sender": headers.get("from", ""),
             "attachmentCount": attachment_count,
+            "createdAt": now,
+            "updatedAt": now,
+            "ttl": ttl_epoch(),
+        }
+    )
+
+
+def mark_message_ignored(
+    table: Any,
+    *,
+    message_id: str,
+    headers: Dict[str, str],
+    reason: str,
+) -> None:
+    """Persist a terminal metadata-only decision so ignored mail is never retried."""
+    now = utc_now().isoformat()
+    table.put_item(
+        Item={
+            "messageId": message_id,
+            "attachmentId": MESSAGE_LEDGER_ATTACHMENT_ID,
+            "status": "MESSAGE_IGNORED",
+            "subject": headers.get("subject", ""),
+            "sender": headers.get("from", ""),
+            "attachmentCount": 0,
+            "ignoredReason": reason,
+            "bodyFetched": False,
             "createdAt": now,
             "updatedAt": now,
             "ttl": ttl_epoch(),
@@ -1427,7 +1521,43 @@ def _research_event_payloads(snapshot: Dict[str, Any]) -> List[Tuple[str, Any]]:
     """Return canonical event records without mixing product books."""
     snapshot_type = str(snapshot.get("snapshotType") or "")
     data = snapshot.get("data") or {}
-    if snapshot_type in {"real-time-alert", "investing-ideas"}:
+    if snapshot_type == "investing-ideas":
+        positions = data.get("positions") if isinstance(data, dict) else []
+        if not isinstance(positions, list) or not positions:
+            positions = []
+            if isinstance(data, dict):
+                positions.extend(
+                    {"ticker": ticker, "side": "Long"}
+                    for ticker in data.get("longs") or []
+                )
+                positions.extend(
+                    {"ticker": ticker, "side": "Short"}
+                    for ticker in data.get("shorts") or []
+                )
+        typed_positions = []
+        for position in positions:
+            if not isinstance(position, dict) or not str(position.get("ticker") or "").strip():
+                continue
+            normalized_position = deepcopy(position)
+            side = str(
+                normalized_position.get("side")
+                or normalized_position.get("position")
+                or ""
+            ).strip().lower()
+            if side in {"long", "buy", "bullish"}:
+                normalized_position["bias"] = "BULLISH"
+            elif side in {"short", "sell", "bearish"}:
+                normalized_position["bias"] = "BEARISH"
+            typed_positions.append(normalized_position)
+        if typed_positions:
+            return [("INVESTING_IDEA_POSITION", position) for position in typed_positions]
+        # Preserve compatibility with legacy alert-shaped snapshots while
+        # making structured position rows the canonical materialization.
+        alerts = data.get("alerts") if isinstance(data, dict) else []
+        if not alerts and isinstance(data, dict) and data.get("alert"):
+            alerts = [data["alert"]]
+        return [("POSITION_ACTION", alert) for alert in alerts if isinstance(alert, dict)]
+    if snapshot_type == "real-time-alert":
         alerts = data.get("alerts") if isinstance(data.get("alerts"), list) else []
         if not alerts and data.get("alert"):
             alerts = [data["alert"]]
@@ -1502,6 +1632,7 @@ def persist_research_event_ledger(
             "FULL_BOOK_CHECKPOINT": "full-book-checkpoint",
             "DAILY_PRIMARY_MANIFEST": "daily-primary-manifest",
             "DAILY_SUPPLEMENTAL_SNAPSHOT": "daily-supplemental-snapshot",
+            "INVESTING_IDEA_POSITION": "investing-idea-position",
         }.get(event_type, "research-event")
         item = {
             "productKey": product_key,
@@ -1524,6 +1655,8 @@ def persist_research_event_ledger(
             "capturedAt": str(snapshot.get("scrapedAt") or utc_now().isoformat()),
             "immutable": True,
         }
+        if event_type == "INVESTING_IDEA_POSITION":
+            item["decisionEligible"] = False
         try:
             table.put_item(
                 Item=_to_dynamodb_value(item),
@@ -1585,7 +1718,7 @@ def _integral_dynamodb_number(value: Any, *, minimum: int) -> Optional[int]:
 def verify_research_event_ledger(db: Any) -> Dict[str, Any]:
     table = db.Table(RESEARCH_EVENT_LEDGER_TABLE)
     products: Dict[str, Dict[str, int]] = {}
-    for product_key in ("real-time-alert", "etf-pro"):
+    for product_key in ("real-time-alert", "etf-pro", "investing-ideas"):
         items: List[Dict[str, Any]] = []
         exclusive_start_key = None
         while True:
@@ -1650,6 +1783,11 @@ def verify_research_event_ledger(db: Any) -> Dict[str, Any]:
             "eventCount": len(items),
             "unverifiedEventCount": unverified,
         }
+    # Keep the historical verification response stable when no Investing
+    # Ideas event has ever been materialized, while reporting that product
+    # whenever it is present in the ledger.
+    if products.get("investing-ideas", {}).get("eventCount") == 0:
+        products.pop("investing-ideas", None)
     event_count = sum(item["eventCount"] for item in products.values())
     unverified_count = sum(
         item["unverifiedEventCount"] for item in products.values()
@@ -1963,6 +2101,118 @@ def _compute_materialized_data_version(item: Dict[str, Any]) -> str:
     return f"{MATERIALIZED_DATA_VERSION}:{hashlib.sha256(encoded).hexdigest()}"
 
 
+def _inflation_forecast_scenarios(forecast: Dict[str, Any]) -> Optional[Tuple[Any, Any, Any]]:
+    scenarios = forecast.get("scenarios")
+    if isinstance(scenarios, dict):
+        values = (
+            scenarios.get("upper", scenarios.get("upside")),
+            scenarios.get("base", scenarios.get("baseCase")),
+            scenarios.get("lower", scenarios.get("downside")),
+        )
+    elif isinstance(scenarios, list):
+        by_key: Dict[str, Any] = {}
+        for index, scenario in enumerate(scenarios[:3]):
+            if not isinstance(scenario, dict):
+                continue
+            token = str(
+                scenario.get("key")
+                or scenario.get("label")
+                or scenario.get("name")
+                or ""
+            ).lower()
+            key = (
+                "upper"
+                if re.search(r"up|upper|bull|high", token)
+                else "lower"
+                if re.search(r"down|lower|bear|low", token)
+                else "base"
+                if re.search(r"base|central", token)
+                else ("upper", "base", "lower")[index]
+            )
+            by_key[key] = scenario.get(
+                "raw",
+                scenario.get("value", scenario.get("percent")),
+            )
+        values = (by_key.get("upper"), by_key.get("base"), by_key.get("lower"))
+    else:
+        return None
+    if any(value is None for value in values):
+        return None
+    try:
+        upper, base, lower = (Decimal(str(value)) for value in values)
+    except Exception:
+        return None
+    if not all(value.is_finite() for value in (upper, base, lower)):
+        return None
+    return (upper, base, lower) if lower < base < upper else None
+
+
+def _inflation_forecast_identity(forecast: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
+    report_month = str(
+        forecast.get("reportMonth") or forecast.get("reportMonthId") or ""
+    ).strip()
+    release_at = str(
+        forecast.get("releaseAt") or forecast.get("releaseDate") or ""
+    ).strip()
+    scenarios = _inflation_forecast_scenarios(forecast)
+    if not report_month or not release_at or not scenarios:
+        return None
+    chart_identity = str(
+        (forecast.get("source") or {}).get("chartSha256")
+        or (forecast.get("source") or {}).get("chartUrl")
+        or ""
+    )
+    return (report_month, release_at, *scenarios, chart_identity)
+
+
+def _prefer_inflation_forecast(
+    current: Dict[str, Any], incoming: Dict[str, Any]
+) -> Dict[str, Any]:
+    current_source = current.get("source") or {}
+    incoming_source = incoming.get("source") or {}
+    current_priority = int(current_source.get("priority") or 0)
+    incoming_priority = int(incoming_source.get("priority") or 0)
+    winner = incoming if incoming_priority > current_priority else current
+    source_ids = _ordered_unique(
+        [
+            *list(current.get("sourceMessageIds") or []),
+            current_source.get("messageId"),
+            *list(incoming.get("sourceMessageIds") or []),
+            incoming_source.get("messageId"),
+        ]
+    )
+    return {
+        **deepcopy(winner),
+        "sourceMessageIds": [source_id for source_id in source_ids if source_id],
+    }
+
+
+def _merge_inflation_forecasts(
+    existing: Optional[Dict[str, Any]], incoming: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    merged: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    for snapshot in (existing or {}, incoming):
+        forecasts = (snapshot.get("data") or {}).get("forecasts") or []
+        for forecast in forecasts:
+            if not isinstance(forecast, dict):
+                continue
+            identity = _inflation_forecast_identity(forecast)
+            if not identity:
+                continue
+            merged[identity] = (
+                _prefer_inflation_forecast(merged[identity], forecast)
+                if identity in merged
+                else deepcopy(forecast)
+            )
+    return sorted(
+        merged.values(),
+        key=lambda forecast: (
+            str(forecast.get("reportMonth") or ""),
+            str(forecast.get("publishedAt") or ""),
+        ),
+    )
+
+
 def _merge_materialized_snapshot(
     existing: Optional[Dict[str, Any]], incoming: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -1991,6 +2241,15 @@ def _merge_materialized_snapshot(
         )
         merged["itemCount"] = len(merged["data"].get("rows") or [])
         merged["changeCount"] = len(merged["data"].get("changes") or [])
+    elif candidate["snapshotType"] == "inflation-nowcast":
+        latest = candidate if not current or incoming_is_latest else current
+        merged["data"] = deepcopy(latest.get("data") or {})
+        merged["data"]["forecasts"] = _merge_inflation_forecasts(
+            current,
+            candidate,
+        )
+        merged["forecastCount"] = len(merged["data"]["forecasts"])
+        merged["itemCount"] = 3 if merged["forecastCount"] else 0
 
     merged["sourceMessageIds"] = sorted(
         _ordered_unique([*existing_sources, *incoming_sources])
@@ -2135,6 +2394,46 @@ def put_immutable_s3_object(
             "Immutable S3 key already exists with a different content checksum."
         )
     return False
+
+
+def archive_market_structure_chart(
+    *,
+    chart: Dict[str, str],
+    payload: bytes,
+    content_type: str,
+    extension: str,
+    content_sha256: str,
+) -> Dict[str, str]:
+    """Store one verified report chart under a private content-addressed key."""
+    if not re.fullmatch(r"[a-f0-9]{64}", content_sha256):
+        raise ValueError("Market Situation chart checksum is invalid")
+    if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+        raise ValueError("Market Situation chart content type is not allowlisted")
+    expected_extension = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/webp": "webp",
+    }[content_type]
+    if extension != expected_extension:
+        raise ValueError("Market Situation chart extension does not match its content")
+
+    s3_key = f"{MARKET_STRUCTURE_ASSET_PREFIX}{content_sha256}.{extension}"
+    put_immutable_s3_object(
+        bucket=S3_BUCKET,
+        key=s3_key,
+        body=payload,
+        content_type=content_type,
+        metadata={
+            "source": "gmail-market-structure",
+            "report-type": "market-structure",
+            "content-sha256": content_sha256,
+        },
+        content_sha256=content_sha256,
+    )
+    return {
+        "id": content_sha256,
+        "s3Key": s3_key,
+    }
 
 
 def claim_textract_content(
@@ -2321,12 +2620,18 @@ def backfill_html_snapshot(
     ).get("Item")
     if not item or not item.get("s3Bucket") or not item.get("s3Key"):
         return False
+    if is_market_structure_webcast_subject(str(item.get("subject") or "")):
+        return False
     is_investing_ideas_change = bool(
         re.search(r"\b\d+\s+Changes?:", str(item.get("subject") or ""), re.IGNORECASE)
     )
     if (
         item.get("snapshotType")
-        and report_type not in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "the-macro-show"}
+        and report_type not in {
+            *RESEARCH_EVENT_SNAPSHOT_TYPES,
+            "the-macro-show",
+            "inflation-nowcast",
+        }
         and not is_investing_ideas_change
     ):
         return False
@@ -2343,9 +2648,18 @@ def backfill_html_snapshot(
             s3_key=item["s3Key"],
             message_id=message_id,
             subject=item.get("subject", ""),
+            sender=item.get("sender", ""),
+            chart_archiver=(
+                archive_market_structure_chart
+                if report_type == "market-structure"
+                else None
+            ),
+            textract_client=(
+                textract if report_type in HTML_TEXTRACT_REPORT_TYPES else None
+            ),
         )
         if not snapshot:
-            if report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
+            if report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}:
                 raise RetryableResearchMaterializationError(
                     f"Research parser returned no {report_type} snapshot"
                 )
@@ -2422,7 +2736,7 @@ def backfill_html_snapshot(
         )
         return True
     except Exception as parse_err:
-        if snapshot or report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
+        if snapshot or report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}:
             try:
                 persist_snapshot_failure(
                     snapshot or _manifest_stub(
@@ -2472,6 +2786,8 @@ def _should_backfill_materialized_snapshot(
 
     report_type = str(item.get("snapshotType") or item.get("reportType") or "unknown")
     subject = str(item.get("subject") or "")
+    if is_market_structure_webcast_subject(subject):
+        return False
     if allow_version_upgrade:
         inferred_report_type = infer_report_type(
             str(item.get("filename") or ""),
@@ -2479,7 +2795,10 @@ def _should_backfill_materialized_snapshot(
         )
         if inferred_report_type != "unknown":
             report_type = inferred_report_type
-    is_materializable = report_type in RESEARCH_EVENT_SNAPSHOT_TYPES or bool(
+    is_materializable = report_type in {
+        *RESEARCH_EVENT_SNAPSHOT_TYPES,
+        "inflation-nowcast",
+    } or bool(
         re.search(r"\b\d+\s+Changes?:", subject, re.IGNORECASE)
     )
     if not is_materializable:
@@ -2673,6 +2992,15 @@ def upload_attachment(
                     s3_key=s3_key,
                     message_id=message_id,
                     subject=subject,
+                    sender=headers.get("from", ""),
+                    chart_archiver=(
+                        archive_market_structure_chart
+                        if report_type == "market-structure"
+                        else None
+                    ),
+                    textract_client=(
+                        textract if report_type in HTML_TEXTRACT_REPORT_TYPES else None
+                    ),
                 )
                 if snapshot:
                     event_count = persist_research_event_ledger(
@@ -2743,7 +3071,7 @@ def upload_attachment(
                             "retryable": False,
                         }
                     )
-                elif report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
+                elif report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}:
                     raise RetryableResearchMaterializationError(
                         f"Research parser returned no {report_type} snapshot"
                     )
@@ -2850,6 +3178,27 @@ def process_message(
             "skipped": [],
         }
 
+        ignored_sentinel = next(
+            (
+                item
+                for item in ledger_items
+                if item.get("attachmentId") == MESSAGE_LEDGER_ATTACHMENT_ID
+                and item.get("status") == "MESSAGE_IGNORED"
+            ),
+            None,
+        )
+        if ignored_sentinel:
+            result["ignored"] = True
+            result["skipped"].append(
+                {
+                    "filename": "",
+                    "detail": str(
+                        ignored_sentinel.get("ignoredReason")
+                        or "metadata-only-ignore"
+                    ),
+                }
+            )
+
         for item in attachment_items:
             require_work_budget()
             filename = item.get("filename", "")
@@ -2897,6 +3246,28 @@ def process_message(
                 attachment_count=len(attachment_items),
             )
         return result
+
+    require_work_budget()
+    metadata = get_message_metadata(access_token, user_id, message_id)
+    metadata_headers = get_headers(metadata)
+    if is_market_structure_webcast_subject(metadata_headers.get("subject", "")):
+        mark_message_ignored(
+            table,
+            message_id=message_id,
+            headers=metadata_headers,
+            reason="market-structure-webcast",
+        )
+        return {
+            "messageId": message_id,
+            "subject": metadata_headers.get("subject", ""),
+            "sender": metadata_headers.get("from", ""),
+            "attachmentCount": 0,
+            "stored": [],
+            "skipped": [
+                {"filename": "", "detail": "market-structure-webcast"}
+            ],
+            "ignored": True,
+        }
 
     require_work_budget()
     message = get_message(access_token, user_id, message_id)
@@ -2950,7 +3321,7 @@ def prepare_build_recovery(
     attempted_at: str,
     limit: int = 1,
 ) -> Tuple[List[str], List[Dict[str, Any]]]:
-    """Select each quarantined Risk Range message at most once per build."""
+    """Select bounded, known-safe quarantined recovery messages per build."""
     selected: List[str] = []
     updated: List[Dict[str, Any]] = []
     for raw_item in state.get("quarantinedMessages") or []:
@@ -2960,7 +3331,7 @@ def prepare_build_recovery(
         message_id = str(item.get("messageId") or "")
         eligible = (
             message_id
-            and item.get("errorCode") in RISK_RANGE_BUILD_RECOVERY_ERROR_CODES
+            and item.get("errorCode") in BUILD_RECOVERY_ERROR_CODES
             and item.get("recoveryBuildVersion") != build_version
             and len(selected) < max(0, limit)
         )
@@ -2985,6 +3356,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     auth_probe_only = event.get("authProbeOnly") is True
     force_auth_probe_requested = event.get("forceAuthProbe") is True
     forced_auth_probe = auth_probe_only and force_auth_probe_requested
+    auth_verified_at: Optional[str] = None
 
     def heartbeat_response(
         *,
@@ -3005,6 +3377,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             error_code=error_code,
             detail=detail,
             secret_version=heartbeat_secret_version,
+            auth_verified_at=auth_verified_at,
             counts=counts,
         )
         response_body = dict(body)
@@ -3342,6 +3715,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             detail=safe_error_detail(err),
             heartbeat_secret_version=secret_version,
         )
+    auth_verified_at = utc_now().isoformat()
 
     if auth_probe_only:
         # Activation can validate the refresh grant and readonly Gmail API
@@ -4099,6 +4473,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             error_code=heartbeat_error_code,
             detail=f"{len(remaining_items)} durable Gmail message(s) remain.",
             secret_version=secret_version,
+            auth_verified_at=auth_verified_at,
             counts=counts,
         )
         response_status = (
@@ -4282,6 +4657,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             else None
         ),
         secret_version=secret_version,
+        auth_verified_at=auth_verified_at,
         counts=counts,
     )
     if not heartbeat_written:

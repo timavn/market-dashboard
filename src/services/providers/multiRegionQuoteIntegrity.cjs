@@ -14,6 +14,8 @@ const UNAVAILABLE_DATA_TYPES = new Set([
   'stale',
 ]);
 
+const DISPLAYABLE_QUOTE_SOURCES = new Set(['ibkr', 'yahoo', 'fred', 'stooq', 'derived']);
+
 const IBKR_MAX_QUOTE_AGE_MS = 2 * 60 * 1000;
 const YAHOO_MAX_QUOTE_AGE_MS = 4 * 24 * 60 * 60 * 1000;
 const YAHOO_CRYPTO_MAX_QUOTE_AGE_MS = 2 * 60 * 60 * 1000;
@@ -23,9 +25,22 @@ const CRYPTO_SYMBOLS = new Set(['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP']);
 function toQuoteInstrument(index) {
   if (!index || typeof index !== 'object') return index;
   const hasExplicitDescriptor = Boolean(
-    index.provider || index.secType || index.exchange || index.currency || index.conId || index.conid
+    index.provider
+      || index.secType
+      || index.exchange
+      || index.currency
+      || index.conId
+      || index.conid
+      || index.ibkrSymbol
+      || index.yahooSymbol
   );
   if (!hasExplicitDescriptor) return index.symbol;
+  const provider = String(index.provider || '').trim().toLowerCase();
+  const providerSymbol = index.providerSymbol || undefined;
+  const ibkrSymbol = index.ibkrSymbol
+    || (provider === 'ibkr' ? providerSymbol : undefined);
+  const yahooSymbol = index.yahooSymbol
+    || (provider === 'yahoo' ? providerSymbol : undefined);
   return {
     symbol: index.symbol,
     secType: index.secType,
@@ -33,7 +48,9 @@ function toQuoteInstrument(index) {
     currency: index.currency,
     conId: index.conId ?? index.conid,
     provider: index.provider,
-    providerSymbol: index.providerSymbol || index.yahooSymbol,
+    providerSymbol,
+    ibkrSymbol,
+    yahooSymbol,
   };
 }
 
@@ -71,7 +88,14 @@ function classifyQuoteAvailability(quote, { now = Date.now() } = {}) {
     return 'unavailable';
   }
   if (isDeniedEntitlement(quote.entitlementStatus)) return 'unavailable';
-  if (source === 'ibkr' && /(?:stale_quote|cache[_ -]?disconnected|provider[_ -]?offline)/i.test(warning)) {
+  if (
+    source === 'ibkr'
+    && (
+      dataType === 'frozen'
+      || dataType === 'delayed_frozen'
+      || /(?:stale_quote|close_only_reference|frozen_quote|cache[_ -]?disconnected|provider[_ -]?offline)/i.test(warning)
+    )
+  ) {
     return 'unavailable';
   }
   if (source === 'ibkr' && ageMs > IBKR_MAX_QUOTE_AGE_MS) return 'unavailable';
@@ -119,6 +143,55 @@ function buildPeriodReturnsMetadata(periods) {
   };
 }
 
+/**
+ * Return true only for rows that can be rendered as a verified observation in
+ * the multi-region API. Missing and explicitly rejected rows stay represented
+ * by the fixed client roster, but are omitted from the transport arrays.
+ */
+function isDisplayableQuoteRow(row) {
+  if (!row || !hasFinitePrice(row)) return false;
+  if (!['current', 'delayed', 'historical'].includes(String(row.availability || '').toLowerCase())) {
+    return false;
+  }
+  const timestamp = row.timestamp || row.quoteAsOf;
+  if (!Number.isFinite(Date.parse(String(timestamp || '')))) return false;
+  const source = String(row.source || row.provider || '').toLowerCase();
+  if (!DISPLAYABLE_QUOTE_SOURCES.has(source)) return false;
+  const warning = String(row.warning || '');
+  const providerWarningOnly = source === 'yahoo'
+    && (
+      /^ibkr\s*:/i.test(warning)
+      || warning.split(';').map((part) => part.trim()).filter(Boolean).every((part) => (
+        /^(?:ibkr_unavailable|yahoo_fallback|delayed_data)$/i.test(part)
+      ))
+    );
+  if (
+    /(?:offline|disconnected|cache|mock|seed|synthetic|fallback|inferred|stale|not[_ -]?entitled|unentitled)/i.test(
+      [row.error, row.freshness, row.sourceStatus, warning].filter(Boolean).join(' ')
+    )
+    && !providerWarningOnly
+  ) return false;
+
+  // Derived curve rows have no upstream provider of their own. Their legs are
+  // verified before the server marks the derived row historical.
+  if (
+    String(row.source || '').toLowerCase() === 'derived'
+    && String(row.dataType || '').toLowerCase() === 'derived'
+  ) {
+    return row.availability === 'historical';
+  }
+
+  return classifyQuoteAvailability({
+    symbol: row.symbol,
+    price: row.price,
+    source: row.source || row.provider,
+    dataType: row.dataType,
+    timestamp,
+    warning: row.warning,
+    entitlementStatus: row.entitlementStatus,
+  }) !== 'unavailable';
+}
+
 module.exports = {
   IBKR_MAX_QUOTE_AGE_MS,
   YAHOO_CRYPTO_MAX_QUOTE_AGE_MS,
@@ -127,4 +200,5 @@ module.exports = {
   classifyQuoteAvailability,
   buildQuoteMetadata,
   buildPeriodReturnsMetadata,
+  isDisplayableQuoteRow,
 };

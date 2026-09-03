@@ -982,6 +982,19 @@ def _decimalize(value: Any) -> Any:
 
 
 def save_snapshot_to_dynamodb(snapshot: Dict[str, Any], db: Any) -> None:
+    if snapshot.get("snapshotType") == "cftc-positioning":
+        snapshot = {
+            **snapshot,
+            "reportType": "cftc-positioning",
+            "snapshotType": "cftc-positioning-hedgeye-audit",
+            "source": "hedgeye-email-html-audit",
+            "contentComplete": False,
+            "decisionEligible": False,
+            "warnings": [
+                *list(snapshot.get("warnings") or []),
+                "AUDIT_ONLY_NOT_FOR_TRADING_DECISIONS",
+            ],
+        }
     snap_table = db.Table("HedgeyeDailySnapshot")
     item = _decimalize(snapshot)
     item["ttl"] = int(datetime.now(timezone.utc).timestamp() + (730 * 24 * 60 * 60))

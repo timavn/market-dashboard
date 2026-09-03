@@ -1,5 +1,6 @@
 const ANNUALIZATION_EQUITY = 252;
 const ANNUALIZATION_CRYPTO = 365;
+const WINDOW_21 = 21;
 const WINDOW_63 = 63;
 const WINDOW_252 = 252;
 const WINDOW_3Y = 756; // ~3 * 252 trading sessions
@@ -128,9 +129,18 @@ function rollingAnnualizedVolSeries(logReturns, window, annualizationFactor) {
 function buildRealizedVolatilitySnapshot(bars, {
   assetType = 'equity',
   includeLongWindows = true,
+  // Rolling series and the normalized price history are chart-only payloads.
+  // Bulk portfolio sizing needs the scalar values, but materializing these
+  // arrays for every maximum-history symbol creates avoidable CPU and GC work.
+  includeSeries = true,
+  normalizedBars = null,
 } = {}) {
   const annualizationFactor = resolveAnnualizationFactor(assetType);
-  const series = normalizePriceSeries(bars);
+  const series = Array.isArray(normalizedBars)
+    ? normalizedBars
+      .filter((row) => row?.date && finitePositive(row?.adjustedClose))
+      .map((row) => ({ date: row.date, close: Number(row.adjustedClose) }))
+    : normalizePriceSeries(bars);
   const logReturns = buildLogReturns(series);
   const asOf = series.at(-1)?.date || null;
   const observationCount = logReturns.length;
@@ -142,6 +152,7 @@ function buildRealizedVolatilitySnapshot(bars, {
       annualizationFactor,
       observationCount,
       asOf,
+      rv21: null,
       rv63: null,
       rv252: null,
       rv3y: null,
@@ -154,6 +165,7 @@ function buildRealizedVolatilitySnapshot(bars, {
     };
   }
 
+  const rv21 = trailingAnnualizedVol(logReturns, WINDOW_21, annualizationFactor);
   const rv63 = trailingAnnualizedVol(logReturns, WINDOW_63, annualizationFactor);
   const rv252 = observationCount >= WINDOW_252
     ? trailingAnnualizedVol(logReturns, WINDOW_252, annualizationFactor)
@@ -209,6 +221,7 @@ function buildRealizedVolatilitySnapshot(bars, {
     annualizationFactor,
     observationCount,
     asOf,
+    rv21: rv21 ? rv21.value : null,
     rv63: rv63 ? rv63.value : null,
     rv252: rv252 ? rv252.value : null,
     rv3y: rv3y ? rv3y.value : null,
@@ -219,11 +232,16 @@ function buildRealizedVolatilitySnapshot(bars, {
     limitedHistory,
     spikeWarning,
     warnings,
-    rolling63: rollingAnnualizedVolSeries(logReturns, WINDOW_63, annualizationFactor),
-    rolling252: observationCount >= WINDOW_252
+    rolling21: includeSeries
+      ? rollingAnnualizedVolSeries(logReturns, WINDOW_21, annualizationFactor)
+      : [],
+    rolling63: includeSeries
+      ? rollingAnnualizedVolSeries(logReturns, WINDOW_63, annualizationFactor)
+      : [],
+    rolling252: includeSeries && observationCount >= WINDOW_252
       ? rollingAnnualizedVolSeries(logReturns, WINDOW_252, annualizationFactor)
       : [],
-    priceSeries: series,
+    priceSeries: includeSeries ? series : [],
   };
 }
 
@@ -245,6 +263,7 @@ module.exports = {
   MIN_OBSERVATIONS,
   SPIKE_RATIO,
   WINDOW_10Y,
+  WINDOW_21,
   WINDOW_252,
   WINDOW_3Y,
   WINDOW_5Y,

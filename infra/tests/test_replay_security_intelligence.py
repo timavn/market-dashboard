@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import unittest
+from argparse import Namespace
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -96,6 +97,72 @@ class ReplayMarketCalendarTests(unittest.TestCase):
             replay.replay_exit_code([{"status": "would_index"}, {"status": "would_dispatch"}]),
             0,
         )
+
+
+class ReplayProfileContractTests(unittest.TestCase):
+    def test_dry_run_is_pinned_to_the_local_read_profile(self):
+        args = Namespace(apply=False, read_profile="market-dashboard-local", admin_profile=None)
+        self.assertEqual(replay.validate_profile_arguments(args, environment={}), "market-dashboard-local")
+
+        with self.assertRaises(replay.ProfileValidationError) as context:
+            replay.validate_profile_arguments(
+                Namespace(apply=False, read_profile="market-dashboard-admin", admin_profile=None),
+                environment={},
+            )
+        self.assertEqual(context.exception.error_code, "AWS_PROFILE_NAME_INVALID")
+
+    def test_apply_requires_the_explicit_admin_profile_before_aws_clients(self):
+        with self.assertRaises(replay.ProfileValidationError) as missing:
+            replay.validate_profile_arguments(
+                Namespace(apply=True, read_profile="market-dashboard-local", admin_profile=None),
+                environment={},
+            )
+        self.assertEqual(missing.exception.error_code, "AWS_ADMIN_PROFILE_REQUIRED")
+
+        with self.assertRaises(replay.ProfileValidationError) as wrong:
+            replay.validate_profile_arguments(
+                Namespace(apply=True, read_profile="market-dashboard-local", admin_profile="market-dashboard-local"),
+                environment={},
+            )
+        self.assertEqual(wrong.exception.error_code, "AWS_ADMIN_PROFILE_REQUIRED")
+
+        self.assertEqual(
+            replay.validate_profile_arguments(
+                Namespace(apply=True, read_profile="market-dashboard-local", admin_profile="market-dashboard-admin"),
+                environment={},
+            ),
+            "market-dashboard-admin",
+        )
+
+    def test_ambient_profile_and_static_credentials_are_rejected(self):
+        args = Namespace(apply=True, read_profile="market-dashboard-local", admin_profile="market-dashboard-admin")
+        with self.assertRaises(replay.ProfileValidationError) as profile:
+            replay.validate_profile_arguments(
+                args,
+                environment={"AWS_PROFILE": "market-dashboard-local"},
+            )
+        self.assertEqual(profile.exception.error_code, "AWS_PROFILE_ENVIRONMENT_OVERRIDE")
+
+        with self.assertRaises(replay.ProfileValidationError) as credentials:
+            replay.validate_profile_arguments(
+                args,
+                environment={"AWS_ACCESS_KEY_ID": "ambient"},
+            )
+        self.assertEqual(credentials.exception.error_code, "AWS_PROFILE_STATIC_SESSION_REJECTED")
+
+    def test_identity_contract_distinguishes_local_reads_and_assumed_admin_role(self):
+        self.assertTrue(replay.approved_identity({
+            "Account": "915328198276",
+            "Arn": "arn:aws:iam::915328198276:user/market-dashboard-local",
+        }, "market-dashboard-local", apply=False))
+        self.assertFalse(replay.approved_identity({
+            "Account": "915328198276",
+            "Arn": "arn:aws:iam::915328198276:user/market-dashboard-local",
+        }, "market-dashboard-admin", apply=True))
+        self.assertTrue(replay.approved_identity({
+            "Account": "915328198276",
+            "Arn": "arn:aws:sts::915328198276:assumed-role/AWSReservedSSO_Administrator/operator",
+        }, "market-dashboard-admin", apply=True))
 
 
 if __name__ == "__main__":

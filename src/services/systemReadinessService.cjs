@@ -17,6 +17,10 @@ const {
   buildResearchPipelineCoverage,
   collectResearchPipelineCoverage,
 } = require('../utils/researchPipelineCoverage.cjs');
+const {
+  legacyHermesIsReadOnly,
+  normalizeLegacyHermesMode,
+} = require('../utils/legacyHermesMode.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const RUNTIME_BOOT_FINGERPRINT = computeRuntimeFingerprint(REPO_ROOT);
@@ -34,6 +38,11 @@ const DEFAULT_CONTROLLER_STATE_FILE = path.join(
 );
 const DEFAULT_SYSTEM_READINESS_CACHE_MS = 5 * 60 * 1000;
 const MIN_SYSTEM_READINESS_CACHE_MS = 5 * 60 * 1000;
+// A cached report remains inside the bridge's six-minute evidence contract for
+// this entire window. Public callers can consume that still-valid report while
+// one background refresh runs, but a completed failed refresh replaces it and
+// fails closed immediately.
+const SYSTEM_READINESS_REVALIDATE_GRACE_MS = 50 * 1000;
 const GIB = 1024 ** 3;
 
 const SERVICE_DEFINITIONS = new Map(
@@ -238,8 +247,17 @@ function getHostCapacity({
   }
 }
 
+function configuredControllerStateFile(env = process.env) {
+  if (Object.prototype.hasOwnProperty.call(env, 'READINESS_CONTROLLER_STATE_FILE')) {
+    return String(env.READINESS_CONTROLLER_STATE_FILE || '').trim()
+      || DEFAULT_CONTROLLER_STATE_FILE;
+  }
+  return String(env.HERMES_CONTROLLER_STATE_FILE || '').trim()
+    || DEFAULT_CONTROLLER_STATE_FILE;
+}
+
 function getControllerState({
-  stateFile = process.env.HERMES_CONTROLLER_STATE_FILE || DEFAULT_CONTROLLER_STATE_FILE,
+  stateFile = configuredControllerStateFile(),
   readFile = (file) => fs.readFileSync(file, 'utf8'),
 } = {}) {
   try {
@@ -276,7 +294,11 @@ function getControllerState({
   }
 }
 
-function buildHostChecks({ capacity, controller, now }) {
+function buildHostChecks({ capacity, controller, now, legacyReadOnly = false }) {
+  const controllerId = legacyReadOnly ? 'readiness.controller' : 'hermes.controller';
+  const controllerLabel = legacyReadOnly
+    ? 'Dashboard readiness controller'
+    : 'Hermes reliability controller';
   let capacityCheck;
   if (!capacity?.available) {
     capacityCheck = makeCheck({
@@ -337,13 +359,13 @@ function buildHostChecks({ capacity, controller, now }) {
     return [
       capacityCheck,
       makeCheck({
-        id: 'hermes.controller',
-        label: 'Hermes reliability controller',
+        id: controllerId,
+        label: controllerLabel,
         status: 'warn',
         blocking: false,
         owner: 'automation-operations',
         errorCode: controller?.errorCode || 'HERMES_CONTROLLER_STATE_MISSING',
-        summary: 'The supervised local reliability controller has not published valid state.',
+        summary: 'The supervised local readiness controller has not published valid state.',
         detail: controller?.error || null,
         observedAt: now,
         now,
@@ -378,8 +400,8 @@ function buildHostChecks({ capacity, controller, now }) {
   return [
     capacityCheck,
     makeCheck({
-      id: 'hermes.controller',
-      label: 'Hermes reliability controller',
+      id: controllerId,
+      label: controllerLabel,
       status,
       blocking: false,
       owner: 'automation-operations',
@@ -604,6 +626,28 @@ function getSupervisorProvenance({
         lastResultStatus: child?.lastResultStatus || null,
         lastErrorCode: child?.lastErrorCode || null,
         restarts: Number(child?.restarts) || 0,
+        sidecarProcessPids: Array.isArray(child?.sidecarProcessPids)
+          ? child.sidecarProcessPids.map(value => Number(value)).filter(Number.isInteger)
+          : [],
+        managedSidecarProcessPids: Array.isArray(child?.managedSidecarProcessPids)
+          ? child.managedSidecarProcessPids.map(value => Number(value)).filter(Number.isInteger)
+          : [],
+        sidecarProcessCount: Number.isFinite(Number(child?.sidecarProcessCount))
+          ? Number(child.sidecarProcessCount)
+          : null,
+        managedSidecarProcessCount: Number.isFinite(Number(child?.managedSidecarProcessCount))
+          ? Number(child.managedSidecarProcessCount)
+          : null,
+        duplicatePids: Array.isArray(child?.duplicatePids)
+          ? child.duplicatePids.map(value => Number(value)).filter(Number.isInteger)
+          : [],
+        duplicateCount: Number.isFinite(Number(child?.duplicateCount))
+          ? Number(child.duplicateCount)
+          : null,
+        sidecarRuntimeVerified: typeof child?.sidecarRuntimeVerified === 'boolean'
+          ? child.sidecarRuntimeVerified
+          : null,
+        sidecarProcessCleanup: child?.sidecarProcessCleanup || null,
       }];
     }));
     return {
@@ -626,6 +670,13 @@ function getSupervisorProvenance({
       sourceMatches,
       childPids: Object.fromEntries(Object.entries(children).map(([name, child]) => [name, child.pid])),
       children,
+      analystContract: {
+        verified: state?.analystContract?.verified === true,
+        checkedAt: state?.analystContract?.checkedAt || null,
+        error: state?.analystContract?.error
+          ? String(state.analystContract.error).slice(0, 500)
+          : null,
+      },
     };
   } catch (error) {
     return {
@@ -997,6 +1048,79 @@ function buildHermesBridgeCheck({ supervisor, now }) {
   });
 }
 
+function buildAnalystRuntimeCheck({ supervisor, now }) {
+  const sidecar = supervisor?.children?.analystSidecar || null;
+  const gateway = supervisor?.children?.analystHermes || null;
+  const contract = supervisor?.analystContract || null;
+  const supervisorVerified = supervisor?.stateFound === true
+    && supervisor?.running === true
+    && supervisor?.rootMatches === true
+    && supervisor?.commandMatches === true
+    && supervisor?.sourceMatches === true;
+  const childReady = (child) => (
+    child?.running === true
+    && ['ready', 'healthy'].includes(String(child?.status || '').toLowerCase())
+  );
+  const sidecarReady = childReady(sidecar);
+  const gatewayReady = childReady(gateway);
+  const contractVerified = contract?.verified === true;
+  const ready = supervisorVerified && sidecarReady && gatewayReady && contractVerified;
+
+  let errorCode = null;
+  let summary = 'The Analyst gateway, research sidecar, and JSON-RPC contract are verified.';
+  let detail = `Sidecar PID ${sidecar?.pid || 'unknown'}; gateway PID ${gateway?.pid || 'unknown'}.`;
+  if (!ready) {
+    if (gatewayReady && sidecarReady && !contractVerified) {
+      errorCode = 'ANALYST_CONTRACT_UNVERIFIED';
+      summary = 'The Analyst processes are running, but the Hermes JSON-RPC contract is unverified.';
+      detail = contract?.error || 'The deep create/resume/list/stream/interrupt contract check has not passed.';
+    } else {
+      errorCode = 'ANALYST_RUNTIME_UNAVAILABLE';
+      summary = 'The Analyst runtime is unavailable or has unverified process provenance.';
+      detail = [
+        supervisorVerified ? null : 'The repository-owned supervisor is unverified.',
+        sidecarReady ? null : 'The research sidecar is not ready.',
+        gatewayReady ? null : 'The Analyst Hermes gateway is not ready.',
+        contractVerified ? null : contract?.error,
+      ].filter(Boolean).join(' ') || null;
+    }
+  }
+
+  return makeCheck({
+    id: 'analyst.runtime',
+    label: 'The Analyst runtime',
+    status: ready ? 'pass' : 'fail',
+    blocking: false,
+    owner: 'automation-operations',
+    errorCode,
+    summary,
+    detail,
+    observedAt: contract?.checkedAt || now,
+    now,
+    impact: ready ? null : 'On-demand Analyst chats and cited research requests may be unavailable.',
+    recovery: ready ? null : {
+      kind: 'command',
+      label: 'Restart the repo-owned stack and repeat the Analyst contract check.',
+      command: 'npm run dev:restart -- --detach',
+    },
+    provenance: {
+      source: 'dashboard-supervisor',
+      contractVerified,
+      contractCheckedAt: contract?.checkedAt || null,
+      sidecar: {
+        pid: sidecar?.pid || null,
+        running: sidecar?.running === true,
+        status: sidecar?.status || null,
+      },
+      gateway: {
+        pid: gateway?.pid || null,
+        running: gateway?.running === true,
+        status: gateway?.status || null,
+      },
+    },
+  });
+}
+
 function serviceFailureCheck({ id, label, message, impact, recovery, blocking = true, ...metadata }) {
   return makeCheck({
     id,
@@ -1010,18 +1134,63 @@ function serviceFailureCheck({ id, label, message, impact, recovery, blocking = 
   });
 }
 
-function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolioResult, now }) {
+function buildSidecarChecks({
+  livezResult,
+  readyzResult,
+  statusResult,
+  portfolioResult,
+  supervisor,
+  expectedAccounts = [],
+  now,
+}) {
   const livez = fulfilledValue(livezResult);
   const readyz = fulfilledValue(readyzResult);
   const gateway = fulfilledValue(statusResult);
   const portfolio = fulfilledValue(portfolioResult);
-  const restart = {
+  const portfolioErrorCode = portfolio?.error_code
+    || portfolio?.errorCode
+    || portfolioResult?.reason?.sidecarCode
+    || null;
+  const gatewayErrorCode = gateway?.error_code
+    || gateway?.errorCode
+    || readyzResult?.reason?.sidecarCode
+    || null;
+  const sidecarState = supervisor?.children?.sidecar || null;
+  const duplicatePids = Array.isArray(sidecarState?.duplicatePids)
+    ? sidecarState.duplicatePids
+    : [];
+  const duplicateCount = Number(sidecarState?.duplicateCount);
+  const processCleanupFailed = sidecarState?.sidecarProcessCleanup?.verified === false;
+  const sidecarDuplicateFailure = processCleanupFailed
+    || (Number.isFinite(duplicateCount) && duplicateCount > 0);
+  const restartSidecar = {
     kind: 'command',
-    label: 'Restart the repo-owned dashboard stack.',
-    command: 'npm run dev:restart',
+    label: 'Restart only the repo-owned IBKR sidecar.',
+    command: 'npm run dev:sidecar:restart',
   };
 
-  const sidecar = livez
+  const sidecar = sidecarDuplicateFailure
+    ? serviceFailureCheck({
+        id: 'ibkr.sidecar',
+        label: 'IBKR sidecar',
+        message: processCleanupFailed
+          ? `The supervisor could not verify IBKR sidecar process cleanup${sidecarState?.sidecarProcessCleanup?.detail ? `: ${sidecarState.sidecarProcessCleanup.detail}` : '.'}`
+          : `Duplicate repo-owned IBKR sidecar process(es) remain connected to Gateway: ${duplicatePids.join(', ') || 'unknown PID(s)'}.`,
+        errorCode: processCleanupFailed
+          ? (sidecarState?.sidecarProcessCleanup?.errorCode || 'IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED')
+          : 'IBKR_SIDECAR_DUPLICATES',
+        impact: 'The sidecar is not singleton-safe; duplicate Gateway sessions can cause connection errors and live data is not considered ready.',
+        recovery: restartSidecar,
+        provenance: {
+          sidecarProcessPids: sidecarState?.sidecarProcessPids || [],
+          managedSidecarProcessPids: sidecarState?.managedSidecarProcessPids || [],
+          duplicatePids,
+          duplicateCount: Number.isFinite(duplicateCount) ? duplicateCount : null,
+          sidecarProcessCleanup: sidecarState?.sidecarProcessCleanup || null,
+        },
+        now,
+      })
+    : livez
     ? makeCheck({
         id: 'ibkr.sidecar',
         label: 'IBKR sidecar',
@@ -1037,7 +1206,7 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
         message: `Sidecar did not answer /livez${errorMessage(livezResult) ? `: ${errorMessage(livezResult)}` : '.'}`,
         errorCode: 'IBKR_SIDECAR_UNREACHABLE',
         impact: 'Portfolio, IBKR quotes, and prediction-market discovery are unavailable.',
-        recovery: restart,
+        recovery: restartSidecar,
       });
 
   const runtime = livez?.runtime;
@@ -1085,6 +1254,7 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
     && readyz?.connected === true
     && gateway?.connected === true
     && gateway?.status === 'connected';
+  const gatewayApiUnresponsive = gatewayErrorCode === 'IBKR_GATEWAY_API_UNRESPONSIVE';
   const gatewayCheck = connected
     ? makeCheck({
         id: 'ibkr.gateway',
@@ -1100,26 +1270,55 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
         id: 'ibkr.gateway',
         label: 'IB Gateway authentication',
         message: livez
-          ? `Sidecar is alive, but Gateway is not authenticated${errorMessage(readyzResult) ? `: ${errorMessage(readyzResult)}` : '.'}`
+          ? (gatewayApiUnresponsive
+            ? `Sidecar is alive, but Gateway did not complete a verified API heartbeat${gateway?.message ? `: ${gateway.message}` : '.'}`
+            : `Sidecar is alive, but Gateway is not authenticated${errorMessage(readyzResult) ? `: ${errorMessage(readyzResult)}` : '.'}`)
           : 'Gateway cannot be checked until the sidecar is running.',
-        errorCode: livez ? 'IBKR_GATEWAY_NOT_AUTHENTICATED' : 'IBKR_GATEWAY_UNAVAILABLE',
+        errorCode: livez
+          ? (gatewayErrorCode || 'IBKR_GATEWAY_NOT_AUTHENTICATED')
+          : 'IBKR_GATEWAY_UNAVAILABLE',
         impact: 'No live brokerage data or trading capability is available.',
-        recovery: {
-          kind: 'manual',
-          label: 'Open IB Gateway, sign in, confirm API socket access on port 4001, then refresh.',
-        },
+        recovery: gatewayApiUnresponsive
+          ? restartSidecar
+          : {
+            kind: 'manual',
+            label: 'Open IB Gateway, sign in, confirm API socket access on port 4001, then refresh.',
+          },
       });
 
   const accounts = gateway?.accounts || readyz?.accounts || [];
-  const accountsCheck = connected && accounts.length > 0
+  const normalizedExpectedAccounts = [...new Set((expectedAccounts || [])
+    .map((account) => String(account || '').trim())
+    .filter(Boolean))];
+  const missingExpectedAccounts = normalizedExpectedAccounts
+    .filter((account) => !accounts.includes(account));
+  const accountsCheck = connected && (accounts.length > 0 || normalizedExpectedAccounts.length > 0)
     ? makeCheck({
         id: 'ibkr.accounts',
         label: 'Managed IBKR accounts',
-        status: 'pass',
-        blocking: true,
-        summary: `${accounts.length} managed account(s) are available.`,
-        detail: accounts.join(', '),
+        status: missingExpectedAccounts.length ? 'warn' : 'pass',
+        blocking: false,
+        errorCode: missingExpectedAccounts.length ? 'IBKR_PARTIAL_ACCOUNT_COVERAGE' : null,
+        accountCoverageStatus: missingExpectedAccounts.length ? 'partial_account_coverage' : 'complete',
+        summary: missingExpectedAccounts.length
+          ? `Gateway has partial account coverage (${accounts.length} of ${normalizedExpectedAccounts.length} expected).`
+          : `${accounts.length} managed account(s) are available.`,
+        detail: missingExpectedAccounts.length
+          ? `Connected: ${accounts.join(', ') || 'none'}. Missing live: ${missingExpectedAccounts.join(', ')}.`
+          : accounts.join(', '),
         observedAt: gateway.time || now,
+        impact: missingExpectedAccounts.length
+          ? 'Disconnected accounts remain history-only and current prediction-market totals are withheld.'
+          : null,
+        recovery: missingExpectedAccounts.length ? {
+          kind: 'manual',
+          label: 'Sign in to IB Gateway with the linked username that exposes every expected account, then reconnect.',
+        } : null,
+        provenance: {
+          expectedAccountIds: normalizedExpectedAccounts,
+          connectedAccountIds: accounts,
+          missingLiveAccountIds: missingExpectedAccounts,
+        },
         now,
       })
     : serviceFailureCheck({
@@ -1127,6 +1326,7 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
         label: 'Managed IBKR accounts',
         message: connected ? 'Gateway connected without returning a managed account.' : 'Accounts are unavailable while Gateway is disconnected.',
         errorCode: 'IBKR_ACCOUNTS_UNAVAILABLE',
+        accountCoverageStatus: 'unavailable',
         impact: 'The dashboard cannot select or load a live portfolio.',
         recovery: {
           kind: 'manual',
@@ -1202,7 +1402,7 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
         errorCode: !connected
           ? 'IBKR_PORTFOLIO_UNAVAILABLE'
           : (!portfolio
-            ? 'IBKR_LIVE_SESSION_UNAVAILABLE'
+            ? (portfolioErrorCode || 'IBKR_LIVE_SESSION_UNAVAILABLE')
             : (!liveSessionVerified
               ? 'IBKR_LIVE_SESSION_UNVERIFIED'
               : (!positionProvenanceVerified
@@ -1213,10 +1413,11 @@ function buildSidecarChecks({ livezResult, readyzResult, statusResult, portfolio
         observedAt,
         lastSuccessAt: liveSessionVerified ? observedAt : null,
         impact: 'Portfolio values must not be trusted or used for decisions.',
-        recovery: restart,
+        recovery: restartSidecar,
         provenance: portfolio ? {
           source: portfolio.source || null,
           status: portfolio.status || null,
+          errorCode: portfolioErrorCode,
           accountCount: liveAccounts.length,
           positionCount: positions.length,
           socketVerifiedAt,
@@ -1645,9 +1846,12 @@ function createSystemReadinessService({
   readLaunchAgentProvenance = getLaunchAgentProvenance,
   readHostCapacity = getHostCapacity,
   readControllerState = getControllerState,
+  expectedIbkrAccounts = [],
   now: nowProvider = () => new Date(),
   cacheNow = () => Date.now(),
+  legacyMode = process.env.LEGACY_HERMES_MODE,
 }) {
+  const legacyReadOnly = legacyHermesIsReadOnly(normalizeLegacyHermesMode(legacyMode));
   let cached = null;
   let inFlight = null;
   const configuredCacheMs = Number(process.env.SYSTEM_READINESS_CACHE_MS);
@@ -1716,10 +1920,12 @@ function createSystemReadinessService({
       ],
     }));
     let director = { workers: [], recentRuns: [] };
-    try {
-      director = await getDirectorSnapshot({ dynamodb, workflowSnapshot: workflow });
-    } catch (error) {
-      director = { workers: [], recentRuns: [], error: error.message };
+    if (!legacyReadOnly) {
+      try {
+        director = await getDirectorSnapshot({ dynamodb, workflowSnapshot: workflow });
+      } catch (error) {
+        director = { workers: [], recentRuns: [], error: error.message };
+      }
     }
 
     let inbox = workflow.hermesInbox || null;
@@ -1731,21 +1937,23 @@ function createSystemReadinessService({
       }
     }
 
-    const workerDefinitions = listWorkerDefinitions();
+    const workerDefinitions = legacyReadOnly ? [] : listWorkerDefinitions();
     const gmailAccount = inbox?.gmailAccount
       || process.env.HERMES_GMAIL_ACCOUNT
       || 'timsmithaviation@gmail.com';
     const gmailFunction = process.env.HERMES_GMAIL_INGESTOR_FUNCTION
       || SERVICE_DEFINITIONS.get('gmail.ingestion')?.aws?.functionName
       || 'market-dashboard-gmail-ingestor-v2';
-    const workerSignals = await collectHermesWorkerSignals({
-      dynamodb,
-      cloudwatch,
-      workerDefinitions,
-      now,
-      heartbeatReader: readServiceHeartbeat,
-      metricReader: readLambdaActivity,
-    });
+    const workerSignals = legacyReadOnly
+      ? []
+      : await collectHermesWorkerSignals({
+        dynamodb,
+        cloudwatch,
+        workerDefinitions,
+        now,
+        heartbeatReader: readServiceHeartbeat,
+        metricReader: readLambdaActivity,
+      });
     let gmailHeartbeatStore;
     try {
       gmailHeartbeatStore = await readServiceHeartbeat(
@@ -1804,7 +2012,7 @@ function createSystemReadinessService({
         due,
       });
     });
-    if (director.error && workerChecks.length === 0) {
+    if (!legacyReadOnly && director.error && workerChecks.length === 0) {
       workerChecks.push(serviceFailureCheck({
         id: 'hermes.status',
         label: 'Hermes worker status',
@@ -1814,7 +2022,7 @@ function createSystemReadinessService({
       }));
     }
 
-    const gmailCheck = gmailHeartbeatStore?.available !== true
+    const rawGmailCheck = gmailHeartbeatStore?.available !== true
       ? serviceFailureCheck({
           id: 'gmail.ingestion',
           label: 'Gmail authentication and ingestion',
@@ -1846,6 +2054,10 @@ function createSystemReadinessService({
           now: evaluationNow,
           maxAgeMinutes: GMAIL_READINESS_MAX_AGE_MINUTES,
         });
+    const gmailCheck = {
+      ...rawGmailCheck,
+      capabilityIds: [legacyReadOnly ? 'automation.readiness' : 'automation.hermes'],
+    };
 
     const currentPredictionPayload = fulfilledValue(currentPredictionResult);
     const predictionDisplayCheck = currentPredictionPayload
@@ -1892,12 +2104,17 @@ function createSystemReadinessService({
       launchAgent,
       now: evaluationNow,
     });
-    const bridgeCheck = buildHermesBridgeCheck({ supervisor, now: evaluationNow });
+    const bridgeCheck = legacyReadOnly
+      ? null
+      : buildHermesBridgeCheck({ supervisor, now: evaluationNow });
+    const analystRuntimeCheck = buildAnalystRuntimeCheck({ supervisor, now: evaluationNow });
     const sidecarChecks = buildSidecarChecks({
       livezResult,
       readyzResult,
       statusResult,
       portfolioResult,
+      supervisor,
+      expectedAccounts: expectedIbkrAccounts,
       now: evaluationNow,
     });
     const researchChecks = buildResearchChecks({
@@ -1912,6 +2129,7 @@ function createSystemReadinessService({
       capacity: hostCapacity,
       controller: controllerState,
       now: evaluationNow,
+      legacyReadOnly,
     });
 
     const report = buildSystemReadiness([
@@ -1921,7 +2139,12 @@ function createSystemReadinessService({
         checks: [dashboardChecks[0], apiCheck, ...dashboardChecks.slice(1)],
       },
       { id: 'brokerage', label: 'IBKR and live portfolio', checks: sidecarChecks },
-      { id: 'automation', label: 'Hermes and Gmail automation', checks: [bridgeCheck, ...workerChecks, gmailCheck] },
+      {
+        id: 'automation',
+        label: legacyReadOnly ? 'Gmail and readiness automation' : 'Hermes and Gmail automation',
+        checks: legacyReadOnly ? [gmailCheck] : [bridgeCheck, ...workerChecks, gmailCheck],
+      },
+      { id: 'analyst', label: 'The Analyst', checks: [analystRuntimeCheck] },
       {
         id: 'prediction-markets',
         label: 'Prediction markets',
@@ -1983,9 +2206,19 @@ function createSystemReadinessService({
     // Public callers, including `?refresh=1`, share this hard minimum interval.
     // A UI request must never turn the expensive AWS/database probes into an
     // unbounded request-driven workload.
-    if (cached && cacheNow() - cached.savedAt < cacheMs) {
+    const cacheAgeMs = cached ? cacheNow() - cached.savedAt : Number.POSITIVE_INFINITY;
+    if (cached && cacheAgeMs < cacheMs) {
       if (cached.error) throw cached.error;
       return cached.value;
+    }
+    if (
+      cached?.value
+      && !cached.error
+      && cacheAgeMs < cacheMs + SYSTEM_READINESS_REVALIDATE_GRACE_MS
+    ) {
+      const stillValidValue = cached.value;
+      void runCollection().catch(() => {});
+      return stillValidValue;
     }
     return runCollection();
   }
@@ -2007,10 +2240,13 @@ module.exports = {
   DEFAULT_SYSTEM_READINESS_CACHE_MS,
   DEFAULT_WORKER_THRESHOLDS_MINUTES,
   MIN_SYSTEM_READINESS_CACHE_MS,
+  SYSTEM_READINESS_REVALIDATE_GRACE_MS,
   businessDaysSince,
+  buildAnalystRuntimeCheck,
   buildDashboardChecks,
   buildHermesBridgeCheck,
   collectHermesWorkerSignals,
+  configuredControllerStateFile,
   getLambdaActivity,
   getHostCapacity,
   getControllerState,

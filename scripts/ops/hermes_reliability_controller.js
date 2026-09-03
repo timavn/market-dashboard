@@ -42,7 +42,7 @@ const DEFAULT_READINESS_TIMEOUT_MS = 120_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 330_000;
 const MAX_STATE_ACTIONS = 200;
 const MAX_RESOLVED_INCIDENTS = 100;
-const CONTROLLER_SERVICE_ID = 'hermes-reliability-controller';
+const CONTROLLER_SERVICE_ID = 'dashboard-readiness-controller';
 const CONTROLLER_STATE_VERSION = 1;
 const ACTIVE_MODE = 'active';
 const SHADOW_MODE = 'shadow';
@@ -66,6 +66,10 @@ const ACTION_EXECUTORS = Object.freeze({
   },
   'restart-local-stack': {
     manifestExecutor: 'dev-stack-restart',
+    controllerExecutor: 'loopback-readiness-api',
+  },
+  'restart-ibkr-sidecar': {
+    manifestExecutor: 'dev-stack-sidecar-restart',
     controllerExecutor: 'loopback-readiness-api',
   },
   'rebuild-sidecar-runtime': {
@@ -134,8 +138,19 @@ function boundedText(value, length = 500) {
   return String(value || '').slice(0, length);
 }
 
+function compatibilityEnvValue(env, primaryName, legacyName) {
+  if (Object.prototype.hasOwnProperty.call(env, primaryName)) return env[primaryName];
+  return env[legacyName];
+}
+
 function controllerStateFile(env = process.env) {
-  const configured = String(env.HERMES_CONTROLLER_STATE_FILE || '').trim();
+  const configured = String(
+    compatibilityEnvValue(
+      env,
+      'READINESS_CONTROLLER_STATE_FILE',
+      'HERMES_CONTROLLER_STATE_FILE',
+    ) || '',
+  ).trim();
   return configured ? path.resolve(configured) : DEFAULT_STATE_FILE;
 }
 
@@ -239,6 +254,7 @@ function restoreState(raw, {
   const restored = {
     ...fresh,
     ...raw,
+    serviceId: CONTROLLER_SERVICE_ID,
     mode: normalizedMode,
     enabledActionIds: [...enabledActionIds],
     status: normalizedMode === ACTIVE_MODE ? 'monitoring' : 'shadow',
@@ -520,9 +536,15 @@ function notificationBody(kind, incident) {
   const code = incident.errorCode || 'UNKNOWN_ERROR';
   if (kind === 'recovery') return `${code} cleared after two verified clean observations.`;
   if (kind === 'circuit') {
+    if (incident.actionId === 'restart-ibkr-sidecar') {
+      return `${code} persisted after two sidecar-only repairs. Relaunch and log in to IB Gateway manually; automatic Gateway quit/login/MFA is disabled.`;
+    }
     return `${code} reached the two-attempt limit; automatic repair is paused until ${incident.circuitOpenUntil}.`;
   }
   if (kind === 'escalation') {
+    if (incident.actionId === 'restart-ibkr-sidecar') {
+      return `${code}: sidecar-only recovery is unavailable. Relaunch and log in to IB Gateway manually.`;
+    }
     return `${code}: ${incident.suppressionReason || 'manual operator action is required'}.`;
   }
   return `${code}: ${incident.summary || 'readiness is degraded'}.`;
@@ -716,6 +738,50 @@ function observeReport(state, report, {
       incident.capabilityIds = [...new Set(cause.capabilityIds || [])];
       incident.cleanObservationCount = 0;
       incident.lastCleanObservedAt = null;
+      const conflictingInFlightAction = state.inFlight?.incidentId === incident.id
+        && state.inFlight?.actionId !== policy?.id;
+      if (policy && conflictingInFlightAction) {
+        const supersededFlight = state.inFlight;
+        const supersededRecord = state.actions.find(
+          (item) => item.id === supersededFlight.actionRecordId,
+        );
+        if (supersededRecord && !supersededRecord.completedAt) {
+          supersededRecord.completedAt = observedAt;
+          supersededRecord.outcome = 'superseded';
+          supersededRecord.verificationOutcome = 'policy-rebound';
+          supersededRecord.errorCode = 'CONTROLLER_ACTION_POLICY_REBOUND';
+          supersededRecord.detail = (
+            `Recovery policy changed from ${supersededFlight.actionId} to ${policy.id}.`
+          );
+        }
+        // A conflicting flight can only survive from persisted controller
+        // state: policies are immutable within a running controller process.
+        // Retire that stale global hold so the incident can adopt the current
+        // bounded action instead of dispatching the old recovery again.
+        state.inFlight = null;
+      }
+      if (
+        policy
+        && (
+          !incident.actionId
+          || incident.actionId !== policy.id
+          || incident.suppressionReason === 'NO_AUTOMATIC_POLICY'
+        )
+      ) {
+        const actionChanged = Boolean(
+          incident.actionId && incident.actionId !== policy.id,
+        );
+        incident.actionId = policy.id;
+        if (incident.status === 'manual' || actionChanged) {
+          incident.status = 'open';
+          incident.suppressionReason = null;
+          incident.suppressionDetail = null;
+          incident.nextRetryAt = null;
+          incident.circuitOpenedAt = null;
+          incident.circuitOpenUntil = null;
+          incident.verificationOutcome = actionChanged ? 'policy-rebound' : null;
+        }
+      }
       if (incident.status === 'verifying') {
         incident.verificationOutcome = 'failed';
         incident.status = 'open';
@@ -823,7 +889,7 @@ function eligibleActions(state, checksById, {
     if (mode === ACTIVE_MODE && !enabledActions.has(policy.id)) {
       incident.status = 'suppressed';
       incident.suppressionReason = 'ACTION_CLASS_DISABLED';
-      incident.suppressionDetail = `${policy.id} is not in HERMES_RELIABILITY_ENABLED_ACTIONS.`;
+      incident.suppressionDetail = `${policy.id} is not in READINESS_CONTROLLER_ENABLED_ACTIONS.`;
       incident.nextRetryAt = null;
       continue;
     }
@@ -1032,7 +1098,11 @@ function controllerHeartbeat(state) {
 function createController({
   manifest = SERVICE_MANIFEST,
   env = process.env,
-  mode = normalizeMode(env.HERMES_RELIABILITY_CONTROLLER_MODE),
+  mode = normalizeMode(compatibilityEnvValue(
+    env,
+    'READINESS_CONTROLLER_MODE',
+    'HERMES_RELIABILITY_CONTROLLER_MODE',
+  )),
   enabledActionIds: requestedEnabledActionIds = null,
   statePath = controllerStateFile(env),
   state: suppliedState = null,
@@ -1048,7 +1118,11 @@ function createController({
   const policies = compilePolicies(manifest);
   const enabledActionIds = normalizeEnabledActionIds(
     requestedEnabledActionIds == null
-      ? env.HERMES_RELIABILITY_ENABLED_ACTIONS
+      ? compatibilityEnvValue(
+        env,
+        'READINESS_CONTROLLER_ENABLED_ACTIONS',
+        'HERMES_RELIABILITY_ENABLED_ACTIONS',
+      )
       : requestedEnabledActionIds,
     policies,
   );
@@ -1361,7 +1435,12 @@ async function runDaemon({
   controller = createController({ env }),
   intervalMs = Math.max(
     DEFAULT_POLL_INTERVAL_MS,
-    Number(env.HERMES_CONTROLLER_POLL_INTERVAL_MS) || DEFAULT_POLL_INTERVAL_MS,
+    Number(compatibilityEnvValue(
+      env,
+      'READINESS_CONTROLLER_POLL_INTERVAL_MS',
+      'HERMES_CONTROLLER_POLL_INTERVAL_MS',
+    ))
+      || DEFAULT_POLL_INTERVAL_MS,
   ),
 } = {}) {
   let stopping = false;
@@ -1394,7 +1473,7 @@ async function runDaemon({
 if (require.main === module) {
   runDaemon().catch((error) => {
     process.stderr.write(
-      `[hermes-reliability-controller] fatal: ${boundedText(error?.stack || error)}\n`,
+      `[readiness-controller] fatal: ${boundedText(error?.stack || error)}\n`,
     );
     process.exitCode = 1;
   });
@@ -1416,6 +1495,7 @@ module.exports = {
   SHADOW_MODE,
   buildDependentSuppressions,
   compilePolicies,
+  compatibilityEnvValue,
   controllerHeartbeat,
   controllerStateFile,
   createController,

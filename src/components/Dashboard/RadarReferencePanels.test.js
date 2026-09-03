@@ -1,5 +1,5 @@
-import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import React, { useCallback, useState } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MarketDataService } from '../../services/api/marketDataService';
 import RadarReferencePanels, {
@@ -8,6 +8,11 @@ import RadarReferencePanels, {
   getRowQuoteStatus,
   readManualRecord,
 } from './RadarReferencePanels';
+import { resetSessionResourceStore } from '../../utils/sessionResourceStore';
+import {
+  createUnknownDashboardCardStatuses,
+  mergeDashboardCardStatuses,
+} from './dashboardStatus';
 
 jest.mock('axios', () => ({ get: jest.fn() }));
 jest.mock('../../services/api/marketDataService', () => ({
@@ -37,6 +42,42 @@ describe('radar reference data guards', () => {
       freshness: 'current',
       quoteAsOf: '2026-07-13T20:59:00.000Z',
     }, null)).toBe('delayed');
+  });
+
+  it('accepts a verified Yahoo fallback while preserving the rejected IBKR warning', () => {
+    expect(getRowQuoteStatus({
+      symbol: 'DJI',
+      price: '54036.93',
+      availability: 'delayed',
+      source: 'yahoo',
+      dataType: 'delayed',
+      quoteAsOf: '2026-07-13T20:59:00.000Z',
+      warning: 'ibkr: close_only_reference; missing_timestamp; stale_quote; delayed_data',
+    }, null)).toBe('delayed');
+  });
+
+  it('accepts a direct Yahoo row with its delayed provenance warning', () => {
+    expect(getRowQuoteStatus({
+      symbol: 'SMH',
+      price: '250.00',
+      availability: 'delayed',
+      source: 'yahoo',
+      dataType: 'delayed',
+      quoteAsOf: '2026-07-13T20:59:00.000Z',
+      warning: 'yahoo_fallback',
+    }, null)).toBe('delayed');
+  });
+
+  it('still rejects a stale warning emitted by the selected Yahoo provider', () => {
+    expect(getRowQuoteStatus({
+      symbol: 'DJI',
+      price: '54036.93',
+      availability: 'delayed',
+      source: 'yahoo',
+      dataType: 'delayed',
+      quoteAsOf: '2026-07-13T20:59:00.000Z',
+      warning: 'stale_quote',
+    }, null)).toBe('unavailable');
   });
 
   it('reports mixed coverage when verified rows and missing rows coexist', () => {
@@ -79,7 +120,7 @@ describe('radar reference data guards', () => {
     }, null)).toBe('delayed');
   });
 
-  it('rejects an old IBKR mark as soon as provider health is delayed', () => {
+  it('keeps a fresh IBKR mark through a status-poll delay and demotes it on disconnect', () => {
     const row = {
       availability: 'current',
       source: 'ibkr',
@@ -93,7 +134,65 @@ describe('radar reference data guards', () => {
     };
 
     expect(getRowQuoteStatus(row, providerStatus)).toBe('live');
-    expect(getRowQuoteStatus(row, { ...providerStatus, statusRefreshDelayed: true })).toBe('unavailable');
+    expect(getRowQuoteStatus(row, { ...providerStatus, statusRefreshDelayed: true })).toBe('live');
+    expect(getRowQuoteStatus(row, {
+      ...providerStatus,
+      ibkr: { ...providerStatus.ibkr, connected: false, status: 'offline' },
+    })).toBe('delayed');
+  });
+
+  it('shows a retained last-verified row as delayed even after its normal live cutoff', () => {
+    expect(getRowQuoteStatus({
+      symbol: 'SPX',
+      price: '7669.22',
+      availability: 'reference',
+      source: 'ibkr',
+      dataType: 'live',
+      freshness: 'refresh-delayed',
+      quoteAsOf: '2026-07-10T20:00:00.000Z',
+      lastVerifiedAt: '2026-07-10T20:00:00.000Z',
+      displayDelayed: true,
+      displayOnly: true,
+      executable: false,
+    }, null)).toBe('delayed');
+  });
+
+  it('never shows a retained marker when its provenance is synthetic', () => {
+    expect(getRowQuoteStatus({
+      symbol: 'SPX',
+      price: '7669.22',
+      availability: 'reference',
+      source: 'mock',
+      dataType: 'live',
+      freshness: 'refresh-delayed',
+      quoteAsOf: '2026-07-10T20:00:00.000Z',
+      lastVerifiedAt: '2026-07-10T20:00:00.000Z',
+      displayDelayed: true,
+      displayOnly: true,
+      executable: false,
+    }, null)).toBe('unavailable');
+  });
+
+  it('demotes an aging timestamped IBKR observation instead of blanking it', () => {
+    expect(getRowQuoteStatus({
+      symbol: 'DJI',
+      price: '53002.30',
+      availability: 'current',
+      source: 'ibkr',
+      dataType: 'live',
+      freshness: 'current',
+      quoteAsOf: '2026-07-13T20:58:00.000Z',
+    }, null)).toBe('live');
+
+    expect(getRowQuoteStatus({
+      symbol: 'DJI',
+      price: '53002.30',
+      availability: 'current',
+      source: 'ibkr',
+      dataType: 'live',
+      freshness: 'current',
+      quoteAsOf: '2026-07-13T20:57:59.999Z',
+    }, null)).toBe('delayed');
   });
 
   it('rejects legacy rows without the explicit backend availability enum', () => {
@@ -170,6 +269,7 @@ describe('radar reference data guards', () => {
 
 describe('radar reference volume card', () => {
   beforeEach(() => {
+    resetSessionResourceStore();
     jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-07-13T21:00:00.000Z').getTime());
     MarketDataService.getDollarLiquidityModels.mockResolvedValue({ models: {} });
     MarketDataService.getHedgeyeSnapshot.mockResolvedValue(null);
@@ -181,11 +281,12 @@ describe('radar reference volume card', () => {
   });
 
   afterEach(() => {
+    resetSessionResourceStore();
     jest.restoreAllMocks();
     delete global.fetch;
   });
 
-  test('places Volume immediately to the right of Dollar Liquidity', async () => {
+  test('renders four reference cards in the reflowed order', async () => {
     MarketDataService.getMarketShareVolume.mockResolvedValue({
       totalMarket: [],
       totalExchange: [],
@@ -198,19 +299,21 @@ describe('radar reference volume card', () => {
     expect(within(referenceBar).queryByRole('heading', { name: 'Normal / Reference' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByText('Select any panel for the full source view')).not.toBeInTheDocument();
     const cards = within(referenceBar).getAllByRole('region');
-    const situation = screen.getByRole('region', { name: 'Market Situation' });
+    const cftc = screen.getByRole('region', { name: 'CFTC Positioning' });
+    const quads = screen.getByRole('region', { name: 'Global Quads' });
     const liquidity = screen.getByRole('region', { name: 'Dollar Liquidity' });
     const volume = screen.getByRole('region', { name: 'Volume' });
-    expect(cards).toHaveLength(5);
-    expect(cards[1]).toBe(situation);
-    expect(cards[3]).toBe(liquidity);
-    expect(cards[4]).toBe(volume);
+    expect(cards).toHaveLength(4);
+    expect(cards).toEqual([cftc, quads, liquidity, volume]);
+    expect(within(referenceBar).queryByRole('region', { name: 'Market Situation' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Style Factors' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Currencies' })).not.toBeInTheDocument();
-    await within(volume).findByLabelText('UNAVAILABLE');
+    await waitFor(() => expect(volume).toHaveAttribute('data-status', 'unavailable'));
+    expect(within(volume).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
   });
 
-  test('replaces manual Style Factors with the verified Market Situation signals', async () => {
+  test('keeps Market Situation out of the strip while preserving its status reporting', async () => {
+    const onDashboardStatusChange = jest.fn();
     MarketDataService.getHedgeyeSnapshot.mockResolvedValue({
       date: '2026-07-13',
       snapshotType: 'market-structure',
@@ -234,21 +337,80 @@ describe('radar reference volume card', () => {
       meta: { status: 'missing' },
     });
 
-    render(<RadarReferencePanels />);
+    render(<RadarReferencePanels onDashboardStatusChange={onDashboardStatusChange} />);
 
-    const panel = screen.getByRole('region', { name: 'Market Situation' });
-    expect(await within(panel).findByText('SPX Gamma Exposure')).toBeInTheDocument();
-    expect(within(panel).getByText('Negative')).toHaveClass('efr-situation-reading--negative');
-    expect(within(panel).getByText('Bearish')).toHaveClass('efr-situation-reading--negative');
-    expect(within(panel).getByText('Neutral')).toHaveClass('efr-situation-reading--neutral');
-    expect(within(panel).getByText('Risk On')).toHaveClass('efr-situation-reading--positive');
-    expect(within(panel).getByLabelText('AS OF · JUL 13, 2026'))
-      .toHaveAttribute('data-status', 'historical');
+    const referenceBar = screen.getByRole('region', { name: 'Normal / Reference' });
+    expect(within(referenceBar).queryByRole('region', { name: 'Market Situation' })).not.toBeInTheDocument();
+    expect(within(referenceBar).queryByText('SPX Gamma Exposure')).not.toBeInTheDocument();
+    await waitFor(() => expect(
+      onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'market-situation'),
+    ).toEqual(expect.objectContaining({ status: 'historical' })));
+  });
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'Market Situation' }));
-    const dialog = screen.getByRole('dialog', { name: 'Market Situation' });
-    expect(within(dialog).getByText('Market Situation Report')).toBeInTheDocument();
-    expect(within(dialog).getByText('Published signal matrix')).toBeInTheDocument();
+  test('reports each reference card as an isolated Dashboard status', async () => {
+    const onDashboardStatusChange = jest.fn();
+    MarketDataService.getMarketShareVolume.mockResolvedValue({
+      totalMarket: [],
+      totalExchange: [],
+      meta: { status: 'missing' },
+    });
+
+    render(<RadarReferencePanels onDashboardStatusChange={onDashboardStatusChange} />);
+
+    await waitFor(() => expect(onDashboardStatusChange).toHaveBeenCalled());
+    const latestStatuses = onDashboardStatusChange.mock.calls.at(-1)[0];
+    expect(latestStatuses.map(({ id }) => id)).toEqual([
+      'cftc-positioning',
+      'market-situation',
+      'global-quads',
+      'dollar-liquidity',
+      'volume',
+    ]);
+    expect(latestStatuses.find(({ id }) => id === 'global-quads')).toEqual(expect.objectContaining({
+      status: 'manual',
+      detail: 'NO AS-OF',
+    }));
+  });
+
+  test('settles status publishing when the parent stores each update', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const publishSpy = jest.fn();
+    MarketDataService.getMarketShareVolume.mockResolvedValue({
+      totalMarket: [],
+      totalExchange: [],
+      meta: { status: 'missing' },
+    });
+    const StatefulParent = () => {
+      const [statuses, setStatuses] = useState(createUnknownDashboardCardStatuses);
+      const handleStatusChange = useCallback((updates) => {
+        publishSpy(updates);
+        setStatuses((current) => mergeDashboardCardStatuses(current, updates));
+      }, []);
+      return (
+        <>
+          <output data-testid="volume-parent-status">{statuses.volume.status}</output>
+          <RadarReferencePanels onDashboardStatusChange={handleStatusChange} />
+        </>
+      );
+    };
+
+    render(<StatefulParent />);
+
+    await waitFor(() => expect(screen.getByTestId('volume-parent-status')).toHaveTextContent('unavailable'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const settledPublishCount = publishSpy.mock.calls.length;
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(publishSpy).toHaveBeenCalled();
+    expect(publishSpy.mock.calls).toHaveLength(settledPublishCount);
+    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/Maximum update depth exceeded/i);
+    consoleError.mockRestore();
   });
 
   test('surfaces a provisional dataset with its as-of date', async () => {
@@ -269,16 +431,12 @@ describe('radar reference volume card', () => {
     render(<RadarReferencePanels />);
 
     const panel = screen.getByRole('region', { name: 'Volume' });
-    const chip = await within(panel).findByLabelText('PROVISIONAL · AS OF JUL 10');
-    expect(chip).toHaveAttribute('data-status', 'delayed');
-    expect(chip).toHaveClass('efr-status-chip--delayed', 'efr-status-chip--indicator-only');
-    expect(chip).toHaveAttribute('title', 'PROVISIONAL · AS OF JUL 10');
-    fireEvent.click(chip);
-    const statusDialog = screen.getByRole('dialog', { name: 'Volume data status' });
-    expect(within(statusDialog).getByText('The latest dataset is preliminary and may be incomplete.'))
-      .toBeInTheDocument();
-    expect(within(panel).queryByText('PROVISIONAL')).not.toBeInTheDocument();
-    expect(within(panel).queryByText('AS OF JUL 10')).not.toBeInTheDocument();
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'delayed'));
+    expect(within(panel).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Volume' }));
+    expect(await screen.findByRole('dialog', { name: 'Volume' })).toBeInTheDocument();
+    expect(MarketDataService.getMarketShareVolume).toHaveBeenCalledTimes(1);
   });
 
   test.each([
@@ -295,9 +453,8 @@ describe('radar reference volume card', () => {
     render(<RadarReferencePanels />);
 
     const panel = screen.getByRole('region', { name: 'Volume' });
-    await waitFor(() => {
-      expect(within(panel).getByLabelText('UNAVAILABLE')).toHaveAttribute('data-status', 'unavailable');
-    });
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'unavailable'));
+    expect(within(panel).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
     expect(within(panel).queryByText('PROVISIONAL')).not.toBeInTheDocument();
     consoleError.mockRestore();
   });

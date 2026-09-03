@@ -104,6 +104,57 @@ test('sidecar 503 becomes a typed blocked portfolio snapshot without stale posit
   }
 });
 
+test('sidecar preserves a typed positions-client failure code', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({
+      status: 'tws_offline',
+      error_code: 'IBKR_POSITIONS_CLIENT_UNAVAILABLE',
+      message: 'Dedicated positions client could not reach the IBKR socket.',
+    }),
+  });
+
+  try {
+    await assert.rejects(
+      () => getJson('http://127.0.0.1:8765/portfolio/live-positions'),
+      error => {
+        assert.equal(error.code, 'IBKR_POSITIONS_CLIENT_UNAVAILABLE');
+        assert.equal(error.upstreamStatus, 'tws_offline');
+        assert.equal(error.upstreamErrorCode, 'IBKR_POSITIONS_CLIENT_UNAVAILABLE');
+        return true;
+      },
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('readiness aborts become a typed bridge input timeout', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    const error = new Error('This operation was aborted');
+    error.name = 'AbortError';
+    error.code = 20;
+    throw error;
+  };
+
+  try {
+    await assert.rejects(
+      () => getJson('http://127.0.0.1:3001/api/system-readiness'),
+      error => {
+        assert.equal(error.code, 'SYSTEM_READINESS_REQUEST_TIMEOUT');
+        assert.equal(error.upstreamStatus, 'timeout');
+        assert.match(error.message, /bridge input budget/);
+        return true;
+      },
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('bridge entrypoint is default-disabled and performs no capture or AWS writes', async () => {
   let captures = 0;
   const writes = [];

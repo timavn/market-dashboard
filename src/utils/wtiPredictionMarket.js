@@ -1,3 +1,5 @@
+import { isRefreshDelayedVolatilityRow } from './volatilitySnapshotRows';
+
 const NEW_YORK_TIME_ZONE = 'America/New_York';
 const LIVE_RESPONSE_MAX_AGE_MS = 120000;
 const FUTURE_CLOCK_TOLERANCE_MS = 15000;
@@ -528,8 +530,11 @@ export function normalizeOvxReference(snapshot, { historical = false, now = Date
   const today = dateKeyInNewYork(now);
   const source = row?.sourceLabel || row?.source || null;
   const provenance = [source, row?.warning].filter(Boolean).join(' ');
-  const available = row?.availability === 'available'
-    && row?.freshness === 'current'
+  const refreshDelayed = isRefreshDelayedVolatilityRow(row, now);
+  const available = (
+    (row?.availability === 'available' && row?.freshness === 'current')
+    || refreshDelayed
+  )
     && value != null
     && value >= 0
     && Boolean(asOf)
@@ -537,12 +542,14 @@ export function normalizeOvxReference(snapshot, { historical = false, now = Date
     && !BLOCKED_PROVENANCE.test(provenance);
   if (!available) return { status: 'unavailable', reason: 'A fresh current-session OVX reference is unavailable.' };
   return {
-    status: 'available',
+    status: refreshDelayed ? 'refresh-delayed' : 'available',
     value,
     asOf,
     date: dateKeyInNewYork(asOf),
     source,
     quoteMode: row.quoteMode || null,
+    refreshDelayed,
+    lastVerifiedAt: refreshDelayed ? row.lastVerifiedAt : null,
     executable: false,
   };
 }
@@ -554,18 +561,16 @@ export function describeWtiGeometry(market = {}) {
   };
   if (market.geometry === 'above') {
     const boundary = firstFinite(market.lower, market.threshold);
-    const operator = market.operator === '>' ? '>' : market.lowerInclusive === true ? '≥' : market.lowerInclusive === false ? '>' : 'above';
-    return `WTI ${operator} ${money(boundary)}`;
+    const label = market.lowerInclusive === true ? 'At least' : 'Above';
+    return `${label} ${money(boundary)}`;
   }
   if (market.geometry === 'below') {
     const boundary = firstFinite(market.upper, market.threshold);
-    const operator = market.upperInclusive === true ? '≤' : market.upperInclusive === false ? '<' : 'below';
-    return `WTI ${operator} ${money(boundary)}`;
+    const label = market.upperInclusive === true ? 'At most' : 'Below';
+    return `${label} ${money(boundary)}`;
   }
   if (market.geometry === 'between') {
-    const left = market.lowerInclusive === true ? '[' : market.lowerInclusive === false ? '(' : '';
-    const right = market.upperInclusive === true ? ']' : market.upperInclusive === false ? ')' : '';
-    return `WTI ${left}${money(market.lower)} – ${money(market.upper)}${right}`;
+    return `${money(market.lower)}–${money(market.upper)}`;
   }
   return market.title || market.ticker || 'WTI contract';
 }

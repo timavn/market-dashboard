@@ -29,11 +29,27 @@ describe('GlobalMarketDayCycleHeader regional strip', () => {
   test('shows the correct local times from west to east', () => {
     render(<GlobalMarketDayCycleHeader />);
 
-    expect(screen.getByLabelText(/LA 06:26/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/CHI 08:26/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/NY 09:26/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/LDN 14:26/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/HK 22:26/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/TYO 23:26/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/LA 06:26 Jan 15/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/CHI 08:26 Jan 15/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/NY 09:26 Jan 15/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/LDN 14:26 Jan 15/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/HK 22:26 Jan 15/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/TYO 23:26 Jan 15/)).toBeInTheDocument();
+  });
+
+  test('marks LA as the home timezone and shows dates under each clock', () => {
+    const { container } = render(<GlobalMarketDayCycleHeader />);
+
+    expect(container.querySelector('.global-session-city--home')).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('home timezone')
+    );
+    expect(container.querySelectorAll('.global-session-city--home')).toHaveLength(1);
+    expect(container.querySelector('.global-session-city--home .global-session-city__code')).toHaveTextContent('LA');
+
+    expect(screen.getByText('LA').closest('.global-session-city').querySelector('.global-session-city__date'))
+      .toHaveTextContent('Jan 15');
+    expect(screen.getByText('TYO').closest('.global-session-city').querySelector('.global-session-city__date'))
+      .toHaveTextContent('Jan 15');
   });
 });

@@ -43,6 +43,24 @@ describe('ProcessPage', () => {
     expect(screen.getByTestId('process-document-title')).toHaveTextContent('Process');
     expect(screen.queryByText(/Portfolio Management Framework · Version 0\.1 · Draft/i)).not.toBeInTheDocument();
     expect(screen.getAllByTestId('process-paper-section')).toHaveLength(10);
+    const processDocument = screen.getByTestId('process-document');
+    expect(within(processDocument).getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      '1. Dollar and Cross-Asset Context',
+      '2. Volatility',
+      '3. Interest Rates',
+      '4. Quads and Expected Value',
+      '5. Candidate Qualification',
+      '6. Quantitative Selection and Timing',
+      '7. Fundamental Qualification',
+      '8. Portfolio Decision',
+      'Methods',
+    ]);
+    expect(processDocument).toHaveTextContent(
+      /conflict is a hard qualification failure/i,
+    );
+    expect(processDocument).toHaveTextContent(
+      /USD\/SPX correlation is approximately -0\.9/i,
+    );
 
     const library = screen.getByRole('navigation', { name: 'Process library' });
     expect(within(library).getAllByRole('link').map((link) => link.textContent)).toEqual([
@@ -65,7 +83,50 @@ describe('ProcessPage', () => {
     expect(screen.queryByText(/Beta defines the boundaries/i)).not.toBeInTheDocument();
   });
 
-  test('renders Methods as an index containing all eight mechanisms', () => {
+  test('renders the Exposure Lab guide in the same searchable, editable Process reader', () => {
+    render(<ProcessPage documentId="exposure-lab-guide" />);
+
+    expect(screen.getByTestId('process-page')).toHaveAttribute(
+      'data-document-id',
+      'exposure-lab-guide',
+    );
+    expect(screen.getByTestId('process-document-title')).toHaveTextContent('Exposure Lab Guide');
+    const guide = screen.getByTestId('process-document');
+    expect(within(guide).getAllByRole('heading', { level: 2 })).toHaveLength(10);
+    expect(guide).toHaveTextContent(/what common risks does the portfolio actually own/i);
+    expect(screen.getByRole('table', { name: 'Exposure Lab factor catalog' })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('navigation', { name: 'Process library' }))
+        .getByRole('link', { name: 'Process' }),
+    ).toHaveAttribute('aria-current', 'page');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('textbox', { name: 'Edit Exposure Lab guide' }))
+      .toHaveAttribute('contenteditable', 'true');
+  });
+
+  test('opens plain-language finance definitions in place', () => {
+    render(<ProcessPage documentId="the-process" />);
+
+    const comparisonBaseLinks = screen.getAllByRole('button', { name: 'comparison base' });
+    expect(comparisonBaseLinks.length).toBeGreaterThan(0);
+    expect(comparisonBaseLinks[0]).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(comparisonBaseLinks[0]);
+
+    expect(screen.getByRole('dialog', { name: 'comparison base definition' })).toHaveTextContent(
+      /earlier period or reference group used as the starting point/i,
+    );
+    expect(screen.getByRole('dialog', { name: 'comparison base definition' })).toHaveTextContent(
+      /110 million.*100 million.*10% growth/i,
+    );
+    expect(comparisonBaseLinks[0]).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'comparison base definition' })).not.toBeInTheDocument();
+  });
+
+  test('renders Methods as one chapter-style reader containing all eight mechanisms', () => {
     render(<ProcessPage documentId="methods-index" />);
 
     expect(screen.getByTestId('process-document-title')).toHaveTextContent('Methods');
@@ -82,6 +143,13 @@ describe('ProcessPage', () => {
     ].forEach((name) => {
       expect(within(article).getByRole('link', { name })).toBeInTheDocument();
     });
+    expect(within(article).getByRole('heading', { name: '3. Signals and Risk Ranges' })).toBeInTheDocument();
+    expect(within(article).getByRole('heading', { name: '10. Validation and Change Control' })).toBeInTheDocument();
+    expect(article).toHaveTextContent(/Trade and Trend retain separate sources/i);
+    expect(within(article).getByRole('link', { name: 'Position Sizing' })).toHaveAttribute(
+      'href',
+      '#/process/methods?section=method-position-sizing',
+    );
     expect(
       within(screen.getByRole('navigation', { name: 'Process library' }))
         .getByRole('link', { name: 'Methods' }),
@@ -92,7 +160,7 @@ describe('ProcessPage', () => {
     render(<ProcessPage documentId="position-sizing" />);
 
     expect(screen.getByTestId('process-document-title')).toHaveTextContent('Position Sizing');
-    expect(screen.queryByText(/Method · Version 1\.1 · Canonical/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Version 1\.1|Canonical/i)).not.toBeInTheDocument();
     expect(screen.getAllByTestId('process-section')).toHaveLength(8);
     expect(screen.getByTestId('process-document')).toHaveTextContent(
       /Trend breaks while Trade remains aligned, MIN becomes the ceiling/i,
@@ -108,7 +176,7 @@ describe('ProcessPage', () => {
     const view = render(<ProcessPage documentId="the-process" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const abstract = screen.getByRole('textbox', { name: 'Edit Abstract section' });
+    const abstract = screen.getByRole('textbox', { name: 'Edit Strategy Overview section' });
     fireEvent.input(abstract, {
       target: { innerHTML: '<p>Edited abstract for the next review.</p>' },
     });
@@ -125,7 +193,7 @@ describe('ProcessPage', () => {
     const view = render(<ProcessPage documentId="the-process" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const abstract = screen.getByRole('textbox', { name: 'Edit Abstract section' });
+    const abstract = screen.getByRole('textbox', { name: 'Edit Strategy Overview section' });
     fireEvent.input(abstract, { target: { innerHTML: '<p>Draft to restore.</p>' } });
     fireEvent.click(screen.getByRole('button', { name: 'Read' }));
     fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
@@ -157,7 +225,43 @@ describe('ProcessPage', () => {
     fireEvent.click(screen.getByRole('option', { name: /Tail.*Signals and Risk Ranges/i }));
 
     expect(onNavigate).toHaveBeenCalledWith(
-      '#/process/methods/signals-and-risk-ranges?section=tail',
+      '#/process/methods?section=method-signals-and-risk-ranges--tail',
+    );
+  });
+
+  test('finds and routes to an Exposure Lab guide section from Process search', () => {
+    const onNavigate = jest.fn();
+    render(<ProcessPage documentId="the-process" onNavigate={onNavigate} />);
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Process documents' }), {
+      target: { value: 'Failure-state reference' },
+    });
+    fireEvent.click(screen.getByRole('option', { name: /Failure-state reference.*Exposure Lab Guide/i }));
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      '#/process/exposure-lab?section=failure-states',
+    );
+  });
+
+  test('keeps Methods index links inside the chapter reader', () => {
+    const onNavigate = jest.fn();
+    render(
+      <ProcessPage
+        documentId="methods-index"
+        onNavigate={onNavigate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'Position Sizing', exact: true }));
+
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'start',
+    });
+    expect(screen.getByRole('button', { name: '4 Position Sizing' })).toHaveAttribute(
+      'aria-current',
+      'location',
     );
   });
 
@@ -170,7 +274,7 @@ describe('ProcessPage', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /8 Stops, Exits, and Reversals/i }));
+    fireEvent.click(screen.getByRole('button', { name: /8.*Portfolio Decision/i }));
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
       behavior: 'smooth',
       block: 'start',
@@ -188,5 +292,46 @@ describe('ProcessPage', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Methods' }));
     expect(onNavigate).toHaveBeenCalledWith('#/process/methods');
 
+  });
+
+  test('shows one contents number and tracks the active section while scrolling', () => {
+    render(<ProcessPage documentId="the-process" />);
+    const contents = screen.getByRole('complementary');
+    const dollarButton = within(contents).getByRole('button', {
+      name: '1 Dollar and Cross-Asset Context',
+    });
+    const interestButton = within(contents).getByRole('button', {
+      name: '3 Interest Rates',
+    });
+    expect(dollarButton).toBeInTheDocument();
+    expect(within(contents).queryByRole('button', {
+      name: /1 1\. Dollar and Cross-Asset Context/,
+    })).not.toBeInTheDocument();
+
+    const scrollContainer = screen.getByTestId('process-article-scroll');
+    scrollContainer.getBoundingClientRect = () => ({ top: 100, height: 800 });
+    const sections = within(screen.getByTestId('process-document'))
+      .getAllByTestId('process-paper-section');
+    const setSectionPositions = (positions) => {
+      positions.forEach((top, index) => {
+        sections[index].getBoundingClientRect = () => ({ top, height: 200 });
+      });
+    };
+    setSectionPositions([
+      120, 620, 1120, 1620, 2120,
+      2620, 3120, 3620, 4120, 4620,
+    ]);
+
+    fireEvent.scroll(scrollContainer);
+    expect(interestButton).not.toHaveAttribute('aria-current', 'location');
+
+    setSectionPositions([
+      -1380, -880, -380, 320, 820,
+      1320, 1820, 2320, 2820, 3320,
+    ]);
+
+    fireEvent.scroll(scrollContainer);
+    expect(interestButton).toHaveAttribute('aria-current', 'location');
+    expect(dollarButton).not.toHaveAttribute('aria-current', 'location');
   });
 });

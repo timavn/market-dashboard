@@ -10,11 +10,11 @@ import {
 import { getProcessDocument } from '../../constants/processDocuments';
 
 describe('Process library articles', () => {
-  test('renders a restrained Methods index with all eight addressable Methods', () => {
+  test('renders the Methods index together with all eight method chapters', () => {
     render(<ProcessLibraryArticle documentId="methods-index" />);
 
     expect(screen.getByRole('heading', { name: 'Methods', level: 1 })).toBeInTheDocument();
-    const table = screen.getByRole('table');
+    const table = screen.getAllByRole('table')[0];
     const methodLinks = within(table).getAllByRole('link');
     expect(methodLinks).toHaveLength(8);
     expect(methodLinks.map((link) => link.textContent)).toEqual([
@@ -29,11 +29,13 @@ describe('Process library articles', () => {
     ]);
     expect(screen.getByRole('link', { name: 'Position Sizing' })).toHaveAttribute(
       'href',
-      '#/process/methods/position-sizing',
+      '#/process/methods?section=method-position-sizing',
     );
     expect(screen.getByTestId('process-document')).toHaveTextContent(
-      /Position Sizing is the current formula-complete Method/i,
+      /A Method describes the calculation it owns/i,
     );
+    expect(screen.getByRole('heading', { name: '3. Signals and Risk Ranges' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '10. Validation and Change Control' })).toBeInTheDocument();
   });
 
   test('defines signals, ranges, and entry location while keeping Tail non-authoritative', () => {
@@ -42,20 +44,22 @@ describe('Process library articles', () => {
     const article = screen.getByTestId('process-document');
     expect(article).toHaveTextContent(/Trade.*three weeks or less/i);
     expect(article).toHaveTextContent(/Trend.*three months or more/i);
-    expect(article).toHaveTextContent(/long may open or add only in the bottom half/i);
-    expect(article).toHaveTextContent(/short may open or add only in the top half/i);
+    expect(article).toHaveTextContent(/PVV means Price, Volume, and Volatility/i);
+    expect(article).toHaveTextContent(/PVVₜ = f\(P≤ₜ, V≤ₜ, σ≤ₜ\) = \[LRRₜ, HRRₜ\]/);
+    expect(article).toHaveTextContent(/long may open or add only when 0 ≤ p ≤ 0\.5/i);
+    expect(article).toHaveTextContent(/short may open or add only when 0\.5 ≤ p ≤ 1/i);
     expect(article).toHaveTextContent(
-      /Tail is a long-duration directional context shown for overview.*no entry, exit, sizing, or portfolio authority/i,
+      /Tail is long-duration context for the overview.*not an entry, exit, sizing, or portfolio authorization input/i,
     );
   });
 
-  test('makes unresolved Method boundaries explicit instead of inventing policy', () => {
+  test('documents the formulas and qualification boundaries used by the Methods', () => {
     const cases = [
-      ['stops-exits-and-reversals', /No canonical hard-stop policy is currently defined/i],
-      ['macro-regime-and-quad-overlay', /does not currently authorize, reject, or resize a position/i],
-      ['security-selection-and-pods', /descriptions do not constitute approved formulas/i],
-      ['portfolio-construction-and-diversification', /No unapproved threshold may be presented/i],
-      ['validation-and-change-control', /does not approve a new investment rule/i],
+      ['stops-exits-and-reversals', /No canonical hard-stop formula is defined here/i],
+      ['macro-regime-and-quad-overlay', /candidate map and a qualification decision, not an automatic order/i],
+      ['security-selection-and-pods', /No single factor or Pod overrides a failed macro qualification/i],
+      ['portfolio-construction-and-diversification', /may not increase the security above its calculated MAX/i],
+      ['validation-and-change-control', /tests for formulas, boundaries, precedence, missing data, and provenance/i],
     ];
 
     cases.forEach(([documentId, expectedText]) => {
@@ -63,6 +67,28 @@ describe('Process library articles', () => {
       expect(screen.getByTestId('process-document')).toHaveTextContent(expectedText);
       view.unmount();
     });
+  });
+
+  test('includes the top-down, expected-value, and bottom-up calculations', () => {
+    const { unmount: unmountMacro } = render(<ProcessLibraryArticle documentId="macro-regime-and-quad-overlay" />);
+    const macro = screen.getByTestId('process-document');
+    expect(macro).toHaveTextContent(/trending Pearson correlation between DXY/i);
+    expect(macro).toHaveTextContent(/exact 15-, 30-, 90-, 120-, and 180-session windows/i);
+    expect(macro).not.toHaveTextContent(/rₜ = ln\(Pₜ \/ Pₜ₋₁\)/);
+    expect(macro).toHaveTextContent(/RV = stdev\(returns\) × √252/);
+    expect(macro).toHaveTextContent(/low when x < low.*normal when low ≤ x < high.*elevated when x ≥ high/i);
+    expect(macro).toHaveTextContent(/curve spread = yield10Y − yield2Y/);
+    expect(macro).toHaveTextContent(/weighted EV = Σ pᵢ × EVᵢ/);
+    expect(macro).toHaveTextContent(/DXY\/SPX correlation is approximately −0\.9/i);
+    unmountMacro();
+
+    const { unmount: unmountPods } = render(<ProcessLibraryArticle documentId="security-selection-and-pods" />);
+    const pods = screen.getByTestId('process-document');
+    expect(pods).toHaveTextContent(/growthₜ = \(metricₜ \/ metricₜ₋ₙ\) − 1/);
+    expect(pods).toHaveTextContent(/growth change = growthₜ − growthₜ₋ₘ/);
+    expect(pods).toHaveTextContent(/FCF \/ revenue/);
+    expect(pods).toHaveTextContent(/NOPAT \/ invested capital/);
+    unmountPods();
   });
 
   test('exports renderers for library articles while preserving Position Sizing separately', () => {
@@ -93,7 +119,7 @@ describe('Process library articles', () => {
     };
 
     render(<ProcessLibraryArticle documentId="methods-index" editor={editor} />);
-    const overviewSection = screen.getByRole('textbox', { name: 'Edit Overview section' });
+    const overviewSection = screen.getByRole('textbox', { name: 'Edit How to use the Methods section' });
     expect(overviewSection).toHaveAttribute('contenteditable', 'true');
     fireEvent.input(overviewSection, { target: { innerHTML: '<h2>Overview</h2><p>Edited.</p>' } });
     expect(onRegionInput).toHaveBeenCalledWith('overview', '<h2>Overview</h2><p>Edited.</p>');

@@ -9,6 +9,7 @@ const path = require('node:path');
 const manifest = require('../../ops/services.json');
 const {
   ACTIVE_MODE,
+  CONTROLLER_SERVICE_ID,
   CONTROLLER_BUILD_FINGERPRINT,
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_READINESS_TIMEOUT_MS,
@@ -17,6 +18,7 @@ const {
   DEFAULT_TELEMETRY_MAX_AGE_MS,
   SHADOW_MODE,
   compilePolicies,
+  compatibilityEnvValue,
   controllerHeartbeat,
   createController,
   createDefaultIo,
@@ -38,6 +40,34 @@ const {
 
 const BASE_TIME = Date.parse('2026-07-27T16:00:00.000Z');
 const ALL_ACTION_IDS = compilePolicies(manifest).map((policy) => policy.id);
+
+test('generic readiness environment names take precedence during compatibility', () => {
+  const env = {
+    READINESS_CONTROLLER_MODE: 'active',
+    HERMES_RELIABILITY_CONTROLLER_MODE: 'shadow',
+    READINESS_CONTROLLER_ENABLED_ACTIONS: '',
+    HERMES_RELIABILITY_ENABLED_ACTIONS: 'prune-dashboard-logs',
+  };
+  assert.equal(
+    compatibilityEnvValue(
+      env,
+      'READINESS_CONTROLLER_MODE',
+      'HERMES_RELIABILITY_CONTROLLER_MODE',
+    ),
+    'active',
+  );
+  const controller = createController({
+    env,
+    state: null,
+    persist: () => {},
+    emit: () => {},
+    io: {},
+  });
+  assert.equal(controller.mode, 'active');
+  assert.deepEqual(controller.state.enabledActionIds, []);
+  assert.equal(controller.state.serviceId, CONTROLLER_SERVICE_ID);
+  assert.equal(CONTROLLER_SERVICE_ID, 'dashboard-readiness-controller');
+});
 
 function check(id, status = 'pass', now = BASE_TIME, overrides = {}) {
   return {
@@ -146,7 +176,7 @@ function controllerHarness({
 test('controller policy manifest is complete, low risk, and exact-code allowlisted', () => {
   assert.deepEqual(policyValidationErrors(manifest), []);
   const policies = compilePolicies(manifest);
-  assert.equal(policies.length, 7);
+  assert.equal(policies.length, 8);
   assert.ok(policies.every((policy) => policy.maxAttempts === 2));
   assert.ok(policies.every((policy) => policy.attemptWindowMs === 3_600_000));
   assert.ok(policies.every((policy) => policy.circuitDurationMs === 3_600_000));
@@ -168,6 +198,54 @@ test('controller policy manifest is complete, low risk, and exact-code allowlist
     assert.equal(gmail.triggeringErrorCodes.includes(forbidden), false);
   }
 
+  const restart = policies.find((policy) => policy.id === 'restart-local-stack');
+  assert.equal(
+    restart.triggeringErrorCodes.includes('DASHBOARD_SUPERVISOR_CODE_DRIFT'),
+    true,
+  );
+  assert.deepEqual(restart.prerequisites[0], {
+    checkId: 'dashboard.supervisor',
+    statuses: ['pass', 'warn'],
+    allowedErrorCodes: [null, 'DASHBOARD_SUPERVISOR_CODE_DRIFT'],
+    maxAgeMs: 180000,
+  });
+
+  const sidecarRestart = policies.find(
+    (policy) => policy.id === 'restart-ibkr-sidecar',
+  );
+  assert.deepEqual(sidecarRestart.triggeringCheckIds, [
+    'local-sidecar',
+    'ibkr.sidecar',
+    'ibkr.gateway',
+    'ibkr.portfolio',
+  ]);
+  assert.deepEqual(sidecarRestart.triggeringErrorCodes.sort(), [
+    'IBKR_BALANCE_REQUEST_TIMEOUT',
+    'IBKR_GATEWAY_API_UNRESPONSIVE',
+    'IBKR_LIVE_SESSION_STALE',
+    'IBKR_LIVE_SESSION_UNAVAILABLE',
+    'IBKR_LIVE_SESSION_UNVERIFIED',
+    'IBKR_POSITIONS_CLIENT_UNAVAILABLE',
+    'IBKR_POSITIONS_REQUEST_TIMEOUT',
+    'IBKR_SIDECAR_DUPLICATES',
+    'IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED',
+    'IBKR_SIDECAR_UNREACHABLE',
+    'IBKR_SOCKET_VERIFICATION_TIMEOUT',
+  ]);
+  for (const serviceId of ['local-sidecar', 'ibkr.sidecar']) {
+    assert.equal(
+      manifest.services.find((service) => service.id === serviceId)?.recoveryActionId,
+      'restart-ibkr-sidecar',
+    );
+  }
+  assert.equal(sidecarRestart.cooldownMs, 120_000);
+  assert.deepEqual(sidecarRestart.verificationChecks, [
+    'ibkr.sidecar',
+    'ibkr.gateway',
+    'ibkr.accounts',
+    'ibkr.portfolio',
+  ]);
+
   const everyTrigger = policies.flatMap((policy) => policy.triggeringErrorCodes);
   assert.equal(everyTrigger.some((code) => /IAM|OAUTH|DEPLOY|LOGIN|ORDER|TRADING/.test(code)), false);
 
@@ -184,6 +262,192 @@ test('controller policy manifest is complete, low risk, and exact-code allowlist
       (item) => item.checkId === 'prediction.display',
     ).allowedErrorCodes,
     [null, 'CATALOG_NOT_PROMOTED', 'NO_CURRENT_NATIVE_LIVE_QUOTE'],
+  );
+});
+
+test('supervisor source drift becomes eligible for the bounded local restart', () => {
+  const policies = compilePolicies(manifest);
+  const state = newState({
+    mode: ACTIVE_MODE,
+    now: BASE_TIME,
+    enabledActionIds: ['restart-local-stack'],
+  });
+  const driftReport = (now) => report({
+    now,
+    checks: [
+      check('dashboard.supervisor', 'warn', now, {
+        errorCode: 'DASHBOARD_SUPERVISOR_CODE_DRIFT',
+      }),
+    ],
+    rootCauses: [cause('DASHBOARD_SUPERVISOR_CODE_DRIFT', 'dashboard.supervisor')],
+  });
+
+  const first = observeReport(state, driftReport(BASE_TIME), {
+    policies,
+    now: BASE_TIME,
+  });
+  assert.deepEqual(
+    eligibleActions(state, first.checksById, {
+      policies,
+      now: BASE_TIME,
+      mode: ACTIVE_MODE,
+      enabledActionIds: ['restart-local-stack'],
+    }),
+    [],
+  );
+
+  const secondNow = BASE_TIME + 60_000;
+  const second = observeReport(state, driftReport(secondNow), {
+    policies,
+    now: secondNow,
+  });
+  const eligible = eligibleActions(state, second.checksById, {
+    policies,
+    now: secondNow,
+    mode: ACTIVE_MODE,
+    enabledActionIds: ['restart-local-stack'],
+  });
+
+  assert.deepEqual(eligible.map(({ policy }) => policy.id), ['restart-local-stack']);
+});
+
+test('existing manual incidents adopt a newly added automatic policy', () => {
+  const policies = compilePolicies(manifest);
+  const state = newState({
+    mode: ACTIVE_MODE,
+    now: BASE_TIME,
+    enabledActionIds: ['restart-local-stack'],
+  });
+  state.incidents = [{
+    id: 'dashboard.supervisor:DASHBOARD_SUPERVISOR_CODE_DRIFT',
+    checkId: 'dashboard.supervisor',
+    errorCode: 'DASHBOARD_SUPERVISOR_CODE_DRIFT',
+    label: 'Dashboard supervisor',
+    status: 'manual',
+    actionId: null,
+    suppressionReason: 'NO_AUTOMATIC_POLICY',
+    openedAt: new Date(BASE_TIME - 120_000).toISOString(),
+    lastSeenAt: new Date(BASE_TIME - 60_000).toISOString(),
+    lastMatchingObservationAt: new Date(BASE_TIME - 60_000).toISOString(),
+    observationCount: 2,
+    cleanObservationCount: 0,
+    affectedCheckIds: ['dashboard.supervisor'],
+    capabilityIds: [],
+    notifications: {},
+  }];
+
+  const observation = observeReport(state, report({
+    now: BASE_TIME,
+    checks: [check('dashboard.supervisor', 'warn', BASE_TIME, {
+      errorCode: 'DASHBOARD_SUPERVISOR_CODE_DRIFT',
+    })],
+    rootCauses: [cause('DASHBOARD_SUPERVISOR_CODE_DRIFT', 'dashboard.supervisor')],
+  }), { policies, now: BASE_TIME });
+
+  assert.equal(state.incidents[0].actionId, 'restart-local-stack');
+  assert.equal(state.incidents[0].status, 'open');
+  assert.deepEqual(
+    eligibleActions(state, observation.checksById, {
+      policies,
+      now: BASE_TIME,
+      mode: ACTIVE_MODE,
+      enabledActionIds: ['restart-local-stack'],
+    }).map(({ policy }) => policy.id),
+    ['restart-local-stack'],
+  );
+});
+
+test('unresolved incidents rebind when their configured recovery action changes', () => {
+  const policies = compilePolicies(manifest);
+  const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME });
+  state.incidents = [{
+    id: 'ibkr.sidecar:IBKR_SIDECAR_UNREACHABLE',
+    checkId: 'ibkr.sidecar',
+    errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+    label: 'IBKR sidecar',
+    status: 'circuit_open',
+    actionId: 'restart-local-stack',
+    suppressionReason: 'CIRCUIT_OPEN',
+    openedAt: new Date(BASE_TIME - 120_000).toISOString(),
+    lastSeenAt: new Date(BASE_TIME - 60_000).toISOString(),
+    lastMatchingObservationAt: new Date(BASE_TIME - 60_000).toISOString(),
+    observationCount: 2,
+    cleanObservationCount: 0,
+    affectedCheckIds: ['ibkr.sidecar'],
+    capabilityIds: ['portfolio.live'],
+    circuitOpenedAt: new Date(BASE_TIME - 30_000).toISOString(),
+    circuitOpenUntil: new Date(BASE_TIME + 300_000).toISOString(),
+    notifications: {},
+  }];
+
+  observeReport(state, report({
+    now: BASE_TIME,
+    checks: [check('ibkr.sidecar', 'fail', BASE_TIME, {
+      errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+    })],
+    rootCauses: [cause('IBKR_SIDECAR_UNREACHABLE', 'ibkr.sidecar')],
+  }), { policies, now: BASE_TIME });
+
+  assert.equal(state.incidents[0].actionId, 'restart-ibkr-sidecar');
+  assert.equal(state.incidents[0].status, 'open');
+  assert.equal(state.incidents[0].circuitOpenUntil, null);
+  assert.equal(state.incidents[0].verificationOutcome, 'policy-rebound');
+});
+
+test('persisted in-flight incidents retire an obsolete recovery action', () => {
+  const policies = compilePolicies(manifest);
+  const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME });
+  const incidentId = 'ibkr.sidecar:IBKR_SIDECAR_UNREACHABLE';
+  state.incidents = [{
+    id: incidentId,
+    checkId: 'ibkr.sidecar',
+    errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+    label: 'IBKR sidecar',
+    status: 'verifying',
+    actionId: 'restart-local-stack',
+    openedAt: new Date(BASE_TIME - 120_000).toISOString(),
+    lastSeenAt: new Date(BASE_TIME - 60_000).toISOString(),
+    lastMatchingObservationAt: new Date(BASE_TIME - 60_000).toISOString(),
+    observationCount: 2,
+    cleanObservationCount: 0,
+    affectedCheckIds: ['ibkr.sidecar'],
+    capabilityIds: ['portfolio.live'],
+    notifications: {},
+  }];
+  state.actions = [{
+    id: 'restart-local-stack:1',
+    incidentId,
+    actionId: 'restart-local-stack',
+    startedAt: new Date(BASE_TIME - 30_000).toISOString(),
+    completedAt: null,
+    outcome: 'uncertain',
+  }];
+  state.inFlight = {
+    actionRecordId: state.actions[0].id,
+    incidentId,
+    actionId: 'restart-local-stack',
+    startedAt: state.actions[0].startedAt,
+    recoveryHold: true,
+    releaseAfter: new Date(BASE_TIME + 600_000).toISOString(),
+  };
+
+  observeReport(state, report({
+    now: BASE_TIME,
+    checks: [check('ibkr.sidecar', 'fail', BASE_TIME, {
+      errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+    })],
+    rootCauses: [cause('IBKR_SIDECAR_UNREACHABLE', 'ibkr.sidecar')],
+  }), { policies, now: BASE_TIME });
+
+  assert.equal(state.inFlight, null);
+  assert.equal(state.incidents[0].actionId, 'restart-ibkr-sidecar');
+  assert.equal(state.incidents[0].status, 'open');
+  assert.equal(state.incidents[0].verificationOutcome, 'policy-rebound');
+  assert.equal(state.actions[0].outcome, 'superseded');
+  assert.equal(state.actions[0].verificationOutcome, 'policy-rebound');
+  assert.equal(
+    state.actions[0].errorCode,
+    'CONTROLLER_ACTION_POLICY_REBOUND',
   );
 });
 

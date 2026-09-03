@@ -17,6 +17,40 @@ from date_utils import extract_date_from_pdf
 from signal_strength_pages import infer_signal_strength_textract_pages
 
 
+def _table_header_key(value):
+    """Normalize a Textract cell header without depending on line wrapping."""
+    return re.sub(r"[^a-z0-9%]+", " ", str(value or "").lower()).strip()
+
+
+def _signal_strength_column_map(rows):
+    """Return the source column indexes for the fields the reader exposes."""
+    for row in rows[:4]:
+        columns = {}
+        for index, value in enumerate(row):
+            header = _table_header_key(value)
+            if "days on" in header:
+                columns["daysOn"] = index
+            elif header == "ticker" or header.startswith("ticker "):
+                columns["ticker"] = index
+            elif "since initial signal" in header or ("since" in header and "signal" in header):
+                columns["percentChangeSinceSignal"] = index
+        if "ticker" in columns and ("daysOn" in columns or "percentChangeSinceSignal" in columns):
+            return columns
+    # The published chart has a stable fallback layout. Only use it when no
+    # header row was returned by Textract; never substitute another data source.
+    return {"daysOn": 0, "ticker": 1, "percentChangeSinceSignal": 5}
+
+
+def _parse_days_on(value):
+    match = re.search(r"-?\d+", str(value or "").replace(",", ""))
+    return int(match.group(0)) if match else None
+
+
+def _parse_percent_change(value):
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", str(value or "").replace(",", ""))
+    return Decimal(match.group(0)) if match else None
+
+
 def extract_specific_pages_as_pdf(pdf_path, page_numbers):
     """Extract specific pages from PDF and return as bytes"""
     pdf_bytes = io.BytesIO()
@@ -41,16 +75,24 @@ def extract_signal_strength(pdf_path, s3_key=None):
     data = {
         'added': [],
         'removed': [],
-        'stocks': []
+        'stocks': [],
+        'reportedStockCount': None,
+        'membershipComplete': False,
     }
-    ts = datetime.now(timezone.utc).isoformat()
 
     # Use pdfplumber for text extraction (added/removed on page 1) and get page count
     num_pages = 0
     with pdfplumber.open(pdf_path) as pdf:
         num_pages = len(pdf.pages)
         if num_pages >= 1:
-            page1_text = pdf.pages[0].extract_text()
+            page1_text = pdf.pages[0].extract_text() or ""
+            count_match = re.search(
+                r"Signal Strength Stocks:\s*(\d+)\s+Stocks",
+                page1_text or "",
+                re.IGNORECASE,
+            )
+            if count_match:
+                data['reportedStockCount'] = int(count_match.group(1))
             lines = page1_text.split('\n')
             
             # Robust line-by-line parsing for Added/Removed
@@ -192,38 +234,37 @@ def extract_signal_strength(pdf_path, s3_key=None):
 
             for table in tables:
                 table_rows = get_page_rows(table, blocks)
-                # Filter rows relevant to stock list (skip headers if repeated, but we handle that later)
-                # Just collect all rows for now
                 if table_rows:
-                    all_rows.extend(table_rows)
+                    columns = _signal_strength_column_map(table_rows)
+                    all_rows.extend((row, columns) for row in table_rows)
 
         except Exception as e:
             print(f"   ⚠️ Error processing page {page_num}: {e}")
 
     # Process all collected rows to find stocks
     print(f"   📊 Processing {len(all_rows)} total rows from all pages...")
-    for row in all_rows:
-        # Ticker is usually in column 1 (0-indexed), checking length
-        if len(row) > 1:
-            ticker = row[len(row) > 1 and 1 or 0].strip().upper() # Ticker is usually 2nd column
-            
-            # Robust check: sometimes Ticker is 1st col if format shifts? 
-            # In code history it was row[1]. adhering to that but being careful.
-            if len(row) >= 2:
-                ticker = row[1].strip().upper()
-            else:
-                continue
+    for row, columns in all_rows:
+        ticker_index = columns.get("ticker")
+        if ticker_index is None or ticker_index >= len(row):
+            continue
+        ticker = str(row[ticker_index] or "").strip().upper()
+        if ticker in {'TICKER', 'SIGNAL', 'TREND', 'STOCK', 'STOCKS', 'PAGE', 'SYMBOL'}:
+            continue
+        if not re.match(r'^[A-Z]{1,5}(\.[A-Z])?$', ticker):
+            continue
 
-            # Filter out common header words
-            if ticker and ticker not in ['TICKER', 'SIGNAL', 'TREND', 'STOCK', 'STOCKS', 'PAGE', 'SYMBOL']:
-                # Validate it's a ticker (1-5 letters, maybe dot)
-                if re.match(r'^[A-Z]{1,5}(\.[A-Z])?$', ticker):
-                    # Extract Strength/Signal if available (usually next col?)
-                    # Data model only stores ticker primarily, but let's just make sure we capture the ticker
-                    data['stocks'].append({
-                        'ticker': ticker,
-                        'timestamp': ts
-                    })
+        stock = {"ticker": ticker}
+        days_index = columns.get("daysOn")
+        percent_index = columns.get("percentChangeSinceSignal")
+        if days_index is not None and days_index < len(row):
+            days_on = _parse_days_on(row[days_index])
+            if days_on is not None:
+                stock["daysOn"] = days_on
+        if percent_index is not None and percent_index < len(row):
+            percent_change = _parse_percent_change(row[percent_index])
+            if percent_change is not None:
+                stock["percentChangeSinceSignal"] = percent_change
+        data['stocks'].append(stock)
 
     # Remove duplicates while preserving order
     seen = set()
@@ -233,6 +274,10 @@ def extract_signal_strength(pdf_path, s3_key=None):
             seen.add(stock['ticker'])
             unique_stocks.append(stock)
     data['stocks'] = unique_stocks
+    data['membershipComplete'] = (
+        data['reportedStockCount'] is not None
+        and len(data['stocks']) == data['reportedStockCount']
+    )
 
     print(f"   ✅ Total stocks: {len(data['stocks'])}")
     return data
@@ -260,13 +305,14 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None):
     snapshot_item = {
         'date': date,
         'snapshotType': 'signal-strength',
-        'stockCount': len(data['stocks']),
+        'stockCount': data.get('reportedStockCount') or len(data['stocks']),
         'addedCount': len(data['added']),
         'removedCount': len(data['removed']),
         'data': {
             'added': data['added'],
             'removed': data['removed'],
-            'stocks': [s['ticker'] for s in data['stocks']]
+            'stocks': data['stocks'],
+            'membershipComplete': data.get('membershipComplete') is True,
         },
         'scrapedAt': ts,
         'source': 'textract',

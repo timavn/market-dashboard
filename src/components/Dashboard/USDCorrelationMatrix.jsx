@@ -1,9 +1,11 @@
 import React, { useMemo } from 'react';
-import { Share2 } from 'lucide-react';
+import { Share2, TrendingUp } from 'lucide-react';
 import StatusDot from '../common/StatusDot';
 import { getSourceFreshness } from '../../utils/timeUtils';
+import { formatVolatilityRange, getBucketForSeries, VOL_RANGES } from '../../utils/volatilityRegimes';
 import { USD_METRICS, CORRELATION_PERIODS, REFRESH_INTERVALS } from '../../constants/usdMarket';
 import { CorrelationHelpers } from '../../services/api/usdMarketService';
+import MarketEventsQuickReference from './MarketEventsQuickReference';
 import VolatilityMetricRow, { isCompleteVolatilityMetricRow } from './VolatilityMetricRow';
 import './MultiRegionMarketOverview.css';
 import './USDCorrelationMatrix.css';
@@ -194,13 +196,13 @@ const MetricIcon = ({ symbol }) => {
         </span>
       );
     default:
-      return <span aria-hidden="true">📈</span>;
+      return <TrendingUp className="usd-metric-trend" size={20} strokeWidth={2.25} aria-hidden="true" />;
   }
 };
 
 const CorrelationMethodNote = ({ children = null }) => (
   <div className="usd-correlation-header-note">
-    <span className="usd-correlation-header-note-item">*M = 21 / 63 / 126 Trading Days</span>
+    <span className="usd-correlation-header-note-item">Trending Price-Level Pearson · Trading Days</span>
     <span className="usd-correlation-header-note-sep" aria-hidden="true">•</span>
     <span className="usd-correlation-header-note-item">1Y Stats · 30D Rolling</span>
     {children}
@@ -222,6 +224,7 @@ const USDCorrelationMatrix = (props) => {
     calculationDate,
     fxvlSnapshot = null,
     loading = false,
+    refreshing = false,
     error = null,
   } = resolvedState;
   const onRetry = resolvedState.onRetry || resolvedState.retry || props.onRetry;
@@ -246,12 +249,11 @@ const USDCorrelationMatrix = (props) => {
   );
 
   const statusState = useMemo(() => {
-    if (error || (!loading && !hasData)) return 'inactive';
-    if (loading) return 'stale';
+    if (!hasData) return loading ? 'stale' : 'inactive';
     if (freshness === 'current') return 'active';
     if (freshness === 'stale') return 'stale';
     return 'inactive';
-  }, [error, loading, hasData, freshness]);
+  }, [loading, hasData, freshness]);
 
   const statusEmoji = statusState === 'active' ? '🟢' : statusState === 'stale' ? '🟡' : '🔴';
 
@@ -282,6 +284,13 @@ const USDCorrelationMatrix = (props) => {
   const fxvlIsRealized = String(fxvlSnapshot?.measure || '').toLowerCase() === 'realized'
     || /^yahoo(?:\b|[-_])/i.test(String(fxvlSnapshot?.source || ''));
   const fxvlDisplaySymbol = fxvlIsRealized ? 'G5RV' : 'FXVL';
+  const fxvlRegimeRanges = VOL_RANGES[fxvlDisplaySymbol]?.ranges || null;
+  const fxvlBucket = fxvlAvailable
+    ? getBucketForSeries(fxvlDisplaySymbol, fxvlSnapshot?.lastPx)
+    : null;
+  const fxvlRegime = fxvlBucket
+    ? fxvlRegimeRanges?.find((range) => range.color === fxvlBucket)
+    : null;
   const tableMetrics = variant === 'radar'
     ? USD_METRICS.filter(({ symbol }) => symbol !== 'FXVL')
     : USD_METRICS;
@@ -320,7 +329,9 @@ const USDCorrelationMatrix = (props) => {
             symbol={fxvlDisplaySymbol}
             available={fxvlAvailable}
             historical={fxvlHistorical}
-            asOfLabel={fxvlAsOfLabel}
+            bucket={fxvlBucket}
+            regimeLabel={fxvlRegime?.label}
+            regimeRange={formatVolatilityRange(fxvlRegime)}
             className="usd-corr-fxvl-summary"
             ariaLabel={
               fxvlAvailable
@@ -337,6 +348,8 @@ const USDCorrelationMatrix = (props) => {
         </section>
       ) : null}
 
+      {variant === 'radar' ? <MarketEventsQuickReference /> : null}
+
       {variant === 'radar' ? currencyPanel : null}
 
       {variant === 'radar' ? (
@@ -351,10 +364,10 @@ const USDCorrelationMatrix = (props) => {
 
       <div className="region-mw-body usd-corr-body">
         <div className="region-mw-table-wrap usd-corr-table-wrap">
-          {loading ? (
+          {loading && !hasData ? (
             <div className="usd-correlation-state loading">Loading correlation data...</div>
           ) : null}
-          {!loading && error ? (
+          {!hasData && !loading && error ? (
             <div className="usd-correlation-state error" role="alert">
               <span>Error loading correlation data: {error}</span>
               {onRetry ? (
@@ -368,8 +381,24 @@ const USDCorrelationMatrix = (props) => {
             <div className="usd-correlation-state">No correlation data available</div>
           ) : null}
 
-          {!loading && !error && hasData ? (
-            <table className="region-mw-quotes-table usd-corr-table" aria-label="USD correlations">
+          {hasData ? (
+            <>
+              {refreshing && !error ? (
+                <div className="usd-correlation-state refresh-delayed" role="status">
+                  Refreshing verified correlation data; the dated snapshot remains visible.
+                </div>
+              ) : null}
+              {error ? (
+                <div className="usd-correlation-state refresh-delayed" role="status">
+                  <span>Refresh delayed. Showing the dated correlation snapshot.</span>
+                  {onRetry ? (
+                    <button type="button" className="usd-correlation-retry" onClick={onRetry}>
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              <table className="region-mw-quotes-table usd-corr-table" aria-label="USD correlations">
               <thead>
                 <tr>
                   <th className="region-mw-th region-mw-th-name usd-corr-th-metric" scope="col">
@@ -454,7 +483,8 @@ const USDCorrelationMatrix = (props) => {
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </>
           ) : null}
         </div>
       </div>

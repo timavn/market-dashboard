@@ -45,6 +45,64 @@ describe('normalizeQuote', () => {
     expect(q.warning).toMatch(/missing_timestamp/);
   });
 
+  it('rejects an IBKR close-only reference even when it was received now', () => {
+    const q = normalizeIbkrRaw({
+      symbol: 'SPX',
+      last: null,
+      bid: null,
+      ask: null,
+      close: 7709.96,
+      timestamp: new Date().toISOString(),
+      dataType: 'live',
+    });
+
+    expect(q.mark).toBe(7709.96);
+    expect(q.valid).toBe(false);
+    expect(q.warning).toMatch(/close_only_reference/);
+  });
+
+  it.each(['frozen', 'delayed_frozen'])(
+    'rejects IBKR %s marks so the composite provider can fall back',
+    (dataType) => {
+      const q = normalizeIbkrRaw({
+        symbol: 'SPX',
+        last: 7709.96,
+        close: 7700,
+        timestamp: new Date().toISOString(),
+        dataType,
+      });
+
+      expect(q.valid).toBe(false);
+      expect(q.warning).toMatch(/frozen_quote/);
+    },
+  );
+
+  it('rejects an explicitly unentitled IBKR mark', () => {
+    const q = normalizeIbkrRaw({
+      symbol: 'RUT',
+      last: 3000,
+      close: 2990,
+      timestamp: new Date().toISOString(),
+      dataType: 'live',
+      entitlementStatus: 'not_entitled',
+    });
+
+    expect(q.valid).toBe(false);
+    expect(q.warning).toMatch(/entitlement_unavailable/);
+  });
+
+  it('never substitutes an IBKR fetch receipt time for a quote timestamp', () => {
+    const q = normalizeQuote({
+      symbol: 'SPX',
+      last: 7700,
+      fetched_at: new Date().toISOString(),
+    }, 'ibkr');
+
+    expect(q.timestamp).toBeNull();
+    expect(q.valid).toBe(false);
+    expect(q.warning).toMatch(/missing_timestamp/);
+  });
+
   it('normalizes Yahoo legacy shape', () => {
     const q = normalizeYahooLegacy(mockYahoo, 'SPY');
     expect(q.source).toBe('yahoo');

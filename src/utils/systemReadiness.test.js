@@ -10,6 +10,7 @@ const {
 } = require('./systemReadiness.cjs');
 const {
   buildDashboardChecks,
+  buildAnalystRuntimeCheck,
   buildHermesBridgeCheck,
   buildResearchPipelineCheck,
   buildResearchChecks,
@@ -24,6 +25,8 @@ const {
 } = require('../services/systemReadinessService.cjs');
 
 const NOW = new Date('2026-07-21T17:00:00.000Z');
+const EXPECTED_CLOUD_BUILD_VERSION = process.env.MARKET_DASHBOARD_EXPECTED_CLOUD_BUILD_VERSION
+  || require('../../package.json').version;
 
 describe('system readiness evaluation', () => {
   test('canonical manifest has unique, closed references and only core capabilities block', () => {
@@ -310,7 +313,7 @@ describe('system readiness evaluation', () => {
             triggerSource: 'aws-scheduler',
             scheduleId: 'market-dashboard-hermes-quant-analyst-v2',
             scheduled: true,
-            buildVersion: '1.0.0',
+            buildVersion: EXPECTED_CLOUD_BUILD_VERSION,
           }
         : {
             serviceId,
@@ -547,7 +550,7 @@ describe('system readiness evaluation', () => {
         triggerSource: 'aws-scheduler',
         scheduleId: 'market-dashboard-gmail-v2-every-15m',
         scheduled: true,
-        buildVersion: require('../../package.json').version,
+        buildVersion: EXPECTED_CLOUD_BUILD_VERSION,
       },
       now: NOW,
     });
@@ -574,7 +577,7 @@ describe('system readiness evaluation', () => {
         triggerSource: 'aws-scheduler',
         scheduleId: 'market-dashboard-gmail-v2-every-15m',
         scheduled: true,
-        buildVersion: require('../../package.json').version,
+        buildVersion: EXPECTED_CLOUD_BUILD_VERSION,
       },
       now: NOW,
     });
@@ -598,7 +601,7 @@ describe('system readiness evaluation', () => {
         triggerSource: 'aws-scheduler',
         scheduleId: 'market-dashboard-gmail-v2-every-15m',
         scheduled: true,
-        buildVersion: require('../../package.json').version,
+        buildVersion: EXPECTED_CLOUD_BUILD_VERSION,
         counts: { messages: 0, stored: 0, errors: 0, dropped: 1 },
       },
       now: NOW,
@@ -798,6 +801,37 @@ describe('system readiness evaluation', () => {
       status: 'fail',
       errorCode: 'HERMES_CONTROLLER_READINESS_UNAVAILABLE',
       detail: 'Readiness API timed out.',
+    });
+  });
+
+  test('renames the controller check after legacy consolidation', () => {
+    const checks = buildHostChecks({
+      capacity: {
+        available: true,
+        targetPath: '/repo',
+        freeGiB: 100,
+        usedPercent: 70,
+        freeBytes: 100 * (1024 ** 3),
+        totalBytes: 500 * (1024 ** 3),
+        observedAt: NOW.toISOString(),
+      },
+      controller: {
+        available: true,
+        mode: 'active',
+        status: 'running',
+        observedAt: NOW.toISOString(),
+        incidents: [],
+        actions: [],
+        circuits: [],
+      },
+      now: NOW,
+      legacyReadOnly: true,
+    });
+
+    expect(checks[1]).toMatchObject({
+      id: 'readiness.controller',
+      label: 'Dashboard readiness controller',
+      status: 'pass',
     });
   });
 
@@ -1694,7 +1728,7 @@ describe('system readiness evaluation', () => {
     });
     expect(cached.recovery).toMatchObject({
       automatic: true,
-      actionId: 'restart-local-stack',
+      actionId: 'restart-ibkr-sidecar',
     });
   });
 
@@ -1785,6 +1819,46 @@ describe('system readiness evaluation', () => {
       },
     });
     expect(disabled.recovery).toBeNull();
+  });
+
+  test('requires both Analyst processes and the deep contract verification', () => {
+    const supervisor = {
+      stateFound: true,
+      running: true,
+      rootMatches: true,
+      commandMatches: true,
+      sourceMatches: true,
+      children: {
+        analystSidecar: { pid: 101, running: true, status: 'ready' },
+        analystHermes: { pid: 102, running: true, status: 'ready' },
+      },
+      analystContract: {
+        verified: true,
+        checkedAt: NOW.toISOString(),
+      },
+    };
+
+    expect(buildAnalystRuntimeCheck({ supervisor, now: NOW })).toMatchObject({
+      id: 'analyst.runtime',
+      status: 'pass',
+      blocking: false,
+    });
+    expect(buildAnalystRuntimeCheck({
+      supervisor: {
+        ...supervisor,
+        analystContract: {
+          verified: false,
+          checkedAt: NOW.toISOString(),
+          error: 'Contract mismatch.',
+        },
+      },
+      now: NOW,
+    })).toMatchObject({
+      id: 'analyst.runtime',
+      status: 'fail',
+      errorCode: 'ANALYST_CONTRACT_UNVERIFIED',
+      detail: 'Contract mismatch.',
+    });
   });
 
   test('fails disabled mode if a bridge process remains active', () => {

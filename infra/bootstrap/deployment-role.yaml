@@ -70,6 +70,7 @@ Resources:
                   - lambda:UntagResource
                 Resource:
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-gmail-ingestor-v2
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-cftc-ingestor-v1
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hedgeye-pdf-processor-v1
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hermes-worker-v2
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hermes-cloud-watchdog-v1
@@ -82,6 +83,7 @@ Resources:
                   - lambda:DeleteFunctionEventInvokeConfig
                 Resource:
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-gmail-ingestor-v2:$LATEST
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-cftc-ingestor-v1:$LATEST
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hedgeye-pdf-processor-v1:$LATEST
                   - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:market-dashboard-hermes-worker-v2:$LATEST
               - Sid: ManageOwnedTables
@@ -108,6 +110,7 @@ Resources:
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ResearchEntityEventsV1
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ResearchProductManifestsV1
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/PredictionMarketCatalogV2
+                  - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/PredictionMarketPerformanceLedger
                   - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/RiskRangePublicationManifestsV2
               - Sid: ManageOwnedSchedules
                 Effect: Allow
@@ -119,7 +122,9 @@ Resources:
                   - scheduler:UpdateSchedule
                   - scheduler:TagResource
                   - scheduler:UntagResource
-                Resource: !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-*-v2*
+                Resource:
+                  - !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-*-v2*
+                  - !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-cftc-weekday-v1
               - Sid: ManageOwnedWatchdogRule
                 Effect: Allow
                 Action:

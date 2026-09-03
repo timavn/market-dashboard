@@ -404,6 +404,7 @@ describe('PredictionMarketsSandbox', () => {
     render(<PredictionMarketsSandbox onClose={jest.fn()} portfolioData={{ accountId: 'U25779973' }} />);
 
     const workbench = screen.getByTestId('spx-close-workbench');
+    expect(screen.getByTestId('spx-detail-workbench')).toContainElement(workbench);
     const ladder = await within(workbench).findByRole('table', { name: 'S&P 500 cash close threshold ladder' });
     expect(within(workbench).getByRole('heading', { name: 'S&P 500 Close' })).toBeInTheDocument();
     expect(within(workbench).getByText('Cash S&P 500 Index · Settlement 4:00 PM ET')).toBeInTheDocument();
@@ -480,7 +481,7 @@ describe('PredictionMarketsSandbox', () => {
     };
 
     expect(resolveVerifiedLiveSpxQuote(quote, currentStatus, now)).toMatchObject({ status: 'live', price: 7540 });
-    expect(resolveVerifiedLiveSpxQuote(quote, { ...currentStatus, statusRefreshDelayed: true }, now)).toMatchObject({ status: 'unavailable', price: null });
+    expect(resolveVerifiedLiveSpxQuote(quote, { ...currentStatus, statusRefreshDelayed: true }, now)).toMatchObject({ status: 'live', price: 7540 });
     expect(resolveVerifiedLiveSpxQuote(quote, { ...currentStatus, ibkr: { connected: false } }, now)).toMatchObject({ status: 'unavailable', price: null });
     expect(resolveVerifiedLiveSpxQuote({ SPX: { ...quote.SPX, last: null, price: '7540.00' } }, currentStatus, now)).toMatchObject({ status: 'unavailable', price: null });
   });
@@ -676,7 +677,7 @@ describe('PredictionMarketsSandbox', () => {
     expect(within(workbench).queryByText(/−2\s*\/\s*8/)).not.toBeInTheDocument();
   });
 
-  test('clears a displayed HH / HL reference when its forced provider refresh fails', async () => {
+  test('retains a dated HH / HL reference when its forced provider refresh is delayed', async () => {
     MarketDataService.getSecurityRiskMetrics
       .mockResolvedValueOnce(priorSessionBullishPriceStructure)
       .mockRejectedValueOnce(new Error('completed index history unavailable'));
@@ -690,8 +691,8 @@ describe('PredictionMarketsSandbox', () => {
 
     fireEvent.click(within(workbench).getByRole('button', { name: 'Refresh SPX close workbench' }));
 
-    await waitFor(() => expect(priceStructureRow).toHaveTextContent('UNAVAILABLE'));
-    expect(priceStructureRow).not.toHaveTextContent('Net +5');
+    await waitFor(() => expect(priceStructureRow).toHaveTextContent('REFRESH DELAYED · REFERENCE'));
+    expect(priceStructureRow).toHaveTextContent('Net +5');
     expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(2);
   });
 

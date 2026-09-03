@@ -74,12 +74,13 @@ export function getIbkrConnectionDisplay({ status, error }) {
 
 export function getPreferredIbkrAccount(status, savedAccount = '') {
   const accounts = status?.ibkr?.accounts || status?.portfolio?.ibkr?.accounts || [];
+  // An explicit user selection is authoritative across transient sidecar
+  // discovery gaps. The account-scoped live endpoints still reject a genuine
+  // ACCOUNT_NOT_MANAGED or account mismatch; provider polling must not turn a
+  // reconnect into an implicit account switch that erases reference values.
+  if (savedAccount) return savedAccount;
   if (!Array.isArray(accounts) || accounts.length === 0) {
-    return savedAccount || '';
-  }
-
-  if (savedAccount && accounts.includes(savedAccount)) {
-    return savedAccount;
+    return '';
   }
 
   const streamedAccount =
@@ -136,7 +137,8 @@ export function getPortfolioOfflinePanel({ connection, portfolioData }) {
 
   if (syncPending) {
     return {
-      heading: 'IBKR connected — refresh to load portfolio',
+      heading: 'IBKR connected — live positions unavailable; refresh to retry',
+      detail: portfolioData?.error || 'The live IBKR position snapshot was not verified.',
       steps: null,
       syncPending: true,
     };
@@ -145,6 +147,7 @@ export function getPortfolioOfflinePanel({ connection, portfolioData }) {
   if (connection?.kind === 'sidecar_unresponsive') {
     return {
       heading: 'IBKR sidecar is running but unresponsive',
+      detail: null,
       steps: [
         {
           id: 'restart-sidecar',
@@ -159,6 +162,7 @@ export function getPortfolioOfflinePanel({ connection, portfolioData }) {
   if (connection?.kind === 'sidecar_offline') {
     return {
       heading: 'Start the IBKR sidecar',
+      detail: null,
       steps: [
         { id: 'sidecar', label: 'Run npm run ibkr-sidecar in a terminal', done: false },
       ],
@@ -171,6 +175,7 @@ export function getPortfolioOfflinePanel({ connection, portfolioData }) {
       heading: connection?.kind === 'gateway_timeout'
         ? 'IB Gateway check timed out'
         : 'Connect IB Gateway to load live data',
+      detail: null,
       steps,
       syncPending: false,
     };
@@ -178,6 +183,7 @@ export function getPortfolioOfflinePanel({ connection, portfolioData }) {
 
   return {
     heading: 'Connect to load live data',
+    detail: null,
     steps,
     syncPending: false,
   };

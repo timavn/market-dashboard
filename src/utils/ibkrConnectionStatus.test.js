@@ -102,6 +102,14 @@ describe('getPreferredIbkrAccount', () => {
     expect(result).toBe('U25465536');
   });
 
+  it('keeps an explicit saved account through a transient discovery gap', () => {
+    const result = getPreferredIbkrAccount(
+      { ibkr: { accounts: ['U25465536'] } },
+      'U25779973',
+    );
+    expect(result).toBe('U25779973');
+  });
+
   it('prefers the streamed portfolio account when there is no explicit saved selection', () => {
     const result = getPreferredIbkrAccount({
       ibkr: {

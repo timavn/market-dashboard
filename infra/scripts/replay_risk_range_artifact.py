@@ -14,6 +14,7 @@ import argparse
 import configparser
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import boto3
+from aws_profile_contract import AwsProfileContractError, validate_environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,7 +50,7 @@ PRODUCT_KEY = "risk-ranges"
 PRIMARY_MANIFEST_TYPE = "primary"
 CONTENT_HASH_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 ALLOWED_LEDGER_STATUSES = frozenset({"STORED", "INDEXED", "ERROR", "DUPLICATE"})
-APPLY_COMMAND = "python3 infra/scripts/replay_risk_range_artifact.py --apply"
+APPLY_COMMAND = "python3 infra/scripts/replay_risk_range_artifact.py --apply --admin-profile market-dashboard-admin"
 
 
 class ReplayFailure(RuntimeError):
@@ -683,7 +685,7 @@ def replay(
     *,
     apply: bool = False,
     read_profile: str = DEFAULT_READ_PROFILE,
-    admin_profile: str = ADMIN_PROFILE,
+    admin_profile: str | None = None,
     session_factory: Callable[..., Any] = boto3.Session,
     config_path: Path | None = None,
     contract_loader: Callable[[], CanonicalContract] = canonical_contract,
@@ -697,6 +699,15 @@ def replay(
             profile,
             config_path=config_path,
         )
+        try:
+            validate_environment(profile, environment=os.environ)
+        except AwsProfileContractError as error:
+            raise ReplayFailure(error.error_code, error.detail) from None
+    else:
+        try:
+            validate_environment(profile, environment=os.environ)
+        except AwsProfileContractError as error:
+            raise ReplayFailure(error.error_code, error.detail) from None
     session = session_factory(profile_name=profile, region_name=EXPECTED_REGION)
     identity = session.client("sts").get_caller_identity()
     if apply:
@@ -861,7 +872,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--admin-profile",
-        default=ADMIN_PROFILE,
+        default=None,
         help=f"Apply-only IAM Identity Center profile (must be {ADMIN_PROFILE}).",
     )
     return parser.parse_args(argv)

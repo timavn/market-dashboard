@@ -13,8 +13,15 @@ from pathlib import Path
 # Lambda module path
 _LAMBDA = Path(__file__).resolve().parent.parent / "aws" / "lambda"
 sys.path.insert(0, str(_LAMBDA))
+_SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPTS.parent / "infra" / "scripts"))
 
-import csv_processor  # noqa: E402
+from aws_profile_contract import (  # noqa: E402
+    ADMIN_PROFILE,
+    AwsProfileContractError,
+    pin_environment,
+    verified_session,
+)
 
 
 def _pl_dirs():
@@ -50,7 +57,27 @@ def main():
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--file", type=Path, help="CSV path (default: newest in performance/pl)")
+    p.add_argument(
+        "--admin-profile",
+        required=True,
+        help=f"Required verified AWS administrator profile (must be {ADMIN_PROFILE}).",
+    )
     args = p.parse_args()
+
+    if args.admin_profile != ADMIN_PROFILE:
+        p.error(f"--admin-profile must be {ADMIN_PROFILE}")
+    try:
+        session = verified_session(args.admin_profile, purpose="admin", region="us-west-1")
+    except AwsProfileContractError as error:
+        p.error(f"{error.error_code}: {error.detail}")
+    pin_environment(args.admin_profile)
+    import csv_processor  # noqa: E402
+
+    # The legacy Lambda module creates its clients at import time; overwrite
+    # them with the already verified, explicitly selected session before any
+    # parser function can write.
+    csv_processor.s3_client = session.client("s3")
+    csv_processor.dynamodb = session.resource("dynamodb")
 
     os.environ.setdefault("AWS_REGION", "us-west-1")
 

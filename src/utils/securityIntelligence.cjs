@@ -9,8 +9,13 @@ const {
   getResearchProduct,
   getSecurityExposureTags,
   isResearchProductDue,
+  isStructuredOnlyTicker,
   latestResearchMarketDate,
 } = require('./researchProductRegistry.cjs');
+const {
+  isCanonicalResearchBias,
+  normalizeResearchBias,
+} = require('./researchBias.cjs');
 
 const RESPONSE_SCHEMA_VERSION = 1;
 const MAX_SYMBOLS = 200;
@@ -24,6 +29,27 @@ const TRADE_PRODUCT_IDS = new Set(
     .map((product) => product.id),
 );
 const CONTROLLED_EXPOSURE_TYPE_SET = new Set(CONTROLLED_EXPOSURE_TYPES);
+const STRUCTURED_TICKER_EVENT_KINDS = new Set([
+  'primary_risk_range',
+  'historical_risk_range',
+  'risk_range',
+  'supplemental_risk_range',
+  'tracker_trade',
+  'trade_signal',
+  'signal_strength_added',
+  'signal_strength_removed',
+  'signal_strength_listed',
+  'signal_strength_membership',
+  'portfolio_rank',
+  'portfolio_solutions_rank',
+  'portfolio_solutions_mover',
+  'position_mention',
+  'position_reference',
+  'position_change',
+  'real_time_alert',
+  'etf_pro_change',
+  'investing_idea_position',
+]);
 const BOILERPLATE_PATTERN = /\b(click here|unsubscribe|manage (?:your )?preferences|view (?:this )?email in (?:your )?browser)\b/i;
 
 const ALIAS_TO_CANONICAL = (() => {
@@ -213,11 +239,7 @@ function finiteNumber(value) {
 }
 
 function normalizeBias(value) {
-  const normalized = String(value || '').trim().toUpperCase();
-  if (['BULLISH', 'BULL', 'LONG', 'BUY', 'POSITIVE'].includes(normalized)) return 'BULLISH';
-  if (['BEARISH', 'BEAR', 'SHORT', 'SELL', 'NEGATIVE'].includes(normalized)) return 'BEARISH';
-  if (['NEUTRAL', 'HOLD'].includes(normalized)) return 'NEUTRAL';
-  return null;
+  return normalizeResearchBias(value);
 }
 
 function productIdForSnapshot(snapshot) {
@@ -582,6 +604,14 @@ function matchSymbols(candidate, requestedSymbols) {
     : [];
 }
 
+function structuredTickerEventIsEligible(event, symbol) {
+  const canonical = canonicalizeSymbol(symbol);
+  if (!isStructuredOnlyTicker(canonical)) return true;
+  const matchType = String(event?.matchType || '').trim().toLowerCase();
+  const kind = String(event?.eventType || event?.kind || '').trim().toLowerCase();
+  return matchType === 'structured_membership' && STRUCTURED_TICKER_EVENT_KINDS.has(kind);
+}
+
 function sourceUrlForSnapshot(snapshot) {
   if (snapshot?.article?.feedUrl) return snapshot.article.feedUrl;
   if (snapshot?.sourceUrl) return snapshot.sourceUrl;
@@ -648,6 +678,9 @@ function makeReference(input) {
     sourceEventId: input.sourceEventId || null,
   };
   if (input.value !== undefined) reference.value = input.value;
+  // Optional source-match metadata is additive and lets the UI highlight
+  // the exact security mention without changing any decision fields.
+  if (input.matchedText) reference.matchedText = String(input.matchedText);
   if (input.decisionEligible !== undefined) {
     reference.decisionEligible = Boolean(input.decisionEligible);
   }
@@ -700,6 +733,7 @@ function eventEntity(event) {
 
 function referenceFromEvent(event, matchType, exposure, qualityStatus) {
   const productId = productIdForEvent(event);
+  const entity = eventEntity(event);
   return makeReference({
     marketDate: event.marketDate,
     productId,
@@ -714,6 +748,9 @@ function referenceFromEvent(event, matchType, exposure, qualityStatus) {
     exposureLabel: exposure?.label || null,
     publishedAt: event.publishedAt || event.eventTime || null,
     sourceUrl: publicEventSourceUrl(event, productId),
+    matchedText: event.matchedText
+      || exposure?.label
+      || (entity.kind === 'ticker' ? entity.value : null),
     // The daily manifest is the authority for pipeline quality. A row-level
     // "validated" marker cannot upgrade a missing or failed manifest.
     qualityStatus: qualityStatus || event.qualityStatus || 'received',
@@ -748,6 +785,7 @@ function structuredEntryReference({
         : 'direct_alias',
       publishedAt: snapshot.publishedAt || snapshot.scrapedAt || null,
       sourceUrl: sourceUrlForSnapshot(snapshot),
+      matchedText: extractTicker(ticker) || null,
       qualityStatus,
       decisionEligible,
       value,
@@ -821,6 +859,10 @@ function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
 
   texts.forEach((excerpt) => {
     requestedSymbols.forEach((symbol) => {
+      // AM and PM are valid securities, but unstructured newsletter text
+      // cannot distinguish them from meridiem tokens. Their evidence must
+      // originate from a typed ticker-bearing field.
+      if (isStructuredOnlyTicker(canonicalizeSymbol(symbol))) return;
       const candidates = [...candidatesForSymbol(symbol)];
       const matched = candidates.find((candidate) => tokenPattern(candidate)?.test(excerpt));
       if (matched) {
@@ -831,6 +873,7 @@ function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
             productId,
             kind: 'summary_mention',
             excerpt,
+            matchedText: matched,
             matchType: normalizeSymbol(matched) === normalizeSymbol(symbol) ? 'direct' : 'direct_alias',
             publishedAt: snapshot.publishedAt || snapshot.scrapedAt || null,
             sourceUrl: sourceUrlForSnapshot(snapshot),
@@ -848,9 +891,10 @@ function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
             reference: makeReference({
               marketDate: snapshot.date,
               productId,
-              kind: `${exposure.type}_mention`,
-              excerpt,
-              matchType: 'inferred_exposure',
+            kind: `${exposure.type}_mention`,
+            excerpt,
+            matchedText: aliases.find((alias) => tokenPattern(alias)?.test(excerpt)) || exposure.label,
+            matchType: 'inferred_exposure',
               exposureId: exposure.id,
               exposureType: exposure.type,
               exposureLabel: exposure.label,
@@ -892,6 +936,48 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
     });
   }
 
+  if (productId === 'investing-ideas') {
+    const positions = asArray(data.positions).length
+      ? asArray(data.positions)
+      : [
+        ...asArray(data.longs).map((ticker) => ({ ticker, side: 'Long' })),
+        ...asArray(data.shorts).map((ticker) => ({ ticker, side: 'Short' })),
+      ];
+    positions.forEach((position) => {
+      const ticker = extractTicker(position);
+      if (!ticker) return;
+      const rawSide = String(position?.side || position?.position || '').toUpperCase();
+      const side = rawSide === 'SHORT' ? 'SHORT' : rawSide === 'LONG' ? 'LONG' : null;
+      if (!side) return;
+      const bias = side === 'LONG' ? 'BULLISH' : 'BEARISH';
+      const lrr = finiteNumber(position?.lrr);
+      const hrr = finiteNumber(position?.hrr);
+      const prevClose = finiteNumber(position?.prevClose);
+      push(structuredEntryReference({
+        snapshot,
+        productId,
+        kind: 'investing_idea_position',
+        direction: bias,
+        excerpt: [
+          `${ticker} ${side}`,
+          prevClose !== null ? `Prev Close ${prevClose}` : null,
+          lrr !== null && hrr !== null ? `LRR ${lrr} – HRR ${hrr}` : null,
+        ].filter(Boolean).join('; '),
+        ticker,
+        requestedSymbols,
+        qualityStatus,
+        decisionEligible: false,
+        value: {
+          side,
+          bias,
+          prevClose,
+          lrr,
+          hrr,
+        },
+      }));
+    });
+  }
+
   if (TRADE_PRODUCT_IDS.has(productId)) {
     requestedSymbols.forEach((symbol) => {
       const slot = findTrackerSlot(data, symbol);
@@ -912,6 +998,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
             sellTrade !== null ? `Sell Trade ${sellTrade}` : null,
           ].filter(Boolean).join('; '),
           matchType: 'direct',
+          matchedText: symbol,
           publishedAt: snapshot.publishedAt || snapshot.scrapedAt || null,
           sourceUrl: sourceUrlForSnapshot(snapshot),
           qualityStatus,
@@ -1367,7 +1454,10 @@ function buildLastVerifiedDecision({
     if (rangeReference) {
       const lrr = finiteNumber(rangeReference.value.lrr);
       const hrr = finiteNumber(rangeReference.value.hrr);
-      const trend = normalizeBias(rangeReference.value.trend || rangeReference.direction);
+      const trend = normalizeBias(rangeReference.value.trend)
+        || (isCanonicalResearchBias(rangeReference.direction)
+          ? normalizeBias(rangeReference.direction)
+          : null);
       result.riskRange = historicalDecision(
         rangeReference,
         { lrr, hrr },
@@ -1586,6 +1676,7 @@ function buildSecurityIntelligence({
     const productId = productIdForEvent(event);
     const qualityStatus = evidenceQualityStatus(event.marketDate, productId);
     if (entity.kind === 'ticker') {
+      if (!structuredTickerEventIsEligible(event, entity.value)) return;
       requestedSymbols
         .filter((symbol) => symbolMatches(entity.value, symbol))
         .forEach((symbol) => {
@@ -1648,6 +1739,7 @@ function buildSecurityIntelligence({
         direction: normalizeBias(value.trend),
         excerpt: `LRR ${value.lrr} – HRR ${value.hrr}${value.trend ? `; Trend ${normalizeBias(value.trend) || value.trend}` : ''}`,
         matchType: normalizeSymbol(selected.key) === normalizeSymbol(symbol) ? 'direct' : 'direct_alias',
+        matchedText: selected.key || symbol,
         publishedAt: value.timestamp || riskRangeEnvelope.manifest.latestUpdatedAt || null,
         sourceUrl: `/api/hedgeye/screenshot/${encodeURIComponent(marketDate)}/content?type=risk-ranges`,
         qualityStatus: 'indexed',
@@ -1742,6 +1834,7 @@ function buildSecurityIntelligence({
 }
 
 module.exports = {
+  normalizeResearchBias,
   MAX_HISTORY_DAYS,
   MAX_SYMBOLS,
   RESPONSE_SCHEMA_VERSION,

@@ -1,12 +1,14 @@
 const {
   DEFAULT_SYSTEM_READINESS_CACHE_MS,
   MIN_SYSTEM_READINESS_CACHE_MS,
+  SYSTEM_READINESS_REVALIDATE_GRACE_MS,
+  buildSidecarChecks,
   createSystemReadinessService,
 } = require('./systemReadinessService.cjs');
 
 const START_MS = Date.parse('2026-07-27T18:00:00.000Z');
 
-function createHarness() {
+function createHarness({ legacyMode = 'shadow' } = {}) {
   let currentMs = START_MS;
   const sidecarRequest = jest.fn().mockResolvedValue({});
   const probeLocalUrl = jest.fn().mockResolvedValue({
@@ -33,19 +35,28 @@ function createHarness() {
         status: 'disabled',
         running: false,
       },
+      analystSidecar: { pid: 101, running: true, status: 'ready' },
+      analystHermes: { pid: 102, running: true, status: 'ready' },
+    },
+    analystContract: {
+      verified: true,
+      checkedAt: new Date(START_MS).toISOString(),
+      error: null,
     },
   }));
+  const getDirectorSnapshot = jest.fn().mockResolvedValue({ workers: [], recentRuns: [] });
+  const listWorkerDefinitions = jest.fn(() => []);
   const service = createSystemReadinessService({
     sidecarRequest,
     getCurrentPredictionMarkets: jest.fn().mockResolvedValue({ events: [] }),
-    getDirectorSnapshot: jest.fn().mockResolvedValue({ workers: [], recentRuns: [] }),
+    getDirectorSnapshot,
     buildWorkflowStatusSnapshot: jest.fn().mockResolvedValue({}),
     getHermesInboxStatus: jest.fn().mockResolvedValue({}),
     buildRtaResponse: jest.fn().mockResolvedValue({}),
     buildEtfResponse: jest.fn().mockResolvedValue({}),
     dynamodb,
     cloudwatch: {},
-    listWorkerDefinitions: () => [],
+    listWorkerDefinitions,
     readServiceHeartbeat: jest.fn().mockResolvedValue({
       available: true,
       found: false,
@@ -83,6 +94,7 @@ function createHarness() {
     }),
     now: () => new Date(currentMs),
     cacheNow: () => currentMs,
+    legacyMode,
   });
 
   return {
@@ -90,6 +102,8 @@ function createHarness() {
     sidecarRequest,
     probeLocalUrl,
     readSupervisorProvenance,
+    getDirectorSnapshot,
+    listWorkerDefinitions,
     advance(ms) {
       currentMs += ms;
     },
@@ -123,6 +137,27 @@ describe('system readiness expensive-collection budget', () => {
     expect(harness.probeLocalUrl).toHaveBeenCalledTimes(1);
   });
 
+  test('read-only consolidation omits every retired worker and bridge check', async () => {
+    const harness = createHarness({ legacyMode: 'read-only' });
+
+    const report = await harness.service.collect();
+    const checkIds = report.groups.flatMap((group) => group.checks.map((check) => check.id));
+
+    expect(harness.getDirectorSnapshot).not.toHaveBeenCalled();
+    expect(harness.listWorkerDefinitions).not.toHaveBeenCalled();
+    expect(checkIds).toContain('analyst.runtime');
+    expect(checkIds).toContain('readiness.controller');
+    expect(checkIds).not.toContain('dashboard.hermes-bridge');
+    expect(checkIds).not.toContain('hermes.status');
+    expect(checkIds.some((id) => id.startsWith('hermes.quant-'))).toBe(false);
+    expect(report.capabilities.map((capability) => capability.id)).toContain(
+      'automation.readiness',
+    );
+    expect(report.capabilities.map((capability) => capability.id)).not.toContain(
+      'automation.hermes',
+    );
+  });
+
   test('throttles public refresh requests and enforces the hard minimum', async () => {
     process.env.SYSTEM_READINESS_CACHE_MS = '1000';
     expect(MIN_SYSTEM_READINESS_CACHE_MS).toBe(5 * 60 * 1000);
@@ -139,6 +174,44 @@ describe('system readiness expensive-collection budget', () => {
     await harness.service.collect({ refresh: true });
 
     expect(harness.probeLocalUrl).toHaveBeenCalledTimes(2);
+  });
+
+  test('returns still-valid cached evidence while one background refresh runs', async () => {
+    const harness = createHarness();
+    const first = await harness.service.collect();
+    let finishRefresh;
+    harness.probeLocalUrl.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
+
+    harness.advance(DEFAULT_SYSTEM_READINESS_CACHE_MS + 1);
+    const duringRefresh = await harness.service.collect();
+
+    expect(duringRefresh).toBe(first);
+    expect(harness.probeLocalUrl).toHaveBeenCalledTimes(2);
+    expect(SYSTEM_READINESS_REVALIDATE_GRACE_MS).toBeLessThan(60_000);
+
+    finishRefresh({
+      ok: true,
+      status: 200,
+      observedAt: new Date(START_MS).toISOString(),
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  test('fails closed as soon as a background refresh failure is known', async () => {
+    const harness = createHarness();
+    const first = await harness.service.collect();
+    const failure = new Error('readiness dependency unavailable');
+    harness.readSupervisorProvenance.mockImplementationOnce(() => {
+      throw failure;
+    });
+
+    harness.advance(DEFAULT_SYSTEM_READINESS_CACHE_MS + 1);
+    await expect(harness.service.collect()).resolves.toBe(first);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    await expect(harness.service.collect()).rejects.toBe(failure);
   });
 
   test('allows one explicitly trusted internal verification refresh', async () => {
@@ -239,5 +312,205 @@ describe('system readiness expensive-collection budget', () => {
         fromCache: false,
       },
     });
+  });
+});
+
+describe('IBKR sidecar process readiness', () => {
+  test('reports partial account coverage when Gateway omits an expected Roth account', () => {
+    const now = new Date('2026-09-02T22:20:00.000Z');
+    const fulfilled = (value) => ({ status: 'fulfilled', value });
+    const checks = buildSidecarChecks({
+      livezResult: fulfilled({
+        ok: true,
+        time: now.toISOString(),
+        runtime: {
+          errorCode: null,
+          interpreterInsideWorkspace: true,
+          prefixInsideWorkspace: true,
+          appInsideWorkspace: true,
+          dependenciesInsideWorkspace: true,
+        },
+      }),
+      readyzResult: fulfilled({ ok: true, connected: true, status: 'ready', accounts: ['U25779973'] }),
+      statusResult: fulfilled({
+        connected: true,
+        status: 'connected',
+        accounts: ['U25779973'],
+        time: now.toISOString(),
+      }),
+      portfolioResult: fulfilled({}),
+      expectedAccounts: ['U25779973', 'U25465536'],
+      now,
+    });
+
+    expect(checks.find((check) => check.id === 'ibkr.accounts')).toMatchObject({
+      status: 'warn',
+      blocking: true,
+      errorCode: 'IBKR_PARTIAL_ACCOUNT_COVERAGE',
+      accountCoverageStatus: 'partial_account_coverage',
+      summary: 'Gateway has partial account coverage (1 of 2 expected).',
+      detail: 'Connected: U25779973. Missing live: U25465536.',
+    });
+  });
+
+  test('reports partial account coverage when a connected Gateway omits every expected account', () => {
+    const now = new Date('2026-09-02T22:20:00.000Z');
+    const fulfilled = (value) => ({ status: 'fulfilled', value });
+    const checks = buildSidecarChecks({
+      livezResult: fulfilled({
+        ok: true,
+        time: now.toISOString(),
+        runtime: {
+          errorCode: null,
+          interpreterInsideWorkspace: true,
+          prefixInsideWorkspace: true,
+          appInsideWorkspace: true,
+          dependenciesInsideWorkspace: true,
+        },
+      }),
+      readyzResult: fulfilled({ ok: true, connected: true, status: 'ready', accounts: [] }),
+      statusResult: fulfilled({
+        connected: true,
+        status: 'connected',
+        accounts: [],
+        time: now.toISOString(),
+      }),
+      portfolioResult: fulfilled({}),
+      expectedAccounts: ['U25779973', 'U25465536'],
+      now,
+    });
+
+    expect(checks.find((check) => check.id === 'ibkr.accounts')).toMatchObject({
+      status: 'warn',
+      errorCode: 'IBKR_PARTIAL_ACCOUNT_COVERAGE',
+      accountCoverageStatus: 'partial_account_coverage',
+      summary: 'Gateway has partial account coverage (0 of 2 expected).',
+      detail: 'Connected: none. Missing live: U25779973, U25465536.',
+    });
+  });
+
+  test('preserves the typed live-portfolio failure from the sidecar', () => {
+    const now = new Date('2026-08-03T22:00:00.000Z');
+    const fulfilled = (value) => ({ status: 'fulfilled', value });
+    const checks = buildSidecarChecks({
+      livezResult: fulfilled({
+        ok: true,
+        time: now.toISOString(),
+        runtime: {
+          errorCode: null,
+          interpreterInsideWorkspace: true,
+          prefixInsideWorkspace: true,
+          appInsideWorkspace: true,
+          dependenciesInsideWorkspace: true,
+        },
+      }),
+      readyzResult: fulfilled({ ok: true, connected: true, status: 'ready' }),
+      statusResult: fulfilled({ connected: true, status: 'connected' }),
+      portfolioResult: {
+        status: 'rejected',
+        reason: {
+          sidecarCode: 'IBKR_POSITIONS_REQUEST_TIMEOUT',
+          message: 'IBKR sidecar HTTP 503',
+        },
+      },
+      now,
+    });
+
+    const portfolio = checks.find((check) => check.id === 'ibkr.portfolio');
+    expect(portfolio).toMatchObject({
+      status: 'fail',
+      errorCode: 'IBKR_POSITIONS_REQUEST_TIMEOUT',
+      recovery: {
+        automatic: true,
+        actionId: 'restart-ibkr-sidecar',
+      },
+    });
+  });
+
+  test('treats a failed API heartbeat as the canonical Gateway root cause', () => {
+    const now = new Date('2026-08-03T22:00:00.000Z');
+    const fulfilled = (value) => ({ status: 'fulfilled', value });
+    const checks = buildSidecarChecks({
+      livezResult: fulfilled({
+        ok: true,
+        time: now.toISOString(),
+        runtime: {
+          errorCode: null,
+          interpreterInsideWorkspace: true,
+          prefixInsideWorkspace: true,
+          appInsideWorkspace: true,
+          dependenciesInsideWorkspace: true,
+        },
+      }),
+      readyzResult: {
+        status: 'rejected',
+        reason: { sidecarCode: 'IBKR_GATEWAY_API_UNRESPONSIVE' },
+      },
+      statusResult: fulfilled({
+        connected: false,
+        status: 'gateway_api_unresponsive',
+        error_code: 'IBKR_GATEWAY_API_UNRESPONSIVE',
+        message: 'Heartbeat timed out.',
+      }),
+      portfolioResult: fulfilled({}),
+      now,
+    });
+
+    const gateway = checks.find((check) => check.id === 'ibkr.gateway');
+    expect(gateway).toMatchObject({
+      status: 'fail',
+      errorCode: 'IBKR_GATEWAY_API_UNRESPONSIVE',
+      recovery: {
+        automatic: true,
+        actionId: 'restart-ibkr-sidecar',
+        command: 'npm run dev:sidecar:restart',
+      },
+    });
+  });
+
+  test('fails closed with an exact duplicate-process error', () => {
+    const now = new Date('2026-08-03T22:00:00.000Z');
+    const fulfilled = (value) => ({ status: 'fulfilled', value });
+    const checks = buildSidecarChecks({
+      livezResult: fulfilled({
+        ok: true,
+        time: now.toISOString(),
+        runtime: {
+          errorCode: null,
+          interpreterInsideWorkspace: true,
+          prefixInsideWorkspace: true,
+          appInsideWorkspace: true,
+          dependenciesInsideWorkspace: true,
+        },
+      }),
+      readyzResult: fulfilled({ ok: true, connected: true, status: 'ready' }),
+      statusResult: fulfilled({ connected: true, status: 'connected' }),
+      portfolioResult: fulfilled({}),
+      supervisor: {
+        children: {
+          sidecar: {
+            sidecarProcessPids: [101, 102],
+            managedSidecarProcessPids: [101, 102],
+            duplicatePids: [102],
+            duplicateCount: 1,
+            sidecarProcessCleanup: {
+              verified: true,
+              clean: false,
+              errorCode: 'IBKR_SIDECAR_DUPLICATES',
+              detail: 'Repo-owned sidecar processes remain after cleanup: 102.',
+            },
+          },
+        },
+      },
+      now,
+    });
+
+    expect(checks[0]).toMatchObject({
+      id: 'ibkr.sidecar',
+      status: 'fail',
+      errorCode: 'IBKR_SIDECAR_DUPLICATES',
+      recovery: { command: 'npm run dev:sidecar:restart' },
+    });
+    expect(checks[0].summary).toMatch(/102/);
   });
 });

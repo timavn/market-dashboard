@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 import './ExceptionFirstRadar.css';
 
 const STATUS_ALIASES = {
@@ -31,6 +32,7 @@ export const DATA_STATUS_META = {
   live: { label: 'LIVE', tone: 'live' },
   delayed: { label: 'DELAYED', tone: 'delayed' },
   mixed: { label: 'MIXED / DELAYED', tone: 'delayed' },
+  closed: { label: 'CLOSED', tone: 'closed' },
   historical: { label: 'AS OF', tone: 'historical' },
   asof: { label: 'AS OF', tone: 'historical' },
   manual: { label: 'MANUAL', tone: 'manual' },
@@ -43,6 +45,7 @@ export const DATA_STATUS_SUMMARIES = {
   live: 'Verified live provider data is current.',
   delayed: 'Live data is not available; delayed data is shown.',
   mixed: 'Sources have mixed freshness or availability; see the counts below.',
+  closed: 'The market is closed; the most recent completed reference close is shown.',
   historical: 'Historical snapshot only; this is not a live feed.',
   manual: 'Manually maintained reference data; this is not a live feed.',
   loading: 'Checking the data provider now.',
@@ -72,6 +75,15 @@ const getStatusSummary = (status, label) => {
   return DATA_STATUS_SUMMARIES[status];
 };
 
+const getStatusGlyph = (status) => {
+  if (status === 'live') return '✓';
+  if (status === 'closed') return '◷';
+  if (status === 'historical') return '◷';
+  if (status === 'offline' || status === 'unavailable') return '×';
+  if (status === 'loading') return '?';
+  return '!';
+};
+
 const cleanDiagnostics = (diagnostics) => (Array.isArray(diagnostics) ? diagnostics : [])
   .map((item) => {
     if (typeof item === 'string') return { label: null, value: item };
@@ -95,6 +107,7 @@ export const getStatusIndicatorKind = (status) => {
   if (normalized === 'offline' || normalized === 'unavailable') return 'error';
   if (
     normalized === 'historical'
+    || normalized === 'closed'
     || normalized === 'asof'
     || normalized === 'manual'
     || normalized === 'loading'
@@ -126,14 +139,18 @@ const DataStatusChip = ({
   className = '',
   title,
   compact = false,
+  plain = false,
   indicatorOnly = false,
+  showDetail = true,
   context = 'Data status',
   summary,
   diagnostics = [],
   issues = [],
 }) => {
+  const surfaceActive = useSurfaceActivity();
   const normalizedStatus = normalizeStatus(status);
   const meta = DATA_STATUS_META[normalizedStatus];
+  const statusGlyph = getStatusGlyph(normalizedStatus);
   const indicatorKind = getStatusIndicatorKind(normalizedStatus);
   const visibleLabel = label || meta.label;
   const accessibleLabel = detail ? `${visibleLabel} · ${detail}` : visibleLabel;
@@ -180,12 +197,12 @@ const DataStatusChip = ({
   }, []);
 
   useLayoutEffect(() => {
-    if (!isOpen) return;
+    if (!surfaceActive || !isOpen) return;
     updatePosition();
-  }, [isOpen, popoverContentKey, updatePosition]);
+  }, [isOpen, popoverContentKey, surfaceActive, updatePosition]);
 
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (!surfaceActive || !isOpen) return undefined;
 
     const handlePointerDown = (event) => {
       if (triggerRef.current?.contains(event.target) || popoverRef.current?.contains(event.target)) return;
@@ -205,14 +222,14 @@ const DataStatusChip = ({
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [closePopover, isOpen, updatePosition]);
+  }, [closePopover, isOpen, surfaceActive, updatePosition]);
 
   const togglePopover = () => {
     if (!isOpen) setPosition(null);
     setIsOpen((open) => !open);
   };
 
-  const popover = isOpen && typeof document !== 'undefined'
+  const popover = surfaceActive && isOpen && typeof document !== 'undefined'
     ? createPortal(
       <section
         ref={popoverRef}
@@ -275,7 +292,7 @@ const DataStatusChip = ({
       <button
         ref={triggerRef}
         type="button"
-        className={`efr-status-chip efr-status-chip--${meta.tone}${compact ? ' efr-status-chip--compact' : ''}${indicatorOnly ? ' efr-status-chip--indicator-only' : ''}${className ? ` ${className}` : ''}`}
+        className={`efr-status-chip efr-status-chip--${meta.tone}${compact ? ' efr-status-chip--compact' : ''}${plain ? ' efr-status-chip--plain' : ''}${indicatorOnly ? ' efr-status-chip--indicator-only' : ''}${className ? ` ${className}` : ''}`}
         title={title || accessibleLabel}
         aria-label={accessibleLabel}
         aria-haspopup="dialog"
@@ -285,13 +302,15 @@ const DataStatusChip = ({
         data-indicator={indicatorOnly ? indicatorKind : undefined}
         onClick={togglePopover}
       >
-        {indicatorOnly ? (
+        {plain ? (
+          <span className="efr-status-chip__plain-glyph" aria-hidden="true">{statusGlyph}</span>
+        ) : indicatorOnly ? (
           <StatusIndicatorIcon />
         ) : (
           <span className="efr-status-chip__dot" aria-hidden="true" />
         )}
         {!indicatorOnly ? <span>{visibleLabel}</span> : null}
-        {!indicatorOnly && detail ? <span className="efr-status-chip__detail">{detail}</span> : null}
+        {!indicatorOnly && showDetail && detail ? <span className="efr-status-chip__detail">{detail}</span> : null}
       </button>
       {popover}
     </>

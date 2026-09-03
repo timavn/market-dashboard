@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Durable account-scoped prediction-market execution and performance ledger.
+
+Resources:
+  PredictionMarketPerformanceLedger:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: PredictionMarketPerformanceLedger
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      AttributeDefinitions:
+        - AttributeName: accountId
+          AttributeType: S
+        - AttributeName: recordKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: accountId
+          KeyType: HASH
+        - AttributeName: recordKey
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: market-dashboard:owner
+          Value: prediction-performance-ledger
+        - Key: market-dashboard:purpose
+          Value: verified-contract-performance
+        - Key: market-dashboard:data-classification
+          Value: account-financial-history
+
+Outputs:
+  PredictionMarketPerformanceLedgerName:
+    Description: DynamoDB table used by the prediction contract performance ledger.
+    Value:
+      Ref: PredictionMarketPerformanceLedger
+  PredictionMarketPerformanceLedgerArn:
+    Description: ARN of the prediction contract performance ledger.
+    Value:
+      Fn::GetAtt:
+        - PredictionMarketPerformanceLedger
+        - Arn
