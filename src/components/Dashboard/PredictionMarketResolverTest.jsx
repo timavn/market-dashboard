@@ -81,7 +81,9 @@ const GOLD_CORRELATION_LAST_UNITS = Object.freeze({
   CRB: 'index',
   WTI: 'USD/bbl',
 });
-const MOMO_TRACKER_ROW_COUNT = 9;
+const MOMO_TRACKER_LEGACY_ROW_COUNT = 9;
+const MOMO_TRACKER_MIN_ROW_COUNT = 8;
+const MOMO_TRACKER_MAX_ROW_COUNT = 25;
 const MOMO_TRACKER_TRENDS = new Set(['BULLISH', 'BEARISH', 'NEUTRAL']);
 const MOMO_TRACKER_TICKER_ORDER = new Map([
   'MSFT', 'AAPL', 'AMZN', 'META', 'GOOGL', 'NFLX', 'TSLA', 'NVDA', 'SNDK', 'ORCL',
@@ -2049,12 +2051,26 @@ export function normalizeMomoTrackerSnapshot(payload = {}, nowMs = Date.now()) {
       index: finite(row.index) ? Number(row.index) : null,
       displayIndex: finite(row.index)
         ? Number(row.index)
-        : MOMO_TRACKER_TICKER_ORDER.get(normalizedTicker) ?? (MOMO_TRACKER_ROW_COUNT + sourceIndex),
+        : MOMO_TRACKER_TICKER_ORDER.get(normalizedTicker) ?? (MOMO_TRACKER_TICKER_ORDER.size + sourceIndex),
       sourceIndex,
       rawRow: row,
     };
   });
-  const validRows = rows.length === MOMO_TRACKER_ROW_COUNT
+  const hasDeclaredStockCount = payload?.meta?.stockCount !== null
+    && payload?.meta?.stockCount !== undefined
+    && payload?.meta?.stockCount !== '';
+  const declaredStockCount = hasDeclaredStockCount && Number.isInteger(Number(payload.meta.stockCount))
+    ? Number(payload.meta.stockCount)
+    : null;
+  const validDeclaredStockCount = !hasDeclaredStockCount || (
+    declaredStockCount >= MOMO_TRACKER_MIN_ROW_COUNT
+    && declaredStockCount <= MOMO_TRACKER_MAX_ROW_COUNT
+  );
+  const expectedStockCount = hasDeclaredStockCount
+    ? declaredStockCount
+    : MOMO_TRACKER_LEGACY_ROW_COUNT;
+  const validRows = validDeclaredStockCount
+    && rows.length === expectedStockCount
     && rows.every((row) => {
       const availableRange = row.rangeStatus === 'available'
         && finite(row.buyTrade)
@@ -2073,7 +2089,7 @@ export function normalizeMomoTrackerSnapshot(payload = {}, nowMs = Date.now()) {
         && (row.index === null || (
           Number.isInteger(row.index)
           && row.index >= 0
-          && row.index < MOMO_TRACKER_ROW_COUNT
+          && row.index < expectedStockCount
         ))
         && MOMO_TRACKER_TRENDS.has(row.trend)
         && (availableRange || outbucketRange);
@@ -2081,9 +2097,6 @@ export function normalizeMomoTrackerSnapshot(payload = {}, nowMs = Date.now()) {
     && new Set(rows.map((row) => row.ticker)).size === rows.length
     && new Set(rows.filter((row) => row.index !== null).map((row) => row.index)).size
       === rows.filter((row) => row.index !== null).length;
-  const declaredStockCount = finite(payload?.meta?.stockCount)
-    ? Number(payload.meta.stockCount)
-    : null;
   const verified = payload?.snapshotType === 'momo-tracker'
     && (!payload?.reportType || payload.reportType === 'momo-tracker')
     && /^\d{4}-\d{2}-\d{2}$/.test(publicationDate)
@@ -2091,7 +2104,6 @@ export function normalizeMomoTrackerSnapshot(payload = {}, nowMs = Date.now()) {
     && payload?.contentComplete !== false
     && payload?.decisionEligible !== false
     && payload?.refreshFailed !== true
-    && (declaredStockCount === null || declaredStockCount === MOMO_TRACKER_ROW_COUNT)
     && validRows
     && !/(?:stale|cache|mock|seed|fallback|offline|disconnected|synthetic|inferred|derived)/i.test(evidence);
 
@@ -2282,7 +2294,6 @@ const MomoTrackerPanel = ({
   spots = {},
   state = 'loading',
   nowMs = Date.now(),
-  resource = null,
 }) => {
   const available = ['available', 'refresh-delayed'].includes(state)
     && snapshot?.status === 'available'
@@ -2295,11 +2306,6 @@ const MomoTrackerPanel = ({
       aria-label="Published Hedgeye MOMO Tracker risk ranges"
       data-testid="sp500-momo-tracker"
     >
-      {resource && (
-        <div className="pm-inline-resource-status">
-          <ResourceDataStatusChip resource={resource} context="MOMO Tracker publication" />
-        </div>
-      )}
       {available ? (
         <table aria-label="Hedgeye MOMO Tracker risk ranges">
           <colgroup>
@@ -4538,7 +4544,6 @@ const SpxRiskRangeChart = ({
   momoTracker = null,
   momoTrackerSpots = {},
   momoTrackerState = 'loading',
-  momoTrackerResource = null,
   goldMarketReferences = [],
   goldCorrelationSnapshot = null,
   goldCorrelationState = 'idle',
@@ -5062,7 +5067,7 @@ const SpxRiskRangeChart = ({
           ? chart?.sessionWindow?.endAt || snapshot?.session?.closeTime
           : undefined}
       >
-        {marketUi.symbol !== 'GOLD' && chartAvailable && chartRefreshActive && (
+        {!['GOLD', 'SPX'].includes(marketUi.symbol) && chartAvailable && chartRefreshActive && (
           <LoadingIndicator
             label="Refreshing"
             size="sm"
@@ -5660,7 +5665,6 @@ const SpxRiskRangeChart = ({
             spots={momoTrackerSpots}
             state={momoTrackerState}
             nowMs={nowMs}
-            resource={momoTrackerResource}
           />
         )}
         {goldOneDayLayout && (
@@ -7103,7 +7107,7 @@ const PredictionMarketResolverTest = ({
     getObservedAt: (value) => value.publicationDate,
     pollIntervalMs: MOMO_TRACKER_POLL_MS,
     active: active && normalizedMarketId === 'sp500' && chartRange === '1d',
-    refreshOnActivate: false,
+    refreshOnActivate: true,
   });
   const momoTrackerSnapshot = momoTrackerResource.data;
   const momoTrackerState = momoTrackerSnapshot
@@ -7548,7 +7552,7 @@ const PredictionMarketResolverTest = ({
           : `Live ${marketUi.fullLabel} prediction-market monitor`}
       aria-busy={loading || monitorResource.refreshing || currentSnapshot?.refresh?.state === 'refreshing'}
     >
-      {normalizedMarketId !== 'gold' && (
+      {!['gold', 'sp500'].includes(normalizedMarketId) && (
         <div className="pm-spx-resource-status">
           <ResourceDataStatusChip
             resource={monitorResource}
@@ -7625,7 +7629,6 @@ const PredictionMarketResolverTest = ({
             momoTracker={normalizedMarketId === 'sp500' ? momoTrackerSnapshot : null}
             momoTrackerSpots={normalizedMarketId === 'sp500' ? momoTrackerSpots : {}}
             momoTrackerState={normalizedMarketId === 'sp500' ? momoTrackerState : 'idle'}
-            momoTrackerResource={normalizedMarketId === 'sp500' ? momoTrackerResource : null}
             goldMarketReferences={normalizedMarketId === 'gold'
               ? goldHeaderMarketReferences
                 || displaySnapshot?.goldMarketReferences

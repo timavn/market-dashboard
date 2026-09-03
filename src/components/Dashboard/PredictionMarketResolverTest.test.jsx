@@ -1237,6 +1237,15 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(normalized).toMatchObject({ status: 'available', publicationDate: '2026-08-17' });
     expect(normalized.rows).toHaveLength(9);
     expect(normalized.rows[0]).toMatchObject({ ticker: 'MSFT', buyTrade: 479, trend: 'BULLISH' });
+
+    const eightRowPublication = momoTrackerFixture();
+    eightRowPublication.data = Object.fromEntries(Object.entries(eightRowPublication.data).slice(0, 8));
+    eightRowPublication.meta = { stockCount: 8 };
+    expect(normalizeMomoTrackerSnapshot(eightRowPublication, NOW)).toMatchObject({
+      status: 'available',
+      publicationDate: '2026-08-17',
+      rows: expect.arrayContaining([expect.objectContaining({ ticker: 'NVDA' })]),
+    });
     expect(normalizeMomoTrackerSnapshot(momoTrackerFixture({ fromCache: true }), NOW)).toMatchObject({
       status: 'unavailable',
       rows: [],
@@ -2365,6 +2374,33 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(panel).not.toHaveTextContent('HEDGEYE MOMO TRACKER');
     expect(panel).not.toHaveTextContent('PUBLISHED');
     expect(MarketDataService.getQuotes).not.toHaveBeenCalled();
+  });
+
+  test('renders the publisher-declared eight-row table without S&P refresh chrome', async () => {
+    const publication = momoTrackerFixture();
+    publication.data = Object.fromEntries(Object.entries(publication.data).slice(0, 8));
+    publication.meta = { stockCount: 8 };
+    MarketDataService.getHedgeyeSnapshot.mockResolvedValue(publication);
+    MarketDataService.getQuotes.mockResolvedValue(momoSpotQuotes());
+    predictionMarketTestService.getMonitor.mockResolvedValue(monitorSnapshot({
+      refresh: { state: 'refreshing', revision: 2, suggestedNextPollMs: 750 },
+    }));
+
+    renderPanel();
+
+    const monitorRegion = await screen.findByRole('region', {
+      name: 'Live S&P 500 prediction-market monitor',
+    });
+    const chartRegion = await screen.findByRole('region', { name: 'SPX Risk Range chart' });
+    const panel = await within(chartRegion).findByTestId('sp500-momo-tracker');
+    expect(await within(panel).findByText('NVDA')).toBeInTheDocument();
+    expect(within(panel).getAllByRole('row')).toHaveLength(9);
+    expect(within(panel).queryByText('NO NEW DATA')).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: /^(?:LIVE|REFRESHING|LOADING|UNAVAILABLE)/i }))
+      .not.toBeInTheDocument();
+    expect(within(chartRegion).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(monitorRegion).queryByRole('button', { name: /^REFRESHING/i }))
+      .not.toBeInTheDocument();
   });
 
   test('keeps an unverified MOMO spot blank without hiding the published table', async () => {
