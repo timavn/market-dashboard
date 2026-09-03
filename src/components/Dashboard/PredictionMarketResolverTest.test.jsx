@@ -3842,18 +3842,40 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(within(contractClock).getByText(/CLOSES IN/)).toHaveClass('pm-spx-contract-clock-timing');
     expect(within(comparison).queryByText(/SETTLES ON · BUREAU OF LABOR STATISTICS/i))
       .not.toBeInTheDocument();
-    expect(within(comparison).getByTestId('cpi-forecast-chart-plot')).toBeInTheDocument();
-    expect(await within(comparison).findByTestId('cpi-cleveland-endpoint-label'))
-      .toHaveTextContent('CLEVELAND FED 2.5%');
-    expect(within(comparison).getByTestId('cpi-cleveland-endpoint-label'))
-      .toHaveAttribute('font-weight', '400');
+    const chartPlot = within(comparison).getByTestId('cpi-forecast-chart-plot');
+    expect(chartPlot).toBeInTheDocument();
+    const chartLabels = await Promise.all([
+      ['upside', 'UPSIDE 2.8%'],
+      ['base', 'BASE 2.6%'],
+      ['bls', 'BLS ACTUAL 2.7%'],
+      ['cleveland', 'CLEVELAND FED 2.5%'],
+      ['downside', 'DOWNSIDE 2.4%'],
+    ].map(async ([id, label]) => {
+      const testId = id === 'cleveland' ? 'cpi-cleveland-endpoint-label' : `cpi-chart-label-${id}`;
+      const node = await within(chartPlot).findByTestId(testId);
+      expect(node).toHaveTextContent(label);
+      expect(node.querySelector('text')).toHaveAttribute('font-weight', '400');
+      return node;
+    }));
+    expect(within(chartPlot).queryByText(/^HYE\b/i)).not.toBeInTheDocument();
+    const labelBaselines = chartLabels
+      .map((node) => Number(node.querySelector('text')?.getAttribute('y')))
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right);
+    expect(labelBaselines).toHaveLength(5);
+    labelBaselines.slice(1).forEach((baseline, index) => {
+      expect(baseline - labelBaselines[index]).toBeGreaterThanOrEqual(13.5);
+    });
     const hedgeyeReferences = await Promise.all(['downside', 'base', 'upside'].map((scenario) => (
       within(comparison).findByTestId(`cpi-hedgeye-${scenario}-reference`)
     )));
     hedgeyeReferences.forEach((referenceLine) => {
       expect(referenceLine)
         .toHaveAttribute('stroke-dasharray', '5 4');
+      expect(referenceLine).toHaveAttribute('stroke-width', '1');
     });
+    expect(within(chartPlot).getByTestId('cpi-bls-reference')).toHaveAttribute('stroke-width', '1');
+    expect(chartPlot.querySelector('.recharts-line-curve')).toHaveAttribute('stroke-width', '1');
 
     const sourceMonitor = within(shell).getByTestId('cpi-source-monitor');
     const sourceTable = within(sourceMonitor).getByRole('table');

@@ -1920,6 +1920,50 @@ const ChartEndpointLabel = ({
   );
 };
 
+const CpiChartRailLabel = ({
+  viewBox,
+  value,
+  color,
+  verticalOffset = 0,
+  strokeDasharray,
+  testId,
+}) => {
+  if (!viewBox || !value) return null;
+  const lineEndX = Number(viewBox.x) + Number(viewBox.width);
+  const lineY = Number(viewBox.y);
+  const labelX = lineEndX + 18;
+  const labelY = lineY + 3 + verticalOffset;
+  const connectorY = labelY - 3;
+  return (
+    <g
+      data-testid={testId}
+      {...labelOffsetAttributes(verticalOffset)}
+      pointerEvents="none"
+    >
+      <line
+        x1={lineEndX}
+        y1={lineY}
+        x2={labelX - 4}
+        y2={connectorY}
+        stroke={color}
+        strokeWidth="0.75"
+        strokeDasharray={strokeDasharray}
+        opacity="0.72"
+      />
+      <text
+        x={labelX}
+        y={labelY}
+        fill={color}
+        fontSize="9"
+        fontWeight="400"
+        textAnchor="start"
+      >
+        {value}
+      </text>
+    </g>
+  );
+};
+
 const proxyFitSigned = (value, suffix = '') => finite(value)
   ? `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)}${suffix}`
   : '—';
@@ -4374,6 +4418,18 @@ const CpiForecastComparisonPanel = ({
     Math.floor((minimum - padding) * 10) / 10,
     Math.ceil((maximum + padding) * 10) / 10,
   ];
+  const scenarioByKey = new Map(scenarios.map((scenario) => [scenario.key, scenario]));
+  const cpiChartLabelOffsets = resolveChartLabelOffsets([
+    ...(scenarioByKey.has('upside') ? [{ id: 'upside', value: Number(scenarioByKey.get('upside').value) }] : []),
+    ...(scenarioByKey.has('base') ? [{ id: 'base', value: Number(scenarioByKey.get('base').value) }] : []),
+    ...(blsAvailable ? [{ id: 'bls', value: Number(blsFinal.value) }] : []),
+    ...(latestCleveland ? [{ id: 'cleveland', value: Number(latestCleveland.cleveland) }] : []),
+    ...(scenarioByKey.has('downside') ? [{ id: 'downside', value: Number(scenarioByKey.get('downside').value) }] : []),
+  ], yDomain, {
+    height: 84,
+    minGap: 14,
+    padding: 4,
+  });
   const chartRows = clevelandPoints.length
     ? clevelandPoints
     : [
@@ -4449,7 +4505,12 @@ const CpiForecastComparisonPanel = ({
 
       <div className="pm-cpi-comparison-chart" role="img" aria-label="Cleveland Fed CPI nowcast history with Hedgeye scenario and latest BLS actual reference lines">
         {allValues.length ? (
-          <div className="pm-cpi-comparison-chart-plot" data-testid="cpi-forecast-chart-plot">
+          <div
+            className="pm-cpi-comparison-chart-plot"
+            data-testid="cpi-forecast-chart-plot"
+            data-label-collision-count={Object.values(cpiChartLabelOffsets)
+              .filter((offset) => Math.abs(Number(offset)) > 0.01).length}
+          >
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartRows} margin={{ top: 12, right: 122, bottom: 2, left: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
@@ -4477,14 +4538,18 @@ const CpiForecastComparisonPanel = ({
                     y={Number(scenario.value)}
                     stroke={`var(--pm-cpi-${scenario.key})`}
                     strokeDasharray="5 4"
-                    strokeWidth={scenario.key === 'base' ? 2 : 1}
+                    strokeWidth={1}
                     data-testid={`cpi-hedgeye-${scenario.key}-reference`}
-                    label={{
-                      value: `HYE ${scenario.label?.toUpperCase() || scenario.key.toUpperCase()} ${formatCpiPercent(scenario.value)}`,
-                      position: 'insideTopRight',
-                      fill: `var(--pm-cpi-${scenario.key})`,
-                      fontSize: 9,
-                    }}
+                    label={(props) => (
+                      <CpiChartRailLabel
+                        viewBox={props.viewBox}
+                        value={`${scenario.key.toUpperCase()} ${formatCpiPercent(scenario.value)}`}
+                        color={`var(--pm-cpi-${scenario.key})`}
+                        verticalOffset={cpiChartLabelOffsets[scenario.key] || 0}
+                        strokeDasharray="5 4"
+                        testId={`cpi-chart-label-${scenario.key}`}
+                      />
+                    )}
                   />
                 ))}
                 {blsAvailable && (
@@ -4492,12 +4557,18 @@ const CpiForecastComparisonPanel = ({
                     y={Number(blsFinal.value)}
                     stroke="var(--pm-cpi-bls)"
                     strokeDasharray="2 3"
-                    label={{
-                      value: `BLS ${String(blsFinal.reportMonth).slice(5)} ACTUAL ${formatCpiPercent(blsFinal.value)}`,
-                      position: 'insideBottomRight',
-                      fill: 'var(--pm-cpi-bls)',
-                      fontSize: 9,
-                    }}
+                    strokeWidth={1}
+                    data-testid="cpi-bls-reference"
+                    label={(props) => (
+                      <CpiChartRailLabel
+                        viewBox={props.viewBox}
+                        value={`BLS ACTUAL ${formatCpiPercent(blsFinal.value)}`}
+                        color="var(--pm-cpi-bls)"
+                        verticalOffset={cpiChartLabelOffsets.bls || 0}
+                        strokeDasharray="2 3"
+                        testId="cpi-chart-label-bls"
+                      />
+                    )}
                   />
                 )}
                 <Line
@@ -4505,30 +4576,37 @@ const CpiForecastComparisonPanel = ({
                   dataKey="cleveland"
                   name="Cleveland Fed"
                   stroke="var(--pm-cpi-cleveland)"
-                  strokeWidth={2}
+                  strokeWidth={1}
                   connectNulls={false}
                   dot={{ r: 2, fill: 'var(--pm-cpi-cleveland)' }}
                   activeDot={{ r: 4 }}
+                  data-testid="cpi-cleveland-line"
                   isAnimationActive={false}
                 />
+                {latestCleveland && (
+                  <ReferenceLine
+                    y={latestCleveland.cleveland}
+                    stroke="transparent"
+                    strokeWidth={0}
+                    label={(props) => (
+                      <CpiChartRailLabel
+                        viewBox={props.viewBox}
+                        value={`CLEVELAND FED ${formatCpiPercent(latestCleveland.cleveland)}`}
+                        color="var(--pm-cpi-cleveland)"
+                        verticalOffset={cpiChartLabelOffsets.cleveland || 0}
+                        testId="cpi-cleveland-endpoint-label"
+                      />
+                    )}
+                  />
+                )}
                 {latestCleveland && (
                   <ReferenceDot
                     x={latestCleveland.timestamp}
                     y={latestCleveland.cleveland}
-                    r={4}
+                    r={3}
                     fill="var(--pm-cpi-cleveland)"
                     stroke="var(--pm-surface)"
                     isFront
-                    label={(props) => (
-                      <ChartEndpointLabel
-                        viewBox={props.viewBox}
-                        value={`CLEVELAND FED ${formatCpiPercent(latestCleveland.cleveland)}`}
-                        color="var(--pm-cpi-cleveland)"
-                        fontWeight={400}
-                        verticalOffset={scenarios.some((scenario) => Math.abs(Number(scenario.value) - latestCleveland.cleveland) < 0.05) ? 10 : 0}
-                        testId="cpi-cleveland-endpoint-label"
-                      />
-                    )}
                   />
                 )}
               </LineChart>
