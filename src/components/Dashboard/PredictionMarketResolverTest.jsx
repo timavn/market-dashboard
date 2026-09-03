@@ -4486,10 +4486,13 @@ const CpiForecastComparisonPanel = ({
           <span className={`is-${settlement.status === 'unavailable' ? 'unavailable' : 'verified'}`}>{settlementStatusLabel}</span>
           {(snapshot?.referenceOnly || refreshDelayed) && <span className="is-reference">DATED REFERENCE</span>}
         </div>
-        <div className="pm-cpi-event-clock pm-cpi-release-clock">
+        <div
+          className="pm-cpi-event-clock pm-cpi-release-clock"
+          aria-label="BLS release time"
+          data-testid="cpi-release-clock"
+        >
           <span>BLS RELEASE</span>
           <strong>{formatCpiReleaseAt(comparison?.releaseAt)}</strong>
-          <small>{releaseCurrent ? `${compactCountdown(comparison.releaseAt, nowMs)} REMAINING` : waiting ? 'CHECKING CURRENT RELEASE' : 'RELEASE UNAVAILABLE'}</small>
         </div>
         <div
           className={`pm-spx-contract-clock pm-spx-chart-contract-clock is-${contractClockChecking ? 'loading' : contractClock.state}`}
@@ -7675,7 +7678,7 @@ const PredictionMarketResolverTest = ({
           : `Live ${marketUi.fullLabel} prediction-market monitor`}
       aria-busy={loading || monitorResource.refreshing || currentSnapshot?.refresh?.state === 'refreshing'}
     >
-      {!['gold', 'sp500'].includes(normalizedMarketId) && (
+      {!['cpi', 'gold', 'sp500'].includes(normalizedMarketId) && (
         <div className="pm-spx-resource-status">
           <ResourceDataStatusChip
             resource={monitorResource}

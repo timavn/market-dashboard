@@ -3834,12 +3834,17 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(within(comparison).getByText('2.5%')).toBeInTheDocument();
     expect(within(comparison).getByText('2.7%')).toBeInTheDocument();
     expect(within(comparison).getByText('BLS RELEASE')).toBeInTheDocument();
+    const releaseClock = within(comparison).getByTestId('cpi-release-clock');
+    expect(within(releaseClock).getByText('Sep 11, 8:30 AM EDT')).toBeInTheDocument();
+    expect(within(releaseClock).queryByText(/REMAINING/i)).not.toBeInTheDocument();
+    expect(releaseClock.querySelector('small')).not.toBeInTheDocument();
     expect(within(comparison).getByText('BLS VERIFIED')).toBeInTheDocument();
     expect(within(comparison).queryByText('CONTRACT CLOSE')).not.toBeInTheDocument();
     const contractClock = within(comparison).getByLabelText('Selected contract trading hours');
     expect(contractClock).toHaveClass('pm-spx-chart-contract-clock', 'is-open');
     expect(within(contractClock).getByText('OPEN')).toHaveClass('pm-spx-contract-clock-status');
     expect(within(contractClock).getByText(/CLOSES IN/)).toHaveClass('pm-spx-contract-clock-timing');
+    expect(shell.querySelector('.pm-spx-resource-status')).not.toBeInTheDocument();
     expect(within(comparison).queryByText(/SETTLES ON · BUREAU OF LABOR STATISTICS/i))
       .not.toBeInTheDocument();
     const chartPlot = within(comparison).getByTestId('cpi-forecast-chart-plot');

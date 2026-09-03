@@ -441,9 +441,13 @@
   text-align: center;
 }
 
-.pm-cpi-release-clock small {
-  color: #31527c;
-  font-size: 8px;
+.pm-cpi-release-clock {
+  grid-template-rows: auto auto;
+  gap: 3px !important;
+}
+
+.pm-cpi-release-clock strong {
+  line-height: 1.25;
 }
 
 .pm-cpi-comparison-header > .pm-spx-chart-contract-clock {
