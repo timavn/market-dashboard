@@ -306,28 +306,56 @@ export function withCanonicalGoldCorrelationFactor(snapshot, correlationSnapshot
   const dxy = usable
     ? correlationSnapshot.rows.find((row) => row.key === 'DXY')
     : null;
-  const value = finite(dxy?.values?.['30D']) ? Number(dxy.values['30D']) : null;
-  const replacement = {
+  const correlationValue = finite(dxy?.values?.['30D']) ? Number(dxy.values['30D']) : null;
+  const correlationReplacement = {
     id: 'usd',
     label: 'XAUUSD/DXY 30D RETURN CORRELATION',
-    status: value == null ? 'unavailable' : 'available',
-    value,
-    displayValue: value == null ? null : `${value > 0 ? '+' : ''}${value.toFixed(2)}`,
-    source: value == null ? null : dxy.source,
-    asOf: value == null ? null : dxy.asOf,
+    status: correlationValue == null ? 'unavailable' : 'available',
+    value: correlationValue,
+    displayValue: correlationValue == null ? null : `${correlationValue > 0 ? '+' : ''}${correlationValue.toFixed(2)}`,
+    source: correlationValue == null ? null : dxy.source,
+    asOf: correlationValue == null ? null : dxy.asOf,
     fit: 'context_only',
     decisionEligible: false,
-    note: value == null
+    note: correlationValue == null
       ? correlationSnapshot?.reason || dxy?.reason || 'Verified XAUUSD/DXY return correlation is unavailable.'
       : 'Completed-session return correlation context only; never an executable price or scoring input.',
   };
   const rows = Array.isArray(snapshot.factorRows) ? snapshot.factorRows : [];
-  const hasCorrelation = rows.some((row) => row?.id === 'usd');
+  const existingDxy = rows.find((row) => row?.id === 'dxy');
+  const canonicalDxyValue = finite(dxy?.latest?.value) ? Number(dxy.latest.value) : null;
+  const dxyReplacement = canonicalDxyValue == null ? existingDxy || {
+    id: 'dxy',
+    label: 'DXY · LAST CLOSE',
+    status: 'unavailable',
+    value: null,
+    displayValue: null,
+    source: null,
+    asOf: null,
+    fit: 'completed_session',
+    decisionEligible: false,
+    note: 'Verified completed-session DXY context is unavailable.',
+  } : {
+    id: 'dxy',
+    label: 'DXY · LAST CLOSE',
+    status: 'historical',
+    availability: 'historical',
+    value: canonicalDxyValue,
+    displayValue: canonicalDxyValue.toFixed(2),
+    source: dxy.source,
+    asOf: dxy.latest.asOf,
+    historicalThroughDate: dxy.latest.asOf,
+    fit: 'completed_session',
+    decisionEligible: false,
+    note: 'Completed-session DXY close; dollar-strength context only, not an executable price or scoring input.',
+  };
   return {
     ...snapshot,
-    factorRows: hasCorrelation
-      ? rows.map((row) => row?.id === 'usd' ? replacement : row)
-      : [replacement, ...rows],
+    factorRows: [
+      dxyReplacement,
+      correlationReplacement,
+      ...rows.filter((row) => !['dxy', 'usd'].includes(row?.id)),
+    ],
   };
 }
 
@@ -6020,6 +6048,7 @@ const FactorMonitor = ({ snapshot, analyses, nowMs, refreshDelayed, marketId = '
   const riskRange = snapshot?.riskRange;
   const shared = analyses[0]?.confluence || null;
   const usable = (factor) => isSpxMonitorSectionUsable(factor, nowMs);
+  const dxyAvailable = usable(factors.dxy);
   const usdAvailable = usable(factors.usd);
   const cftcAvailable = usable(factors.cftc);
   const gammaAvailable = usable(factors.gamma);
@@ -6107,6 +6136,15 @@ const FactorMonitor = ({ snapshot, analyses, nowMs, refreshDelayed, marketId = '
   const eventTicker = snapshot?.contracts?.event?.ticker || snapshot?.selectedGenerationId || 'KXINXU';
   const selectedVenueId = snapshot?.selectedVenueId || snapshot?.displaySelection?.venueId || 'auto';
   const factorRows = [
+    {
+      label: 'DXY · LAST CLOSE',
+      value: formatFactorNumber(factors.dxy?.value, 2), maximum: 'CTX', points: '—',
+      source: factors.dxy?.source, asOf: factors.dxy?.asOf, available: dxyAvailable,
+      detail: factors.dxy?.reason,
+      valueTone: 'neutral',
+      refreshDelayed: Boolean(factors.dxy?.refreshIssue),
+      referenceStatus: factors.dxy?.status,
+    },
     {
       label: 'USD CORR · SPX/DXY 30D',
       value: formatFactorNumber(factors.usd?.r30), maximum: '2', points: pointLabel(shared?.correlation?.points),

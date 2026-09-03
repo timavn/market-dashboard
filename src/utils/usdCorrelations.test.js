@@ -90,7 +90,7 @@ describe('USD correlation calculations', () => {
     expect(correlation.toFixed(2)).toBe('-0.93');
   });
 
-  test('adds Silver correlation/RV and the aligned completed-session Brent–WTI spread', () => {
+  test('adds the DXY close, Silver correlation/RV, and aligned completed-session Brent–WTI spread', () => {
     const histories = historiesFromLevels(variedLevels, {
       WTI: (value) => value,
       BRENT: (value) => value + 5,
@@ -106,6 +106,13 @@ describe('USD correlation calculations', () => {
     });
 
     expect(snapshot.correlations.SILVER['30D']).toEqual(expect.any(Number));
+    expect(snapshot.assetContext.dxy).toMatchObject({
+      status: 'historical', availability: 'historical',
+      value: expect.any(Number), previousClose: expect.any(Number),
+      changePercent: expect.any(Number), asOf: snapshot.calculationDate,
+      decisionEligible: false,
+      source: 'Yahoo Finance completed DXY daily bars',
+    });
     expect(snapshot.assetContext.silverRealizedVolatility).toMatchObject({
       status: 'historical', availability: 'historical', window: 21,
       annualized: true, decisionEligible: false,
@@ -126,6 +133,7 @@ describe('USD correlation calculations', () => {
     });
 
     expect(snapshot.correlations.SILVER).toBeUndefined();
+    expect(snapshot.assetContext.dxy).toBeDefined();
     expect(snapshot.assetContext.silverRealizedVolatility).toBeUndefined();
     expect(snapshot.assetContext.brentWtiSpread).toBeDefined();
   });

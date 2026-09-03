@@ -767,6 +767,13 @@ describe('SPX monitor snapshot', () => {
       loadUsdSnapshot: jest.fn(async () => ({
         sourceStatus: 'current', calculationDate: '2026-08-17', timestamp: NOW.toISOString(),
         source: 'DXY / SPX daily log returns',
+        assetContext: {
+          dxy: {
+            status: 'historical', availability: 'historical', value: 98.42,
+            previousClose: 98.11, changePercent: 0.316, asOf: '2026-08-17',
+            source: 'Yahoo Finance completed DXY daily bars', decisionEligible: false,
+          },
+        },
         correlations: { SPX: { '15D': -0.6, '30D': -0.72, '90D': -0.55 } },
       })),
     });
@@ -788,6 +795,10 @@ describe('SPX monitor snapshot', () => {
       },
       chart: { status: 'available', source: 'ibkr_historical_bars' },
       factors: {
+        dxy: {
+          status: 'historical', availability: 'historical', value: 98.42,
+          historicalThroughDate: '2026-08-17', decisionEligible: false,
+        },
         cftc: { status: 'available', zScore1Y: 1.4 },
         gamma: {
           status: 'available', value: 'positive', throttle: 0.72,

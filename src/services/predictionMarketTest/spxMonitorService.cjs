@@ -16,6 +16,7 @@ const {
   getLatestSpxRtaRiskRange,
 } = require('../predictionMarketsIngest/rtaRiskRangeProvider');
 const ibkrMarketDataProvider = require('../providers/ibkr/ibkrMarketDataProvider');
+const { normalizeDxyContext } = require('./usdContext.cjs');
 
 const LIVE_QUOTE_MAX_AGE_MS = 60_000;
 const LIVE_BAR_MAX_AGE_MS = 10 * 60_000;
@@ -1970,6 +1971,11 @@ function createSpxMonitorService(options = {}) {
       usdResult,
       'USD correlation refresh failed',
     );
+    const dxy = markRefreshFailure(
+      normalizeDxyContext(settledValue(usdResult), nowMs),
+      usdResult,
+      'DXY context refresh failed',
+    );
     const trade = markRefreshFailure(
       normalizeTrade(settledValue(tradeResult), riskRange, researchDate, nowMs),
       tradeResult,
@@ -2031,6 +2037,7 @@ function createSpxMonitorService(options = {}) {
     };
 
     const factors = {
+      dxy,
       usd,
       cftc,
       gamma: structure.gamma,

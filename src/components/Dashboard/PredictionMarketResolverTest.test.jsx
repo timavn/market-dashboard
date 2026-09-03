@@ -318,6 +318,11 @@ function monitorSnapshot(overrides = {}) {
       source: 'RiskRangeData', lrr: 7674, hrr: 7824, trend: 'bullish', date: '2026-08-17',
     }),
     factors: {
+      dxy: factor('historical', {
+        availability: 'historical', value: 98.42,
+        source: 'Yahoo Finance completed DXY daily bars', asOf: '2026-08-14',
+        historicalThroughDate: '2026-08-14', decisionEligible: false,
+      }),
       usd: factor('available', { r15: -0.6, r30: -0.72, r90: -0.55, sourceStatus: 'current', date: '2026-08-17' }),
       cftc: factor('available', {
         zScore1Y: 1.4, zScore3Y: 0.8, latest: -407, weeklyChange: -25834, asOf: '2026-08-11',
@@ -551,6 +556,7 @@ function genericMonitorSnapshot(marketId, { lineCount = 3, spotValue = null } = 
   };
   const requestedFactorLabels = {
     wti: [
+      'DXY · LAST CLOSE',
       'WTI/DXY 30D CORRELATION',
       'CFTC CRUDE-OIL MANAGED MONEY · 1Y / 3Y Z',
       'OVX',
@@ -558,6 +564,7 @@ function genericMonitorSnapshot(marketId, { lineCount = 3, spotValue = null } = 
       'CONTRACT / RR GEOMETRY',
     ],
     gold: [
+      'DXY · LAST CLOSE',
       'GOLD/DXY 30D CORRELATION',
       'CFTC GOLD MANAGED MONEY · 1Y / 3Y Z',
       'GVZ',
@@ -565,6 +572,7 @@ function genericMonitorSnapshot(marketId, { lineCount = 3, spotValue = null } = 
       'CONTRACT / RR GEOMETRY',
     ],
     silver: [
+      'DXY · LAST CLOSE',
       'SILVER/DXY 30D CORRELATION',
       'CFTC SILVER MANAGED MONEY · 1Y / 3Y Z',
       '21D ANNUALIZED SILVER REALIZED VOLATILITY',
@@ -572,6 +580,7 @@ function genericMonitorSnapshot(marketId, { lineCount = 3, spotValue = null } = 
       'CONTRACT / RR GEOMETRY',
     ],
     brent: [
+      'DXY · LAST CLOSE',
       'BRENT/DXY 30D CORRELATION',
       'BRENT–WTI FRONT-MONTH SPREAD',
       'OVX · WTI PROXY',
@@ -579,6 +588,7 @@ function genericMonitorSnapshot(marketId, { lineCount = 3, spotValue = null } = 
       'CONTRACT / RR GEOMETRY',
     ],
     bitcoin: [
+      'DXY · LAST CLOSE',
       'BTC/DXY 30D CORRELATION',
       'CFTC CME BITCOIN · 1Y / 3Y Z',
       'BITVX',
@@ -587,24 +597,34 @@ function genericMonitorSnapshot(marketId, { lineCount = 3, spotValue = null } = 
     ],
   };
   const requestedFactorIds = {
-    wti: ['usd', 'cftc', 'OVX', 'gate', 'geometry'],
-    gold: ['usd', 'cftc', 'GVZ', 'gate', 'geometry'],
-    silver: ['usd', 'cftc', 'silverRealizedVolatility', 'gate', 'geometry'],
-    brent: ['usd', 'brentWtiSpread', 'OVX', 'gate', 'geometry'],
-    bitcoin: ['usd', 'cftc', 'BITVX', 'gate', 'geometry'],
+    wti: ['dxy', 'usd', 'cftc', 'OVX', 'gate', 'geometry'],
+    gold: ['dxy', 'usd', 'cftc', 'GVZ', 'gate', 'geometry'],
+    silver: ['dxy', 'usd', 'cftc', 'silverRealizedVolatility', 'gate', 'geometry'],
+    brent: ['dxy', 'usd', 'brentWtiSpread', 'OVX', 'gate', 'geometry'],
+    bitcoin: ['dxy', 'usd', 'cftc', 'BITVX', 'gate', 'geometry'],
   };
   const genericFactorRows = requestedFactorLabels[marketId]?.map((label, index) => ({
     id: requestedFactorIds[marketId][index],
     label,
-    role: index === 3 ? 'gate' : 'context',
-    fit: index === 4 ? 'calibration' : 'context_only',
+    role: requestedFactorIds[marketId][index] === 'gate' ? 'gate' : 'context',
+    fit: requestedFactorIds[marketId][index] === 'geometry' ? 'calibration'
+      : requestedFactorIds[marketId][index] === 'dxy' ? 'completed_session' : 'context_only',
     decisionEligible: false,
-    status: 'available',
-    value: index === 0 ? -0.82 : index === 2 ? 22.5 : null,
-    displayValue: index === 0 ? '-0.82' : index === 1 ? '+1.20 / +0.80' : index === 2 ? '22.50' : index === 3 ? 'BULLISH / BULLISH' : '70.00 – 80.00',
-    displayState: index === 3 ? 'CONTEXT ALIGNED' : null,
-    source: 'verified-test-source',
-    asOf: '2026-08-17T14:59:00.000Z',
+    status: requestedFactorIds[marketId][index] === 'dxy' ? 'historical' : 'available',
+    availability: requestedFactorIds[marketId][index] === 'dxy' ? 'historical' : undefined,
+    value: requestedFactorIds[marketId][index] === 'dxy' ? 98.42
+      : requestedFactorIds[marketId][index] === 'usd' ? -0.82
+        : ['GVZ', 'OVX', 'BITVX', 'silverRealizedVolatility'].includes(requestedFactorIds[marketId][index]) ? 22.5 : null,
+    displayValue: requestedFactorIds[marketId][index] === 'dxy' ? '98.42'
+      : requestedFactorIds[marketId][index] === 'usd' ? '-0.82'
+        : requestedFactorIds[marketId][index] === 'cftc' ? '+1.20 / +0.80'
+          : ['GVZ', 'OVX', 'BITVX', 'silverRealizedVolatility'].includes(requestedFactorIds[marketId][index]) ? '22.50'
+            : requestedFactorIds[marketId][index] === 'gate' ? 'BULLISH / BULLISH' : '70.00 – 80.00',
+    displayState: requestedFactorIds[marketId][index] === 'gate' ? 'CONTEXT ALIGNED' : null,
+    source: requestedFactorIds[marketId][index] === 'dxy'
+      ? 'Yahoo Finance completed DXY daily bars' : 'verified-test-source',
+    asOf: requestedFactorIds[marketId][index] === 'dxy'
+      ? '2026-08-14' : '2026-08-17T14:59:00.000Z',
   }));
   return {
     schemaVersion: 2,
@@ -1224,6 +1244,12 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     });
     expect(snapshot.factorRows.find((factorRow) => factorRow.id === 'usd').label)
       .toBe('GOLD/DXY 30D CORRELATION');
+    expect(replaced.factorRows.slice(0, 2).map((factorRow) => factorRow.id)).toEqual(['dxy', 'usd']);
+    expect(replaced.factorRows[0]).toMatchObject({
+      label: 'DXY · LAST CLOSE', status: 'historical', value: 98.42,
+      displayValue: '98.42', source: 'Yahoo Finance DX-Y.NYB completed daily closes',
+      asOf: '2026-08-14', decisionEligible: false,
+    });
 
     const unavailable = withCanonicalGoldCorrelationFactor(snapshot, null, NOW);
     expect(unavailable.factorRows.find((factorRow) => factorRow.id === 'usd')).toMatchObject({
@@ -1875,6 +1901,11 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       expect(within(table).getByText('-0.72')).toBeInTheDocument();
     });
     const factorTable = within(screen.getByRole('region', { name: 'SPX factor monitor' })).getByRole('table');
+    expect(within(factorTable).getAllByRole('rowheader').slice(0, 2).map((cell) => cell.textContent)).toEqual([
+      'DXY · LAST CLOSE', 'USD CORR · SPX/DXY 30D',
+    ]);
+    const dxyRow = within(factorTable).getByText('DXY · LAST CLOSE').closest('tr');
+    expect(within(dxyRow).getByText('98.42')).toHaveClass('pm-spx-factor-value', 'is-neutral');
     const gateRow = within(factorTable).getByText('TRADE / TREND GATE').closest('tr');
     expect(gateRow).toHaveAttribute('data-availability', 'partial');
     expect(gateRow).not.toHaveClass('is-unavailable');
@@ -3890,6 +3921,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
 
   test.each([
     ['silver', 'Silver', [
+      'DXY · LAST CLOSE',
       'SILVER/DXY 30D CORRELATION',
       'CFTC SILVER MANAGED MONEY · 1Y / 3Y Z',
       '21D ANNUALIZED SILVER REALIZED VOLATILITY',
@@ -3897,6 +3929,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['gold', 'Gold', [
+      'DXY · LAST CLOSE',
       'XAUUSD/DXY 30D RETURN CORRELATION',
       'CFTC GOLD MANAGED MONEY · 1Y / 3Y Z',
       'GVZ',
@@ -3904,6 +3937,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['wti', 'WTI Oil', [
+      'DXY · LAST CLOSE',
       'WTI/DXY 30D CORRELATION',
       'CFTC CRUDE-OIL MANAGED MONEY · 1Y / 3Y Z',
       'OVX',
@@ -3911,6 +3945,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['brent', 'Brent Oil', [
+      'DXY · LAST CLOSE',
       'BRENT/DXY 30D CORRELATION',
       'BRENT–WTI FRONT-MONTH SPREAD',
       'OVX · WTI PROXY',
@@ -3918,13 +3953,14 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['bitcoin', 'Bitcoin', [
+      'DXY · LAST CLOSE',
       'BTC/DXY 30D CORRELATION',
       'CFTC CME BITCOIN · 1Y / 3Y Z',
       'BITVX',
       'TRADE / TREND GATE',
       'CONTRACT / RR GEOMETRY',
     ]],
-  ])('renders the exact five-row %s factor monitor as context, not a score', async (marketId, label, expectedLabels) => {
+  ])('renders the exact six-row %s factor monitor with DXY immediately above correlation', async (marketId, label, expectedLabels) => {
     if (marketId === 'gold') {
       MarketDataService.getGoldCorrelations.mockResolvedValue(goldCorrelationFixture());
     }

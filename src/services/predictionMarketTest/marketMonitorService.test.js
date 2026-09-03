@@ -1420,6 +1420,7 @@ describe('normalized multi-market snapshots', () => {
 
   test.each([
     ['silver', [
+      'DXY · LAST CLOSE',
       'SILVER/DXY 30D CORRELATION',
       'CFTC SILVER MANAGED MONEY · 1Y / 3Y Z',
       '21D ANNUALIZED SILVER REALIZED VOLATILITY',
@@ -1427,6 +1428,7 @@ describe('normalized multi-market snapshots', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['gold', [
+      'DXY · LAST CLOSE',
       'GOLD/DXY 30D CORRELATION',
       'CFTC GOLD MANAGED MONEY · 1Y / 3Y Z',
       'GVZ',
@@ -1434,6 +1436,7 @@ describe('normalized multi-market snapshots', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['wti', [
+      'DXY · LAST CLOSE',
       'WTI/DXY 30D CORRELATION',
       'CFTC CRUDE-OIL MANAGED MONEY · 1Y / 3Y Z',
       'OVX',
@@ -1441,6 +1444,7 @@ describe('normalized multi-market snapshots', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['brent', [
+      'DXY · LAST CLOSE',
       'BRENT/DXY 30D CORRELATION',
       'BRENT–WTI FRONT-MONTH SPREAD',
       'OVX · WTI PROXY',
@@ -1448,13 +1452,14 @@ describe('normalized multi-market snapshots', () => {
       'CONTRACT / RR GEOMETRY',
     ]],
     ['bitcoin', [
+      'DXY · LAST CLOSE',
       'BTC/DXY 30D CORRELATION',
       'CFTC CME BITCOIN · 1Y / 3Y Z',
       'BITVX',
       'TRADE / TREND GATE',
       'CONTRACT / RR GEOMETRY',
     ]],
-  ])('publishes the exact ordered %s context-only factor contract', async (marketId, labels) => {
+  ])('publishes the exact ordered %s context-only factor contract with DXY first', async (marketId, labels) => {
     const snapshot = await createSubject().service.getSnapshot(marketId);
 
     expect(snapshot.factorRows.map((row) => row.label)).toEqual(labels);

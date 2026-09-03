@@ -11,6 +11,7 @@ const {
   pythExplorerSymbol,
 } = require('./resolverIdentities.cjs');
 const { evaluateRiskRangeBasis } = require('./directionalFeedRegistry.cjs');
+const { normalizeDxyContext } = require('./usdContext.cjs');
 
 const { kalshiFetch: defaultKalshiFetch } = require('../predictionMarketsIngest/providers/kalshiClient');
 const {
@@ -3008,7 +3009,23 @@ function contractGeometryRow(config, riskRange) {
 }
 
 function legacyGenericFactorRows(config, riskRange, factors) {
-  const rows = [{
+  const rows = config.usdCorrelationKey ? [
+    contextFactorRow({
+      id: 'dxy',
+      label: 'DXY · LAST CLOSE',
+      factor: factors.dxy,
+      displayValue: factorDisplayNumber(factors.dxy?.value, 2),
+      fit: 'completed_session',
+    }),
+    contextFactorRow({
+      id: 'usd',
+      label: `USD CORR · ${config.usdCorrelationKey}/DXY 30D`,
+      factor: factors.usd,
+      displayValue: factorDisplayNumber(factors.usd?.r30, 2, { signed: true }),
+      fit: 'context_only',
+    }),
+  ] : [];
+  rows.push({
     id: 'riskRange',
     label: `${config.riskRange.label.toUpperCase()}${config.riskRange.fit === 'related_only' ? ' · RELATED ONLY' : config.riskRange.fit === 'strong_proxy' ? ' · PROXY' : ''}`,
     status: riskRange.status,
@@ -3024,7 +3041,7 @@ function legacyGenericFactorRows(config, riskRange, factors) {
     source: factors.trade.source,
     asOf: factors.trade.asOf,
     note: factors.trade.reason || 'Independent same-session MOMO Trade signal.',
-  }];
+  });
   config.volatility.forEach((key) => {
     const factor = factors[key];
     rows.push({
@@ -3044,18 +3061,18 @@ function legacyGenericFactorRows(config, riskRange, factors) {
       note: 'Verified official positioning context only.',
     });
   }
-  if (config.usdCorrelationKey) {
-    rows.push({
-      id: 'usd', label: `USD CORR · ${config.usdCorrelationKey}/DXY 30D`, status: factors.usd.status,
-      value: factors.usd.r30, source: factors.usd.source, asOf: factors.usd.asOf,
-      note: 'Proxy correlation context only.',
-    });
-  }
   return rows;
 }
 
 function genericFactorRows(config, riskRange, factors) {
   if (config.id === 'nasdaq100') return legacyGenericFactorRows(config, riskRange, factors);
+  const dxy = contextFactorRow({
+    id: 'dxy',
+    label: 'DXY · LAST CLOSE',
+    factor: factors.dxy,
+    displayValue: factorDisplayNumber(factors.dxy?.value, 2),
+    fit: 'completed_session',
+  });
   const correlation = contextFactorRow({
     id: 'usd',
     label: `${config.usdCorrelationKey}/DXY 30D CORRELATION`,
@@ -3107,6 +3124,7 @@ function genericFactorRows(config, riskRange, factors) {
     });
   }
   return [
+    dxy,
     correlation,
     second,
     third,
@@ -4747,6 +4765,13 @@ function createMarketMonitorService(options = {}) {
           ? refreshPending(normalizeUsdCorrelation(null, config, nowMs), 'USD correlation is refreshing.')
           : refreshFailure(normalizeUsdCorrelation(null, config, nowMs), usdResult.reason)
       : null;
+    const dxy = config.usdCorrelationKey
+      ? usdResult.status === 'fulfilled'
+        ? normalizeDxyContext(usdResult.value, nowMs)
+        : isPendingResult(usdResult)
+          ? refreshPending(normalizeDxyContext(null, nowMs), 'DXY context is refreshing.')
+          : refreshFailure(normalizeDxyContext(null, nowMs), usdResult.reason)
+      : null;
     const silverRealizedVolatility = config.id === 'silver'
       ? usdResult.status === 'fulfilled'
         ? normalizeSilverRealizedVolatility(usdResult.value, nowMs)
@@ -4765,6 +4790,7 @@ function createMarketMonitorService(options = {}) {
       trade,
       ...volatility,
       ...(cftc ? { cftc } : {}),
+      ...(dxy ? { dxy } : {}),
       ...(usd ? { usd } : {}),
       ...(silverRealizedVolatility ? { silverRealizedVolatility } : {}),
       ...(brentWtiSpread ? { brentWtiSpread } : {}),

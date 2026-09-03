@@ -209,6 +209,25 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
   }
 
   const assetContext = {};
+  const dxyRows = normalized.DXY || [];
+  const dxyLatest = dxyRows.at(-1) || null;
+  const dxyPrevious = dxyRows.at(-2) || null;
+  if (dxyLatest?.date === calculationDate && Number.isFinite(dxyLatest.close) && dxyLatest.close > 0) {
+    assetContext.dxy = {
+      status: 'historical',
+      availability: 'historical',
+      value: round(dxyLatest.close, 4),
+      previousClose: Number.isFinite(dxyPrevious?.close) && dxyPrevious.close > 0
+        ? round(dxyPrevious.close, 4)
+        : null,
+      changePercent: Number.isFinite(dxyPrevious?.close) && dxyPrevious.close > 0
+        ? round(((dxyLatest.close / dxyPrevious.close) - 1) * 100, 4)
+        : null,
+      asOf: dxyLatest.date,
+      source: 'Yahoo Finance completed DXY daily bars',
+      decisionEligible: false,
+    };
+  }
   if (normalized.SILVER) {
     const realized = buildRealizedVolatilitySnapshot(normalized.SILVER, {
       assetType: 'commodity',
