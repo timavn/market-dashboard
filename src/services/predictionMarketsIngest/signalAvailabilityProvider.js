@@ -239,6 +239,12 @@ async function getRiskRangeHistoryAvailability({ ticker, dates = [] } = {}, opti
   };
 }
 
+// Monthly Inflation Nowcast emails commonly arrive just after the prior CPI
+// release, which can put the still-current forecast more than 21 days behind
+// the next release. Keep this under DynamoDB BatchGetItem's 100-key ceiling;
+// selectCpiForecast still requires an exact future release before using a row.
+const CPI_NOWCAST_LOOKBACK_DAYS = 75;
+
 function recentDateKeys(now, count = 21) {
   return Array.from({ length: count }, (_, index) => (
     dateKeyInNewYork(new Date(now - index * 24 * 60 * 60 * 1000))
@@ -253,7 +259,8 @@ async function loadLatestCpiSnapshot(dynamodb = defaultDynamodb, options = {}) {
 async function loadCpiNowcastSnapshots(dynamodb = defaultDynamodb, options = {}) {
   const now = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
   return cachedLoad('cpi:inflation-nowcast:recent', async () => {
-    const keys = recentDateKeys(now).map((date) => ({ date, snapshotType: 'inflation-nowcast' }));
+    const keys = recentDateKeys(now, CPI_NOWCAST_LOOKBACK_DAYS)
+      .map((date) => ({ date, snapshotType: 'inflation-nowcast' }));
     const result = await dynamodb.batchGet({
       RequestItems: {
         HedgeyeDailySnapshot: { Keys: keys },

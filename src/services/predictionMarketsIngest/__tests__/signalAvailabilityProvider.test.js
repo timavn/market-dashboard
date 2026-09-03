@@ -2,6 +2,7 @@ const {
   getOverviewSignalAvailability,
   getRiskRangeHistoryAvailability,
   loadClevelandFedCpiNowcast,
+  loadCpiNowcastSnapshots,
   normalizeClevelandFedNowcast,
 } = require('../signalAvailabilityProvider');
 
@@ -24,6 +25,34 @@ function dynamodbMock({ item = null, snapshots = [], queryItems = [], itemsByDat
 }
 
 describe('prediction-market Overview signal availability', () => {
+  test('keeps the current monthly CPI forecast in scope across a long release cycle', async () => {
+    const currentForecast = {
+      date: '2026-08-13',
+      publishedAt: '2026-08-13T12:59:50.000Z',
+      data: {
+        metric: 'Headline CPI YoY',
+        forecastMonth: 'August 2026',
+        releaseAt: '2026-09-11T12:30:00.000Z',
+        scenarios: { upper: 3.58, base: 3.47, lower: 3.36 },
+      },
+    };
+    const dynamodb = dynamodbMock({ snapshots: [currentForecast] });
+
+    const snapshots = await loadCpiNowcastSnapshots(dynamodb, {
+      now: Date.parse('2026-09-03T12:00:00.000Z'),
+      useCache: false,
+    });
+
+    expect(snapshots).toEqual([currentForecast]);
+    const keys = dynamodb.batchGet.mock.calls[0][0]
+      .RequestItems.HedgeyeDailySnapshot.Keys;
+    expect(keys).toHaveLength(75);
+    expect(keys).toContainEqual({
+      date: '2026-08-13',
+      snapshotType: 'inflation-nowcast',
+    });
+  });
+
   test('normalizes the official Cleveland Fed daily CPI nowcast history', () => {
     const normalized = normalizeClevelandFedNowcast([
       {

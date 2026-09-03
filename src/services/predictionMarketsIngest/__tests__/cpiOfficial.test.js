@@ -67,15 +67,14 @@ describe('official BLS CPI finals', () => {
 
   test('falls back to the official BLS flat file when the JSON API is unavailable', async () => {
     const httpClient = {
-      get: jest.fn()
-        .mockRejectedValueOnce(new Error('503 Service Unavailable'))
-        .mockResolvedValueOnce({
-          data: [
-            'series_id year period value footnote_codes',
-            `${BLS_CPI_SERIES_ID} 2025 M06 322.561`,
-            `${BLS_CPI_SERIES_ID} 2026 M06 333.952`,
-          ].join('\n'),
-        }),
+      post: jest.fn().mockRejectedValueOnce(new Error('503 Service Unavailable')),
+      get: jest.fn().mockResolvedValueOnce({
+        data: [
+          'series_id year period value footnote_codes',
+          `${BLS_CPI_SERIES_ID} 2025 M06 322.561`,
+          `${BLS_CPI_SERIES_ID} 2026 M06 333.952`,
+        ].join('\n'),
+      }),
     };
 
     const result = await refreshOfficialCpiFinals({
@@ -85,7 +84,16 @@ describe('official BLS CPI finals', () => {
       endYear: 2026,
     });
 
-    expect(httpClient.get).toHaveBeenNthCalledWith(2, BLS_CPI_DATA_URL, expect.objectContaining({
+    expect(httpClient.post).toHaveBeenCalledWith(
+      expect.stringContaining('/publicAPI/v2/timeseries/data/'),
+      expect.objectContaining({
+        seriesid: [BLS_CPI_SERIES_ID],
+        startyear: '2024',
+        endyear: '2026',
+      }),
+      expect.objectContaining({ timeout: 10000 }),
+    );
+    expect(httpClient.get).toHaveBeenCalledWith(BLS_CPI_DATA_URL, expect.objectContaining({
       responseType: 'text',
     }));
     expect(result).toMatchObject({
@@ -99,7 +107,7 @@ describe('official BLS CPI finals', () => {
 
   test('fetches the prior calendar year needed for the earliest requested YoY final', async () => {
     const httpClient = {
-      get: jest.fn().mockResolvedValue({
+      post: jest.fn().mockResolvedValue({
         data: {
           status: 'REQUEST_SUCCEEDED',
           Results: {
@@ -122,10 +130,15 @@ describe('official BLS CPI finals', () => {
       endYear: 2026,
     });
 
-    expect(httpClient.get).toHaveBeenCalledWith(
+    expect(httpClient.post).toHaveBeenCalledWith(
       expect.stringContaining('/publicAPI/v2/timeseries/data/'),
       expect.objectContaining({
-        params: expect.objectContaining({ startyear: 2024, endyear: 2026 }),
+        seriesid: [BLS_CPI_SERIES_ID],
+        startyear: '2024',
+        endyear: '2026',
+      }),
+      expect.objectContaining({
+        timeout: 10000,
       }),
     );
     expect(result.finals).toEqual(expect.arrayContaining([
@@ -139,7 +152,7 @@ describe('official BLS CPI finals', () => {
     const pendingRequest = new Promise((resolve) => {
       resolveRequest = resolve;
     });
-    const httpClient = { get: jest.fn(() => pendingRequest) };
+    const httpClient = { post: jest.fn(() => pendingRequest) };
 
     const result = await loadOfficialCpiFinals({
       httpClient,
@@ -155,8 +168,9 @@ describe('official BLS CPI finals', () => {
         expect.objectContaining({ id: '2026-06', value: 3.5 }),
       ]),
     });
-    expect(httpClient.get).toHaveBeenCalledWith(
+    expect(httpClient.post).toHaveBeenCalledWith(
       expect.stringContaining('/publicAPI/v2/timeseries/data/'),
+      expect.any(Object),
       expect.objectContaining({ timeout: 10000 }),
     );
 
@@ -167,7 +181,7 @@ describe('official BLS CPI finals', () => {
 
   test('can await the official remote refresh when a caller requires the latest completed month', async () => {
     const httpClient = {
-      get: jest.fn().mockResolvedValue({
+      post: jest.fn().mockResolvedValue({
         data: {
           status: 'REQUEST_SUCCEEDED',
           Results: {
@@ -202,7 +216,7 @@ describe('official BLS CPI finals', () => {
 
   test('updates the in-memory cache after a successful BLS refresh', async () => {
     const httpClient = {
-      get: jest.fn().mockResolvedValue({
+      post: jest.fn().mockResolvedValue({
         data: {
           status: 'REQUEST_SUCCEEDED',
           Results: {
@@ -234,11 +248,12 @@ describe('official BLS CPI finals', () => {
     expect(cached.finals).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: '2026-06', value: 3.5 }),
     ]));
-    expect(httpClient.get).toHaveBeenCalledTimes(1);
+    expect(httpClient.post).toHaveBeenCalledTimes(1);
   });
 
   test('retains the verified June checkpoint when both remote BLS sources fail', async () => {
     const httpClient = {
+      post: jest.fn().mockRejectedValue(new Error('BLS unavailable')),
       get: jest.fn().mockRejectedValue(new Error('BLS unavailable')),
     };
 
@@ -257,7 +272,8 @@ describe('official BLS CPI finals', () => {
         expect.objectContaining({ id: '2026-06', value: 3.5 }),
       ]),
     });
-    expect(httpClient.get).toHaveBeenCalledTimes(2);
+    expect(httpClient.post).toHaveBeenCalledTimes(1);
+    expect(httpClient.get).toHaveBeenCalledTimes(1);
   });
 
   test('keeps the verified June release visible while the BLS flat file catches up', () => {

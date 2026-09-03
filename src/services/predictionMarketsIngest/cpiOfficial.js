@@ -130,14 +130,18 @@ async function fetchOfficialCpiFinals({ httpClient = axios, startYear, endYear }
   let finals;
   let apiError;
   try {
-    const response = await httpClient.get(BLS_CPI_API_URL, {
-      params: {
-        seriesid: BLS_CPI_SERIES_ID,
-        startyear: observationStartYear,
-        endyear: endYear,
-      },
+    // BLS no longer accepts GET on the multi-series endpoint. POST the
+    // documented JSON request so the latest monthly observation is returned.
+    const response = await httpClient.post(BLS_CPI_API_URL, {
+      seriesid: [BLS_CPI_SERIES_ID],
+      startyear: String(observationStartYear),
+      endyear: String(endYear),
+    }, {
       timeout: 10000,
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
     });
     const status = String(response?.data?.status || '').toUpperCase();
     if (status && status !== 'REQUEST_SUCCEEDED') {
@@ -148,6 +152,9 @@ async function fetchOfficialCpiFinals({ httpClient = axios, startYear, endYear }
       startYear,
       endYear,
     );
+    if (!finals.length) {
+      throw new Error(`BLS CPI API returned no official ${startYear}-${endYear} observations.`);
+    }
   } catch (error) {
     apiError = error;
     const response = await httpClient.get(BLS_CPI_DATA_URL, {
