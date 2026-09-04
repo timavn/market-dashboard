@@ -4331,6 +4331,74 @@ const formatCpiReleaseAt = (value) => {
   }).format(new Date(timestamp));
 };
 
+const cpiUtcDayStart = (value) => {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+};
+
+const cpiUtcDateKey = (value) => {
+  const dayStart = cpiUtcDayStart(value);
+  return Number.isFinite(dayStart) ? new Date(dayStart).toISOString().slice(0, 10) : null;
+};
+
+export const buildCpiCalendarAxis = (reportMonth, points = []) => {
+  const monthMatch = /^(20\d{2})-(0[1-9]|1[0-2])$/.exec(String(reportMonth || ''));
+  const sourceTimestamps = (Array.isArray(points) ? points : [])
+    .map((point) => Number(point?.timestamp ?? point))
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  const firstSourceDay = sourceTimestamps.length ? cpiUtcDayStart(sourceTimestamps[0]) : null;
+  const lastSourceDay = sourceTimestamps.length ? cpiUtcDayStart(sourceTimestamps.at(-1)) : null;
+  const reportStart = monthMatch
+    ? Date.UTC(Number(monthMatch[1]), Number(monthMatch[2]) - 1, 1)
+    : null;
+  const reportEndExclusive = monthMatch
+    ? Date.UTC(Number(monthMatch[1]), Number(monthMatch[2]), 1)
+    : null;
+  const startMs = Number.isFinite(reportStart) && Number.isFinite(firstSourceDay)
+    ? Math.min(reportStart, firstSourceDay)
+    : reportStart ?? firstSourceDay;
+  const endExclusiveMs = Number.isFinite(reportEndExclusive) && Number.isFinite(lastSourceDay)
+    ? Math.max(reportEndExclusive, lastSourceDay + UTC_DAY_MS)
+    : reportEndExclusive ?? (Number.isFinite(lastSourceDay) ? lastSourceDay + UTC_DAY_MS : null);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endExclusiveMs) || endExclusiveMs <= startMs) {
+    return null;
+  }
+
+  const weekendDays = [];
+  for (let cursor = startMs; cursor < endExclusiveMs; cursor += UTC_DAY_MS) {
+    const day = new Date(cursor).getUTCDay();
+    if (day !== 0 && day !== 6) continue;
+    weekendDays.push({
+      date: cpiUtcDateKey(cursor),
+      startMs: cursor,
+      endMs: Math.min(cursor + UTC_DAY_MS, endExclusiveMs),
+    });
+  }
+
+  const ticks = [];
+  for (let cursor = startMs; cursor < endExclusiveMs; cursor += 7 * UTC_DAY_MS) {
+    ticks.push(cursor + (UTC_DAY_MS / 2));
+  }
+  const lastCalendarDay = endExclusiveMs - UTC_DAY_MS;
+  const lastTickDay = ticks.length ? cpiUtcDayStart(ticks.at(-1)) : null;
+  if (!Number.isFinite(lastTickDay) || lastCalendarDay - lastTickDay >= 2 * UTC_DAY_MS) {
+    ticks.push(lastCalendarDay + (UTC_DAY_MS / 2));
+  }
+
+  return {
+    domain: [startMs, endExclusiveMs - 1],
+    ticks,
+    weekendDays,
+    startDate: cpiUtcDateKey(startMs),
+    endDate: cpiUtcDateKey(lastCalendarDay),
+    sourceStartDate: sourceTimestamps.length ? cpiUtcDateKey(sourceTimestamps[0]) : null,
+    sourceEndDate: sourceTimestamps.length ? cpiUtcDateKey(sourceTimestamps.at(-1)) : null,
+  };
+};
+
 const CpiForecastTooltip = ({ active, payload, label }) => {
   if (!active || !Array.isArray(payload) || !payload.length) return null;
   const point = payload.find((entry) => finite(entry?.value));
@@ -4394,6 +4462,7 @@ const CpiForecastComparisonPanel = ({
         .sort((left, right) => left.timestamp - right.timestamp)
     : [];
   const latestCleveland = clevelandPoints.at(-1) || null;
+  const cpiCalendarAxis = buildCpiCalendarAxis(reportMonth, clevelandPoints);
   const allValues = [
     ...scenarios.map((scenario) => Number(scenario.value)),
     ...clevelandPoints.map((point) => Number(point.cleveland)),
@@ -4501,18 +4570,43 @@ const CpiForecastComparisonPanel = ({
             data-testid="cpi-forecast-chart-plot"
             data-label-collision-count={Object.values(cpiChartLabelOffsets)
               .filter((offset) => Math.abs(Number(offset)) > 0.01).length}
+            data-calendar-start-date={cpiCalendarAxis?.startDate || undefined}
+            data-calendar-end-date={cpiCalendarAxis?.endDate || undefined}
+            data-source-start-date={cpiCalendarAxis?.sourceStartDate || undefined}
+            data-source-end-date={cpiCalendarAxis?.sourceEndDate || undefined}
+            data-source-point-count={clevelandPoints.length}
+            data-weekend-day-count={cpiCalendarAxis?.weekendDays.length || 0}
           >
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartRows} margin={{ top: 12, right: 122, bottom: 2, left: 0 }}>
+                {(cpiCalendarAxis?.weekendDays || []).map((weekend) => (
+                  <ReferenceArea
+                    key={weekend.date}
+                    className="pm-cpi-weekend-band"
+                    x1={weekend.startMs}
+                    x2={weekend.endMs}
+                    fill="var(--pm-cpi-weekend-fill)"
+                    fillOpacity={0.62}
+                    stroke="none"
+                    ifOverflow="hidden"
+                    data-testid={`cpi-weekend-${weekend.date}`}
+                    data-weekend-date={weekend.date}
+                    aria-label={`${weekend.date}: weekend, no Cleveland Fed publication`}
+                  />
+                ))}
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis
                   type="number"
+                  scale="time"
                   dataKey="timestamp"
-                  domain={['dataMin', 'dataMax']}
+                  domain={cpiCalendarAxis?.domain || ['dataMin', 'dataMax']}
+                  ticks={cpiCalendarAxis?.ticks}
+                  interval={0}
                   tickFormatter={(value) => new Date(Number(value)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
                   tick={{ fontSize: 9 }}
                   axisLine={false}
                   tickLine={false}
+                  allowDataOverflow
                 />
                 <YAxis
                   domain={yDomain}

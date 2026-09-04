@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 import PersistentSurface from '../common/PersistentSurface';
 import PredictionMarketResolverTest, {
   ChartTooltip,
+  buildCpiCalendarAxis,
   buildContractTradingClock,
   buildFiveDayChartLayout,
   buildGoldLadderProximityLevels,
@@ -3849,6 +3850,22 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       .not.toBeInTheDocument();
     const chartPlot = within(comparison).getByTestId('cpi-forecast-chart-plot');
     expect(chartPlot).toBeInTheDocument();
+    expect(chartPlot).toHaveAttribute('data-calendar-start-date', '2026-08-01');
+    expect(chartPlot).toHaveAttribute('data-calendar-end-date', '2026-08-31');
+    expect(chartPlot).toHaveAttribute('data-source-start-date', '2026-08-10');
+    expect(chartPlot).toHaveAttribute('data-source-end-date', '2026-08-17');
+    expect(chartPlot).toHaveAttribute('data-source-point-count', '2');
+    expect(chartPlot).toHaveAttribute('data-weekend-day-count', '10');
+    const weekendBands = await within(chartPlot).findAllByTestId(/^cpi-weekend-2026-08-/);
+    expect(weekendBands).toHaveLength(10);
+    expect(weekendBands.map((band) => band.getAttribute('data-weekend-date'))).toEqual([
+      '2026-08-01', '2026-08-02', '2026-08-08', '2026-08-09', '2026-08-15',
+      '2026-08-16', '2026-08-22', '2026-08-23', '2026-08-29', '2026-08-30',
+    ]);
+    weekendBands.forEach((band) => {
+      expect(band).toHaveAccessibleName(/weekend, no Cleveland Fed publication/i);
+    });
+    expect(await within(chartPlot).findByText('Aug 1')).toBeInTheDocument();
     const chartLabels = await Promise.all([
       ['upside', 'UPSIDE 2.8%'],
       ['base', 'BASE 2.6%'],
@@ -5036,6 +5053,27 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
 });
 
 describe('SPX monitor expiry and scoring helpers', () => {
+  test('anchors CPI to its calendar month, includes weekends, and retains post-month source observations', () => {
+    const axis = buildCpiCalendarAxis('2026-08', [
+      { timestamp: Date.parse('2026-08-03T12:00:00.000Z') },
+      { timestamp: Date.parse('2026-09-01T12:00:00.000Z') },
+    ]);
+
+    expect(axis).toMatchObject({
+      startDate: '2026-08-01',
+      endDate: '2026-09-01',
+      sourceStartDate: '2026-08-03',
+      sourceEndDate: '2026-09-01',
+    });
+    expect(axis.weekendDays.map((day) => day.date)).toEqual([
+      '2026-08-01', '2026-08-02', '2026-08-08', '2026-08-09', '2026-08-15',
+      '2026-08-16', '2026-08-22', '2026-08-23', '2026-08-29', '2026-08-30',
+    ]);
+    expect(axis.ticks.map((timestamp) => new Date(timestamp).toISOString().slice(0, 10))).toEqual([
+      '2026-08-01', '2026-08-08', '2026-08-15', '2026-08-22', '2026-08-29', '2026-09-01',
+    ]);
+  });
+
   test('grades the three closest contract lines on both sides of every verified reference', () => {
     const lines = [4_406, 4_416, 4_426, 4_436, 4_446, 4_456, 4_466, 4_476]
       .map((threshold) => ({ threshold, comparator: '>' }));

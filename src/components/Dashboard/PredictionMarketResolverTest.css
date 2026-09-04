@@ -17,6 +17,7 @@
   --pm-cpi-upside: #2563eb;
   --pm-cpi-cleveland: #0f766e;
   --pm-cpi-bls: #64748b;
+  --pm-cpi-weekend-fill: #dce5ef;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -506,6 +507,10 @@
 
 .pm-cpi-comparison-chart .recharts-cartesian-grid-horizontal line {
   stroke: #dce5ef;
+}
+
+.pm-cpi-weekend-band {
+  pointer-events: none;
 }
 
 .pm-cpi-comparison-chart .recharts-cartesian-axis-tick-value {
@@ -3517,6 +3522,7 @@
   --pm-cpi-upside: #60a5fa;
   --pm-cpi-cleveland: #2dd4bf;
   --pm-cpi-bls: #cbd5e1;
+  --pm-cpi-weekend-fill: #334155;
   background: #101827;
 }
 
