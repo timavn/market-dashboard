@@ -3860,6 +3860,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       const node = await within(chartPlot).findByTestId(testId);
       expect(node).toHaveTextContent(label);
       expect(node.querySelector('text')).toHaveAttribute('font-weight', '400');
+      expect(node.querySelector('line')).not.toBeInTheDocument();
       return node;
     }));
     expect(within(chartPlot).queryByText(/^HYE\b/i)).not.toBeInTheDocument();

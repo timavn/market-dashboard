@@ -1925,7 +1925,6 @@ const CpiChartRailLabel = ({
   value,
   color,
   verticalOffset = 0,
-  strokeDasharray,
   testId,
 }) => {
   if (!viewBox || !value) return null;
@@ -1933,23 +1932,12 @@ const CpiChartRailLabel = ({
   const lineY = Number(viewBox.y);
   const labelX = lineEndX + 18;
   const labelY = lineY + 3 + verticalOffset;
-  const connectorY = labelY - 3;
   return (
     <g
       data-testid={testId}
       {...labelOffsetAttributes(verticalOffset)}
       pointerEvents="none"
     >
-      <line
-        x1={lineEndX}
-        y1={lineY}
-        x2={labelX - 4}
-        y2={connectorY}
-        stroke={color}
-        strokeWidth="0.75"
-        strokeDasharray={strokeDasharray}
-        opacity="0.72"
-      />
       <text
         x={labelX}
         y={labelY}
@@ -4549,7 +4537,6 @@ const CpiForecastComparisonPanel = ({
                         value={`${scenario.key.toUpperCase()} ${formatCpiPercent(scenario.value)}`}
                         color={`var(--pm-cpi-${scenario.key})`}
                         verticalOffset={cpiChartLabelOffsets[scenario.key] || 0}
-                        strokeDasharray="5 4"
                         testId={`cpi-chart-label-${scenario.key}`}
                       />
                     )}
@@ -4568,7 +4555,6 @@ const CpiForecastComparisonPanel = ({
                         value={`BLS ACTUAL ${formatCpiPercent(blsFinal.value)}`}
                         color="var(--pm-cpi-bls)"
                         verticalOffset={cpiChartLabelOffsets.bls || 0}
-                        strokeDasharray="2 3"
                         testId="cpi-chart-label-bls"
                       />
                     )}
