@@ -34,6 +34,7 @@ import PredictionMarketResolverTest, {
   resolveAthReferenceDate,
   resolveAthReferenceValue,
   resolveChartLabelOffsets,
+  resolveCpiBlsActualAvailability,
   resolveVerifiedGoldSettlements,
   resolveVerifiedGoldSettlementTime,
   resolveVerifiedVixCloses,
@@ -3834,6 +3835,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(within(comparison).getByText('D 2.4% · B 2.6% · U 2.8%')).toBeInTheDocument();
     expect(within(comparison).getByText('2.5%')).toBeInTheDocument();
     expect(within(comparison).getByText('2.7%')).toBeInTheDocument();
+    expect(within(comparison).getByText('BLS JULY 2026 ACTUAL')).toBeInTheDocument();
     expect(within(comparison).getByText('BLS RELEASE')).toBeInTheDocument();
     const releaseClock = within(comparison).getByTestId('cpi-release-clock');
     expect(within(releaseClock).getByText('Sep 11, 8:30 AM EDT')).toBeInTheDocument();
@@ -3869,7 +3871,6 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     const chartLabels = await Promise.all([
       ['upside', 'UPSIDE 2.8%'],
       ['base', 'BASE 2.6%'],
-      ['bls', 'BLS ACTUAL 2.7%'],
       ['cleveland', 'CLEVELAND FED 2.5%'],
       ['downside', 'DOWNSIDE 2.4%'],
     ].map(async ([id, label]) => {
@@ -3880,12 +3881,15 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       expect(node.querySelector('line')).not.toBeInTheDocument();
       return node;
     }));
+    expect(within(chartPlot).queryByTestId('cpi-bls-reference')).not.toBeInTheDocument();
+    expect(within(chartPlot).queryByTestId('cpi-chart-label-bls')).not.toBeInTheDocument();
+    expect(within(chartPlot).queryByText(/^BLS ACTUAL\b/i)).not.toBeInTheDocument();
     expect(within(chartPlot).queryByText(/^HYE\b/i)).not.toBeInTheDocument();
     const labelBaselines = chartLabels
       .map((node) => Number(node.querySelector('text')?.getAttribute('y')))
       .filter(Number.isFinite)
       .sort((left, right) => left - right);
-    expect(labelBaselines).toHaveLength(5);
+    expect(labelBaselines).toHaveLength(4);
     labelBaselines.slice(1).forEach((baseline, index) => {
       expect(baseline - labelBaselines[index]).toBeGreaterThanOrEqual(13.5);
     });
@@ -3897,7 +3901,6 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
         .toHaveAttribute('stroke-dasharray', '5 4');
       expect(referenceLine).toHaveAttribute('stroke-width', '1');
     });
-    expect(within(chartPlot).getByTestId('cpi-bls-reference')).toHaveAttribute('stroke-width', '1');
     expect(chartPlot.querySelector('.recharts-line-curve')).toHaveAttribute('stroke-width', '1');
 
     const sourceMonitor = within(shell).getByTestId('cpi-source-monitor');
@@ -5072,6 +5075,46 @@ describe('SPX monitor expiry and scoring helpers', () => {
     expect(axis.ticks.map((timestamp) => new Date(timestamp).toISOString().slice(0, 10))).toEqual([
       '2026-08-01', '2026-08-08', '2026-08-15', '2026-08-22', '2026-08-29', '2026-09-01',
     ]);
+  });
+
+  test('keeps a prior-month BLS actual as dated context and only charts an exact-month actual after release', () => {
+    const releaseAt = '2026-09-11T12:30:00.000Z';
+    const priorMonthBls = {
+      status: 'available',
+      latestFinal: { reportMonth: '2026-07', value: 3.4 },
+    };
+    const reportMonthBls = {
+      status: 'available',
+      latestFinal: { reportMonth: '2026-08', value: 3.5 },
+    };
+
+    expect(resolveCpiBlsActualAvailability({
+      bls: priorMonthBls,
+      reportMonth: '2026-08',
+      releaseAt,
+      nowMs: Date.parse('2026-09-03T16:00:00.000Z'),
+    })).toEqual({
+      latestPublishedActualAvailable: true,
+      reportMonthActualAvailable: false,
+    });
+    expect(resolveCpiBlsActualAvailability({
+      bls: reportMonthBls,
+      reportMonth: '2026-08',
+      releaseAt,
+      nowMs: Date.parse('2026-09-03T16:00:00.000Z'),
+    })).toEqual({
+      latestPublishedActualAvailable: false,
+      reportMonthActualAvailable: false,
+    });
+    expect(resolveCpiBlsActualAvailability({
+      bls: reportMonthBls,
+      reportMonth: '2026-08',
+      releaseAt,
+      nowMs: Date.parse(releaseAt),
+    })).toEqual({
+      latestPublishedActualAvailable: true,
+      reportMonthActualAvailable: true,
+    });
   });
 
   test('grades the three closest contract lines on both sides of every verified reference', () => {

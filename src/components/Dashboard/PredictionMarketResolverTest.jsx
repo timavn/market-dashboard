@@ -4399,6 +4399,35 @@ export const buildCpiCalendarAxis = (reportMonth, points = []) => {
   };
 };
 
+export const resolveCpiBlsActualAvailability = ({
+  bls,
+  reportMonth,
+  releaseAt,
+  nowMs = Date.now(),
+} = {}) => {
+  const latestFinal = bls?.latestFinal || null;
+  const targetMonth = String(reportMonth || '');
+  const actualMonth = String(latestFinal?.reportMonth || '');
+  const validTargetMonth = /^(20\d{2})-(0[1-9]|1[0-2])$/.test(targetMonth);
+  const validActualMonth = /^(20\d{2})-(0[1-9]|1[0-2])$/.test(actualMonth);
+  const sourceAvailable = bls?.status === 'available'
+    && finite(latestFinal?.value)
+    && validTargetMonth
+    && validActualMonth
+    && actualMonth <= targetMonth;
+  const priorMonthActualAvailable = sourceAvailable && actualMonth < targetMonth;
+  const releaseAtMs = Date.parse(releaseAt || '');
+  const reportMonthActualAvailable = sourceAvailable
+    && actualMonth === targetMonth
+    && Number.isFinite(releaseAtMs)
+    && releaseAtMs <= Number(nowMs);
+
+  return {
+    latestPublishedActualAvailable: priorMonthActualAvailable || reportMonthActualAvailable,
+    reportMonthActualAvailable,
+  };
+};
+
 const CpiForecastTooltip = ({ active, payload, label }) => {
   if (!active || !Array.isArray(payload) || !payload.length) return null;
   const point = payload.find((entry) => finite(entry?.value));
@@ -4448,9 +4477,15 @@ const CpiForecastComparisonPanel = ({
   const hedgeyeAvailable = exactSource(comparison?.hedgeye);
   const clevelandAvailable = exactSource(comparison?.clevelandFed);
   const blsFinal = comparison?.bls?.latestFinal || null;
-  const blsAvailable = comparison?.bls?.status === 'available'
-    && finite(blsFinal?.value)
-    && String(blsFinal?.reportMonth || '') < String(reportMonth || '');
+  const {
+    latestPublishedActualAvailable: blsLatestActualAvailable,
+    reportMonthActualAvailable: blsReportMonthActualAvailable,
+  } = resolveCpiBlsActualAvailability({
+    bls: comparison?.bls,
+    reportMonth,
+    releaseAt: comparison?.releaseAt,
+    nowMs,
+  });
   const scenarios = hedgeyeAvailable
     ? (comparison.hedgeye.scenarios || []).filter((scenario) => finite(scenario?.value))
     : [];
@@ -4466,7 +4501,7 @@ const CpiForecastComparisonPanel = ({
   const allValues = [
     ...scenarios.map((scenario) => Number(scenario.value)),
     ...clevelandPoints.map((point) => Number(point.cleveland)),
-    ...(blsAvailable ? [Number(blsFinal.value)] : []),
+    ...(blsReportMonthActualAvailable ? [Number(blsFinal.value)] : []),
   ].filter(Number.isFinite);
   const minimum = allValues.length ? Math.min(...allValues) : 0;
   const maximum = allValues.length ? Math.max(...allValues) : 5;
@@ -4479,7 +4514,7 @@ const CpiForecastComparisonPanel = ({
   const cpiChartLabelOffsets = resolveChartLabelOffsets([
     ...(scenarioByKey.has('upside') ? [{ id: 'upside', value: Number(scenarioByKey.get('upside').value) }] : []),
     ...(scenarioByKey.has('base') ? [{ id: 'base', value: Number(scenarioByKey.get('base').value) }] : []),
-    ...(blsAvailable ? [{ id: 'bls', value: Number(blsFinal.value) }] : []),
+    ...(blsReportMonthActualAvailable ? [{ id: 'bls', value: Number(blsFinal.value) }] : []),
     ...(latestCleveland ? [{ id: 'cleveland', value: Number(latestCleveland.cleveland) }] : []),
     ...(scenarioByKey.has('downside') ? [{ id: 'downside', value: Number(scenarioByKey.get('downside').value) }] : []),
   ], yDomain, {
@@ -4514,9 +4549,11 @@ const CpiForecastComparisonPanel = ({
       asOf: comparison?.clevelandFed?.asOf, reason: comparison?.clevelandFed?.reason,
     },
     {
-      id: 'bls', label: blsAvailable ? `BLS ${formatCpiMonth(blsFinal.reportMonth).toUpperCase()} ACTUAL` : 'BLS LATEST ACTUAL',
-      status: blsAvailable ? 'available' : comparison?.bls?.status || 'unavailable',
-      value: blsAvailable ? formatCpiPercent(blsFinal.value) : '—',
+      id: 'bls', label: blsLatestActualAvailable ? `BLS ${formatCpiMonth(blsFinal.reportMonth).toUpperCase()} ACTUAL` : 'BLS LATEST ACTUAL',
+      status: blsLatestActualAvailable
+        ? 'available'
+        : comparison?.bls?.status === 'refreshing' ? 'refreshing' : 'unavailable',
+      value: blsLatestActualAvailable ? formatCpiPercent(blsFinal.value) : '—',
       asOf: comparison?.bls?.fetchedAt || comparison?.bls?.asOf, reason: comparison?.bls?.reason,
     },
   ];
@@ -4563,7 +4600,11 @@ const CpiForecastComparisonPanel = ({
         </div>
       </header>
 
-      <div className="pm-cpi-comparison-chart" role="img" aria-label="Cleveland Fed CPI nowcast history with Hedgeye scenario and latest BLS actual reference lines">
+      <div
+        className="pm-cpi-comparison-chart"
+        role="img"
+        aria-label={`Cleveland Fed CPI nowcast history with Hedgeye scenario reference lines${blsReportMonthActualAvailable ? ' and the matching report-month BLS actual' : ''}`}
+      >
         {allValues.length ? (
           <div
             className="pm-cpi-comparison-chart-plot"
@@ -4636,7 +4677,7 @@ const CpiForecastComparisonPanel = ({
                     )}
                   />
                 ))}
-                {blsAvailable && (
+                {blsReportMonthActualAvailable && (
                   <ReferenceLine
                     y={Number(blsFinal.value)}
                     stroke="var(--pm-cpi-bls)"
@@ -6104,6 +6145,12 @@ const CpiSourceMonitor = ({ snapshot, refreshDelayed, nowMs = Date.now() }) => {
   const reportMonth = comparison?.reportMonth || null;
   const releaseAtMs = Date.parse(comparison?.releaseAt || '');
   const currentRelease = Number.isFinite(releaseAtMs) && releaseAtMs > nowMs;
+  const blsActualAvailability = resolveCpiBlsActualAvailability({
+    bls: comparison?.bls,
+    reportMonth,
+    releaseAt: comparison?.releaseAt,
+    nowMs,
+  });
   const hedgeye = comparison?.hedgeye;
   const rows = [
     ...(Array.isArray(hedgeye?.scenarios) ? hedgeye.scenarios : []).map((scenario) => ({
@@ -6136,8 +6183,7 @@ const CpiSourceMonitor = ({ snapshot, refreshDelayed, nowMs = Date.now() }) => {
       period: comparison?.bls?.latestFinal?.reportMonth || null,
       asOf: comparison?.bls?.fetchedAt || comparison?.bls?.asOf,
       status: comparison?.bls?.status,
-      exact: Boolean(comparison?.bls?.latestFinal?.reportMonth
-        && comparison.bls.latestFinal.reportMonth < reportMonth),
+      exact: blsActualAvailability.latestPublishedActualAvailable,
       reason: comparison?.bls?.reason,
     },
   ];
