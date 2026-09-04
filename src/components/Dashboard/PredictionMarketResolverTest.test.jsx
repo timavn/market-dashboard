@@ -30,6 +30,7 @@ import PredictionMarketResolverTest, {
   normalizeMomoTrackerSnapshot,
   normalizeVerifiedMomoTrackerSpots,
   normalizeVerifiedSpxHeaderQuotes,
+  normalizeCpiChartValue,
   parseLiveFesPosition,
   projectOverlayPointsToSessions,
   resolveAthReferenceDate,
@@ -5122,9 +5123,9 @@ describe('SPX monitor expiry and scoring helpers', () => {
         { timestamp: Date.parse('2026-08-05T12:00:00.000Z'), cleveland: 3.38 },
       ],
       scenarios: [
-        { key: 'downside', value: 3.4 },
-        { key: 'base', value: 3.5 },
-        { key: 'upside', value: 3.6 },
+        { key: 'downside', value: 3.36 },
+        { key: 'base', value: 3.47 },
+        { key: 'upside', value: 3.58 },
       ],
       tooltipAnchor: 3.2,
     });
@@ -5134,15 +5135,26 @@ describe('SPX monitor expiry and scoring helpers', () => {
       date: '2026-08-01', cleveland: null, clevelandLatest: null, tooltipAnchor: 3.2,
     });
     expect(rows[2]).toMatchObject({
-      date: '2026-08-03', cleveland: 3.42, clevelandLatest: 3.42,
+      date: '2026-08-03', cleveland: 3.4, clevelandLatest: 3.4,
     });
     expect(rows[3]).toMatchObject({
-      date: '2026-08-04', cleveland: null, clevelandLatest: 3.42,
+      date: '2026-08-04', cleveland: null, clevelandLatest: 3.4,
       scenarios: { downside: 3.4, base: 3.5, upside: 3.6 },
     });
     expect(rows.at(-1)).toMatchObject({
-      date: '2026-08-08', cleveland: null, clevelandLatest: 3.38,
+      date: '2026-08-08', cleveland: null, clevelandLatest: 3.4,
     });
+  });
+
+  test('uses the displayed one-decimal CPI precision for every plotted coordinate', () => {
+    expect([
+      3.36,
+      3.47,
+      3.58,
+      3.36362988816106,
+      3.37247775770926,
+      3.37583994813757,
+    ].map(normalizeCpiChartValue)).toEqual([3.4, 3.5, 3.6, 3.4, 3.4, 3.4]);
   });
 
   test('shows every plotted CPI value in the daily hover card without bold text', () => {

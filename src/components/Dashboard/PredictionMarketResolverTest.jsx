@@ -4306,7 +4306,14 @@ const GoldCorrelationPanel = ({ snapshot, state = 'loading', reason = null }) =>
   );
 };
 
-const formatCpiPercent = (value) => finite(value) ? `${Number(value).toFixed(1)}%` : '—';
+export const normalizeCpiChartValue = (value) => (
+  finite(value) ? Number(Number(value).toFixed(1)) : null
+);
+
+const formatCpiPercent = (value) => {
+  const normalized = normalizeCpiChartValue(value);
+  return finite(normalized) ? `${normalized.toFixed(1)}%` : '—';
+};
 
 const formatCpiMonth = (value) => {
   const match = String(value || '').match(/^(20\d{2})-(0[1-9]|1[0-2])$/);
@@ -4421,13 +4428,13 @@ export const buildCpiDailyChartRows = ({
   const normalizedPoints = (Array.isArray(clevelandPoints) ? clevelandPoints : [])
     .map((point) => ({
       timestamp: Number(point?.timestamp),
-      cleveland: Number(point?.cleveland ?? point?.value),
+      cleveland: normalizeCpiChartValue(point?.cleveland ?? point?.value),
     }))
     .filter((point) => Number.isFinite(point.timestamp) && finite(point.cleveland))
     .sort((left, right) => left.timestamp - right.timestamp);
   const scenarioValues = Object.fromEntries((Array.isArray(scenarios) ? scenarios : [])
     .filter((scenario) => ['downside', 'base', 'upside'].includes(scenario?.key) && finite(scenario?.value))
-    .map((scenario) => [scenario.key, Number(scenario.value)]));
+    .map((scenario) => [scenario.key, normalizeCpiChartValue(scenario.value)]));
   let pointIndex = 0;
   let latestCleveland = null;
   const rows = [];
@@ -4449,7 +4456,7 @@ export const buildCpiDailyChartRows = ({
       clevelandObservationTimestamp: publishedToday?.timestamp ?? null,
       clevelandLatest: latestCleveland?.cleveland ?? null,
       clevelandLatestTimestamp: latestCleveland?.timestamp ?? null,
-      blsActual: finite(blsActual) ? Number(blsActual) : null,
+      blsActual: normalizeCpiChartValue(blsActual),
       tooltipAnchor: finite(tooltipAnchor) ? Number(tooltipAnchor) : null,
     });
   }
@@ -4589,13 +4596,18 @@ const CpiForecastComparisonPanel = ({
     releaseAt: comparison?.releaseAt,
     nowMs,
   });
+  const blsChartValue = blsReportMonthActualAvailable
+    ? normalizeCpiChartValue(blsFinal?.value)
+    : null;
   const scenarios = hedgeyeAvailable
-    ? (comparison.hedgeye.scenarios || []).filter((scenario) => finite(scenario?.value))
+    ? (comparison.hedgeye.scenarios || [])
+      .filter((scenario) => finite(scenario?.value))
+      .map((scenario) => ({ ...scenario, value: normalizeCpiChartValue(scenario.value) }))
     : [];
   const clevelandPoints = clevelandAvailable
     ? (comparison.clevelandFed.points || []).map((point) => ({
         timestamp: Number(point.timestamp),
-        cleveland: Number(point.value),
+        cleveland: normalizeCpiChartValue(point.value),
       })).filter((point) => Number.isFinite(point.timestamp) && finite(point.cleveland))
         .sort((left, right) => left.timestamp - right.timestamp)
     : [];
@@ -4610,7 +4622,7 @@ const CpiForecastComparisonPanel = ({
   const allValues = [
     ...scenarios.map((scenario) => Number(scenario.value)),
     ...clevelandPoints.map((point) => Number(point.cleveland)),
-    ...(blsReportMonthActualAvailable ? [Number(blsFinal.value)] : []),
+    ...(finite(blsChartValue) ? [blsChartValue] : []),
   ].filter(Number.isFinite);
   const minimum = allValues.length ? Math.min(...allValues) : 0;
   const maximum = allValues.length ? Math.max(...allValues) : 5;
@@ -4623,7 +4635,7 @@ const CpiForecastComparisonPanel = ({
   const cpiChartLabelOffsets = resolveChartLabelOffsets([
     ...(scenarioByKey.has('upside') ? [{ id: 'upside', value: Number(scenarioByKey.get('upside').value) }] : []),
     ...(scenarioByKey.has('base') ? [{ id: 'base', value: Number(scenarioByKey.get('base').value) }] : []),
-    ...(blsReportMonthActualAvailable ? [{ id: 'bls', value: Number(blsFinal.value) }] : []),
+    ...(finite(blsChartValue) ? [{ id: 'bls', value: blsChartValue }] : []),
     ...(latestCleveland ? [{ id: 'cleveland', value: Number(latestCleveland.cleveland) }] : []),
     ...(scenarioByKey.has('downside') ? [{ id: 'downside', value: Number(scenarioByKey.get('downside').value) }] : []),
   ], yDomain, {
@@ -4635,7 +4647,7 @@ const CpiForecastComparisonPanel = ({
     calendarAxis: cpiCalendarAxis,
     clevelandPoints,
     scenarios,
-    blsActual: blsReportMonthActualAvailable ? blsFinal.value : null,
+    blsActual: blsChartValue,
     tooltipAnchor: yDomain[0],
   });
   const chartRows = dailyChartRows.length ? dailyChartRows : [
@@ -4809,9 +4821,9 @@ const CpiForecastComparisonPanel = ({
                     )}
                   />
                 ))}
-                {blsReportMonthActualAvailable && (
+                {finite(blsChartValue) && (
                   <ReferenceLine
-                    y={Number(blsFinal.value)}
+                    y={blsChartValue}
                     stroke="var(--pm-cpi-bls)"
                     strokeDasharray="2 3"
                     strokeWidth={1}
@@ -4819,7 +4831,7 @@ const CpiForecastComparisonPanel = ({
                     label={(props) => (
                       <CpiChartRailLabel
                         viewBox={props.viewBox}
-                        value={`BLS ACTUAL ${formatCpiPercent(blsFinal.value)}`}
+                        value={`BLS ACTUAL ${formatCpiPercent(blsChartValue)}`}
                         color="var(--pm-cpi-bls)"
                         verticalOffset={cpiChartLabelOffsets.bls || 0}
                         testId="cpi-chart-label-bls"
