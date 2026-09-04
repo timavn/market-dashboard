@@ -4343,7 +4343,7 @@ const cpiUtcDateKey = (value) => {
   return Number.isFinite(dayStart) ? new Date(dayStart).toISOString().slice(0, 10) : null;
 };
 
-export const buildCpiCalendarAxis = (reportMonth, points = []) => {
+export const buildCpiCalendarAxis = (reportMonth, points = [], { endAt = null } = {}) => {
   const monthMatch = /^(20\d{2})-(0[1-9]|1[0-2])$/.exec(String(reportMonth || ''));
   const sourceTimestamps = (Array.isArray(points) ? points : [])
     .map((point) => Number(point?.timestamp ?? point))
@@ -4357,46 +4357,103 @@ export const buildCpiCalendarAxis = (reportMonth, points = []) => {
   const reportEndExclusive = monthMatch
     ? Date.UTC(Number(monthMatch[1]), Number(monthMatch[2]), 1)
     : null;
-  const startMs = Number.isFinite(reportStart) && Number.isFinite(firstSourceDay)
-    ? Math.min(reportStart, firstSourceDay)
-    : reportStart ?? firstSourceDay;
-  const endExclusiveMs = Number.isFinite(reportEndExclusive) && Number.isFinite(lastSourceDay)
-    ? Math.max(reportEndExclusive, lastSourceDay + UTC_DAY_MS)
-    : reportEndExclusive ?? (Number.isFinite(lastSourceDay) ? lastSourceDay + UTC_DAY_MS : null);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endExclusiveMs) || endExclusiveMs <= startMs) {
+  const parsedEndAt = Number.isFinite(Number(endAt)) ? Number(endAt) : Date.parse(endAt || '');
+  const startMs = reportStart ?? firstSourceDay;
+  const fallbackEndDay = [
+    Number.isFinite(reportEndExclusive) ? reportEndExclusive - UTC_DAY_MS : null,
+    lastSourceDay,
+  ].filter(Number.isFinite).reduce((latest, value) => Math.max(latest, value), -Infinity);
+  const hasSettlementEnd = Number.isFinite(parsedEndAt) && parsedEndAt >= startMs;
+  const endMs = hasSettlementEnd
+    ? parsedEndAt
+    : Number.isFinite(fallbackEndDay) ? fallbackEndDay + UTC_DAY_MS - 1 : null;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
     return null;
   }
+  const lastCalendarDay = cpiUtcDayStart(endMs);
 
   const weekendDays = [];
-  for (let cursor = startMs; cursor < endExclusiveMs; cursor += UTC_DAY_MS) {
+  for (let cursor = startMs; cursor <= lastCalendarDay; cursor += UTC_DAY_MS) {
     const day = new Date(cursor).getUTCDay();
     if (day !== 0 && day !== 6) continue;
     weekendDays.push({
       date: cpiUtcDateKey(cursor),
       startMs: cursor,
-      endMs: Math.min(cursor + UTC_DAY_MS, endExclusiveMs),
+      endMs: Math.min(cursor + UTC_DAY_MS, endMs),
     });
   }
 
   const ticks = [];
-  for (let cursor = startMs; cursor < endExclusiveMs; cursor += 7 * UTC_DAY_MS) {
-    ticks.push(cursor + (UTC_DAY_MS / 2));
+  for (let cursor = startMs; cursor <= lastCalendarDay; cursor += 7 * UTC_DAY_MS) {
+    ticks.push(Math.min(cursor + (UTC_DAY_MS / 2), endMs));
   }
-  const lastCalendarDay = endExclusiveMs - UTC_DAY_MS;
   const lastTickDay = ticks.length ? cpiUtcDayStart(ticks.at(-1)) : null;
   if (!Number.isFinite(lastTickDay) || lastCalendarDay - lastTickDay >= 2 * UTC_DAY_MS) {
-    ticks.push(lastCalendarDay + (UTC_DAY_MS / 2));
+    ticks.push(Math.min(lastCalendarDay + (UTC_DAY_MS / 2), endMs));
   }
 
   return {
-    domain: [startMs, endExclusiveMs - 1],
+    domain: [startMs, endMs],
     ticks,
     weekendDays,
+    dayCount: Math.round((lastCalendarDay - startMs) / UTC_DAY_MS) + 1,
     startDate: cpiUtcDateKey(startMs),
     endDate: cpiUtcDateKey(lastCalendarDay),
+    settlementDate: hasSettlementEnd ? cpiUtcDateKey(endMs) : null,
     sourceStartDate: sourceTimestamps.length ? cpiUtcDateKey(sourceTimestamps[0]) : null,
     sourceEndDate: sourceTimestamps.length ? cpiUtcDateKey(sourceTimestamps.at(-1)) : null,
   };
+};
+
+export const buildCpiDailyChartRows = ({
+  calendarAxis,
+  clevelandPoints = [],
+  scenarios = [],
+  blsActual = null,
+  tooltipAnchor = null,
+} = {}) => {
+  const startMs = Number(calendarAxis?.domain?.[0]);
+  const endMs = Number(calendarAxis?.domain?.[1]);
+  const startDay = cpiUtcDayStart(startMs);
+  const endDay = cpiUtcDayStart(endMs);
+  if (!Number.isFinite(startDay) || !Number.isFinite(endDay) || endDay < startDay) return [];
+
+  const normalizedPoints = (Array.isArray(clevelandPoints) ? clevelandPoints : [])
+    .map((point) => ({
+      timestamp: Number(point?.timestamp),
+      cleveland: Number(point?.cleveland ?? point?.value),
+    }))
+    .filter((point) => Number.isFinite(point.timestamp) && finite(point.cleveland))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const scenarioValues = Object.fromEntries((Array.isArray(scenarios) ? scenarios : [])
+    .filter((scenario) => ['downside', 'base', 'upside'].includes(scenario?.key) && finite(scenario?.value))
+    .map((scenario) => [scenario.key, Number(scenario.value)]));
+  let pointIndex = 0;
+  let latestCleveland = null;
+  const rows = [];
+
+  for (let dayStart = startDay; dayStart <= endDay; dayStart += UTC_DAY_MS) {
+    let publishedToday = null;
+    const dayEnd = dayStart + UTC_DAY_MS;
+    while (pointIndex < normalizedPoints.length && normalizedPoints[pointIndex].timestamp < dayEnd) {
+      const point = normalizedPoints[pointIndex];
+      latestCleveland = point;
+      if (point.timestamp >= dayStart) publishedToday = point;
+      pointIndex += 1;
+    }
+    rows.push({
+      timestamp: Math.min(dayStart + (UTC_DAY_MS / 2), endMs),
+      date: cpiUtcDateKey(dayStart),
+      scenarios: scenarioValues,
+      cleveland: publishedToday?.cleveland ?? null,
+      clevelandObservationTimestamp: publishedToday?.timestamp ?? null,
+      clevelandLatest: latestCleveland?.cleveland ?? null,
+      clevelandLatestTimestamp: latestCleveland?.timestamp ?? null,
+      blsActual: finite(blsActual) ? Number(blsActual) : null,
+      tooltipAnchor: finite(tooltipAnchor) ? Number(tooltipAnchor) : null,
+    });
+  }
+  return rows;
 };
 
 export const resolveCpiBlsActualAvailability = ({
@@ -4428,16 +4485,62 @@ export const resolveCpiBlsActualAvailability = ({
   };
 };
 
-const CpiForecastTooltip = ({ active, payload, label }) => {
-  if (!active || !Array.isArray(payload) || !payload.length) return null;
-  const point = payload.find((entry) => finite(entry?.value));
-  if (!point) return null;
+const formatCpiTooltipDate = (value, options = {}) => {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp)) return null;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(options.year ? { year: 'numeric' } : {}),
+    timeZone: 'UTC',
+  }).format(new Date(timestamp));
+};
+
+export const CpiForecastTooltip = ({ active, payload, label, hedgeyeAsOf = null }) => {
+  if (!active || !Array.isArray(payload) || !payload.length || !Number.isFinite(Number(label))) return null;
+  const row = payload.find((entry) => entry?.payload)?.payload || null;
+  if (!row) return null;
+  const scenarioRows = ['downside', 'base', 'upside']
+    .map((key) => finite(row?.scenarios?.[key]) ? { key, value: Number(row.scenarios[key]) } : null)
+    .filter(Boolean);
+  const clevelandPublishedToday = finite(row.cleveland);
+  const clevelandValue = clevelandPublishedToday ? Number(row.cleveland)
+    : finite(row.clevelandLatest) ? Number(row.clevelandLatest) : null;
+  const clevelandPublicationAt = clevelandPublishedToday
+    ? row.clevelandObservationTimestamp
+    : row.clevelandLatestTimestamp;
+  const clevelandNote = clevelandPublishedToday
+    ? 'PUBLISHED THIS DAY'
+    : finite(clevelandValue) && Number.isFinite(Number(clevelandPublicationAt))
+      ? `LAST PUBLISHED ${formatCpiTooltipDate(clevelandPublicationAt)?.toUpperCase()}`
+      : 'NO PUBLICATION YET';
   return (
-    <div className="pm-cpi-tooltip">
-      <strong>CLEVELAND FED {formatCpiPercent(point.value)}</strong>
-      <span>{Number.isFinite(Number(label)) ? new Date(Number(label)).toLocaleDateString('en-US', {
-        month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
-      }) : 'DATE UNAVAILABLE'}</span>
+    <div className="pm-cpi-tooltip" data-testid="cpi-chart-tooltip">
+      <span className="pm-cpi-tooltip-date">
+        {formatCpiTooltipDate(label, { year: true })?.toUpperCase()}
+      </span>
+      <div className="pm-cpi-tooltip-values">
+        {scenarioRows.map((scenario) => (
+          <div key={scenario.key} className={`pm-cpi-tooltip-row is-${scenario.key}`}>
+            <span>{scenario.key.toUpperCase()}</span>
+            <span>{formatCpiPercent(scenario.value)}</span>
+          </div>
+        ))}
+        <div className="pm-cpi-tooltip-row is-cleveland">
+          <span>CLEVELAND FED</span>
+          <span>{formatCpiPercent(clevelandValue)}</span>
+        </div>
+        {finite(row.blsActual) && (
+          <div className="pm-cpi-tooltip-row is-bls">
+            <span>BLS ACTUAL</span>
+            <span>{formatCpiPercent(row.blsActual)}</span>
+          </div>
+        )}
+      </div>
+      <small>{clevelandNote}</small>
+      {Number.isFinite(Date.parse(hedgeyeAsOf || '')) && (
+        <small>HEDGEYE SCENARIOS AS OF {formatCpiTooltipDate(Date.parse(hedgeyeAsOf))?.toUpperCase()}</small>
+      )}
     </div>
   );
 };
@@ -4497,7 +4600,13 @@ const CpiForecastComparisonPanel = ({
         .sort((left, right) => left.timestamp - right.timestamp)
     : [];
   const latestCleveland = clevelandPoints.at(-1) || null;
-  const cpiCalendarAxis = buildCpiCalendarAxis(reportMonth, clevelandPoints);
+  const contractSettlementAt = event?.observationTime
+    || event?.closeTime
+    || comparison?.releaseAt
+    || null;
+  const cpiCalendarAxis = buildCpiCalendarAxis(reportMonth, clevelandPoints, {
+    endAt: contractSettlementAt,
+  });
   const allValues = [
     ...scenarios.map((scenario) => Number(scenario.value)),
     ...clevelandPoints.map((point) => Number(point.cleveland)),
@@ -4522,12 +4631,17 @@ const CpiForecastComparisonPanel = ({
     minGap: 14,
     padding: 4,
   });
-  const chartRows = clevelandPoints.length
-    ? clevelandPoints
-    : [
-        { timestamp: Math.max(0, nowMs - 7 * 24 * 60 * 60_000), cleveland: null },
-        { timestamp: Number.isFinite(releaseAtMs) ? Math.max(nowMs, releaseAtMs) : nowMs, cleveland: null },
-      ];
+  const dailyChartRows = buildCpiDailyChartRows({
+    calendarAxis: cpiCalendarAxis,
+    clevelandPoints,
+    scenarios,
+    blsActual: blsReportMonthActualAvailable ? blsFinal.value : null,
+    tooltipAnchor: yDomain[0],
+  });
+  const chartRows = dailyChartRows.length ? dailyChartRows : [
+    { timestamp: Math.max(0, nowMs - 7 * 24 * 60 * 60_000), cleveland: null, tooltipAnchor: yDomain[0] },
+    { timestamp: Number.isFinite(releaseAtMs) ? Math.max(nowMs, releaseAtMs) : nowMs, cleveland: null, tooltipAnchor: yDomain[0] },
+  ];
   const settlement = buildSettlementIdentityViewModel(venueSelection, {
     checking: loading && !snapshot,
     nowMs,
@@ -4613,6 +4727,8 @@ const CpiForecastComparisonPanel = ({
               .filter((offset) => Math.abs(Number(offset)) > 0.01).length}
             data-calendar-start-date={cpiCalendarAxis?.startDate || undefined}
             data-calendar-end-date={cpiCalendarAxis?.endDate || undefined}
+            data-calendar-day-count={cpiCalendarAxis?.dayCount || 0}
+            data-settlement-date={cpiCalendarAxis?.settlementDate || undefined}
             data-source-start-date={cpiCalendarAxis?.sourceStartDate || undefined}
             data-source-end-date={cpiCalendarAxis?.sourceEndDate || undefined}
             data-source-point-count={clevelandPoints.length}
@@ -4657,7 +4773,23 @@ const CpiForecastComparisonPanel = ({
                   tickLine={false}
                   width={42}
                 />
-                <Tooltip content={<CpiForecastTooltip />} />
+                <Tooltip
+                  content={<CpiForecastTooltip hedgeyeAsOf={comparison?.hedgeye?.asOf} />}
+                  cursor={{ stroke: 'var(--pm-spx-border)', strokeWidth: 1 }}
+                  filterNull={false}
+                  isAnimationActive={false}
+                />
+                <Line
+                  type="linear"
+                  dataKey="tooltipAnchor"
+                  name="Calendar day"
+                  stroke="transparent"
+                  strokeOpacity={0}
+                  dot={false}
+                  activeDot={false}
+                  legendType="none"
+                  isAnimationActive={false}
+                />
                 {scenarios.map((scenario) => (
                   <ReferenceLine
                     key={scenario.key}
@@ -4701,9 +4833,9 @@ const CpiForecastComparisonPanel = ({
                   name="Cleveland Fed"
                   stroke="var(--pm-cpi-cleveland)"
                   strokeWidth={1}
-                  connectNulls={false}
-                  dot={{ r: 2, fill: 'var(--pm-cpi-cleveland)' }}
-                  activeDot={{ r: 4 }}
+                  connectNulls
+                  dot={false}
+                  activeDot={false}
                   data-testid="cpi-cleveland-line"
                   isAnimationActive={false}
                 />
@@ -4721,16 +4853,6 @@ const CpiForecastComparisonPanel = ({
                         testId="cpi-cleveland-endpoint-label"
                       />
                     )}
-                  />
-                )}
-                {latestCleveland && (
-                  <ReferenceDot
-                    x={latestCleveland.timestamp}
-                    y={latestCleveland.cleveland}
-                    r={3}
-                    fill="var(--pm-cpi-cleveland)"
-                    stroke="var(--pm-surface)"
-                    isFront
                   />
                 )}
               </LineChart>

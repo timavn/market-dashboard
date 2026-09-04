@@ -5,6 +5,7 @@ import PersistentSurface from '../common/PersistentSurface';
 import PredictionMarketResolverTest, {
   ChartTooltip,
   buildCpiCalendarAxis,
+  buildCpiDailyChartRows,
   buildContractTradingClock,
   buildFiveDayChartLayout,
   buildGoldLadderProximityLevels,
@@ -44,6 +45,7 @@ import PredictionMarketResolverTest, {
   stabilizeGoldHeaderMarketReferences,
   stabilizeSpxHeaderMarketReferences,
   withCanonicalGoldCorrelationFactor,
+  CpiForecastTooltip,
 } from './PredictionMarketResolverTest';
 import { MarketDataService } from '../../services/api/marketDataService';
 import predictionMarketTestService from '../../services/api/predictionMarketTestService';
@@ -3853,11 +3855,13 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     const chartPlot = within(comparison).getByTestId('cpi-forecast-chart-plot');
     expect(chartPlot).toBeInTheDocument();
     expect(chartPlot).toHaveAttribute('data-calendar-start-date', '2026-08-01');
-    expect(chartPlot).toHaveAttribute('data-calendar-end-date', '2026-08-31');
+    expect(chartPlot).toHaveAttribute('data-calendar-end-date', '2026-09-11');
+    expect(chartPlot).toHaveAttribute('data-calendar-day-count', '42');
+    expect(chartPlot).toHaveAttribute('data-settlement-date', '2026-09-11');
     expect(chartPlot).toHaveAttribute('data-source-start-date', '2026-08-10');
     expect(chartPlot).toHaveAttribute('data-source-end-date', '2026-08-17');
     expect(chartPlot).toHaveAttribute('data-source-point-count', '2');
-    expect(chartPlot).toHaveAttribute('data-weekend-day-count', '10');
+    expect(chartPlot).toHaveAttribute('data-weekend-day-count', '12');
     const weekendBands = await within(chartPlot).findAllByTestId(/^cpi-weekend-2026-08-/);
     expect(weekendBands).toHaveLength(10);
     expect(weekendBands.map((band) => band.getAttribute('data-weekend-date'))).toEqual([
@@ -3867,7 +3871,9 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     weekendBands.forEach((band) => {
       expect(band).toHaveAccessibleName(/weekend, no Cleveland Fed publication/i);
     });
+    expect(await within(chartPlot).findAllByTestId(/^cpi-weekend-2026-09-/)).toHaveLength(2);
     expect(await within(chartPlot).findByText('Aug 1')).toBeInTheDocument();
+    expect(await within(chartPlot).findByText('Sep 11')).toBeInTheDocument();
     const chartLabels = await Promise.all([
       ['upside', 'UPSIDE 2.8%'],
       ['base', 'BASE 2.6%'],
@@ -3902,6 +3908,8 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
       expect(referenceLine).toHaveAttribute('stroke-width', '1');
     });
     expect(chartPlot.querySelector('.recharts-line-curve')).toHaveAttribute('stroke-width', '1');
+    expect(chartPlot.querySelector('.recharts-line-dots')).not.toBeInTheDocument();
+    expect(chartPlot.querySelector('.recharts-reference-dot')).not.toBeInTheDocument();
 
     const sourceMonitor = within(shell).getByTestId('cpi-source-monitor');
     const sourceTable = within(sourceMonitor).getByRole('table');
@@ -5075,6 +5083,95 @@ describe('SPX monitor expiry and scoring helpers', () => {
     expect(axis.ticks.map((timestamp) => new Date(timestamp).toISOString().slice(0, 10))).toEqual([
       '2026-08-01', '2026-08-08', '2026-08-15', '2026-08-22', '2026-08-29', '2026-09-01',
     ]);
+  });
+
+  test('extends the CPI calendar in consistent seven-day steps through contract settlement', () => {
+    const axis = buildCpiCalendarAxis('2026-08', [
+      { timestamp: Date.parse('2026-08-03T12:00:00.000Z') },
+      { timestamp: Date.parse('2026-09-01T12:00:00.000Z') },
+    ], { endAt: '2026-09-11T12:29:00.000Z' });
+
+    expect(axis).toMatchObject({
+      startDate: '2026-08-01',
+      endDate: '2026-09-11',
+      settlementDate: '2026-09-11',
+      dayCount: 42,
+      sourceStartDate: '2026-08-03',
+      sourceEndDate: '2026-09-01',
+    });
+    expect(axis.weekendDays.map((day) => day.date)).toEqual([
+      '2026-08-01', '2026-08-02', '2026-08-08', '2026-08-09', '2026-08-15',
+      '2026-08-16', '2026-08-22', '2026-08-23', '2026-08-29', '2026-08-30',
+      '2026-09-05', '2026-09-06',
+    ]);
+    expect(axis.ticks.map((timestamp) => new Date(timestamp).toISOString().slice(0, 10))).toEqual([
+      '2026-08-01', '2026-08-08', '2026-08-15', '2026-08-22', '2026-08-29',
+      '2026-09-05', '2026-09-11',
+    ]);
+  });
+
+  test('builds one hover target per CPI calendar day without inventing Cleveland observations', () => {
+    const calendarAxis = buildCpiCalendarAxis('2026-08', [
+      { timestamp: Date.parse('2026-08-03T12:00:00.000Z') },
+      { timestamp: Date.parse('2026-08-05T12:00:00.000Z') },
+    ], { endAt: '2026-08-08T12:29:00.000Z' });
+    const rows = buildCpiDailyChartRows({
+      calendarAxis,
+      clevelandPoints: [
+        { timestamp: Date.parse('2026-08-03T12:00:00.000Z'), cleveland: 3.42 },
+        { timestamp: Date.parse('2026-08-05T12:00:00.000Z'), cleveland: 3.38 },
+      ],
+      scenarios: [
+        { key: 'downside', value: 3.4 },
+        { key: 'base', value: 3.5 },
+        { key: 'upside', value: 3.6 },
+      ],
+      tooltipAnchor: 3.2,
+    });
+
+    expect(rows).toHaveLength(8);
+    expect(rows[0]).toMatchObject({
+      date: '2026-08-01', cleveland: null, clevelandLatest: null, tooltipAnchor: 3.2,
+    });
+    expect(rows[2]).toMatchObject({
+      date: '2026-08-03', cleveland: 3.42, clevelandLatest: 3.42,
+    });
+    expect(rows[3]).toMatchObject({
+      date: '2026-08-04', cleveland: null, clevelandLatest: 3.42,
+      scenarios: { downside: 3.4, base: 3.5, upside: 3.6 },
+    });
+    expect(rows.at(-1)).toMatchObject({
+      date: '2026-08-08', cleveland: null, clevelandLatest: 3.38,
+    });
+  });
+
+  test('shows every plotted CPI value in the daily hover card without bold text', () => {
+    render(<CpiForecastTooltip
+      active
+      label={Date.parse('2026-08-04T12:00:00.000Z')}
+      hedgeyeAsOf="2026-08-03T14:00:00.000Z"
+      payload={[{
+        value: 3.2,
+        payload: {
+          scenarios: { downside: 3.4, base: 3.5, upside: 3.6 },
+          cleveland: null,
+          clevelandLatest: 3.42,
+          clevelandLatestTimestamp: Date.parse('2026-08-03T12:00:00.000Z'),
+          blsActual: null,
+        },
+      }]}
+    />);
+
+    const tooltip = screen.getByTestId('cpi-chart-tooltip');
+    expect(tooltip).toHaveTextContent('AUG 4, 2026');
+    expect(tooltip).toHaveTextContent('DOWNSIDE3.4%');
+    expect(tooltip).toHaveTextContent('BASE3.5%');
+    expect(tooltip).toHaveTextContent('UPSIDE3.6%');
+    expect(tooltip).toHaveTextContent('CLEVELAND FED3.4%');
+    expect(tooltip).toHaveTextContent('LAST PUBLISHED AUG 3');
+    expect(tooltip).toHaveTextContent('HEDGEYE SCENARIOS AS OF AUG 3');
+    expect(tooltip.querySelector('strong')).not.toBeInTheDocument();
+    expect(tooltip.querySelector('b')).not.toBeInTheDocument();
   });
 
   test('keeps a prior-month BLS actual as dated context and only charts an exact-month actual after release', () => {
