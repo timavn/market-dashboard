@@ -1,4 +1,8 @@
-PDF_PROCESSOR_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+# Make splits paths on spaces, so $(dir ...)/$(abspath ...) break when the
+# tested release builds under "Application Support". This Makefile is the only
+# one read, so $(MAKEFILE_LIST) is its full path; the shell keeps it intact.
+MAKEFILE_PATH := $(strip $(MAKEFILE_LIST))
+PDF_PROCESSOR_DIR := $(shell cd "$$(dirname "$(MAKEFILE_PATH)")" && pwd)/
 PDF_PROCESSOR_SOURCE_NAMES = \
 	hedgeye_pdf_processor_lambda.py \
 	date_utils.py \
@@ -13,8 +17,7 @@ PDF_PROCESSOR_SOURCE_NAMES = \
 	parse_the_call.py \
 	parse_volume.py \
 	signal_strength_pages.py
-PDF_PROCESSOR_SOURCES := $(addprefix $(PDF_PROCESSOR_DIR),$(PDF_PROCESSOR_SOURCE_NAMES))
-RESEARCH_PRODUCT_REGISTRY := $(abspath $(PDF_PROCESSOR_DIR)../../infra/lambdas/gmail_ingestor/research_products.json)
+GMAIL_INGESTOR_DIR := $(PDF_PROCESSOR_DIR)../../infra/lambdas/gmail_ingestor
 
 build-HedgeyePdfProcessorFunction:
 	python3 -m pip install \
@@ -26,9 +29,7 @@ build-HedgeyePdfProcessorFunction:
 		--only-binary=:all: \
 		-r "$(PDF_PROCESSOR_DIR)requirements-pdf.txt" \
 		-t "$(ARTIFACTS_DIR)"
-	cp $(PDF_PROCESSOR_SOURCES) "$(ARTIFACTS_DIR)"
-	cp "$(RESEARCH_PRODUCT_REGISTRY)" "$(ARTIFACTS_DIR)"
-
-	cp "$(PDF_PROCESSOR_DIR)../../infra/lambdas/gmail_ingestor/analyst_change_journal.py" "$(ARTIFACTS_DIR)"
-
-	cp "$(PDF_PROCESSOR_DIR)../../infra/lambdas/gmail_ingestor/global_quads.py" "$(ARTIFACTS_DIR)"
+	cd "$(PDF_PROCESSOR_DIR)" && cp $(PDF_PROCESSOR_SOURCE_NAMES) "$(ARTIFACTS_DIR)"
+	cp "$(GMAIL_INGESTOR_DIR)/research_products.json" "$(ARTIFACTS_DIR)"
+	cp "$(GMAIL_INGESTOR_DIR)/analyst_change_journal.py" "$(ARTIFACTS_DIR)"
+	cp "$(GMAIL_INGESTOR_DIR)/global_quads.py" "$(ARTIFACTS_DIR)"
