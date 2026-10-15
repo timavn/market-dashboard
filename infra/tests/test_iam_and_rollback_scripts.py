@@ -1645,7 +1645,6 @@ class RollbackExportScriptTests(unittest.TestCase):
             "ResearchEntityEventsV1",
             "ResearchProductManifestsV1",
             "PredictionMarketCatalogV2",
-            "PredictionMarketPerformanceLedger",
             "RiskRangePublicationManifestsV2",
         }
         self.assertEqual(
@@ -1692,6 +1691,8 @@ class RollbackExportScriptTests(unittest.TestCase):
             "RiskRangeData",
             "HermesAgentRuns",
             "HermesAlerts",
+            # Owned by its own stack, market-dashboard-prediction-performance-v1.
+            "PredictionMarketPerformanceLedger",
         }
         self.assertEqual(
             {

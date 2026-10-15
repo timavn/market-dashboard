@@ -69,8 +69,10 @@ EVENT_RULE_NAMES="$(
     "$CANONICAL_EVENT_RULE_NAMES" \
     "${MARKET_DASHBOARD_EXPORT_EVENT_RULES:-}"
 )"
-TABLE_NAMES="MarketDashboardServiceHeartbeats,HermesInputSnapshots,ResearchEventLedgerV2,ResearchEntityEventsV1,ResearchProductManifestsV1,PredictionMarketCatalogV2,PredictionMarketPerformanceLedger,RiskRangePublicationManifestsV2"
-EXTERNAL_TABLE_NAMES="HermesEmailIngestLedger,HedgeyeDailySnapshot,HedgeyeRiskRanges,RiskRangeData,HermesAgentRuns,HermesAlerts"
+# PredictionMarketPerformanceLedger is owned by its own stack
+# (market-dashboard-prediction-performance-v1), not by the readiness stack.
+TABLE_NAMES="MarketDashboardServiceHeartbeats,HermesInputSnapshots,ResearchEventLedgerV2,ResearchEntityEventsV1,ResearchProductManifestsV1,PredictionMarketCatalogV2,RiskRangePublicationManifestsV2"
+EXTERNAL_TABLE_NAMES="HermesEmailIngestLedger,HedgeyeDailySnapshot,HedgeyeRiskRanges,RiskRangeData,HermesAgentRuns,HermesAlerts,PredictionMarketPerformanceLedger"
 REQUIRED_EXTERNAL_TABLE_NAMES="HermesEmailIngestLedger,HedgeyeDailySnapshot"
 ABSENT_STATUS=42
 
