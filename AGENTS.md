@@ -106,6 +106,7 @@ These instructions apply across the repository. Preserve user-owned changes and 
 
 ## Engineering workflow
 
+- Release AWS Lambda and CloudFormation changes only through `infra/scripts/prepare_tested_release.py` and `infra/scripts/deploy.sh` from a committed, gated release. Never hand-patch or overlay a deployed function's code with `update-function-code`: it leaves `BUILD_VERSION` stale and lets the deployed code drift from every branch. Preview the CloudFormation change set and get the user's approval before executing a stack update.
 - Inspect the current code, tests, and rendered surface before changing behavior. Reuse established components and patterns where they fit.
 - Preserve existing architecture and unrelated work. Avoid opportunistic refactors, dependency additions, and broad formatting changes.
 - Build repeated behavior from structured data and shared services rather than ticker-specific UI conditions.

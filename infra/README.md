@@ -7,6 +7,21 @@ canary has passed. The Analyst consolidation retains Gmail and the cloud
 watchdog while retiring all three worker schedules. Its current operator
 runbook is [The Analyst consolidation](../docs/THE_ANALYST_CONSOLIDATION.md).
 
+## Release path
+
+Every Lambda change ships through `infra/scripts/prepare_tested_release.py`
+(gates from `ops/verification.json`, an exact commit, a signed receipt) and
+`infra/scripts/deploy.sh`, which sets the stack's `BuildVersion` to that
+commit. Do not overlay function code with `aws lambda update-function-code`.
+The Sep 28 and Oct 6 2026 HedgAI overlays kept `BUILD_VERSION` at the Aug 17
+release, so quarantined Gmail messages were never retried against the new
+code and production drifted from every branch.
+
+As a backstop, the Gmail ingestor keys quarantine recovery on
+`BUILD_VERSION` plus a fingerprint of its own source files
+(`RECOVERY_BUILD_IDENTITY`), and its heartbeat reports `codeFingerprint`, so a
+code change retries each quarantined message once however it was deployed.
+
 ## Security boundaries
 
 - IB Gateway and the dashboard remain loopback-only. AWS never calls the Mac.

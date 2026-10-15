@@ -2110,6 +2110,42 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(selected_again, [])
         self.assertEqual(selected_new_build, ["risk-range-message"])
 
+    def test_code_change_without_a_new_build_version_still_rearms_recovery(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "hermes_gmail_ingestor.py").write_text("print('a')\n")
+            (root / "research_products.json").write_text("{}\n")
+            (root / "notes.txt").write_text("not code\n")
+            before = ingestor.source_code_fingerprint(root)
+            (root / "notes.txt").write_text("still not code\n")
+            self.assertEqual(ingestor.source_code_fingerprint(root), before)
+            (root / "hermes_gmail_ingestor.py").write_text("print('b')\n")
+            after = ingestor.source_code_fingerprint(root)
+        self.assertNotEqual(after, before)
+
+        # A message last tried by the Aug build (bare BUILD_VERSION) is retried
+        # once by the same BUILD_VERSION running different code.
+        state = {"quarantinedMessages": [{
+            "messageId": "risk-range-message",
+            "errorCode": "RISK_RANGE_PUBLICATION_INVALID",
+            "recoveryBuildVersion": ingestor.BUILD_VERSION,
+        }]}
+        selected, updated = ingestor.prepare_build_recovery(
+            state, build_version=ingestor.RECOVERY_BUILD_IDENTITY,
+            attempted_at="2026-10-15T00:00:00+00:00",
+        )
+        self.assertEqual(selected, ["risk-range-message"])
+        self.assertTrue(ingestor.RECOVERY_BUILD_IDENTITY.startswith(f"{ingestor.BUILD_VERSION}+"))
+        self.assertEqual(updated[0]["recoveryBuildVersion"], ingestor.RECOVERY_BUILD_IDENTITY)
+        selected_again, _ = ingestor.prepare_build_recovery(
+            {"quarantinedMessages": updated}, build_version=ingestor.RECOVERY_BUILD_IDENTITY,
+            attempted_at="2026-10-15T00:15:00+00:00",
+        )
+        self.assertEqual(selected_again, [])
+
     def test_backlog_without_progress_emits_distinct_stalled_error(self):
         batch_id = "stalled-batch"
         queue_attachment_id = (

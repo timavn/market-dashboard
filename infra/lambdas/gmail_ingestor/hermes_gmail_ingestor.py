@@ -38,7 +38,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import boto3
@@ -136,6 +136,28 @@ ATTACHMENT_CLAIM_STALE_SECONDS = int(
 )
 TEXTRACT_CLAIM_STALE_SECONDS = 60 * 60
 BUILD_VERSION = os.environ.get("BUILD_VERSION", "development")
+
+
+def source_code_fingerprint(directory: Optional[Path] = None) -> str:
+    """Hash this package's own source so any code change is a new build.
+
+    BUILD_VERSION only changes when infra/scripts/deploy.sh releases a commit.
+    A hand-patched code upload that skips it (the Sep 28 and Oct 6 2026 HedgAI
+    overlays) kept the old BUILD_VERSION, so quarantined messages were never
+    retried against the new code. Recovery is keyed on the code instead.
+    """
+    root = directory or Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(root.iterdir()):
+        if path.is_file() and path.suffix in {".py", ".json"}:
+            digest.update(path.name.encode("utf-8") + b"\0")
+            digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+CODE_FINGERPRINT = source_code_fingerprint()
+# Quarantine recovery and the heartbeat identify a build by release + code.
+RECOVERY_BUILD_IDENTITY = f"{BUILD_VERSION}+{CODE_FINGERPRINT[:16]}"
 HEARTBEAT_TTL_DAYS = int(os.environ.get("SERVICE_HEARTBEAT_TTL_DAYS", "90"))
 GMAIL_ACCOUNT = str(
     os.environ.get("HERMES_GMAIL_ACCOUNT", "timsmithaviation@gmail.com")
@@ -944,6 +966,7 @@ def write_service_heartbeat(
         "scheduleId": schedule_id,
         "scheduled": scheduled,
         "buildVersion": BUILD_VERSION,
+        "codeFingerprint": CODE_FINGERPRINT,
         "accountEmail": GMAIL_ACCOUNT,
         "secretVersion": secret_version or "unknown",
         "counts": counts or {},
@@ -4170,7 +4193,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             _updated_quarantines,
         ) = prepare_build_recovery(
             state,
-            build_version=BUILD_VERSION,
+            build_version=RECOVERY_BUILD_IDENTITY,
             attempted_at=recovery_attempted_at,
         )
         if build_recovery_message_ids:
